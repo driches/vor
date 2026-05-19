@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeListChangedFilesTool } from './list-changed-files.js';
-import { buildFakeDeps, getResultJson, makeFile } from './test-helpers.js';
+import { buildFakeDeps, callTool, getResultJson, makeFile } from './test-helpers.js';
 
 describe('list_changed_files tool', () => {
   it('returns the changed files with reviewable ranges', async () => {
@@ -11,7 +11,7 @@ describe('list_changed_files tool', () => {
       ],
     });
     const tool = makeListChangedFilesTool(deps);
-    const result = await tool.handler({}, undefined);
+    const result = await callTool(tool, {});
     const json = getResultJson(result) as Array<{
       path: string;
       reviewable_line_ranges: number[][];
@@ -26,7 +26,7 @@ describe('list_changed_files tool', () => {
   it('returns empty array for PR with no files', async () => {
     const deps = buildFakeDeps({ files: [] });
     const tool = makeListChangedFilesTool(deps);
-    const json = getResultJson(await tool.handler({}, undefined)) as unknown[];
+    const json = getResultJson(await callTool(tool, {})) as unknown[];
     expect(json).toEqual([]);
   });
 });

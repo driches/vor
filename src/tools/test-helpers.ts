@@ -81,12 +81,22 @@ export function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
   };
 }
 
-/** Pull the text content out of a CallToolResult shape. */
-export function getResultText(result: { content: { type: string; text: string }[] }): string {
-  return result.content[0]!.text;
+/** Pull the text content out of a CallToolResult shape (loose typing). */
+export function getResultText(result: unknown): string {
+  const r = result as { content: Array<{ type: string; text?: string }> };
+  return r.content[0]?.text ?? '';
 }
 
 /** Parse the JSON wrapped in a textResult. */
-export function getResultJson(result: { content: { type: string; text: string }[] }): unknown {
+export function getResultJson(result: unknown): unknown {
   return JSON.parse(getResultText(result));
+}
+
+/**
+ * Invokes a tool's handler with permissive arg typing. Useful in tests because
+ * the SDK's InferShape treats Zod-optional fields as required-with-undefined.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function callTool(tool: any, args: Record<string, unknown>): Promise<unknown> {
+  return tool.handler(args, undefined);
 }

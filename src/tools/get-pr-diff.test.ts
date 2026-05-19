@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeGetPrDiffTool } from './get-pr-diff.js';
-import { buildFakeDeps, getResultJson, makeFile } from './test-helpers.js';
+import { buildFakeDeps, callTool, getResultJson, makeFile } from './test-helpers.js';
 
 const sampleDiff = `diff --git a/a.ts b/a.ts
 index 1..2 100644
@@ -25,7 +25,7 @@ describe('get_pr_diff tool', () => {
       files: [makeFile({ path: 'a.ts' }), makeFile({ path: 'b.ts' })],
     });
     const tool = makeGetPrDiffTool(deps);
-    const r = getResultJson(await tool.handler({ max_bytes: 100_000 }, undefined)) as {
+    const r = getResultJson(await callTool(tool, { max_bytes: 100_000 })) as {
       diff: string;
       truncated: boolean;
     };
@@ -41,7 +41,7 @@ describe('get_pr_diff tool', () => {
     });
     const tool = makeGetPrDiffTool(deps);
     const r = getResultJson(
-      await tool.handler({ paths: ['a.ts'], max_bytes: 100_000 }, undefined),
+      await callTool(tool, { paths: ['a.ts'], max_bytes: 100_000 }),
     ) as { diff: string };
     expect(r.diff).toContain('a.ts');
     expect(r.diff).not.toContain('b.ts');
@@ -53,7 +53,7 @@ describe('get_pr_diff tool', () => {
       files: [makeFile({ path: 'a.ts' }), makeFile({ path: 'b.ts' })],
     });
     const tool = makeGetPrDiffTool(deps);
-    const r = getResultJson(await tool.handler({ max_bytes: 100 }, undefined)) as {
+    const r = getResultJson(await callTool(tool, { max_bytes: 100 })) as {
       diff: string;
       truncated: boolean;
       omitted_paths: string[];
