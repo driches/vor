@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build outputs (we COMMIT dist/index.js for the GitHub Action)
+# Only ignore dist/ subdirectories that aren't the action bundle
+.tsbuildinfo
+*.tsbuildinfo
+
+# Test outputs
+coverage/
+.vitest-cache/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
