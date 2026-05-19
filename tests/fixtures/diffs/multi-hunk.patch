@@ -1,0 +1,22 @@
+diff --git a/src/util.ts b/src/util.ts
+index 157777c..ae98b51 100644
+--- a/src/util.ts
++++ b/src/util.ts
+@@ -2,7 +2,7 @@ export function a() {
+   return 1;
+ }
+ 
+-export const OLD = "old";
++export const NEW = "new";
+ 
+ export function b() {
+   return 2;
+@@ -15,3 +15,8 @@ export function c() {
+ export function d() {
+   return 4;
+ }
++
++export function e() {
++  // newly added function
++  return 5;
++}

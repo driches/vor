@@ -1,0 +1,81 @@
+/**
+ * Posts the final review to GitHub in a single `pulls.createReview` call,
+ * with all inline comments attached. Used by the orchestrator after the
+ * agent has assembled a `ReviewDraft` and the output filter has trimmed it.
+ */
+
+import type { Octokit } from '@octokit/rest';
+import type { PostedComment, ReviewEvent, Side } from '../types.js';
+import { GitHubApiError } from '../util/errors.js';
+import { AGENT_REVIEW_MARKER } from './prior-reviews.js';
+
+export interface PostReviewInput {
+  owner: string;
+  repo: string;
+  pull_number: number;
+  commit_id: string;
+  event: ReviewEvent;
+  body: string;
+  comments: PostedComment[];
+}
+
+export interface PostReviewResult {
+  review_id: number;
+  comment_count: number;
+}
+
+interface OctokitInlineComment {
+  path: string;
+  line: number;
+  side: Side;
+  body: string;
+  start_line?: number;
+  start_side?: Side;
+}
+
+export async function postReview(
+  octokit: Octokit,
+  input: PostReviewInput,
+): Promise<PostReviewResult> {
+  const bodyWithMarker = `${AGENT_REVIEW_MARKER}\n\n${input.body}`;
+  const inlineComments: OctokitInlineComment[] = input.comments.map((c) => ({
+    path: c.file_path,
+    line: c.line,
+    side: c.side,
+    body: renderCommentBody(c),
+    ...(c.start_line !== undefined
+      ? { start_line: c.start_line, start_side: c.side }
+      : {}),
+  }));
+
+  try {
+    const r = await octokit.rest.pulls.createReview({
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      commit_id: input.commit_id,
+      event: input.event,
+      body: bodyWithMarker,
+      comments: inlineComments,
+    });
+    return { review_id: r.data.id, comment_count: inlineComments.length };
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    throw new GitHubApiError(
+      `Failed to create review on ${input.owner}/${input.repo}#${input.pull_number}`,
+      status,
+      { cause: err },
+    );
+  }
+}
+
+export function renderCommentBody(c: PostedComment): string {
+  const severityTag = c.severity.toUpperCase();
+  const confTag = c.confidence === 'low' ? ' · low confidence' : '';
+  const heading = `**[${severityTag} · ${c.category}${confTag}]** ${c.title}`;
+  const why = c.why_it_matters;
+  const suggestion = c.suggestion
+    ? `\n\n\`\`\`suggestion\n${c.suggestion.replace(/\n$/, '')}\n\`\`\``
+    : '';
+  return `${heading}\n\n${why}${suggestion}`;
+}

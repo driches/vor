@@ -1,0 +1,16 @@
+diff --git a/src/foo.ts b/src/foo.ts
+index 1234567..abcdefa 100644
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -10,5 +10,8 @@ export function existing() {
+   return 1;
+ }
+
+-export function oldFn() {
+-  return 2;
++export function newFn(): number {
++  if (process.env.DEBUG) {
++    console.log('debug');
++  }
++  return 42;
+ }
