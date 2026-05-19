@@ -2,7 +2,7 @@
 
 > AI-powered PR code review GitHub Action. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude.
 
-Built on the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript). The agent has access to a constrained set of custom tools (read PR diff, read file at ref, grep, post inline comments, post summary) and **no built-in filesystem/shell access**. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a hint listing the real reviewable lines so it self-corrects.
+Built on the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with a custom tool-use loop. The agent has access to a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) and **no built-in filesystem/shell access**. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
 
 ## Quick start
 
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: driches/code-review@v1
+      - uses: driches/code-review@v0
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -120,7 +120,7 @@ budget:
 2. It computes **reviewable_line_ranges** for each file (added lines + context inside hunks).
 3. It loads `.code-review.yml` and convention files (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD.
 4. It builds a system prompt that includes severity calibration + repo conventions.
-5. The Claude Agent SDK runs with **9 custom tools** and **no built-in tools**:
+5. The agent loop runs with **9 custom tools** and **no built-in tools**:
    - Read: `get_pr_metadata`, `list_changed_files`, `get_pr_diff`, `read_file_at_ref`, `grep_repo_at_ref`, `read_repo_context_file`
    - Write: `post_inline_comment` (validated), `post_summary` (terminates), `skip_file`
 6. Every `post_inline_comment` runs through a validator. On rejection (line outside diff, missing suggestion for high severity, duplicate, etc.), the agent gets a structured `{ reason, hint }` so it can correct and retry.
