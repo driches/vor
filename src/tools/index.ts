@@ -1,55 +1,21 @@
 /**
- * Builds the MCP server with all custom tools registered.
- * The agent receives ONLY these tools (built-in Read/Edit/Bash disabled via
- * `tools: []` in the query options).
+ * Barrel export for the tool factories. Each factory takes ToolDeps and
+ * returns a tool definition (name + description + Zod input shape + handler).
+ *
+ * The runner consumes these directly — it converts the Zod shape to a JSON
+ * Schema and pairs the handler with the Anthropic SDK's tool-use loop. There
+ * is no MCP transport; the tools execute in-process.
  */
-import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
-import { makeGetPrDiffTool } from './get-pr-diff.js';
-import { makeGetPrMetadataTool } from './get-pr-metadata.js';
-import { makeGrepRepoAtRefTool } from './grep-repo-at-ref.js';
-import { makeListChangedFilesTool } from './list-changed-files.js';
-import { makePostInlineCommentTool } from './post-inline-comment.js';
-import { makePostSummaryTool } from './post-summary.js';
-import { makeReadFileAtRefTool } from './read-file-at-ref.js';
-import { makeReadRepoContextFileTool } from './read-repo-context-file.js';
-import { makeSkipFileTool } from './skip-file.js';
-import type { ToolDeps } from './types.js';
 
-export const MCP_SERVER_NAME = 'pr-review';
-
-export const TOOL_NAMES = [
-  'get_pr_metadata',
-  'list_changed_files',
-  'get_pr_diff',
-  'read_file_at_ref',
-  'grep_repo_at_ref',
-  'read_repo_context_file',
-  'post_inline_comment',
-  'post_summary',
-  'skip_file',
-] as const;
-
-/** Names as the agent sees them (mcp__<server>__<tool>). */
-export const QUALIFIED_TOOL_NAMES = TOOL_NAMES.map(
-  (n) => `mcp__${MCP_SERVER_NAME}__${n}`,
-);
-
-export function buildToolServer(deps: ToolDeps) {
-  return createSdkMcpServer({
-    name: MCP_SERVER_NAME,
-    version: '0.1.0',
-    tools: [
-      makeGetPrMetadataTool(deps),
-      makeListChangedFilesTool(deps),
-      makeGetPrDiffTool(deps),
-      makeReadFileAtRefTool(deps),
-      makeGrepRepoAtRefTool(deps),
-      makeReadRepoContextFileTool(deps),
-      makePostInlineCommentTool(deps),
-      makePostSummaryTool(deps),
-      makeSkipFileTool(deps),
-    ],
-  });
-}
+export { makeGetPrMetadataTool } from './get-pr-metadata.js';
+export { makeListChangedFilesTool } from './list-changed-files.js';
+export { makeGetPrDiffTool } from './get-pr-diff.js';
+export { makeReadFileAtRefTool } from './read-file-at-ref.js';
+export { makeGrepRepoAtRefTool } from './grep-repo-at-ref.js';
+export { makeReadRepoContextFileTool } from './read-repo-context-file.js';
+export { makePostInlineCommentTool } from './post-inline-comment.js';
+export { makePostSummaryTool } from './post-summary.js';
+export { makeSkipFileTool } from './skip-file.js';
 
 export type { ToolDeps } from './types.js';
+export type { SdkToolDefinition, SdkToolResult } from './tool-helper.js';

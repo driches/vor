@@ -4,7 +4,7 @@
  * Every call runs through the validator (the choke point). On rejection,
  * returns a structured hint so the agent can self-correct.
  */
-import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { validateInlineComment } from '../agent/validate-comment.js';
 import type { Category, Severity, Side } from '../types.js';

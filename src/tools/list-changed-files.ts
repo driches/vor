@@ -1,4 +1,4 @@
-import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from './tool-helper.js';
 import { formatRanges } from '../github/reviewable-lines.js';
 import { jsonResult, type ToolDeps } from './types.js';
 

@@ -131,6 +131,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     maxTurns: config.max_turns,
     maxInputTokens: config.budget.max_input_tokens,
     maxOutputTokens: config.budget.max_output_tokens,
+    apiKey: input.anthropic_api_key,
   });
 
   await logger.info(

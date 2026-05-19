@@ -1,13 +1,35 @@
 /**
- * Drives the Claude Agent SDK query loop. Streams events to the action log,
- * tracks budget, and returns when the agent calls post_summary (or hits limits).
+ * Custom tool-use loop using @anthropic-ai/sdk directly.
+ *
+ * Replaces the higher-level Claude Agent SDK because of upstream bugs with
+ * in-process MCP servers (duplicate tool_use IDs, missing tool_results in
+ * subsequent API requests). This gives us full control and visibility.
+ *
+ * The loop:
+ *   1. Send messages + tools + system prompt to Claude
+ *   2. Parse the assistant response for text and tool_use blocks
+ *   3. For each tool_use, run the handler from our tool definition
+ *   4. Append the tool_result blocks to the conversation
+ *   5. Repeat until Claude stops calling tools, post_summary is called, or
+ *      a limit is hit
  */
 
-import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import Anthropic from '@anthropic-ai/sdk';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
-import { buildToolServer, MCP_SERVER_NAME, QUALIFIED_TOOL_NAMES, type ToolDeps } from '../tools/index.js';
+import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
+import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
+import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
+import { makeListChangedFilesTool } from '../tools/list-changed-files.js';
+import { makePostInlineCommentTool } from '../tools/post-inline-comment.js';
+import { makePostSummaryTool } from '../tools/post-summary.js';
+import { makeReadFileAtRefTool } from '../tools/read-file-at-ref.js';
+import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js';
+import { makeSkipFileTool } from '../tools/skip-file.js';
+import type { ToolDeps } from '../tools/types.js';
 
 export interface RunAgentInput {
   deps: ToolDeps;
@@ -17,22 +39,26 @@ export interface RunAgentInput {
   maxTurns: number;
   maxInputTokens: number;
   maxOutputTokens: number;
-  /** Optional abort signal for external cancellation (timeouts). */
+  apiKey: string;
   abortController?: AbortController;
 }
 
 export interface RunAgentResult {
-  /** How the run ended. */
   ended: 'summary_posted' | 'max_turns' | 'budget_exceeded' | 'aborted' | 'error';
-  /** Last error if any. */
   error?: string;
-  /** Number of agent turns consumed. */
   turns: number;
-  /** Total tokens used. */
   inputTokens: number;
   outputTokens: number;
-  /** USD cost (from the result message if available). */
   costUsd: number;
+}
+
+type AnthropicTool = Anthropic.Tool;
+
+interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Anthropic.Tool.InputSchema;
+  handler: (args: Record<string, unknown>) => Promise<string>;
 }
 
 export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
@@ -43,58 +69,128 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     maxOutputTokens: input.maxOutputTokens,
   });
 
-  const mcpServer = buildToolServer(input.deps);
+  const tools = buildToolDefinitions(input.deps);
+  const anthropicTools: AnthropicTool[] = tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema,
+  }));
 
-  const options: Options = {
-    systemPrompt: input.systemPrompt,
-    model: input.model,
-    maxTurns: input.maxTurns,
-    mcpServers: { [MCP_SERVER_NAME]: mcpServer },
-    allowedTools: QUALIFIED_TOOL_NAMES,
-    tools: [],
-    cwd: input.deps.workspaceDir,
-    ...(input.abortController ? { abortController: input.abortController } : {}),
-  };
+  await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
+
+  const client = new Anthropic({ apiKey: input.apiKey });
+
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: input.userPrompt },
+  ];
 
   let turns = 0;
   let inputTokens = 0;
   let outputTokens = 0;
-  let costUsd = 0;
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
   let ended: RunAgentResult['ended'] = 'error';
   let lastError: string | undefined;
 
   try {
-    const stream = query({ prompt: input.userPrompt, options });
+    while (true) {
+      if (input.abortController?.signal.aborted) {
+        ended = 'aborted';
+        break;
+      }
+      budget.startTurn();
+      turns = budget.snapshot().turns;
 
-    for await (const msg of stream) {
-      await handleMessage(msg, {
-        budget,
-        onTurn: () => {
-          turns += 1;
+      const response = await client.messages.create(
+        {
+          model: input.model,
+          max_tokens: 8192,
+          system: [
+            { type: 'text', text: input.systemPrompt, cache_control: { type: 'ephemeral' } },
+          ],
+          messages,
+          tools: anthropicTools,
         },
-        onUsage: (i, o) => {
-          inputTokens += i;
-          outputTokens += o;
-        },
-      });
+        input.abortController ? { signal: input.abortController.signal } : undefined,
+      );
 
-      if (msg.type === 'result' && msg.subtype === 'success') {
-        const u = msg.usage;
-        if (u) {
-          inputTokens = u.input_tokens ?? inputTokens;
-          outputTokens = u.output_tokens ?? outputTokens;
+      inputTokens += response.usage.input_tokens;
+      outputTokens += response.usage.output_tokens;
+      cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
+      cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
+
+      try {
+        budget.addUsage(response.usage.input_tokens, response.usage.output_tokens);
+      } catch (err) {
+        lastError = (err as Error).message;
+        ended = 'budget_exceeded';
+        break;
+      }
+
+      // Log text blocks and tool_use blocks
+      const assistantBlocks = response.content;
+      const toolUseBlocks = assistantBlocks.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+      );
+      const textBlocks = assistantBlocks.filter(
+        (b): b is Anthropic.TextBlock => b.type === 'text',
+      );
+
+      for (const t of textBlocks) {
+        if (t.text.trim().length > 0) {
+          await logger.info(`[turn ${turns}] (assistant): ${t.text.slice(0, 500)}`);
         }
-        costUsd = msg.total_cost_usd ?? 0;
-        turns = msg.num_turns ?? turns;
-        // The agent ended normally — check whether post_summary was called.
+      }
+      for (const u of toolUseBlocks) {
+        await logger.info(`[turn ${turns}] → ${u.name}`);
+      }
+
+      messages.push({ role: 'assistant', content: assistantBlocks });
+
+      // End conditions
+      if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) {
         ended = input.deps.aggregator.hasSummary() ? 'summary_posted' : 'max_turns';
         break;
       }
-    }
 
-    // If the stream ended without a result message but a summary was posted, count it.
-    if (ended === 'error' && input.deps.aggregator.hasSummary()) {
-      ended = 'summary_posted';
+      // Execute tool_use blocks; collect tool_result blocks for the next user message
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const u of toolUseBlocks) {
+        const tool = tools.find((t) => t.name === u.name);
+        if (!tool) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: u.id,
+            is_error: true,
+            content: `Unknown tool: ${u.name}`,
+          });
+          continue;
+        }
+        try {
+          const args = (u.input ?? {}) as Record<string, unknown>;
+          const result = await tool.handler(args);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: u.id,
+            content: result,
+          });
+        } catch (err) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: u.id,
+            is_error: true,
+            content: `Tool error: ${(err as Error).message}`,
+          });
+        }
+      }
+
+      messages.push({ role: 'user', content: toolResults });
+
+      // Terminate after summary
+      if (input.deps.aggregator.hasSummary()) {
+        ended = 'summary_posted';
+        break;
+      }
     }
   } catch (err) {
     if (err instanceof BudgetError) {
@@ -104,14 +200,19 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       ended = 'aborted';
       lastError = err.message;
     } else {
-      ended = 'error';
       lastError = err instanceof Error ? err.message : String(err);
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
 
+  // Rough cost calculation (Sonnet 4.6 pricing as of 2026-05: $3/M input, $15/M output)
+  const inputCost = (inputTokens * 3) / 1_000_000;
+  const outputCost = (outputTokens * 15) / 1_000_000;
+  const cacheCost = (cacheCreationTokens * 3.75) / 1_000_000 + (cacheReadTokens * 0.3) / 1_000_000;
+  const costUsd = inputCost + outputCost + cacheCost;
+
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens}, out=${outputTokens}, cost=$${costUsd.toFixed(4)}`,
+    `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`,
   );
   if (lastError) await logger.warn(`Last error: ${lastError}`);
 
@@ -125,54 +226,47 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   };
 }
 
-interface HandleContext {
-  budget: Budget;
-  onTurn: () => void;
-  onUsage: (input: number, output: number) => void;
-}
+/**
+ * Bridge MCP tool definitions (from the tools/ modules) into our internal
+ * shape with JSON Schema + a plain handler that returns a string.
+ */
+function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
+  const mcpTools = [
+    makeGetPrMetadataTool(deps),
+    makeListChangedFilesTool(deps),
+    makeGetPrDiffTool(deps),
+    makeReadFileAtRefTool(deps),
+    makeGrepRepoAtRefTool(deps),
+    makeReadRepoContextFileTool(deps),
+    makePostInlineCommentTool(deps),
+    makePostSummaryTool(deps),
+    makeSkipFileTool(deps),
+  ];
 
-async function handleMessage(msg: SDKMessage, ctx: HandleContext): Promise<void> {
-  if (msg.type === 'assistant') {
-    ctx.onTurn();
-    try {
-      ctx.budget.startTurn();
-    } catch (err) {
-      // Re-throw budget errors; the outer loop converts to ended state.
-      throw err;
-    }
-
-    const usage = msg.message.usage;
-    if (usage) {
-      const inTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-      const outTokens = usage.output_tokens ?? 0;
-      ctx.onUsage(inTokens, outTokens);
-      try {
-        ctx.budget.addUsage(inTokens, outTokens);
-      } catch (err) {
-        throw err;
-      }
-    }
-
-    for (const block of msg.message.content) {
-      if (block.type === 'tool_use') {
-        await logger.info(`[turn ${ctx.budget.snapshot().turns}] → ${block.name}`);
-      } else if (block.type === 'text' && block.text.trim().length > 0) {
-        await logger.debug(`[turn ${ctx.budget.snapshot().turns}] (assistant text): ${block.text.slice(0, 200)}`);
-      }
-    }
-  } else if (msg.type === 'user') {
-    // Tool result messages — log briefly.
-    if (Array.isArray(msg.message.content)) {
-      for (const block of msg.message.content) {
-        if (typeof block === 'object' && block !== null && 'type' in block && block.type === 'tool_result') {
-          const tu = (block as { tool_use_id?: string }).tool_use_id ?? '';
-          await logger.debug(`tool_result for ${tu}`);
-        }
-      }
-    }
-  } else if (msg.type === 'system' && msg.subtype === 'init') {
-    await logger.info(
-      `Agent initialized: model=${(msg as unknown as { model?: string }).model ?? 'unknown'}, cwd=${msg.cwd}, mcp_servers=${msg.mcp_servers.map((s) => `${s.name}(${s.status})`).join(',')}`,
-    );
-  }
+  return mcpTools.map((mcp) => {
+    const zodSchema = z.object(mcp.inputSchema as z.ZodRawShape);
+    const rawJson = zodToJsonSchema(zodSchema, {
+      target: 'jsonSchema7',
+      $refStrategy: 'none',
+    }) as Record<string, unknown>;
+    // Strip $schema (API doesn't need it) and force `type: 'object'`.
+    if ('$schema' in rawJson) delete rawJson['$schema'];
+    const inputSchema: Anthropic.Tool.InputSchema = {
+      type: 'object',
+      properties: (rawJson.properties as Record<string, unknown>) ?? {},
+      ...(Array.isArray(rawJson.required) ? { required: rawJson.required as string[] } : {}),
+    };
+    return {
+      name: mcp.name,
+      description: mcp.description,
+      input_schema: inputSchema,
+      handler: async (args: Record<string, unknown>): Promise<string> => {
+        const result = await (mcp.handler as (a: unknown, e: unknown) => Promise<unknown>)(args, undefined);
+        const content = (result as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
+        return content
+          .map((b) => (b.type === 'text' ? b.text ?? '' : JSON.stringify(b)))
+          .join('\n');
+      },
+    };
+  });
 }

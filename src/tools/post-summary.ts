@@ -2,7 +2,7 @@
  * TERMINATES the agent run. Validates the assessment is consistent with what
  * was posted (e.g., request_changes requires at least one critical/important).
  */
-import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { jsonResult, type ToolDeps } from './types.js';
 

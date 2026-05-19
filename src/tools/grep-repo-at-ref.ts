@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { jsonResult, type ToolDeps } from './types.js';
 

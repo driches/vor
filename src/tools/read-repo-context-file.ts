@@ -1,4 +1,4 @@
-import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { jsonResult, REPO_CONTEXT_FILES, type ToolDeps } from './types.js';
 
