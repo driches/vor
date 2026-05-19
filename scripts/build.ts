@@ -1,13 +1,15 @@
 import { build } from 'esbuild';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const rootDir = resolve(__dirname, '..');
+const distDir = resolve(rootDir, 'dist');
 
 const result = await build({
   entryPoints: [resolve(rootDir, 'src/index.ts')],
-  outfile: resolve(rootDir, 'dist/index.js'),
+  outfile: resolve(distDir, 'index.js'),
   bundle: true,
   platform: 'node',
   target: 'node20',
@@ -19,9 +21,16 @@ const result = await build({
   banner: {
     js: '#!/usr/bin/env node\n// driches/code-review — built bundle (do not edit by hand)',
   },
-  // The agent SDK uses dynamic require for native modules; mark common Node built-ins external
   external: [],
 });
+
+// Write a dist/package.json so Node treats the CJS bundle correctly even though
+// the root package is "type": "module".
+await mkdir(distDir, { recursive: true });
+await writeFile(
+  resolve(distDir, 'package.json'),
+  JSON.stringify({ type: 'commonjs', private: true }, null, 2) + '\n',
+);
 
 const totalBytes = Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);
 console.log(`Bundle: ${(totalBytes / 1024).toFixed(1)} KB`);
