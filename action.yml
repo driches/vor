@@ -1,0 +1,70 @@
+name: 'Claude Code Review'
+description: 'AI code review for GitHub PRs — inline comments via Claude Agent SDK'
+author: 'driches'
+
+branding:
+  icon: 'eye'
+  color: 'purple'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API key. Required.'
+    required: true
+  github_token:
+    description: 'GitHub token with pull-requests:write. Defaults to the workflow token.'
+    required: true
+    default: ${{ github.token }}
+  model:
+    description: 'Claude model ID. Defaults to claude-sonnet-4-6.'
+    required: false
+    default: 'claude-sonnet-4-6'
+  max_turns:
+    description: 'Maximum agent turns per review.'
+    required: false
+    default: '40'
+  config_path:
+    description: 'Path to .code-review.yml in the consumer repo.'
+    required: false
+    default: '.code-review.yml'
+  dry_run:
+    description: 'If true, log the review instead of posting it.'
+    required: false
+    default: 'false'
+  pr_number:
+    description: 'PR number. Auto-detected from pull_request events; required for manual triggers.'
+    required: false
+
+outputs:
+  review_id:
+    description: 'GitHub review ID that was created.'
+    value: ${{ steps.run.outputs.review_id }}
+  comment_count:
+    description: 'Number of inline comments posted.'
+    value: ${{ steps.run.outputs.comment_count }}
+  ended:
+    description: 'How the review ended (summary_posted | max_turns | budget_exceeded | aborted | error).'
+    value: ${{ steps.run.outputs.ended }}
+  cost_usd:
+    description: 'Total API cost in USD.'
+    value: ${{ steps.run.outputs.cost_usd }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run review
+      id: run
+      shell: bash
+      run: node ${{ github.action_path }}/dist/index.js
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_MAX_TURNS: ${{ inputs.max_turns }}
+        INPUT_CONFIG_PATH: ${{ inputs.config_path }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_PR_NUMBER: ${{ inputs.pr_number }}
