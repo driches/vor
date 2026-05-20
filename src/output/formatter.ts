@@ -18,19 +18,18 @@ export interface RenderedSummary {
   event: ReviewEvent;
 }
 
-const ASSESSMENT_LABEL: Record<NonNullable<ReviewDraft['summary']>['assessment'], string> = {
-  approve: 'Approve',
-  request_changes: 'Request changes',
-  comment: 'Comment',
-};
-
 /**
  * Builds the markdown body that becomes the review-level summary, and decides
  * the final ReviewEvent (APPROVE/REQUEST_CHANGES/COMMENT).
  *
- * The configured `event` from .code-review.yml is the ceiling — the agent
- * cannot escalate above what the repo opts into. With the default `COMMENT`
- * config, all reviews are non-blocking regardless of the agent's assessment.
+ * The body header is the highest severity of the inline comments posted —
+ * NOT the agent's assessment. Using "Approve" in a body posted as a COMMENT
+ * event is misleading (the review isn't actually approving anything). The
+ * severity label tells the reader at a glance what was found.
+ *
+ * The agent's `assessment` still drives the GitHub event when the repo opts
+ * into APPROVE / REQUEST_CHANGES via `.code-review.yml`; the configured event
+ * is the ceiling and the agent cannot escalate above it.
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   const summary = input.draft.summary;
@@ -43,8 +42,8 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
 
   const sections: string[] = [];
 
-  // Headline assessment
-  sections.push(`### ${ASSESSMENT_LABEL[summary.assessment]}`);
+  // Headline: severity of the highest-severity finding (or "No findings")
+  sections.push(`### ${severityHeader(input.keptComments)}`);
   sections.push(summary.assessment_reasoning);
 
   // Strengths
@@ -53,13 +52,11 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     sections.push(summary.strengths.map((s) => `- ${s}`).join('\n'));
   }
 
-  // Findings summary by severity
-  const counts = countBySeverity(input.keptComments);
+  // Findings summary by severity (detail under the header)
   if (input.keptComments.length > 0) {
+    const counts = countBySeverity(input.keptComments);
     sections.push('### Findings');
     sections.push(formatCountsLine(counts));
-  } else if (summary.assessment !== 'approve') {
-    sections.push('_No inline comments were posted._');
   }
 
   // Coverage notes
@@ -117,4 +114,19 @@ function formatCountsLine(counts: Record<Severity, number>): string {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(', ') : 'No findings.';
+}
+
+/**
+ * Body header label, derived from the highest-severity inline comment posted.
+ *
+ * Rationale: the review event is almost always COMMENT (we don't gate merges
+ * by default), so saying "Approve" in the body is misleading. The severity
+ * label gives the reader a quick at-a-glance signal of what was found.
+ */
+function severityHeader(comments: readonly PostedComment[]): string {
+  if (comments.length === 0) return 'No findings';
+  if (comments.some((c) => c.severity === 'critical')) return 'Critical findings';
+  if (comments.some((c) => c.severity === 'important')) return 'Important findings';
+  if (comments.some((c) => c.severity === 'minor')) return 'Minor findings';
+  return 'Notes only';
 }
