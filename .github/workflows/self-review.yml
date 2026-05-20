@@ -18,14 +18,14 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       # Build the bundle from source so we dogfood the actual code in this PR,
       # not the committed dist/index.js. (For consumer repos, the committed
       # dist/ is what runs.)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
