@@ -25,7 +25,7 @@
     "record-fixture": "tsx scripts/record-fixture.ts"
   },
   "dependencies": {
-    "@actions/core": "^1.11.1",
+    "@actions/core": "3.0.1",
     "@anthropic-ai/sdk": "^0.39.0",
     "@octokit/plugin-retry": "^7.1.4",
     "@octokit/plugin-throttling": "^9.4.0",
@@ -39,11 +39,11 @@
     "@types/node": "^20.17.10",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
-    "esbuild": "^0.24.2",
+    "esbuild": "0.28.0",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "4.1.6"
   }
 }
