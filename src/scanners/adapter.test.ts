@@ -122,7 +122,6 @@ describe('scanFindingToPostedComment', () => {
         rule_id: 'js/sql-injection',
         evidence: {
           kind: 'sast',
-          rule_id: 'js/sql-injection',
           cwe: ['CWE-89'],
         },
       }),

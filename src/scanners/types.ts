@@ -96,7 +96,7 @@ export type ScanEvidence =
       cvss?: number;
     }
   | { kind: 'secret'; masked_match: string; pattern_id: string }
-  | { kind: 'sast'; rule_id: string; cwe?: string[] }
+  | { kind: 'sast'; cwe?: string[] }
   | {
       kind: 'container';
       base_image: string;
