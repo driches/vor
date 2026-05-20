@@ -22,7 +22,11 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "record-fixture": "tsx scripts/record-fixture.ts"
+    "record-fixture": "tsx scripts/record-fixture.ts",
+    "golden:capture": "tsx scripts/golden/capture.ts",
+    "golden:capture-batch": "tsx scripts/golden/capture-batch.ts",
+    "golden:discover": "tsx scripts/golden/discover.ts",
+    "golden:eval": "tsx scripts/golden/eval.ts"
   },
   "dependencies": {
     "@actions/core": "3.0.1",

@@ -1,8 +1,13 @@
 /**
  * Re-runs the build and fails if dist/ has uncommitted changes.
  * Ensures the committed dist/index.js matches the current src/.
+ *
+ * Also enforces that src/eval/* never ships in dist/index.js — eval code is
+ * for the local golden-dataset harness and must not be bundled into the
+ * GitHub Action runtime.
  */
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,3 +35,23 @@ try {
   }
   throw err;
 }
+
+// Guard: eval-only modules must not appear in the action bundle.
+console.log('Checking dist/index.js does not include src/eval/*...');
+const bundlePath = resolve(rootDir, 'dist/index.js');
+const bundle = readFileSync(bundlePath, 'utf-8');
+const FORBIDDEN_MARKERS = [
+  'src/eval/local-deps',
+  'src/eval/normalize-codex',
+  'src/eval/compare',
+  'src/eval/report',
+  'src/eval/finding',
+];
+const leaked = FORBIDDEN_MARKERS.filter((m) => bundle.includes(m));
+if (leaked.length > 0) {
+  console.error('dist/index.js contains eval-only modules — eval code leaked into the action bundle:');
+  for (const m of leaked) console.error(`  - ${m}`);
+  console.error('Verify that src/index.ts (and its imports) never reach src/eval/*.');
+  process.exit(1);
+}
+console.log('dist/index.js is free of eval modules.');

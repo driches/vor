@@ -28,4 +28,25 @@ export default [
       'no-console': 'off',
     },
   },
+  // src/eval is a one-way leaf: the action bundle (entry src/index.ts) must
+  // never reach eval code, or it ships in dist/index.js. Only the eval scripts
+  // (scripts/golden/*) and src/eval itself may import from src/eval.
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/eval/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/eval/**', '../eval/*', './eval/*'],
+              message:
+                'src/ (outside src/eval) may not import src/eval/* — eval is leaf-only and must not ship in dist/index.js.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
