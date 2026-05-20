@@ -94,8 +94,10 @@ describe('security config schema', () => {
     expect(() => configSchema.parse(DEFAULT_CONFIG)).not.toThrow();
   });
 
-  it('empty config merges defaults via partial schema (backward compat)', () => {
-    const cfg = loadConfigFromString('');
+  it('valid config without security: block merges security defaults', () => {
+    // Non-empty YAML so we exercise parse → safeParse(partial) → deepMerge,
+    // not the empty-string early-return in loadConfigFromString.
+    const cfg = loadConfigFromString('model: claude-opus-4-7');
     expect(cfg.security).toEqual(DEFAULT_CONFIG.security);
   });
 

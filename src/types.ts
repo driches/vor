@@ -11,22 +11,34 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   nit: 1,
 };
 
-export type Category =
-  | 'bug'
-  | 'security'
-  | 'vulnerability'
-  | 'data-loss'
-  | 'race-condition'
-  | 'error-handling'
-  | 'performance'
-  | 'architecture'
-  | 'api-design'
-  | 'test-gap'
-  | 'readability'
-  | 'naming'
-  | 'docs'
-  | 'yagni'
-  | 'duplication';
+/**
+ * Single source of truth for finding categories. The runtime array is consumed
+ * by Zod enums (`z.enum(CATEGORIES)`); the TypeScript `Category` union is derived
+ * from it. Add new categories here only.
+ *
+ * Note on 'security' vs 'vulnerability':
+ *   'security'      = agent-flagged design concern (e.g. missing auth check)
+ *   'vulnerability' = scanner-confirmed CVE / secret / SAST finding
+ */
+export const CATEGORIES = [
+  'bug',
+  'security',
+  'vulnerability',
+  'data-loss',
+  'race-condition',
+  'error-handling',
+  'performance',
+  'architecture',
+  'api-design',
+  'test-gap',
+  'readability',
+  'naming',
+  'docs',
+  'yagni',
+  'duplication',
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
 
 /**
  * Identifier for a security scanner plugin. Used by `FindingSource` to attribute
