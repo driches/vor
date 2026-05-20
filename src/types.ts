@@ -14,6 +14,7 @@ export const SEVERITY_RANK: Record<Severity, number> = {
 export type Category =
   | 'bug'
   | 'security'
+  | 'vulnerability'
   | 'data-loss'
   | 'race-condition'
   | 'error-handling'
@@ -26,6 +27,26 @@ export type Category =
   | 'docs'
   | 'yagni'
   | 'duplication';
+
+/**
+ * Identifier for a security scanner plugin. Used by `FindingSource` to attribute
+ * scanner-originated findings.
+ */
+export type ScannerId = 'dependency-cve' | 'secrets' | 'sast' | 'container-cve';
+
+/**
+ * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;
+ * scanner-originated comments use `{ kind: 'scanner', scanner, ... }`.
+ */
+export type FindingSource =
+  | { kind: 'agent'; model: string }
+  | {
+      kind: 'scanner';
+      scanner: ScannerId;
+      rule_id?: string;
+      cve_id?: string;
+      ghsa_id?: string;
+    };
 
 export type Side = 'RIGHT' | 'LEFT';
 
@@ -62,6 +83,7 @@ export interface ChangedFile {
 
 /**
  * One inline comment accepted by the validator and queued for posting.
+ * `source` is optional; absence is treated as AI-originated for backward compatibility.
  */
 export interface PostedComment {
   severity: Severity;
@@ -74,6 +96,7 @@ export interface PostedComment {
   why_it_matters: string;
   suggestion?: string;
   confidence: Confidence;
+  source?: FindingSource;
 }
 
 export interface SummaryInput {
