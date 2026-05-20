@@ -58,10 +58,10 @@ export interface ScanCache {
 }
 
 /**
- * Result of matching a finding against the repo's `.code-review-ignore.yml`.
- * `expired` indicates the entry was present but its `until` date has passed,
- * so the finding is NOT ignored — useful for surfacing "your ignore expired"
- * warnings to the author.
+ * Result of matching a finding against the repo's `.code-review/security-ignore.yml`.
+ * Expired entries still suppress the finding (`ignored: true`) but set
+ * `expired: true` so the runner can surface a "your ignore expired" notice
+ * to the PR author.
  */
 export interface IgnoreMatchResult {
   ignored: boolean;
