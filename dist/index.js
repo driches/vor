@@ -50938,11 +50938,6 @@ function bySeverityDesc(a2, b2) {
 }
 
 // src/output/formatter.ts
-var ASSESSMENT_LABEL = {
-  approve: "Approve",
-  request_changes: "Request changes",
-  comment: "Comment"
-};
 function renderSummary(input) {
   const summary2 = input.draft.summary;
   if (!summary2) {
@@ -50952,18 +50947,16 @@ function renderSummary(input) {
     };
   }
   const sections = [];
-  sections.push(`### ${ASSESSMENT_LABEL[summary2.assessment]}`);
+  sections.push(`### ${severityHeader(input.keptComments)}`);
   sections.push(summary2.assessment_reasoning);
   if (summary2.strengths.length > 0) {
     sections.push("### Strengths");
     sections.push(summary2.strengths.map((s2) => `- ${s2}`).join("\n"));
   }
-  const counts = countBySeverity(input.keptComments);
   if (input.keptComments.length > 0) {
+    const counts = countBySeverity(input.keptComments);
     sections.push("### Findings");
     sections.push(formatCountsLine(counts));
-  } else if (summary2.assessment !== "approve") {
-    sections.push("_No inline comments were posted._");
   }
   if (summary2.coverage_note) {
     sections.push("### Coverage");
@@ -51003,6 +50996,13 @@ function formatCountsLine(counts) {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(", ") : "No findings.";
+}
+function severityHeader(comments) {
+  if (comments.length === 0) return "No findings";
+  if (comments.some((c2) => c2.severity === "critical")) return "Critical findings";
+  if (comments.some((c2) => c2.severity === "important")) return "Important findings";
+  if (comments.some((c2) => c2.severity === "minor")) return "Minor findings";
+  return "Notes only";
 }
 
 // src/orchestrator.ts

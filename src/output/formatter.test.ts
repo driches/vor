@@ -27,8 +27,8 @@ const c = (severity: PostedComment['severity']): PostedComment => ({
   confidence: 'high',
 });
 
-describe('renderSummary', () => {
-  it('emits assessment, strengths, and finding counts', () => {
+describe('renderSummary — severity header', () => {
+  it('shows "Critical findings" when at least one critical comment is posted', () => {
     const r = renderSummary({
       draft: baseDraft(),
       keptComments: [c('critical'), c('important'), c('minor')],
@@ -36,61 +36,82 @@ describe('renderSummary', () => {
       configEvent: 'COMMENT',
       modelName: 'claude-sonnet-4-6',
     });
-    expect(r.body).toContain('Comment');
+    expect(r.body).toContain('### Critical findings');
+  });
+
+  it('shows "Important findings" when highest severity is important', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('important'), c('minor'), c('nit')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('### Important findings');
+    expect(r.body).not.toContain('### Critical');
+  });
+
+  it('shows "Minor findings" when highest severity is minor', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('minor'), c('nit')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('### Minor findings');
+  });
+
+  it('shows "Notes only" when only nits are posted', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('nit'), c('nit')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('### Notes only');
+  });
+
+  it('shows "No findings" when no comments were posted', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('### No findings');
+  });
+
+  it('never uses the literal assessment words (Approve / Request changes / Comment) as a section header', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).not.toContain('### Approve');
+    expect(r.body).not.toContain('### Request changes');
+    expect(r.body).not.toContain('### Comment');
+  });
+});
+
+describe('renderSummary — body content', () => {
+  it('emits strengths and finding counts', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('critical'), c('important'), c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'claude-sonnet-4-6',
+    });
     expect(r.body).toContain('Strengths');
     expect(r.body).toContain('Clear naming');
     expect(r.body).toContain('Findings');
     expect(r.body).toContain('1 critical, 1 important, 1 minor');
     expect(r.body).toContain('claude-sonnet-4-6');
-    expect(r.event).toBe('COMMENT');
-  });
-
-  it('returns APPROVE event when agent approves and config allows', () => {
-    const r = renderSummary({
-      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
-      keptComments: [],
-      truncatedCount: 0,
-      configEvent: 'APPROVE',
-      modelName: 'm',
-    });
-    expect(r.event).toBe('APPROVE');
-  });
-
-  it('downgrades agent APPROVE to COMMENT when config ceiling is COMMENT', () => {
-    const r = renderSummary({
-      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
-      keptComments: [],
-      truncatedCount: 0,
-      configEvent: 'COMMENT',
-      modelName: 'm',
-    });
-    expect(r.event).toBe('COMMENT');
-  });
-
-  it('downgrades agent REQUEST_CHANGES to COMMENT when config ceiling is COMMENT', () => {
-    const r = renderSummary({
-      draft: baseDraft({
-        summary: baseSummary({ assessment: 'request_changes' }),
-      }),
-      keptComments: [c('critical')],
-      truncatedCount: 0,
-      configEvent: 'COMMENT',
-      modelName: 'm',
-    });
-    expect(r.event).toBe('COMMENT');
-  });
-
-  it('emits REQUEST_CHANGES when config ceiling permits', () => {
-    const r = renderSummary({
-      draft: baseDraft({
-        summary: baseSummary({ assessment: 'request_changes' }),
-      }),
-      keptComments: [c('critical')],
-      truncatedCount: 0,
-      configEvent: 'REQUEST_CHANGES',
-      modelName: 'm',
-    });
-    expect(r.event).toBe('REQUEST_CHANGES');
   });
 
   it('mentions truncated comments', () => {
@@ -142,5 +163,55 @@ describe('renderSummary', () => {
     });
     expect(r.event).toBe('COMMENT');
     expect(r.body).toContain('no summary');
+  });
+});
+
+describe('renderSummary — event selection (unchanged)', () => {
+  it('returns APPROVE event when agent approves and config allows', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'APPROVE',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('APPROVE');
+  });
+
+  it('downgrades agent APPROVE to COMMENT when config ceiling is COMMENT', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('COMMENT');
+  });
+
+  it('downgrades agent REQUEST_CHANGES to COMMENT when config ceiling is COMMENT', () => {
+    const r = renderSummary({
+      draft: baseDraft({
+        summary: baseSummary({ assessment: 'request_changes' }),
+      }),
+      keptComments: [c('critical')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('COMMENT');
+  });
+
+  it('emits REQUEST_CHANGES when config ceiling permits', () => {
+    const r = renderSummary({
+      draft: baseDraft({
+        summary: baseSummary({ assessment: 'request_changes' }),
+      }),
+      keptComments: [c('critical')],
+      truncatedCount: 0,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('REQUEST_CHANGES');
   });
 });
