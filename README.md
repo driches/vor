@@ -1,5 +1,20 @@
 # Claude Code Review
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="Claude Code Review" width="420">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://github.com/driches/code-review/actions/workflows/ci.yml"><img src="https://github.com/driches/code-review/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/driches/code-review/releases"><img src="https://img.shields.io/github/v/release/driches/code-review?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/driches/code-review" alt="MIT License"></a>
+  <a href="https://github.com/marketplace/actions/claude-code-review"><img src="https://img.shields.io/badge/Marketplace-GitHub%20Action-2088FF?logo=github" alt="GitHub Marketplace"></a>
+  <a href="https://github.com/driches/code-review/discussions"><img src="https://img.shields.io/github/discussions/driches/code-review" alt="Discussions"></a>
+</p>
+
 > AI-powered PR code review GitHub Action. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude.
 
 Built on the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with a custom tool-use loop. The agent has access to a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) and **no built-in filesystem/shell access**. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
@@ -146,6 +161,20 @@ npm run verify-dist
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev workflow.
+
+## Contributing
+
+Issues and PRs welcome. Good first contributions: pick something tagged [`good first issue`](https://github.com/driches/code-review/labels/good%20first%20issue) or [`help wanted`](https://github.com/driches/code-review/labels/help%20wanted), comment "I'll take this", and send a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, the dogfood workflow, and the release process. By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Support
+
+- **Questions, ideas, show-and-tell** → [GitHub Discussions](https://github.com/driches/code-review/discussions)
+- **Bugs, feature requests, review-quality feedback** → [Open an issue](https://github.com/driches/code-review/issues/new/choose)
+- **Anything else** → [SUPPORT.md](SUPPORT.md)
+
+## Security
+
+See [SECURITY.md](SECURITY.md). Please don't file public issues for vulnerabilities — use [GitHub Security Advisories](https://github.com/driches/code-review/security/advisories/new) instead.
 
 ## License
 

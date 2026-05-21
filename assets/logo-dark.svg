@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 128" role="img" width="480" height="128">
+  <title>Claude Code Review (dark theme)</title>
+  <desc>Dark-mode logo: an eye with three diff lines as the iris (middle line in coral), alongside the "code-review" wordmark.</desc>
+
+  <!-- Icon -->
+  <g>
+    <path d="M 32 30 Q 64 18 96 30"
+          fill="none" stroke="#A78BFA" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M 20 64 Q 64 16 108 64 Q 64 112 20 64 Z"
+          fill="none" stroke="#A78BFA" stroke-width="4" stroke-linejoin="round" />
+    <line x1="46" y1="54" x2="82" y2="54" stroke="#D1D5DB" stroke-width="4" stroke-linecap="round" />
+    <line x1="42" y1="64" x2="86" y2="64" stroke="#F0875F" stroke-width="4" stroke-linecap="round" />
+    <line x1="48" y1="74" x2="80" y2="74" stroke="#D1D5DB" stroke-width="4" stroke-linecap="round" />
+  </g>
+
+  <!-- Wordmark -->
+  <text x="144" y="78"
+        font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
+        font-size="42" font-weight="600" fill="#F3F4F6"
+        letter-spacing="-0.5">code-review</text>
+</svg>

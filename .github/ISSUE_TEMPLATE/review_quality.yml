@@ -1,0 +1,66 @@
+name: Review quality feedback
+description: The AI review said something wrong, missed something important, or got severity wrong. This is the highest-signal feedback for tuning the prompt.
+title: "review-quality: "
+labels: ["review-quality", "prompt-tuning"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports directly improve the system prompt and severity calibration. The more concrete the example (with a public link), the more useful it is.
+
+        For action crashes, malformed reviews, or things that look like bugs (not opinions), use the [Bug report](https://github.com/driches/code-review/issues/new?template=bug_report.yml) template instead.
+
+  - type: input
+    id: pr_link
+    attributes:
+      label: Public PR link
+      description: A public PR where the issue is visible. Without this, we can't see the comment in context.
+      placeholder: "https://github.com/your-org/your-repo/pull/123"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of issue is this?
+      options:
+        - "False positive — the agent flagged something that isn't actually a problem"
+        - "False negative — the agent missed something it should have caught"
+        - "Wrong severity — flagged at the wrong level (e.g. critical vs minor)"
+        - "Wrong location — comment posted on the wrong line"
+        - "Style/tone — the comment is technically right but unhelpful, condescending, or noisy"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_it_said
+    attributes:
+      label: What the comment said
+      description: Paste the comment body (or a link to a permalink of it).
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_should_have_happened
+    attributes:
+      label: What should have happened instead?
+      placeholder: |
+        Either: it shouldn't have flagged this at all because... / it should have flagged it at MINOR not CRITICAL because... / it missed that the new code is actually unreachable because...
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model used
+      placeholder: "claude-sonnet-4-6"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: "`.code-review.yml` in use"
+      description: Especially the `focus`, `severity`, and `prompt.additions` sections.
+      render: yaml
