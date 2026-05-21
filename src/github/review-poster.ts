@@ -77,5 +77,27 @@ export function renderCommentBody(c: PostedComment): string {
   const suggestion = c.suggestion
     ? `\n\n\`\`\`suggestion\n${c.suggestion.replace(/\n$/, '')}\n\`\`\``
     : '';
-  return `${heading}\n\n${why}${suggestion}`;
+  const provenance = renderProvenanceTag(c);
+  return `${heading}\n\n${why}${suggestion}${provenance}`;
+}
+
+/**
+ * Renders a small inline tag identifying the scanner that produced a finding.
+ * AI-originated comments (no `source` field, or `source.kind === 'agent'`)
+ * produce no tag so their rendered body is unchanged.
+ */
+function renderProvenanceTag(c: PostedComment): string {
+  if (!c.source || c.source.kind !== 'scanner') return '';
+  switch (c.source.scanner) {
+    case 'dependency-cve': {
+      const id = c.source.cve_id ?? c.source.ghsa_id ?? c.source.rule_id ?? '';
+      return `\n\n_via OSV · ${id}_`;
+    }
+    case 'secrets':
+      return '\n\n_via secrets scan_';
+    case 'sast':
+      return '\n\n_via SAST_';
+    case 'container-cve':
+      return '\n\n_via container scan_';
+  }
 }

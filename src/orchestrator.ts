@@ -19,6 +19,14 @@ import { ReviewAggregator } from './output/aggregator.js';
 import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
 import { renderSummary } from './output/formatter.js';
+import { scanFindingToPostedComment } from './scanners/adapter.js';
+import { InMemoryScanCache } from './scanners/cache.js';
+import { dedupScannerFindings } from './scanners/dedup.js';
+import { IgnoreList } from './scanners/ignore-list.js';
+import { buildEnabledScanners } from './scanners/registry.js';
+import { runScanners } from './scanners/runner.js';
+import type { ScannerDeps } from './scanners/types.js';
+import { validateScanFinding } from './scanners/validate.js';
 import { registerSecret } from './util/secrets.js';
 import { logger } from './util/logger.js';
 
@@ -111,33 +119,100 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     pull_number: input.pull_number,
   });
 
-  // Build aggregator + tool deps
-  const aggregator = new ReviewAggregator();
-  const result = await runAgent({
-    deps: {
-      octokit,
-      owner: input.owner,
-      repo: input.repo,
-      pull_number: input.pull_number,
-      prContext,
-      fileReader,
-      aggregator,
-      config,
-      workspaceDir: input.workspace_dir,
-    },
-    systemPrompt,
-    userPrompt,
-    model: config.model,
-    maxTurns: config.max_turns,
-    maxInputTokens: config.budget.max_input_tokens,
-    maxOutputTokens: config.budget.max_output_tokens,
-    apiKey: input.anthropic_api_key,
+  // Load the security ignore list at HEAD. Always returns a usable instance —
+  // malformed YAML / missing file degrades to an empty list inside .load().
+  const ignoreList = await IgnoreList.load(fileReader, {
+    owner: input.owner,
+    repo: input.repo,
+    ref: prContext.metadata.head_sha,
+    path: config.security.ignore_file,
   });
+
+  // Build aggregator + scanner pipeline. The agent and scanners share the
+  // same aggregator so the filter pipeline applies uniformly to both.
+  const aggregator = new ReviewAggregator();
+  const scanners = buildEnabledScanners(config.security);
+  const scannerDeps: ScannerDeps = {
+    octokit,
+    owner: input.owner,
+    repo: input.repo,
+    pull_number: input.pull_number,
+    head_sha: prContext.metadata.head_sha,
+    changedFiles: prContext.files,
+    contextFiles,
+    diff: prContext.diff,
+    workspaceDir: input.workspace_dir,
+    cache: new InMemoryScanCache(),
+    ignoreList,
+    fileReader,
+    config: config.security,
+    signal: AbortSignal.timeout(120_000),
+  };
+
+  // Fire agent + scanners in parallel. The runner is error-isolated, so a
+  // scanner failure cannot reject this Promise.all — every scanner produces a
+  // ScanResult (possibly with non-fatal errors). The agent itself can throw,
+  // and we let that propagate as before.
+  const [result, scanRunResult] = await Promise.all([
+    runAgent({
+      deps: {
+        octokit,
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pull_number,
+        prContext,
+        fileReader,
+        aggregator,
+        config,
+        workspaceDir: input.workspace_dir,
+      },
+      systemPrompt,
+      userPrompt,
+      model: config.model,
+      maxTurns: config.max_turns,
+      maxInputTokens: config.budget.max_input_tokens,
+      maxOutputTokens: config.budget.max_output_tokens,
+      apiKey: input.anthropic_api_key,
+    }),
+    runScanners(scanners, scannerDeps),
+  ]);
 
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ` +
       `${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`,
   );
+
+  // Pass 2 dedup: drop scanner findings that overlap an AI security-adjacent
+  // comment (dependency-cve findings are protected — see dedup.ts).
+  const dedupedFindings = dedupScannerFindings({
+    scanFindings: scanRunResult.findings,
+    aiComments: aggregator.acceptedComments,
+  });
+
+  // Validate + adapt surviving findings, then push into the same aggregator
+  // so the existing filter pipeline applies to scanner comments too.
+  const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
+  let addedScannerComments = 0;
+  for (const finding of dedupedFindings) {
+    const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
+    if (!valid.ok) {
+      await logger.debug(
+        `Skipping scanner finding from ${finding.scanner}: ${valid.reason}`,
+      );
+      continue;
+    }
+    aggregator.addComment(scanFindingToPostedComment(finding));
+    addedScannerComments += 1;
+  }
+
+  if (scanners.length > 0) {
+    const scannerErrors = scanRunResult.perScanner.flatMap((r) => r.errors);
+    await logger.info(
+      `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ` +
+        `${addedScannerComments} added to review` +
+        (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : ''),
+    );
+  }
 
   // Apply final filters (severity floor, per-file cap, global cap, dedup)
   const filtered = filterComments(aggregator.acceptedComments, {
