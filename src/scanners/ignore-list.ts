@@ -17,6 +17,7 @@ import { parse as parseYaml } from 'yaml';
 import { satisfies as semverSatisfies, valid as semverValid } from 'semver';
 import { z } from 'zod';
 import type { FileReader } from '../github/file-reader.js';
+import { GitHubApiError } from '../util/errors.js';
 import { logger } from '../util/logger.js';
 import type {
   IgnoreList as IgnoreListContract,
@@ -24,13 +25,27 @@ import type {
   ScanFinding,
 } from './types.js';
 
-/** ISO date (YYYY-MM-DD) — Zod parses bare dates from YAML as `Date`. */
+/**
+ * ISO date for the `expires` field. Accepts both bare `YYYY-MM-DD` strings
+ * (yaml's default for unquoted dates) and explicit `!!timestamp` tagged values
+ * (which yaml parses as `Date`). Also accepts RFC3339 datetime strings like
+ * `2026-12-31T23:59:59Z` or `2026-12-31T23:59:59+02:00` so users pasting a
+ * timestamp from another tool don't silently degrade their whole file. All
+ * forms normalize to `YYYY-MM-DD` (UTC truncation for `Date` inputs;
+ * leading-10-char slice for strings, which is correct in either timezone since
+ * the date portion already starts the string).
+ */
 const isoDateSchema = z
   .union([
-    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expires must be ISO YYYY-MM-DD'),
+    z
+      .string()
+      .regex(
+        /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/,
+        'expires must be ISO YYYY-MM-DD or RFC3339 datetime',
+      ),
     z.date(),
   ])
-  .transform((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v));
+  .transform((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)));
 
 const ghsaEntrySchema = z.object({
   ghsa_id: z.string().min(1),
@@ -125,8 +140,10 @@ export class IgnoreList implements IgnoreListContract {
         ref: args.ref,
       });
     } catch (err) {
+      const status =
+        err instanceof GitHubApiError && err.status != null ? ` (status ${err.status})` : '';
       void logger.warn(
-        `Failed to read ignore file ${args.path}@${args.ref}: ${(err as Error).message}. Treating as empty.`,
+        `Failed to read ignore file ${args.path}@${args.ref}${status}: ${(err as Error).message}. Treating as empty.`,
       );
       return IgnoreList.empty();
     }

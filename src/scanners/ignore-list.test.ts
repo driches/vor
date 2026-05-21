@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileReader } from '../github/file-reader.js';
+import { logger } from '../util/logger.js';
 import { IgnoreList } from './ignore-list.js';
 import type { ScanEvidence, ScanFinding } from './types.js';
 
@@ -261,6 +262,92 @@ entries:
       expired: true,
       reason: 'Past sell-by date',
     });
+  });
+});
+
+describe('IgnoreList.load — union ordering (ghsa_id wins over package:)', () => {
+  it('classifies entries with both ghsa_id and package: as GHSA (union priority)', async () => {
+    // Both ghsa_id and a `package:` block are present. The package range
+    // (>=99.0.0) explicitly does NOT cover the finding's version 1.0.0, so if
+    // a future refactor reordered the Zod union to prefer `package:` first the
+    // entry would silently stop matching — this test pins the GHSA-first
+    // contract documented in ignoreEntrySchema.
+    const yaml = `
+entries:
+  - ghsa_id: GHSA-aaaa-bbbb-cccc
+    package:
+      name: lodash
+      ecosystem: npm
+      version: ">=99.0.0"
+    reason: GHSA wins over package
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-7',
+        ghsa_id: 'GHSA-aaaa-bbbb-cccc',
+        ecosystem: 'npm',
+        package: 'lodash',
+        affected_version: '1.0.0',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'GHSA wins over package',
+    });
+  });
+});
+
+describe('IgnoreList.load — expires field formats', () => {
+  it('accepts RFC3339 datetime in `expires` and still suppresses the finding', async () => {
+    // Without the regex widening, `expires: 2099-12-31T23:59:59Z` would fail
+    // schema validation, downgrade the entire file to empty, and silently let
+    // the finding through. Verify the entry parses, is not expired, and still
+    // ignores the finding.
+    const yaml = `
+entries:
+  - ghsa_id: GHSA-rfc-3339-ok
+    reason: RFC3339 timestamp from another tool
+    expires: "2099-12-31T23:59:59Z"
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-8',
+        ghsa_id: 'GHSA-rfc-3339-ok',
+        ecosystem: 'npm',
+        package: 'foo',
+        affected_version: '1.0.0',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'RFC3339 timestamp from another tool',
+    });
+  });
+
+  it('rejects malformed `expires` (e.g. "tomorrow") and degrades to empty with a debuggable warn', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockResolvedValue();
+    const yaml = `
+entries:
+  - ghsa_id: GHSA-bad-expires
+    reason: x
+    expires: tomorrow
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    expect(list.matches(makeFinding())).toEqual({ ignored: false });
+    // The warn message should call out a validation failure so the user knows
+    // their ignore file silently degraded. (Zod's union-mode error doesn't
+    // pinpoint the `expires` field — that's a deliberate trade-off documented
+    // in ignoreEntrySchema's comment — but the message must still say
+    // "validation failed" so the user has a starting point.)
+    const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+    expect(messages.some((m) => m.includes('validation failed'))).toBe(true);
+    warnSpy.mockRestore();
   });
 });
 
