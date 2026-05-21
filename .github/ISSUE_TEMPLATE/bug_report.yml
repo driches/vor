@@ -1,0 +1,86 @@
+name: Bug report
+description: The action crashed, posted no review, posted a malformed review, or otherwise misbehaved.
+title: "bug: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out as much as you can — the more detail, the faster we can fix it.
+
+        If your issue is about **review quality** (the AI flagged something wrong, missed something important, or its severity was off), please use the [Review quality feedback](https://github.com/driches/code-review/issues/new?template=review_quality.yml) template instead. We track those separately because they feed prompt tuning.
+
+  - type: input
+    id: action_version
+    attributes:
+      label: Action version
+      description: "The `@vX` tag or commit SHA you're using in your workflow."
+      placeholder: "v0.1.1 (or v0)"
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: "The Claude model the run used (default is `claude-sonnet-4-6`)."
+      placeholder: "claude-sonnet-4-6"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: What did the action do (or not do)? Paste any error message verbatim.
+      placeholder: "The action exited with `ended: error` and posted no review. The log showed..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "A review with inline comments on the changed lines."
+    validations:
+      required: true
+
+  - type: input
+    id: repro_link
+    attributes:
+      label: Public repro link (PR or repo)
+      description: "If the bug is reproducible on a public PR, a link makes triage 10x faster."
+      placeholder: "https://github.com/your-org/your-repo/pull/123"
+
+  - type: textarea
+    id: workflow_snippet
+    attributes:
+      label: Workflow snippet
+      description: The `.github/workflows/code-review.yml` (or equivalent) that triggered the run. Redact secrets.
+      render: yaml
+      placeholder: |
+        - uses: driches/code-review@v0
+          with:
+            anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your `.code-review.yml` (if any)
+      description: Paste it here. Redact anything sensitive.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: From the Actions run. The "Run review" step output is most useful. Redact API keys and PII.
+      render: text
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-flight
+      options:
+        - label: "I searched [open](https://github.com/driches/code-review/issues) and [closed](https://github.com/driches/code-review/issues?q=is%3Aissue+is%3Aclosed) issues and didn't find a duplicate."
+          required: true

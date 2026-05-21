@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a new input, output, config option, or behavior change.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. The clearer the problem statement, the easier it is to figure out the right shape of the fix — so please lead with the problem rather than a proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation where the current action falls short. Concrete examples beat hypotheticals.
+      placeholder: "When I run the action on a PR with >50 changed files, the agent runs out of turns before getting to half of them..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior (optional)
+      description: If you have a specific shape in mind — new input, config flag, output format — sketch it here. It's fine to leave this blank.
+      placeholder: |
+        Add a `priority_paths` config field. Files matching these globs get reviewed first within the agent's turn budget.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other shapes you considered and rejected.
+
+  - type: dropdown
+    id: willing_to_pr
+    attributes:
+      label: Are you willing to send a PR?
+      options:
+        - "Yes, I'll send a PR"
+        - "Maybe, with some guidance"
+        - "No, just reporting"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-flight
+      options:
+        - label: "I searched existing issues and [discussions](https://github.com/driches/code-review/discussions) and didn't find a duplicate."
+          required: true
