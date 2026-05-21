@@ -45,7 +45,7 @@ export function renderReport(input: RenderReportInput): string {
   const agg = aggregate(input.cases);
   lines.push('## Aggregate');
   lines.push('');
-  lines.push(formatTotalsTable(agg));
+  lines.push(formatTotalsTable(agg, input.cases.length));
   lines.push('');
   if (Object.keys(agg.severity_deltas).length > 0) {
     lines.push('### Severity delta (Codex rank − Ours rank, matched pairs only)');
@@ -156,11 +156,11 @@ function aggregate(cases: readonly CaseReport[]): AggregateTotals {
   };
 }
 
-function formatTotalsTable(agg: AggregateTotals): string {
+function formatTotalsTable(agg: AggregateTotals, caseCount: number): string {
   return [
     '| Metric | Value |',
     '| --- | --- |',
-    `| Cases | ${'-'} |`,
+    `| Cases | ${caseCount} |`,
     `| Ours total | ${agg.ours} |`,
     `| Codex total | ${agg.codex} |`,
     `| Matched | ${agg.matched} |`,

@@ -21,11 +21,9 @@
  * Honors:    GOLDEN_REPO_PATH (default: ../code-review-golden).
  */
 
-import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createOctokit } from '../../src/github/client.js';
-import { fetchPullRequestDiff } from '../../src/github/diff-fetcher.js';
+import { cloneRepoAtSha } from '../../src/eval/local-deps.js';
 import {
   CODERABBIT_BOT,
   CODEX_BOT,
@@ -33,6 +31,8 @@ import {
   type BotConfig,
   type CapturedBotReview,
 } from '../../src/eval/normalize-codex.js';
+import { createOctokit } from '../../src/github/client.js';
+import { fetchPullRequestDiff } from '../../src/github/diff-fetcher.js';
 
 interface Args {
   pr: string;
@@ -153,10 +153,11 @@ async function main(): Promise<void> {
   );
   log(`  → ${normalized.length} normalized finding(s)`);
 
-  // 6. Clone source repo at head SHA (snapshot)
+  // 6. Clone source repo at head SHA (snapshot). cloneRepoAtSha passes the
+  //    token via env (not argv), so it doesn't leak to `ps`.
   const repoDir = resolve(caseDir, 'repo');
   log(`Cloning ${owner}/${repo} → ${repoDir} (depth 100)...`);
-  cloneSnapshot({ owner, repo, headSha, dest: repoDir, token });
+  cloneRepoAtSha({ owner, repo, headSha, dest: repoDir, token });
 
   // 7. meta.yml — written last so a partial capture doesn't look complete
   writeFileSync(
@@ -219,48 +220,6 @@ function chooseBot(spec: string): BotConfig {
     severityRegex: /(?!)/, // never matches
     severityMap: {},
   };
-}
-
-function cloneSnapshot(opts: {
-  owner: string;
-  repo: string;
-  headSha: string;
-  dest: string;
-  token: string;
-}): void {
-  const url = `https://x-access-token:${opts.token}@github.com/${opts.owner}/${opts.repo}.git`;
-  const cloneResult = spawnSync(
-    'git',
-    ['clone', '--depth', '100', '--no-tags', url, opts.dest],
-    { stdio: 'inherit' },
-  );
-  if (cloneResult.status !== 0) die(`git clone failed (exit ${cloneResult.status}).`);
-
-  // Ensure the head SHA is checked out — branches may have moved since capture.
-  // `git fetch <sha>` is the safe way; some servers refuse direct SHA fetch.
-  // Try `git checkout <sha>` first (works if clone already has it via depth).
-  const checkout = spawnSync('git', ['checkout', '--detach', opts.headSha], {
-    cwd: opts.dest,
-    stdio: 'inherit',
-  });
-  if (checkout.status !== 0) {
-    log(`head SHA not in clone — fetching by SHA...`);
-    const fetch = spawnSync('git', ['fetch', '--depth', '100', 'origin', opts.headSha], {
-      cwd: opts.dest,
-      stdio: 'inherit',
-    });
-    if (fetch.status !== 0) die(`git fetch ${opts.headSha} failed.`);
-    const checkout2 = spawnSync('git', ['checkout', '--detach', opts.headSha], {
-      cwd: opts.dest,
-      stdio: 'inherit',
-    });
-    if (checkout2.status !== 0) die(`git checkout ${opts.headSha} failed.`);
-  }
-
-  // Strip the credentialed remote so the token doesn't sit in .git/config.
-  execSync(`git remote set-url origin https://github.com/${opts.owner}/${opts.repo}.git`, {
-    cwd: opts.dest,
-  });
 }
 
 function log(msg: string): void {

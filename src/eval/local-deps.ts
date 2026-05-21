@@ -17,7 +17,8 @@
  * (which spawns `git grep` in cwd) works against a real `.git` directory.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Octokit } from '@octokit/rest';
@@ -96,6 +97,119 @@ export async function buildLocalDeps(input: BuildLocalDepsInput): Promise<BuildL
   };
 
   return { deps, meta, configSource };
+}
+
+/**
+ * Ensure `<caseDir>/repo/` is a usable git checkout at the case's head SHA.
+ *
+ * Cases captured by the GitHub Action are committed to the private dataset
+ * repo WITHOUT the source-code snapshot (gitignored — the per-case
+ * `repo/` directory is excluded from version control). When you pull the
+ * dataset locally, the snapshot is missing. This function detects that and
+ * re-clones the source repo at the captured head SHA so `LocalFileReader`
+ * and `grep_repo_at_ref` work.
+ *
+ * Idempotent: returns immediately if the snapshot already exists.
+ * Requires a GitHub token (param > GH_TOKEN > GITHUB_TOKEN) when cloning.
+ */
+export async function ensureRepoSnapshot(opts: {
+  caseDir: string;
+  token?: string;
+}): Promise<void> {
+  const meta = await readCaseMeta(opts.caseDir);
+  const repoDir = resolve(opts.caseDir, 'repo');
+  if (existsSync(resolve(repoDir, '.git'))) return;
+
+  const token = opts.token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (!token) {
+    const msg =
+      'Snapshot missing at ' +
+      repoDir +
+      ' and no GH_TOKEN / GITHUB_TOKEN set. Export a token from gh CLI or manually clone ' +
+      meta.owner +
+      '/' +
+      meta.repo +
+      ' into that directory at SHA ' +
+      meta.head_sha +
+      '.';
+    throw new Error(msg);
+  }
+
+  cloneRepoAtSha({
+    owner: meta.owner,
+    repo: meta.repo,
+    headSha: meta.head_sha,
+    dest: repoDir,
+    token,
+  });
+}
+
+/**
+ * Shallow-clone a GitHub repo at a specific SHA into `dest`, authenticating
+ * via a token that NEVER appears in `argv` (so it can't be observed via
+ * `ps`/`/proc/<pid>/cmdline`). Auth is supplied through the `GIT_CONFIG_*`
+ * env vars `git` reads at startup — same mechanism `actions/checkout` uses.
+ *
+ * Used by both `scripts/golden/capture.ts` and `ensureRepoSnapshot` above.
+ *
+ * Throws on any git step failure. After this returns, `dest/.git` exists,
+ * HEAD is detached at `headSha`, and the remote URL is the public
+ * non-credentialed form — the token is GC'd with the env object.
+ */
+export function cloneRepoAtSha(opts: {
+  owner: string;
+  repo: string;
+  headSha: string;
+  dest: string;
+  token: string;
+}): void {
+  const url = `https://github.com/${opts.owner}/${opts.repo}.git`;
+  const authHeader = `AUTHORIZATION: bearer ${opts.token}`;
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `http.https://github.com/.extraheader`,
+    GIT_CONFIG_VALUE_0: authHeader,
+  };
+
+  const cloneRes = spawnSync(
+    'git',
+    ['clone', '--depth', '100', '--no-tags', url, opts.dest],
+    { stdio: 'inherit', env },
+  );
+  if (cloneRes.status !== 0) {
+    throw new Error(
+      `git clone of ${opts.owner}/${opts.repo} failed (exit ${cloneRes.status ?? 'spawn-error'}).`,
+    );
+  }
+
+  // Try checkout first (works when --depth covers the SHA). Fall back to
+  // a SHA-targeted fetch + retry for SHAs older than --depth.
+  const co1 = spawnSync('git', ['checkout', '--detach', opts.headSha], {
+    cwd: opts.dest,
+    stdio: 'inherit',
+    env,
+  });
+  if (co1.status !== 0) {
+    const fetch = spawnSync(
+      'git',
+      ['fetch', '--depth', '100', 'origin', opts.headSha],
+      { cwd: opts.dest, stdio: 'inherit', env },
+    );
+    if (fetch.status !== 0) {
+      throw new Error(`git fetch ${opts.headSha} failed in ${opts.dest}.`);
+    }
+    const co2 = spawnSync('git', ['checkout', '--detach', opts.headSha], {
+      cwd: opts.dest,
+      stdio: 'inherit',
+      env,
+    });
+    if (co2.status !== 0) {
+      throw new Error(`git checkout ${opts.headSha} failed in ${opts.dest}.`);
+    }
+  }
+  // No remote URL cleanup needed: the URL we passed is already public, and
+  // the token lives only in the spawned process's env (not in .git/config).
 }
 
 /**

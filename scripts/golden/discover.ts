@@ -132,17 +132,27 @@ async function listRepos(
   return repos.filter((r) => r.owner?.login === owner).map((r) => r.name);
 }
 
+const REVIEW_FETCH_CONCURRENCY = 8;
+
 async function scanRepo(
   octokit: ReturnType<typeof createOctokit>,
   args: Args,
   repo: string,
   since: Date,
 ): Promise<{ candidates: Candidate[]; scanned: number }> {
-  const out: Candidate[] = [];
-  let scanned = 0;
-
-  // List PRs sorted by updated desc. Stop paging once we cross `since`.
+  // List PRs sorted by updated desc, then check reviews in parallel chunks.
+  // The previous version was strictly serial (N+1: one paginated listReviews
+  // call per PR), which made a 60-repo / 200-PR scan take 30s+. Chunked
+  // parallelism keeps ordering deterministic enough while reducing wall time
+  // ~Nx (bounded by REVIEW_FETCH_CONCURRENCY to stay polite to the API).
   const stateFilter = args.state === 'merged' ? 'closed' : args.state;
+  const prsToCheck: Array<{
+    number: number;
+    title: string;
+    head_sha: string;
+    merged_at: string | null;
+  }> = [];
+
   let page = 1;
   outer: while (true) {
     const r = await octokit.rest.pulls.list({
@@ -155,29 +165,12 @@ async function scanRepo(
       page,
     });
     if (r.data.length === 0) break;
-
     for (const pr of r.data) {
       const updated = new Date(pr.updated_at);
       if (updated < since) break outer;
-      // For state=merged we want only actually-merged PRs (closed≠merged).
       if (args.state === 'merged' && !pr.merged_at) continue;
-      scanned += 1;
-
-      const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
-        owner: args.owner,
-        repo,
-        pull_number: pr.number,
-        per_page: 100,
-      });
-      const hasCodex = reviews.some((rv) => rv.user?.login === args.bot);
-      const hasOurs = reviews.some((rv) => (rv.body ?? '').includes(AGENT_REVIEW_MARKER));
-      if (!hasCodex || !hasOurs) continue;
-
-      out.push({
-        owner: args.owner,
-        repo,
-        pull_number: pr.number,
-        case_id: `${repo}-pr-${pr.number}`,
+      prsToCheck.push({
+        number: pr.number,
         title: pr.title,
         head_sha: pr.head.sha,
         merged_at: pr.merged_at,
@@ -186,7 +179,40 @@ async function scanRepo(
     if (r.data.length < 50) break;
     page += 1;
   }
-  return { candidates: out, scanned };
+
+  const out: Candidate[] = [];
+  // Process in fixed-size chunks so we cap in-flight requests at
+  // REVIEW_FETCH_CONCURRENCY without an external lib.
+  for (let i = 0; i < prsToCheck.length; i += REVIEW_FETCH_CONCURRENCY) {
+    const chunk = prsToCheck.slice(i, i + REVIEW_FETCH_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (pr) => {
+        const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+          owner: args.owner,
+          repo,
+          pull_number: pr.number,
+          per_page: 100,
+        });
+        const hasCodex = reviews.some((rv) => rv.user?.login === args.bot);
+        const hasOurs = reviews.some((rv) => (rv.body ?? '').includes(AGENT_REVIEW_MARKER));
+        return { pr, eligible: hasCodex && hasOurs };
+      }),
+    );
+    for (const { pr, eligible } of results) {
+      if (!eligible) continue;
+      out.push({
+        owner: args.owner,
+        repo,
+        pull_number: pr.number,
+        case_id: `${repo}-pr-${pr.number}`,
+        title: pr.title,
+        head_sha: pr.head_sha,
+        merged_at: pr.merged_at,
+      });
+    }
+  }
+
+  return { candidates: out, scanned: prsToCheck.length };
 }
 
 function isAlreadyCaptured(goldenPath: string, caseId: string): boolean {
