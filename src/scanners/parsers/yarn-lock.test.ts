@@ -81,6 +81,22 @@ describe('yarnLockParser.parse', () => {
     expect(yarnLockParser.parse(content)).toEqual([]);
   });
 
+  it('does not drop the next entry when the previous record lacks a version line', () => {
+    // Regression: previously, when the inner loop broke because it hit the
+    // next entry's header, `i` advanced past that header — silently dropping
+    // the entry whose header was at line `j`.
+    const content = [
+      'foo@^1.0.0:',
+      '  resolved "https://example.com/foo"',
+      'bar@^2.0.0:',
+      '  version "2.0.0"',
+      '  resolved "https://example.com/bar"',
+      '',
+    ].join('\n');
+    const deps = yarnLockParser.parse(content);
+    expect(deps).toEqual([{ ecosystem: 'npm', name: 'bar', version: '2.0.0', line: 4 }]);
+  });
+
   it('handles CRLF line endings', () => {
     const content = ['lodash@^4.17.20:', '  version "4.17.21"', ''].join('\r\n');
     const deps = yarnLockParser.parse(content);

@@ -86,6 +86,11 @@ class YarnLockParser implements LockfileParser {
       // Scan forward for the `version "..."` body line.
       let version: string | null = null;
       let versionLine = i + 1;
+      // When the inner loop breaks because it found the next entry's header,
+      // we must NOT advance past that header — the outer loop needs to see it.
+      // When the inner loop breaks on a blank line / consumed-record-body, we
+      // do advance past it.
+      let brokeOnNextHeader = false;
       let j = i + 1;
       while (j < lines.length) {
         const body = lines[j]!;
@@ -98,6 +103,7 @@ class YarnLockParser implements LockfileParser {
           !body.startsWith('#') &&
           body.endsWith(':')
         ) {
+          brokeOnNextHeader = true;
           break;
         }
         const m = body.match(/^\s+version\s+"([^"]+)"/);
@@ -121,7 +127,9 @@ class YarnLockParser implements LockfileParser {
       }
 
       // Skip ahead past the record body so we don't re-enter it as a header.
-      i = j + 1;
+      // EXCEPT when the inner loop broke on the next entry's header — in that
+      // case `j` IS the next header and the outer loop needs to see it.
+      i = brokeOnNextHeader ? j : j + 1;
     }
 
     return out;

@@ -23,7 +23,11 @@ import path from 'node:path';
 import type { ChangedFile } from '../../types.js';
 import type { LockfileParser, ParsedDependency } from './types.js';
 
-const PIN_RE = /^\s*([A-Za-z0-9._-]+)\s*==\s*([^\s;#]+)/;
+// Tolerate optional pip "extras" suffix on the package name, e.g.
+// `Flask[async]==2.3.2` or `requests[security,socks]==2.31.0`. We discard the
+// extras intentionally — they don't affect the pinned version, which is all
+// OSV needs to resolve vulnerabilities.
+const PIN_RE = /^\s*([A-Za-z0-9._-]+)(?:\[[^\]]+\])?\s*==\s*([^\s;#]+)/;
 
 class PythonRequirementsParser implements LockfileParser {
   readonly ecosystem = 'PyPI' as const;

@@ -96,4 +96,13 @@ describe('pythonRequirementsParser.parse', () => {
     const deps = pythonRequirementsParser.parse(content);
     expect(deps).toEqual([{ ecosystem: 'PyPI', name: 'requests', version: '2.28.1', line: 1 }]);
   });
+
+  it('parses pinned packages with extras (extras are discarded)', () => {
+    const content = ['Flask[async]==2.3.2', 'requests[security,socks]==2.31.0'].join('\n');
+    const deps = pythonRequirementsParser.parse(content);
+    expect(deps).toEqual([
+      { ecosystem: 'PyPI', name: 'Flask', version: '2.3.2', line: 1 },
+      { ecosystem: 'PyPI', name: 'requests', version: '2.31.0', line: 2 },
+    ]);
+  });
 });

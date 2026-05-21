@@ -91,11 +91,10 @@ export class OsvClientError extends Error {
     public readonly status?: number,
     options?: { cause?: unknown },
   ) {
-    super(message);
+    // ES2022 Error supports `cause` natively via the options bag; no need to
+    // assign it manually after super().
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = 'OsvClientError';
-    if (options?.cause !== undefined) {
-      (this as Error & { cause?: unknown }).cause = options.cause;
-    }
   }
 }
 
@@ -221,6 +220,7 @@ async function fetchOnce(
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
   if (items.length <= size) return [items];
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
