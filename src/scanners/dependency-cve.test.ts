@@ -435,3 +435,217 @@ describe('createDependencyCveScanner — severity mapping from CVSS', () => {
     });
   }
 });
+
+// -----------------------------------------------------------------
+// Severity fallback from database_specific.severity (no CVSS)
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — database_specific.severity fallback', () => {
+  it.each([
+    { dbSpecific: 'CRITICAL', expected: 'critical' as const },
+    { dbSpecific: 'HIGH', expected: 'important' as const },
+    { dbSpecific: 'MODERATE', expected: 'minor' as const },
+    { dbSpecific: 'LOW', expected: 'nit' as const },
+  ])(
+    'falls back to database_specific.severity=$dbSpecific → $expected when no CVSS',
+    async ({ dbSpecific, expected }) => {
+      // Vuln record with no `severity[]` array; only database_specific.severity.
+      const vuln: OsvVuln = {
+        ...LODASH_VULN,
+        severity: undefined,
+        database_specific: { severity: dbSpecific },
+      };
+      const osvClient: OsvClient = {
+        queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+        getVuln: vi.fn().mockResolvedValue(vuln),
+      };
+      const reader: FileReader = {
+        read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+      } as unknown as FileReader;
+      const scanner = createDependencyCveScanner({ osvClient });
+
+      const result = await scanner.scan(
+        makeScannerDeps({
+          changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+          fileReader: reader,
+        }),
+      );
+
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.severity).toBe(expected);
+      if (result.findings[0]!.evidence.kind !== 'cve') {
+        throw new Error('expected cve evidence');
+      }
+      // No numeric CVSS available → evidence.cvss should be undefined.
+      expect(result.findings[0]!.evidence.cvss).toBeUndefined();
+    },
+  );
+});
+
+// -----------------------------------------------------------------
+// findFixedVersion returns undefined → no suggestion / no fixed_version
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — no fixed version available', () => {
+  it('omits suggestion and evidence.fixed_version when OSV has no fixed event', async () => {
+    // Vuln record with affected ranges but no `fixed` event — e.g. an
+    // outstanding advisory with no remediation yet.
+    const vuln: OsvVuln = {
+      ...LODASH_VULN,
+      affected: [
+        {
+          package: { name: 'lodash', ecosystem: 'npm' },
+          ranges: [
+            {
+              type: 'SEMVER',
+              events: [{ introduced: '0' }],
+            },
+          ],
+        },
+      ],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+      getVuln: vi.fn().mockResolvedValue(vuln),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    expect('suggestion' in finding).toBe(false);
+    expect(finding.evidence).not.toHaveProperty('fixed_version');
+  });
+});
+
+// -----------------------------------------------------------------
+// getVuln failure for one id doesn't drop findings for the other
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — getVuln partial failure', () => {
+  it('keeps findings for vulns whose getVuln succeeded, records an error for the failure', async () => {
+    // Two deps in a single package-lock; queryBatch returns vulns for both;
+    // the first getVuln rejects and the second resolves. We expect one
+    // finding (the success) plus one error mentioning the failed id.
+    const TWO_PKG_LOCK = [
+      '{',
+      '  "name": "test",',
+      '  "version": "1.0.0",',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "test", "version": "1.0.0" },',
+      '    "node_modules/lodash": {',
+      '      "version": "4.17.20"',
+      '    },',
+      '    "node_modules/minimist": {',
+      '      "version": "1.2.5"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const FAILED_ID = 'GHSA-failed-aaaa-bbbb';
+    const OK_ID = 'GHSA-jf85-cpcp-j695';
+
+    const batchResp: OsvBatchResponse = {
+      results: [
+        { vulns: [{ id: FAILED_ID, modified: '2024-01-01T00:00:00Z' }] },
+        { vulns: [{ id: OK_ID, modified: '2024-01-01T00:00:00Z' }] },
+      ],
+    };
+
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(batchResp),
+      getVuln: vi.fn().mockImplementation(async (id: string) => {
+        if (id === FAILED_ID) throw new OsvClientError('boom', 500);
+        return LODASH_VULN;
+      }),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(TWO_PKG_LOCK),
+    } as unknown as FileReader;
+    const logger = makeLogger();
+    const scanner = createDependencyCveScanner({ osvClient, logger });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.errors.length).toBeGreaterThanOrEqual(1);
+    expect(result.errors.some((e) => e.message.includes(FAILED_ID))).toBe(true);
+    // Scan must not throw — implicit from awaiting above without try/catch.
+  });
+});
+
+// -----------------------------------------------------------------
+// PyPI case-insensitive name matching for findFixedVersion
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — PyPI case-folding for findFixedVersion', () => {
+  it('matches Flask (caps) against affected.package.name=flask (lower)', async () => {
+    // requirements.txt with `Flask==2.3.2` — note the capital F.
+    const REQ_TXT = ['Flask==2.3.2'].join('\n');
+    // OSV publishes the affected name as lowercase `flask` (PEP 503).
+    const FLASK_VULN: OsvVuln = {
+      id: 'GHSA-flask-xxxx-yyyy',
+      aliases: ['CVE-2023-30861'],
+      summary: 'Flask cookie disclosure',
+      severity: [{ type: 'CVSS_V3', score: '7.5' }],
+      affected: [
+        {
+          package: { name: 'flask', ecosystem: 'PyPI' },
+          ranges: [
+            {
+              type: 'ECOSYSTEM',
+              events: [{ introduced: '0' }, { fixed: '2.3.3' }],
+            },
+          ],
+        },
+      ],
+    };
+    const batch: OsvBatchResponse = {
+      results: [{ vulns: [{ id: 'GHSA-flask-xxxx-yyyy', modified: '2024-01-01T00:00:00Z' }] }],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(batch),
+      getVuln: vi.fn().mockResolvedValue(FLASK_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(REQ_TXT),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [
+          makeChangedFile({
+            path: 'requirements.txt',
+            language: 'plain',
+            is_generated: false,
+          }),
+        ],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    expect(finding.evidence.fixed_version).toBe('2.3.3');
+    expect(finding.suggestion).toBeDefined();
+    expect(finding.suggestion).toContain('>=2.3.3');
+  });
+});

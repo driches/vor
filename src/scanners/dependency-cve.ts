@@ -58,6 +58,11 @@ const SCANNER_ID: ScannerId = 'dependency-cve';
  *  the GitHub comment body. 300 chars fits comfortably in a PR comment without
  *  losing the gist; the OSV link is appended after the truncation. */
 const DESCRIPTION_MAX_CHARS = 300;
+/** Cap on the rendered title — GitHub truncates long PR-comment titles. The
+ *  whole composed title (summary + ` in name@version`) must fit, otherwise we
+ *  fall through to the boilerplate "<severity> vulnerability in name@version"
+ *  form which is bounded by ecosystem reality. */
+const TITLE_MAX_CHARS = 120;
 
 const DEFAULT_PARSERS: readonly LockfileParser[] = [
   npmPackageLockParser,
@@ -93,13 +98,27 @@ function findParser(
 }
 
 /**
- * Deterministic 12-char fingerprint over `${file_path}:${line}:${rule_id}`.
+ * Deterministic 12-char fingerprint over `${rule_id}:${package_name}:${version}:${file_path}`.
  * SHA-1 is fine here — this is not a security primitive, it's a stable
  * identifier for dedup and ignore-list lookup. 12 hex chars (~48 bits) is
  * enough collision resistance for a single PR.
+ *
+ * Note: `line` is intentionally NOT in the hash. Lockfile reorders (e.g. `npm
+ * install` bumping an unrelated dep) shift line numbers without changing what
+ * the finding is about — including `line` would break cross-PR continuity for
+ * ignore-list pinning and dedup across re-pushes. The `line` field is still
+ * carried on the `ScanFinding` for rendering.
  */
-function fingerprintOf(file_path: string, line: number, rule_id: string): string {
-  return createHash('sha1').update(`${file_path}:${line}:${rule_id}`).digest('hex').slice(0, 12);
+function fingerprintOf(
+  rule_id: string,
+  package_name: string,
+  version: string,
+  file_path: string,
+): string {
+  return createHash('sha1')
+    .update(`${rule_id}:${package_name}:${version}:${file_path}`)
+    .digest('hex')
+    .slice(0, 12);
 }
 
 /**
@@ -230,9 +249,16 @@ function findFixedVersion(
   pkg: string,
 ): string | undefined {
   if (!vuln.affected) return undefined;
+  // PyPI normalizes package names per PEP 503 (lowercase, `_`/`.` → `-`), so a
+  // `requirements.txt` line `Flask==2.3.2` may surface in OSV as `'flask'`.
+  // Compare case-insensitively for PyPI; npm package names are case-sensitive
+  // and must match exactly.
+  const normalize = (s: string) => (ecosystem === 'PyPI' ? s.toLowerCase() : s);
+  const wantedName = normalize(pkg);
   for (const a of vuln.affected) {
     if (!a.package) continue;
-    if (a.package.ecosystem !== ecosystem || a.package.name !== pkg) continue;
+    if (a.package.ecosystem !== ecosystem) continue;
+    if (normalize(a.package.name) !== wantedName) continue;
     if (!a.ranges) continue;
     for (const r of a.ranges) {
       for (const e of r.events) {
@@ -269,9 +295,10 @@ function buildTitle(
   severity: Severity,
   identifier: string,
 ): string {
+  const tail = ` in ${dep.name}@${dep.version}`;
   const summary = vuln.summary?.trim();
-  if (summary && summary.length > 0 && summary.length <= 120) {
-    return `${summary} in ${dep.name}@${dep.version}`;
+  if (summary && summary.length > 0 && summary.length + tail.length <= TITLE_MAX_CHARS) {
+    return `${summary}${tail}`;
   }
   return `${severity} vulnerability in ${dep.name}@${dep.version} (${identifier})`;
 }
@@ -567,7 +594,7 @@ function buildFinding(r: ResolvedDep, vuln: OsvVuln): ScanFinding {
     description: buildDescription(vuln),
     confidence: 'high',
     evidence,
-    fingerprint: fingerprintOf(r.file_path, r.dep.line, rule_id),
+    fingerprint: fingerprintOf(rule_id, r.dep.name, r.dep.version, r.file_path),
     ...(fixed_version !== undefined
       ? { suggestion: `Upgrade ${r.dep.name} to >=${fixed_version}.` }
       : {}),
