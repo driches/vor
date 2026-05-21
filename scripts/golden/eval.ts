@@ -28,7 +28,12 @@ import { buildSystemPrompt } from '../../src/agent/system-prompt.js';
 import { buildUserPrompt } from '../../src/agent/user-prompt.js';
 import { compare } from '../../src/eval/compare.js';
 import { fromPostedComment, type NormalizedFinding } from '../../src/eval/finding.js';
-import { buildLocalDeps, loadContextFilesForCase, type CaseMeta } from '../../src/eval/local-deps.js';
+import {
+  buildLocalDeps,
+  ensureRepoSnapshot,
+  loadContextFilesForCase,
+  type CaseMeta,
+} from '../../src/eval/local-deps.js';
 import { renderReport, type CaseReport } from '../../src/eval/report.js';
 import { filterComments } from '../../src/output/filter.js';
 import { renderSummary } from '../../src/output/formatter.js';
@@ -66,7 +71,16 @@ async function main(): Promise<void> {
 
   for (const id of caseIds) {
     const caseDir = resolve(casesRoot, id);
+    // Reject case-ids whose resolved path escapes casesRoot — defends against
+    // `--case ../../etc/...` style traversal. Direct children only.
+    if (!caseDir.startsWith(casesRoot + '/')) {
+      die(`Case id "${id}" resolves outside cases root (${caseDir}) — refusing to proceed.`);
+    }
     log(`\n=== ${id} ===`);
+    // Auto-restore the source-code snapshot if it's missing (auto-captured
+    // cases are committed without `repo/` — gitignored to keep private code
+    // out of the dataset repo).
+    await ensureRepoSnapshot({ caseDir });
     const built = await buildLocalDeps({ caseDir });
     const { deps, meta, configSource } = built;
 
@@ -224,15 +238,19 @@ function selectCases(casesRoot: string, args: Args): string[] {
 }
 
 /**
- * Hard refuse to run if the dataset path points inside this public repo,
- * since reports and runs embed snippets from private code.
+ * Hard refuse to run if the dataset path points at, or inside, this public
+ * repo — reports and runs embed snippets from private code. Catches both
+ * `<repo>/sub/...` (startsWith check) and the exact-equal case `<repo>` =
+ * `<goldenRoot>` (which the original startsWith with trailing slash missed).
  */
 function assertGoldenPathSafe(goldenRoot: string): void {
   const here = resolve(process.cwd());
   const repoRoot = findRepoRoot(here);
-  if (repoRoot && goldenRoot.startsWith(repoRoot + '/')) {
+  if (!repoRoot) return;
+  const inside = goldenRoot === repoRoot || goldenRoot.startsWith(repoRoot + '/');
+  if (inside) {
     die(
-      `GOLDEN_REPO_PATH (${goldenRoot}) is inside this public repo (${repoRoot}).\n` +
+      `GOLDEN_REPO_PATH (${goldenRoot}) is inside or equal to this public repo (${repoRoot}).\n` +
         `Reports and runs contain snippets of private code — point GOLDEN_REPO_PATH at a separate location.`,
     );
   }

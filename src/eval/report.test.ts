@@ -139,6 +139,8 @@ describe('renderReport', () => {
     expect(md).toMatch(/\| Ours total \| 2 \|/);
     expect(md).toMatch(/\| Codex total \| 1 \|/);
     expect(md).toMatch(/\| Matched \| 1 \|/);
+    // Cases row reports the actual number of cases (regression: was hardcoded '-')
+    expect(md).toMatch(/\| Cases \| 2 \|/);
   });
 
   it('escapes pipes inside cell content', () => {

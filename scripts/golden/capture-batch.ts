@@ -19,7 +19,7 @@
  *   2  — at least one capture failed (other captures still attempted)
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,13 +68,13 @@ async function main(): Promise<void> {
     ];
     if (args.force) captureArgs.push('--force');
 
-    const result = spawnSync('npx', ['tsx', ...captureArgs], {
-      stdio: 'inherit',
-      env: process.env,
-    });
+    // Use async spawn (not spawnSync) so the Node event loop stays alive
+    // — keeps stdio responsive and lets timeouts / signals work between
+    // long-running captures.
+    const status = await spawnCapture(captureArgs);
 
-    if (result.status !== 0) {
-      const msg = `capture exited ${result.status}`;
+    if (status !== 0) {
+      const msg = `capture exited ${status}`;
       log(`  ! ${c.case_id}: ${msg}`);
       failures.push({ candidate: c, error: msg });
     }
@@ -88,6 +88,20 @@ async function main(): Promise<void> {
     }
     process.exit(2);
   }
+}
+
+function spawnCapture(captureArgs: readonly string[]): Promise<number | null> {
+  return new Promise((res) => {
+    const child = spawn('npx', ['tsx', ...captureArgs], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+    child.on('close', (code) => res(code));
+    child.on('error', (err) => {
+      console.error(`[capture-batch] spawn error: ${err.message}`);
+      res(1);
+    });
+  });
 }
 
 function parseArgs(argv: readonly string[]): Args {
