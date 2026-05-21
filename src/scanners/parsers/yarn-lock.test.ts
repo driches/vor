@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest';
+import type { ChangedFile } from '../../types.js';
+import { yarnLockParser } from './yarn-lock.js';
+
+function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
+  return {
+    path: 'yarn.lock',
+    status: 'modified',
+    additions: 0,
+    deletions: 0,
+    reviewable_lines: [],
+    language: 'plaintext',
+    is_generated: true,
+    is_binary: false,
+    size_bytes: 0,
+    head_line_text: new Map(),
+    ...over,
+  };
+}
+
+describe('yarnLockParser.matches', () => {
+  it('matches files named yarn.lock (at any depth)', () => {
+    expect(yarnLockParser.matches(makeFile({ path: 'yarn.lock' }))).toBe(true);
+    expect(yarnLockParser.matches(makeFile({ path: 'apps/web/yarn.lock' }))).toBe(true);
+  });
+
+  it('does not match other lockfiles', () => {
+    expect(yarnLockParser.matches(makeFile({ path: 'package-lock.json' }))).toBe(false);
+    expect(yarnLockParser.matches(makeFile({ path: 'pnpm-lock.yaml' }))).toBe(false);
+  });
+});
+
+describe('yarnLockParser.parse', () => {
+  it('returns [] for empty input', () => {
+    expect(yarnLockParser.parse('')).toEqual([]);
+  });
+
+  it('parses a minimal fixture with a regular package, a scoped package, and a multi-spec header', () => {
+    const content = [
+      '# yarn lockfile v1',
+      '',
+      '',
+      'lodash@^4.17.20:',
+      '  version "4.17.21"',
+      '  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz"',
+      '  integrity sha512-...',
+      '',
+      '"@scope/pkg@^2.0.0":',
+      '  version "2.0.4"',
+      '  resolved "https://..."',
+      '',
+      '"debug@^4.0.0", "debug@^4.1.0":',
+      '  version "4.3.4"',
+      '  resolved "..."',
+      '',
+    ].join('\n');
+
+    const deps = yarnLockParser.parse(content);
+    expect(deps).toHaveLength(3);
+
+    const lodash = deps.find((d) => d.name === 'lodash');
+    const scoped = deps.find((d) => d.name === '@scope/pkg');
+    const debug = deps.find((d) => d.name === 'debug');
+
+    expect(lodash).toBeDefined();
+    expect(lodash!.ecosystem).toBe('npm');
+    expect(lodash!.version).toBe('4.17.21');
+    expect(lodash!.line).toBe(5);
+
+    expect(scoped).toBeDefined();
+    expect(scoped!.version).toBe('2.0.4');
+    // `@scope/pkg` header is at line 9; version is at line 10.
+    expect(scoped!.line).toBe(10);
+
+    expect(debug).toBeDefined();
+    expect(debug!.version).toBe('4.3.4');
+  });
+
+  it('skips records that have no version body', () => {
+    const content = ['no-version-pkg@^1.0.0:', '  resolved "https://..."', ''].join('\n');
+    expect(yarnLockParser.parse(content)).toEqual([]);
+  });
+
+  it('handles CRLF line endings', () => {
+    const content = ['lodash@^4.17.20:', '  version "4.17.21"', ''].join('\r\n');
+    const deps = yarnLockParser.parse(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.name).toBe('lodash');
+    expect(deps[0]!.version).toBe('4.17.21');
+  });
+});
