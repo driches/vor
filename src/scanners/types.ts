@@ -11,6 +11,7 @@ import type { Octokit } from '@octokit/rest';
 import type { Category, ChangedFile, Confidence, ScannerId, Severity } from '../types.js';
 import type { RepoContextEntry } from '../agent/system-prompt.js';
 import type { SecurityConfig } from '../config/types.js';
+import type { FileReader } from '../github/file-reader.js';
 
 /**
  * A single security scanner plugin. The runner calls `applies()` cheaply on
@@ -34,6 +35,9 @@ export interface ScannerDeps {
   owner: string;
   repo: string;
   pull_number: number;
+  /** The PR HEAD SHA — passed to `fileReader.read()` so scanners fetch the
+   *  same revision the reviewable_lines and diff were computed against. */
+  head_sha: string;
   changedFiles: readonly ChangedFile[];
   /** Same context files the system prompt uses — CLAUDE.md, package.json, etc. */
   contextFiles: readonly RepoContextEntry[];
@@ -41,6 +45,9 @@ export interface ScannerDeps {
   workspaceDir: string;
   cache: ScanCache;
   ignoreList: IgnoreList;
+  /** Reads files at the PR HEAD ref. Shared across scanners so a single fetch
+   *  of e.g. a lockfile is reused via the reader's own LRU. */
+  fileReader: FileReader;
   config: SecurityConfig;
   signal: AbortSignal;
 }
