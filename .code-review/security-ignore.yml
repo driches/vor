@@ -1,0 +1,75 @@
+# Suppressions for the action's own security scanners on this repo.
+#
+# Why: this repo IS the secrets scanner. Our test files contain planted
+# fixtures for every supported pattern (AWS, GitHub PATs, Slack, Stripe,
+# Google API, npm, PEM) so the unit tests can assert regex matches.
+# Without suppressions, every PR review on this repo flags every fixture
+# as a critical "secret leaked" finding — dogfood noise that drowns out
+# real review signal.
+#
+# Each entry below targets a specific (file, rule) combination and
+# documents the role the fixture plays in the test suite.
+
+entries:
+  # ---------------------------------------------------------------
+  # src/scanners/secrets-patterns.test.ts
+  # Pattern-level smoke suite: one positive per supported rule.
+  # ---------------------------------------------------------------
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "Positive fixture for the aws-access-key-id pattern test (canonical AWS example)"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:aws-secret-access-key"
+    reason: "Positive + boundary-case fixtures for the aws-secret-access-key pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-classic"
+    reason: "Positive fixture for the github-pat-classic pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-oauth"
+    reason: "Positive fixture for the github-pat-oauth pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-user-server"
+    reason: "Positive fixture for the github-pat-user-server pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-server-server"
+    reason: "Positive fixture for the github-pat-server-server pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-refresh"
+    reason: "Positive fixture for the github-pat-refresh pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:github-pat-fine-grained"
+    reason: "Positive fixture for the github-pat-fine-grained pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:slack-token"
+    reason: "Positive fixture for the slack-token pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:stripe-live-key"
+    reason: "Positive fixture for the stripe-live-key pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:stripe-restricted-key"
+    reason: "Positive fixture for the stripe-restricted-key pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:google-api-key"
+    reason: "Positive fixture for the google-api-key pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:npm-access-token"
+    reason: "Positive fixture for the npm-access-token pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Positive fixture for the private-key-pem pattern test"
+
+  # ---------------------------------------------------------------
+  # src/scanners/secrets.test.ts
+  # Scanner-level integration tests (planted keys exercise findings).
+  # ---------------------------------------------------------------
+  - file: src/scanners/secrets.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "PLANTED_AWS_KEY + KEY_A + KEY_B fixtures for the secrets scanner happy-path and multi-finding tests"
+
+  # ---------------------------------------------------------------
+  # src/orchestrator.test.ts
+  # End-to-end integration test plants the AWS key on a diff hunk.
+  # ---------------------------------------------------------------
+  - file: src/orchestrator.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "PLANTED_AWS_KEY fixture for the orchestrator integration test (Scenarios 1, 2b)"

@@ -246,7 +246,7 @@ import { OsvClientError } from './scanners/osv-client.js';
  * see the assertions below. We hand-roll the unified diff so the test stays
  * independent of any fixture file.
  */
-const PLANTED_AWS_KEY = 'AKIA0123456789ABCDEF';
+const PLANTED_AWS_KEY = 'AKIAIOSFODNN7EXAMPLE';
 
 function buildBaseDiff(): { diff: string; filesApi: OctokitState['filesApi'] } {
   // `src/auth.ts`: 3 added lines starting at line 10. The AWS key sits on the

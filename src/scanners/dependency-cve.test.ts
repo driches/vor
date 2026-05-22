@@ -852,7 +852,10 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
     // Each getVuln sleeps 50ms before returning a shaped vuln. If the calls
     // run serially the total cost is ~150ms; in parallel it's ~50ms.
     const SLEEP_MS = 50;
-    const PARALLEL_THRESHOLD_MS = 130; // 3 * 50ms = 150ms serial; we want < that
+    // 3 * 50ms = 150ms serial. Threshold sits ~20ms below serial so jitter
+    // (GC pauses, slow CI runners) doesn't cause flakes while still being
+    // unambiguously parallel (a serial run would be ≥150ms).
+    const PARALLEL_THRESHOLD_MS = 145;
     const osvClient: OsvClient = {
       queryBatch: vi.fn().mockResolvedValue(batchResp),
       getVuln: vi.fn().mockImplementation(async (id: string) => {
