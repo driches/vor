@@ -149,10 +149,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   };
 
   // Fire agent + scanners in parallel. The runner is error-isolated, so a
-  // scanner failure cannot reject this Promise.all — every scanner produces a
-  // ScanResult (possibly with non-fatal errors). The agent itself can throw,
-  // and we let that propagate as before.
-  const [result, scanRunResult] = await Promise.all([
+  // scanner failure cannot reject the scan branch. The agent itself can throw,
+  // and we let that propagate — but we use Promise.allSettled so a thrown
+  // agent doesn't leave in-flight scanner network calls running as detached
+  // tasks (they'd live until the 60s scanner timeout). Surfaces partial
+  // scanner results in logs even on agent failure.
+  const [agentOutcome, scanOutcome] = await Promise.allSettled([
     runAgent({
       deps: {
         octokit,
@@ -175,6 +177,27 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     }),
     runScanners(scanners, scannerDeps),
   ]);
+  if (agentOutcome.status === 'rejected') {
+    if (scanOutcome.status === 'fulfilled') {
+      await logger.info(
+        `Agent threw; scanner track completed with ${scanOutcome.value.findings.length} finding(s). ` +
+          `Re-throwing agent error.`,
+      );
+    }
+    throw agentOutcome.reason;
+  }
+  const result = agentOutcome.value;
+  const scanRunResult =
+    scanOutcome.status === 'fulfilled'
+      ? scanOutcome.value
+      : { findings: [], perScanner: [] };
+  if (scanOutcome.status === 'rejected') {
+    // runScanners is supposed to be error-isolated, but harden against a
+    // hypothetical regression there so the agent's review still posts.
+    await logger.warn(
+      `runScanners rejected unexpectedly: ${(scanOutcome.reason as Error).message}. Continuing with no scanner findings.`,
+    );
+  }
 
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ` +

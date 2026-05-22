@@ -174,7 +174,13 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
               pattern.pattern.lastIndex = 0;
               let m: RegExpExecArray | null;
               while ((m = pattern.pattern.exec(text)) !== null) {
-                const raw = m[0];
+                // Pull the credential out of the capture group rather than
+                // the full match. Today they're identical because every
+                // pattern uses zero-width lookarounds, but a future pattern
+                // with non-zero-width outer chars (e.g. `"([^"]+)"`) would
+                // pass surrounding delimiters into `registerSecret` and
+                // `maskSecret` — wrong masking, wrong redaction.
+                const raw = m[1] ?? m[0];
 
                 // Apply postCheck (entropy gate, etc.) before doing anything
                 // that could surface the value.

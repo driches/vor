@@ -53364,15 +53364,20 @@ function packageNameFromKey(key) {
 function findVersionLine(lines, installKey) {
   const quoted = `"${installKey}"`;
   for (let i2 = 0; i2 < lines.length; i2++) {
-    if (lines[i2].includes(quoted)) {
-      const end = Math.min(lines.length, i2 + 1 + LOOKAHEAD_LINES);
-      for (let j2 = i2; j2 < end; j2++) {
-        if (/"version"\s*:/.test(lines[j2])) {
-          return j2 + 1;
-        }
-      }
-      return i2 + 1;
+    const line = lines[i2];
+    const pos = line.indexOf(quoted);
+    if (pos < 0) continue;
+    const charAfter = line[pos + quoted.length];
+    if (charAfter !== void 0 && charAfter !== ":" && charAfter !== " " && charAfter !== "	") {
+      continue;
     }
+    const end = Math.min(lines.length, i2 + 1 + LOOKAHEAD_LINES);
+    for (let j2 = i2; j2 < end; j2++) {
+      if (/"version"\s*:/.test(lines[j2])) {
+        return j2 + 1;
+      }
+    }
+    return i2 + 1;
   }
   return 1;
 }
@@ -54372,7 +54377,7 @@ function createSecretsScanner(options = {}) {
               pattern.pattern.lastIndex = 0;
               let m2;
               while ((m2 = pattern.pattern.exec(text)) !== null) {
-                const raw = m2[0];
+                const raw = m2[1] ?? m2[0];
                 if (pattern.postCheck && !pattern.postCheck(raw)) {
                   if (m2.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
@@ -54690,7 +54695,7 @@ async function runOrchestrator(input) {
     fileReader,
     config: config.security
   };
-  const [result, scanRunResult] = await Promise.all([
+  const [agentOutcome, scanOutcome] = await Promise.allSettled([
     runAgent({
       deps: {
         octokit,
@@ -54713,6 +54718,21 @@ async function runOrchestrator(input) {
     }),
     runScanners(scanners, scannerDeps)
   ]);
+  if (agentOutcome.status === "rejected") {
+    if (scanOutcome.status === "fulfilled") {
+      await logger.info(
+        `Agent threw; scanner track completed with ${scanOutcome.value.findings.length} finding(s). Re-throwing agent error.`
+      );
+    }
+    throw agentOutcome.reason;
+  }
+  const result = agentOutcome.value;
+  const scanRunResult = scanOutcome.status === "fulfilled" ? scanOutcome.value : { findings: [], perScanner: [] };
+  if (scanOutcome.status === "rejected") {
+    await logger.warn(
+      `runScanners rejected unexpectedly: ${scanOutcome.reason.message}. Continuing with no scanner findings.`
+    );
+  }
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`
   );

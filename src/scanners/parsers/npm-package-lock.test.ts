@@ -116,4 +116,44 @@ describe('npmPackageLockParser.parse', () => {
     expect(deps).toHaveLength(1);
     expect(deps[0]!.name).toBe('has-version');
   });
+
+  it('anchors the version line to the EXACT key, not a string-suffix match', () => {
+    // Regression for the dogfood IMPORTANT finding: `"node_modules/foo"` used
+    // to substring-match inside `"node_modules/react-router/node_modules/foo"`,
+    // so the inner-foo's CVE comment anchored on the outer's version line.
+    // The outer comment then failed `isLineReviewable` and the finding was
+    // silently dropped.
+    //
+    // Layout: outer `react-router/node_modules/foo` declared FIRST, then
+    // top-level `foo`. The parser should anchor each to the correct
+    // `"version":` line.
+    const content = [
+      '{',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "app", "version": "1.0.0" },',
+      '    "node_modules/react-router/node_modules/foo": {',
+      '      "version": "9.9.9"',
+      '    },',
+      '    "node_modules/foo": {',
+      '      "version": "1.2.3"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const deps = npmPackageLockParser.parse(content);
+    expect(deps).toHaveLength(2);
+
+    const outerFoo = deps.find((d) => d.version === '9.9.9');
+    const topLevelFoo = deps.find((d) => d.version === '1.2.3');
+    expect(outerFoo).toBeDefined();
+    expect(topLevelFoo).toBeDefined();
+
+    // The two entries must point at DIFFERENT lines — if the prefix bug were
+    // present, both would land on line 6 (the outer's version line, since the
+    // outer key contains the top-level key as a suffix). Concretely: outer's
+    // version line is 6, top-level's is 9.
+    expect(outerFoo!.line).toBe(6);
+    expect(topLevelFoo!.line).toBe(9);
+  });
 });

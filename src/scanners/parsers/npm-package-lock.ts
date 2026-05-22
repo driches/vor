@@ -58,17 +58,32 @@ function packageNameFromKey(key: string): string | null {
  * full source-mapped parse is not worth it for v1.
  */
 function findVersionLine(lines: string[], installKey: string): number {
+  // Anchor the quoted key at a word boundary: the character after the closing
+  // quote must be a JSON key terminator (`:`, whitespace, end-of-line). This
+  // prevents `"node_modules/foo"` from substring-matching inside a longer key
+  // like `"node_modules/react-router/node_modules/foo"`, which would silently
+  // anchor the CVE comment on the wrong line and lose the finding entirely.
   const quoted = `"${installKey}"`;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i]!.includes(quoted)) {
-      const end = Math.min(lines.length, i + 1 + LOOKAHEAD_LINES);
-      for (let j = i; j < end; j++) {
-        if (/"version"\s*:/.test(lines[j]!)) {
-          return j + 1;
-        }
-      }
-      return i + 1;
+    const line = lines[i]!;
+    const pos = line.indexOf(quoted);
+    if (pos < 0) continue;
+    const charAfter = line[pos + quoted.length];
+    if (
+      charAfter !== undefined &&
+      charAfter !== ':' &&
+      charAfter !== ' ' &&
+      charAfter !== '\t'
+    ) {
+      continue;
     }
+    const end = Math.min(lines.length, i + 1 + LOOKAHEAD_LINES);
+    for (let j = i; j < end; j++) {
+      if (/"version"\s*:/.test(lines[j]!)) {
+        return j + 1;
+      }
+    }
+    return i + 1;
   }
   return 1;
 }
