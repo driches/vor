@@ -21,7 +21,7 @@ import { filterComments } from './output/filter.js';
 import { renderSummary } from './output/formatter.js';
 import { scanFindingToPostedComment } from './scanners/adapter.js';
 import { InMemoryScanCache } from './scanners/cache.js';
-import { dedupScannerFindings } from './scanners/dedup.js';
+import { dedupKeptScannerComments } from './scanners/dedup.js';
 import { IgnoreList } from './scanners/ignore-list.js';
 import { buildEnabledScanners } from './scanners/registry.js';
 import { runScanners } from './scanners/runner.js';
@@ -181,37 +181,22 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       `${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`,
   );
 
-  // Pass 2 dedup: drop scanner findings that overlap an AI security-adjacent
-  // comment (dependency-cve findings are protected — see dedup.ts).
+  // Validate + adapt ALL scanner findings, then push into the same aggregator
+  // so the filter pipeline (severity floor + caps) applies uniformly to both
+  // AI and scanner comments. Dedup between scanner and AI runs AFTER the
+  // filter — see Codex P1 on PR #8.
   //
-  // Ordering matters here. We dedup against the AI comments that will ACTUALLY
-  // SURVIVE the post-filter (severity floor + caps), not the raw pre-cap list.
-  // The naive "dedup against acceptedComments" suppresses a scanner finding
-  // whenever an AI comment lands near it — even if the AI comment is itself
-  // about to be dropped by the cap. End result of the naive flow: a critical
-  // scanner finding silently lost because a 'minor' AI comment in the same
-  // neighborhood "won" dedup and then got chopped by the cap.
-  //
-  // Fix: predict-then-dedup. We run filterComments() over the AI-only list
-  // first to compute which AI comments survive, then dedup scanner findings
-  // against THAT smaller set. Caps run a second time over the combined list
-  // below — that's the one whose output actually gets posted. The first
-  // filterComments() call is a prediction; only its `kept` is consumed.
-  const aiPredictedSurvivors = filterComments(aggregator.acceptedComments, {
-    severityFloor: config.severity.floor,
-    maxCommentsPerFile: config.severity.max_comments_per_file,
-    maxCommentsTotal: config.severity.max_comments_total,
-  }).kept;
-  const dedupedFindings = dedupScannerFindings({
-    scanFindings: scanRunResult.findings,
-    aiComments: aiPredictedSurvivors,
-  });
-
-  // Validate + adapt surviving findings, then push into the same aggregator
-  // so the existing filter pipeline applies to scanner comments too.
+  // Why no early dedup here: an earlier predict-then-dedup approach ran the
+  // filter over AI-only comments to compute "predicted survivors" and deduped
+  // scanner findings against them. That was still wrong: a scanner finding
+  // could be deduped against an AI comment that ended up dropped by the
+  // combined cap (e.g. when other scanner findings outranked it), silently
+  // losing the security signal in the line area. The simpler correct flow is
+  // to add everything to the aggregator and let post-filter dedup decide
+  // based on what ACTUALLY survives.
   const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
   let addedScannerComments = 0;
-  for (const finding of dedupedFindings) {
+  for (const finding of scanRunResult.findings) {
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
       await logger.debug(
@@ -233,12 +218,18 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   // Apply final filters (severity floor, per-file cap, global cap, dedup) over
-  // the combined AI + scanner list. This is the kept-list that actually ships.
+  // the combined AI + scanner list, then run the post-filter scanner-vs-AI
+  // dedup so scanner findings only lose to AI comments that actually survive
+  // the caps. This is the list that ships.
   const filtered = filterComments(aggregator.acceptedComments, {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total,
   });
+  // Post-filter dedup mutates `filtered.kept` in place (it's a fresh array
+  // returned by filterComments, not a view). Downstream rendering reads
+  // `filtered.kept` so this is the final list.
+  filtered.kept = dedupKeptScannerComments(filtered.kept);
 
   const rendered = renderSummary({
     draft: aggregator.snapshot(),

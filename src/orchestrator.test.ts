@@ -703,6 +703,249 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
 });
 
 // -----------------------------------------------------------------
+// Scenario 2c: post-filter dedup — scanner survives when its overlapping AI
+// counterpart is capped out by the combined cap. Regression for Codex P1 on
+// PR #8.
+//
+// Bug being fixed: the OLD predict-then-dedup ran filterComments() over the
+// AI-only list to compute "predicted survivors", deduped scanner findings
+// against them, then added scanners to the aggregator. If an AI that was a
+// predicted-survivor got bumped from the combined cap by scanner findings
+// (sort-by-severity reshuffles the order), its scanner counterpart had
+// ALREADY been deduped away. Net: nothing posts in the line area, security
+// signal silently lost.
+//
+// Setup:
+//   - 4 critical AI 'performance' comments on lines 5, 7, 9, 13 (not
+//     security-adjacent, so dedup ignores them).
+//   - 1 important AI 'security' comment on line 50 (security-adjacent).
+//   - Scanner: critical 'secrets' finding on line 51 (within 3 lines of the
+//     AI-50 security comment).
+//   - per_file_cap = 5.
+//
+// OLD flow (predict-then-dedup):
+//   - Predict survivors: filter(5 AI, cap=5) = all 5 (incl. AI-50).
+//   - Dedup: scanner@51 distance=1 to AI-50 'security' → DROPPED.
+//   - Combined: 5 AI (no scanner). All 5 fit cap=5. Posted: 4 critical AI +
+//     important AI-50. Line 51 has NOTHING. ← bug
+//
+// NEW flow (post-filter dedup):
+//   - All to aggregator: 5 AI + scanner = 6.
+//   - filterComments(cap=5): sort severity desc — 5 critical (4 AI + scanner)
+//     + 1 important (AI-50). Per-file cap=5 → keep first 5 critical: 4 AI +
+//     scanner. AI-50 capped out.
+//   - Post-filter dedup: surviving AI in kept list = 4 AI 'performance' on
+//     lines 5/7/9/13. None are security-adjacent. Scanner stays.
+//   - Posted: 4 critical AI + scanner. Line 51 HAS scanner finding. ← fix
+//
+// Assertions:
+//   - Total kept comments = 5 (the cap).
+//   - The scanner comment on src/auth.ts:51 IS in the posted review.
+//   - The AI 'security' comment titled "Document credential origin" (line 50)
+//     is NOT in the posted review.
+//   - The 4 critical AI 'performance' comments ARE in the posted review.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI would have suppressed it', () => {
+  it('keeps the scanner finding after post-filter dedup when the overlapping AI gets capped', async () => {
+    // Extended auth.ts diff: 47 added lines starting at line 5 so lines 5, 7,
+    // 9, 13, 50, 51 are all reviewable. The planted AWS key sits on line 51.
+    // We intersperse harmless filler so each commented line has reviewable
+    // content and unique text (so dedup-on-title doesn't fire).
+    const authLines: string[] = [];
+    for (let i = 5; i <= 51; i += 1) {
+      if (i === 5) authLines.push('+// auth module entry');
+      else if (i === 7) authLines.push('+// auth helper init block');
+      else if (i === 9) authLines.push('+// auth state container');
+      else if (i === 13) authLines.push('+// auth wiring complete');
+      else if (i === 50) authLines.push('+// credential block follows');
+      else if (i === 51) authLines.push(`+const awsKey = "${PLANTED_AWS_KEY}";`);
+      else authLines.push(`+// auth filler line ${i}`);
+    }
+    const addedCount = authLines.length; // 47
+    const authDiff = [
+      'diff --git a/src/auth.ts b/src/auth.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/auth.ts',
+      '+++ b/src/auth.ts',
+      `@@ -4,0 +5,${addedCount} @@`,
+      ...authLines,
+    ].join('\n');
+    const appDiff = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 3333333..4444444 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -4,0 +5,3 @@',
+      '+export function app() {',
+      '+  return 1;',
+      '+}',
+    ].join('\n');
+    octokitState.diff = `${authDiff}\n${appDiff}\n`;
+    octokitState.filesApi = [
+      { filename: 'src/auth.ts', changes: addedCount, patch: authDiff },
+      { filename: 'src/app.ts', changes: 3, patch: appDiff },
+    ];
+
+    // per-file cap = 5 so 4 critical AI + scanner fit; AI-50 (important) gets
+    // pushed out by sort-by-severity-desc.
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    secrets:',
+        '      enabled: true',
+        'severity:',
+        '  floor: nit',
+        '  max_comments_per_file: 5',
+        '  max_comments_total: 30',
+      ].join('\n'),
+    );
+
+    // 4 critical 'performance' AI comments on lines 5/7/9/13 + 1 important
+    // 'security' AI on line 50 + a summary. critical and important require
+    // `suggestion` per post-inline-comment.ts, so each carries a non-empty
+    // suggestion that differs from the (filler) head line text.
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_p5',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'src/auth.ts',
+            line: 5,
+            side: 'RIGHT',
+            category: 'performance',
+            title: 'Hot-path entry pass-through',
+            why_it_matters: 'This is the function entry; expensive work here ripples through every call.',
+            suggestion: '+// Move expensive auth-module setup behind a lazy initializer',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_p7',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'src/auth.ts',
+            line: 7,
+            side: 'RIGHT',
+            category: 'performance',
+            title: 'Sync init block blocks request thread',
+            why_it_matters: 'Synchronous init on the hot path adds latency to every auth check.',
+            suggestion: '+// Move helper init to a one-shot async warmup',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_p9',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'src/auth.ts',
+            line: 9,
+            side: 'RIGHT',
+            category: 'performance',
+            title: 'State container allocation per call',
+            why_it_matters: 'A new container per call adds GC pressure under load.',
+            suggestion: '+// Reuse a single auth state container instance',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_p13',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'src/auth.ts',
+            line: 13,
+            side: 'RIGHT',
+            category: 'performance',
+            title: 'Wiring step has a quadratic loop',
+            why_it_matters: 'A nested scan over the wiring registry scales poorly as routes grow.',
+            suggestion: '+// Replace the inner loop with a Map lookup',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_sec50',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'important',
+            file_path: 'src/auth.ts',
+            line: 50,
+            side: 'RIGHT',
+            category: 'security',
+            title: 'Document credential origin',
+            why_it_matters: 'A brief note on where this credential should come from would help future readers audit the flow.',
+            suggestion: '+// Source the credential from process.env.AWS_KEY',
+            confidence: 'low',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_summary',
+          name: 'post_summary',
+          input: {
+            strengths: ['Clear and focused changes that are easy to follow.'],
+            assessment: 'comment',
+            assessment_reasoning: 'A few observations.',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string; body: string; line: number }>;
+    };
+
+    // Per-file cap=5 + sort-by-severity-desc: 4 critical AI + 1 critical
+    // scanner survive; the important AI on line 50 gets dropped.
+    expect(call.comments).toHaveLength(5);
+    const authComments = call.comments.filter((c) => c.path === 'src/auth.ts');
+    expect(authComments).toHaveLength(5);
+
+    // The scanner comment IS in the output (the whole point of this scenario).
+    const scannerComment = authComments.find((c) => c.body.includes('via secrets scan'));
+    expect(scannerComment).toBeDefined();
+    expect(scannerComment!.body).toContain('AWS access key id');
+    // The secrets scanner posts at the line where the key was added (51).
+    expect(scannerComment!.line).toBe(51);
+
+    // The AI 'security' comment on line 50 was capped out, so it's NOT in the
+    // posted review. Verify via title since line numbers might collide with
+    // body rendering.
+    const sec50 = authComments.find((c) => c.body.includes('Document credential origin'));
+    expect(sec50).toBeUndefined();
+
+    // The 4 critical performance AI comments survive.
+    const perfTitles = [
+      'Hot-path entry pass-through',
+      'Sync init block blocks request thread',
+      'State container allocation per call',
+      'Wiring step has a quadratic loop',
+    ];
+    for (const t of perfTitles) {
+      expect(authComments.some((c) => c.body.includes(t))).toBe(true);
+    }
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 3: dependency-cve happy path — lockfile CVE makes it into the review.
 //
 // The dep-cve scanner emits its finding against the lockfile, which is
