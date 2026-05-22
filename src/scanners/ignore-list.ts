@@ -16,6 +16,7 @@
 import { parse as parseYaml } from 'yaml';
 import { satisfies as semverSatisfies, valid as semverValid } from 'semver';
 import { z } from 'zod';
+import { canonicalizePackageName } from './canonicalize.js';
 import type { FileReader } from '../github/file-reader.js';
 import { GitHubApiError } from '../util/errors.js';
 import { logger } from '../util/logger.js';
@@ -242,14 +243,13 @@ function entryMatches(entry: IgnoreEntry, finding: ScanFinding): boolean {
 }
 
 /**
- * Normalize a package name to match registry behavior. npm and PyPI are
- * case-insensitive (PyPI also dash/underscore-insensitive but that's not
- * handled here — out of scope for this fix); other ecosystems compare
- * verbatim.
+ * Normalize a package name to match registry behavior. Delegates to the
+ * shared per-ecosystem canonicalizer so npm (lowercase) and PyPI (full
+ * PEP 503: lowercase + `_`/`.`/`-` collapsed) agree with the rules
+ * dependency-cve uses for OSV name comparison.
  */
 function normalizePackageName(name: string, ecosystem: string): string {
-  if (ecosystem === 'npm' || ecosystem === 'PyPI') return name.toLowerCase();
-  return name;
+  return canonicalizePackageName(name, ecosystem);
 }
 
 /**

@@ -21,6 +21,7 @@
  * findings array with a populated `errors[]` per the {@link Scanner} contract.
  */
 import { createHash } from 'node:crypto';
+import { canonicalizePackageName } from './canonicalize.js';
 import { npmPackageLockParser } from './parsers/npm-package-lock.js';
 import { yarnLockParser } from './parsers/yarn-lock.js';
 import { pnpmLockParser } from './parsers/pnpm-lock.js';
@@ -387,16 +388,16 @@ function findFixedVersion(
   pkg: string,
 ): string | undefined {
   if (!vuln.affected) return undefined;
-  // PyPI normalizes package names per PEP 503 (lowercase, `_`/`.` → `-`), so a
-  // `requirements.txt` line `Flask==2.3.2` may surface in OSV as `'flask'`.
-  // Compare case-insensitively for PyPI; npm package names are case-sensitive
-  // and must match exactly.
-  const normalize = (s: string) => (ecosystem === 'PyPI' ? s.toLowerCase() : s);
-  const wantedName = normalize(pkg);
+  // Compare names via the shared per-ecosystem canonical form. For PyPI
+  // this is PEP 503 (lowercase + `_`/`.`/`-` collapsed), so a lockfile
+  // entry `zope.interface` matches an OSV advisory keyed on
+  // `zope-interface`. npm gets case-insensitive matching. Without this
+  // we silently drop the fixed-version hint for valid advisories.
+  const wantedName = canonicalizePackageName(pkg, ecosystem);
   for (const a of vuln.affected) {
     if (!a.package) continue;
     if (a.package.ecosystem !== ecosystem) continue;
-    if (normalize(a.package.name) !== wantedName) continue;
+    if (canonicalizePackageName(a.package.name, ecosystem) !== wantedName) continue;
     if (!a.ranges) continue;
     for (const r of a.ranges) {
       for (const e of r.events) {
@@ -471,7 +472,9 @@ interface ResolvedDep {
  * cache slot when they reach OSV.
  */
 function depCacheKey(ecosystem: string, name: string, version: string): string {
-  return `osv-batch:${ecosystem}:${name.toLowerCase()}:${version}`;
+  // Cache key uses the canonical name too so `zope.interface` and
+  // `zope-interface` don't get separate cache entries for the same OSV result.
+  return `osv-batch:${ecosystem}:${canonicalizePackageName(name, ecosystem)}:${version}`;
 }
 
 function vulnCacheKey(id: string): string {

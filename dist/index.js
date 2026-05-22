@@ -53187,6 +53187,20 @@ function dedupKeptScannerComments(kept) {
 // src/scanners/ignore-list.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 var import_semver = __toESM(require_semver2(), 1);
+
+// src/scanners/canonicalize.ts
+function canonicalizePackageName(name, ecosystem) {
+  switch (ecosystem) {
+    case "npm":
+      return name.toLowerCase();
+    case "PyPI":
+      return name.toLowerCase().replace(/[-_.]+/g, "-");
+    default:
+      return name;
+  }
+}
+
+// src/scanners/ignore-list.ts
 var isoDateSchema = external_exports.union([
   external_exports.string().regex(
     /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/,
@@ -53335,8 +53349,7 @@ function entryMatches(entry, finding) {
   return false;
 }
 function normalizePackageName(name, ecosystem) {
-  if (ecosystem === "npm" || ecosystem === "PyPI") return name.toLowerCase();
-  return name;
+  return canonicalizePackageName(name, ecosystem);
 }
 function packageInRange(version, range, ecosystem) {
   if ((0, import_semver.valid)(version) != null) {
@@ -53960,12 +53973,11 @@ function deriveSeverity(vuln) {
 }
 function findFixedVersion(vuln, ecosystem, pkg) {
   if (!vuln.affected) return void 0;
-  const normalize = (s2) => ecosystem === "PyPI" ? s2.toLowerCase() : s2;
-  const wantedName = normalize(pkg);
+  const wantedName = canonicalizePackageName(pkg, ecosystem);
   for (const a2 of vuln.affected) {
     if (!a2.package) continue;
     if (a2.package.ecosystem !== ecosystem) continue;
-    if (normalize(a2.package.name) !== wantedName) continue;
+    if (canonicalizePackageName(a2.package.name, ecosystem) !== wantedName) continue;
     if (!a2.ranges) continue;
     for (const r2 of a2.ranges) {
       for (const e2 of r2.events) {
@@ -53993,7 +54005,7 @@ function buildTitle(vuln, dep, severity, identifier) {
   return `${severity} vulnerability in ${dep.name}@${dep.version} (${identifier})`;
 }
 function depCacheKey(ecosystem, name, version) {
-  return `osv-batch:${ecosystem}:${name.toLowerCase()}:${version}`;
+  return `osv-batch:${ecosystem}:${canonicalizePackageName(name, ecosystem)}:${version}`;
 }
 function vulnCacheKey(id) {
   return `osv-vuln:${id}`;
