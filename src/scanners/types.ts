@@ -49,6 +49,12 @@ export interface ScannerDeps {
    *  of e.g. a lockfile is reused via the reader's own LRU. */
   fileReader: FileReader;
   config: SecurityConfig;
+  /** Aborts when the per-scanner timeout fires (or the orchestrator-level
+   *  deadline elapses). Scanners doing network I/O MUST thread this through
+   *  to fetch/HTTP-client calls so in-flight requests are cancelled rather
+   *  than abandoned — abandoning them leaves the request running until its
+   *  own timeout, consuming budget the runner has already given up on. */
+  signal: AbortSignal;
 }
 
 /**

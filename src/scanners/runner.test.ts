@@ -48,6 +48,7 @@ function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
     ignoreList,
     fileReader: defaultReader,
     config: {} as SecurityConfig,
+    signal: new AbortController().signal,
     ...over,
   };
 }
@@ -78,7 +79,7 @@ function makeFinding(over: Partial<ScanFinding> = {}): ScanFinding {
 function makeScanner(args: {
   id: ScannerId;
   applies?: boolean | (() => boolean);
-  scan?: () => Promise<ScanResult>;
+  scan?: (deps: ScannerDeps) => Promise<ScanResult>;
 }): Scanner {
   const appliesArg = args.applies ?? true;
   return {
@@ -250,6 +251,39 @@ describe('runScanners — timeout', () => {
     expect(hungResult.findings).toEqual([]);
 
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('aborts the scanner-supplied AbortSignal when the timeout fires (cooperative cancellation)', async () => {
+    // Regression for Codex P1 round 6: withTimeout used to ONLY reject the
+    // race, leaving the scanner's in-flight network calls running until
+    // their own per-request timeout. Now the runner threads an AbortSignal
+    // via `deps.signal` and aborts it when the scanner-level deadline fires.
+    // This test plants a cooperative scanner that captures its signal,
+    // waits longer than the runner's timeout, then asserts the signal IS
+    // aborted by the time the runner gives up on it.
+    let capturedSignal: AbortSignal | undefined;
+    const cooperative = makeScanner({
+      id: 'dependency-cve',
+      scan: (deps: ScannerDeps) =>
+        new Promise<ScanResult>((resolve) => {
+          capturedSignal = deps.signal;
+          // Resolve normally if no abort — but the test's tiny timeout
+          // ensures abort fires first.
+          deps.signal.addEventListener(
+            'abort',
+            () => resolve(emptyResult('dependency-cve')),
+            { once: true },
+          );
+        }),
+    });
+
+    await runScanners([cooperative], makeScannerDeps(), {
+      perScannerTimeoutMs: 30,
+      logger: makeLogger(),
+    });
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(true);
   });
 });
 

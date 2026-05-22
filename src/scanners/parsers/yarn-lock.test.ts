@@ -105,4 +105,49 @@ describe('yarnLockParser.parse', () => {
     expect(deps[0]!.name).toBe('lodash');
     expect(deps[0]!.version).toBe('4.17.21');
   });
+
+  // -----------------------------------------------------------------
+  // Yarn npm aliases — emit the REAL package name so OSV lookups hit
+  // canonical advisory data instead of the alias label.
+  // -----------------------------------------------------------------
+  describe('npm aliases', () => {
+    it('resolves an unscoped npm alias to the real package name', () => {
+      const content = [
+        '"my-react@npm:react@^18.0.0":',
+        '  version "18.2.0"',
+        '  resolved "https://example.com/react"',
+        '',
+      ].join('\n');
+      const deps = yarnLockParser.parse(content);
+      expect(deps).toEqual([
+        { ecosystem: 'npm', name: 'react', version: '18.2.0', line: 2 },
+      ]);
+    });
+
+    it('resolves a scoped npm alias target', () => {
+      const content = [
+        '"alias@npm:@scope/real-package@^1.0.0":',
+        '  version "1.2.3"',
+        '  resolved "https://example.com/real"',
+        '',
+      ].join('\n');
+      const deps = yarnLockParser.parse(content);
+      expect(deps).toEqual([
+        { ecosystem: 'npm', name: '@scope/real-package', version: '1.2.3', line: 2 },
+      ]);
+    });
+
+    it('leaves non-alias entries unchanged', () => {
+      const content = [
+        'lodash@^4.17.20:',
+        '  version "4.17.21"',
+        '',
+        '"@types/node@^20.0.0":',
+        '  version "20.5.0"',
+        '',
+      ].join('\n');
+      const deps = yarnLockParser.parse(content);
+      expect(deps.map((d) => d.name).sort()).toEqual(['@types/node', 'lodash']);
+    });
+  });
 });

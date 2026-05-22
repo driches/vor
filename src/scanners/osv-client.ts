@@ -67,9 +67,20 @@ export interface OsvVuln {
   database_specific?: { severity?: string };
 }
 
+/**
+ * Optional per-call options accepted by every OsvClient method. The
+ * `signal` lets the caller cancel an in-flight HTTP exchange (and all
+ * pending retries) when an external deadline elapses — e.g. the scanner
+ * runner's per-scanner timeout. The client combines `opts.signal` with its
+ * own per-request timeout so either firing aborts the underlying fetch.
+ */
+export interface OsvRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface OsvClient {
-  queryBatch(queries: OsvQuery[]): Promise<OsvBatchResponse>;
-  getVuln(id: string): Promise<OsvVuln>;
+  queryBatch(queries: OsvQuery[], opts?: OsvRequestOptions): Promise<OsvBatchResponse>;
+  getVuln(id: string, opts?: OsvRequestOptions): Promise<OsvVuln>;
 }
 
 export interface OsvClientOptions {
@@ -179,9 +190,18 @@ async function fetchOnce(
   init: RequestInit,
   timeoutMs: number,
   describe: string,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Combine internal timeout signal with caller-supplied signal (if any).
+  // Either firing aborts the fetch — prefer native AbortSignal.any when
+  // available (Node 20.3+); fall back to a manual relay otherwise.
+  const onExternalAbort = (): void => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
     const res = await fetchImpl(url, { ...init, signal: controller.signal });
     if (!res.ok) {
@@ -216,6 +236,7 @@ async function fetchOnce(
     );
   } finally {
     clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -232,7 +253,10 @@ function chunk<T>(items: T[], size: number): T[][] {
 export function createOsvClient(opts?: OsvClientOptions): OsvClient {
   const cfg = resolveOptions(opts);
 
-  async function queryBatchChunk(queries: OsvQuery[]): Promise<OsvBatchResponse> {
+  async function queryBatchChunk(
+    queries: OsvQuery[],
+    signal?: AbortSignal,
+  ): Promise<OsvBatchResponse> {
     return withRetries(
       async () => {
         const res = await fetchOnce(
@@ -245,6 +269,7 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
           },
           cfg.timeoutMs,
           'OSV querybatch',
+          signal,
         );
         return (await res.json()) as OsvBatchResponse;
       },
@@ -254,7 +279,10 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
   }
 
   return {
-    async queryBatch(queries: OsvQuery[]): Promise<OsvBatchResponse> {
+    async queryBatch(
+      queries: OsvQuery[],
+      opts?: OsvRequestOptions,
+    ): Promise<OsvBatchResponse> {
       if (queries.length === 0) return { results: [] };
 
       const chunks = chunk(queries, QUERY_BATCH_LIMIT);
@@ -263,13 +291,13 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
       // outlier and the OSV server prefers we serialize.
       const aggregated: OsvBatchHit[] = [];
       for (const part of chunks) {
-        const resp = await queryBatchChunk(part);
+        const resp = await queryBatchChunk(part, opts?.signal);
         aggregated.push(...resp.results);
       }
       return { results: aggregated };
     },
 
-    async getVuln(id: string): Promise<OsvVuln> {
+    async getVuln(id: string, opts?: OsvRequestOptions): Promise<OsvVuln> {
       return withRetries(
         async () => {
           const res = await fetchOnce(
@@ -278,6 +306,7 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
             { method: 'GET' },
             cfg.timeoutMs,
             `OSV getVuln(${id})`,
+            opts?.signal,
           );
           return (await res.json()) as OsvVuln;
         },

@@ -177,6 +177,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ignoreList,
     fileReader,
     config: config.security,
+    // Open-ended signal from the orchestrator's side — the per-scanner
+    // timeout signal is OR-ed with this one inside the runner so either
+    // can fire cancellation. Operators wanting a hard top-level deadline
+    // can wire one in here (v2 work).
+    signal: new AbortController().signal,
   };
 
   // Fire agent + scanners in parallel. The runner is error-isolated, so a

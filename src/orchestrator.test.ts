@@ -1057,7 +1057,13 @@ describe('runOrchestrator — Scenario 3: dependency-cve happy path', () => {
 
     // OSV WAS called — proves the parallel runner reached dep-cve.
     expect(osvBatchSpy).toHaveBeenCalledTimes(1);
-    expect(osvVulnSpy).toHaveBeenCalledWith('GHSA-jf85-cpcp-j695');
+    // getVuln signature: (id, opts?) — opts carries the AbortSignal the
+    // runner threads through for cancellation. Don't pin the exact opts
+    // shape, just confirm the id we expect.
+    expect(osvVulnSpy).toHaveBeenCalledWith(
+      'GHSA-jf85-cpcp-j695',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
 
     // The scanner comment now makes it into the review.
     expect(octokitState.createReviewCalls).toHaveLength(1);

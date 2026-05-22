@@ -75,39 +75,6 @@ function resolveOptions(opts?: RunScannersOptions): ResolvedOptions {
 }
 
 /**
- * Race a `scan()` promise against a setTimeout-driven timeout. The timer
- * handle is cleared on EITHER outcome so we don't keep the event loop alive
- * for a scanner that finished quickly.
- *
- * On timeout we reject with a typed `Error` whose message includes the
- * scanner id so the caller can attribute the failure. The losing branch
- * (scanner that completes AFTER the timer fired) is silently ignored — we
- * already lost the race and there's no caller waiting on it.
- */
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  scannerId: ScannerId,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    // Capture the timer handle so success can clear it.
-    const timer = setTimeout(() => {
-      reject(new Error(`scanner ${scannerId} timed out`));
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      },
-    );
-  });
-}
-
-/**
  * Build an empty result with a single non-fatal error. Used as the
  * recovery shape when a scanner throws or times out.
  */
@@ -122,9 +89,41 @@ function errorResult(
 }
 
 /**
+ * Combine two AbortSignals into one that aborts whenever either input does.
+ * Prefer the platform's native `AbortSignal.any` when available (Node 20.3+),
+ * fall back to a manual relay on older runtimes (and to a wrapper that
+ * forwards parent.aborted state at construction time). Returned signal is
+ * detached from both inputs once aborted — no listener leaks even if either
+ * input outlives the request.
+ */
+function anySignal(parent: AbortSignal, child: AbortSignal): AbortSignal {
+  if (typeof (AbortSignal as { any?: (s: AbortSignal[]) => AbortSignal }).any === 'function') {
+    return (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any([
+      parent,
+      child,
+    ]);
+  }
+  // Fallback: relay aborts manually.
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener('abort', onAbort, { once: true });
+  if (child.aborted) controller.abort();
+  else child.addEventListener('abort', onAbort, { once: true });
+  return controller.signal;
+}
+
+/**
  * Run a single scanner end-to-end. Never throws — every failure mode
  * (applies-throws, scan-throws, timeout) is converted into a synthetic
  * {@link ScanResult} carrying a non-fatal {@link ScanError}.
+ *
+ * Cancellation: an AbortController is created per scan and `setTimeout`-
+ * scheduled to abort after the per-scanner deadline. The controller's
+ * signal is OR-ed (via {@link anySignal}) with whatever signal the caller
+ * supplied in `deps.signal` and threaded into `deps.signal` for the scanner
+ * to plumb into its network calls. When the deadline fires, in-flight
+ * fetches reject with AbortError rather than continuing as detached tasks.
  */
 async function runOne(
   scanner: Scanner,
@@ -145,17 +144,44 @@ async function runOne(
     return emptyResult(scanner.id, Date.now() - started);
   }
 
+  const timeoutController = new AbortController();
+  const timer = setTimeout(
+    () => timeoutController.abort(),
+    opts.perScannerTimeoutMs,
+  );
+  const combinedSignal = anySignal(deps.signal, timeoutController.signal);
+  const scopedDeps: ScannerDeps = { ...deps, signal: combinedSignal };
+  // Belt-and-suspenders: a cooperative scanner will reject in-flight network
+  // calls when `combinedSignal` aborts. A buggy or non-network scanner that
+  // ignores its signal would hang us forever — race the scan against the
+  // signal so we always unblock at the deadline. The losing branch can
+  // still run to completion in the background; we just don't wait on it.
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    if (combinedSignal.aborted) {
+      reject(new Error('aborted'));
+      return;
+    }
+    combinedSignal.addEventListener('abort', () => reject(new Error('aborted')), {
+      once: true,
+    });
+  });
   try {
-    const result = await withTimeout(
-      scanner.scan(deps),
-      opts.perScannerTimeoutMs,
-      scanner.id,
-    );
-    return result;
+    return await Promise.race([scanner.scan(scopedDeps), abortPromise]);
   } catch (err) {
+    // Distinguish "we aborted due to our own timeout" from "scanner threw
+    // for some other reason." The latter still gets reported as a failure,
+    // but the message format is different so the run summary can attribute
+    // correctly.
+    if (timeoutController.signal.aborted) {
+      const message = `scanner ${scanner.id} timed out after ${opts.perScannerTimeoutMs}ms`;
+      void opts.logger.warn(message);
+      return errorResult(scanner.id, started, message);
+    }
     const message = (err as Error)?.message ?? String(err);
     void opts.logger.warn(`scanner ${scanner.id} failed: ${message}`);
     return errorResult(scanner.id, started, message);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

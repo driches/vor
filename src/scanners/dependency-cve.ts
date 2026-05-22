@@ -606,7 +606,9 @@ export function createDependencyCveScanner(
       // `errors[]` and we bail with whatever we already resolved from cache.
       if (queriesToFetch.length > 0) {
         try {
-          const resp = await getOsvClient().queryBatch(queriesToFetch);
+          const resp = await getOsvClient().queryBatch(queriesToFetch, {
+            signal: deps.signal,
+          });
           network_calls += 1;
           // Stitch results back to their cache keys + resolved deps.
           for (const [key, idx] of queryIndex) {
@@ -678,7 +680,7 @@ export function createDependencyCveScanner(
         const outcomes = await Promise.all(
           idsToFetch.map(async (id): Promise<FetchOutcome> => {
             try {
-              const vuln = await getOsvClient().getVuln(id);
+              const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
               return { id, ok: true, vuln };
             } catch (err) {
               return { id, ok: false, error: err as Error };

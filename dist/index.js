@@ -53430,14 +53430,13 @@ function extractName(specifier) {
   if (s2.startsWith('"') && s2.endsWith('"')) {
     s2 = s2.slice(1, -1);
   }
-  let atIdx;
-  if (s2.startsWith("@")) {
-    atIdx = s2.indexOf("@", 1);
-  } else {
-    atIdx = s2.indexOf("@");
+  const firstAt = s2.startsWith("@") ? s2.indexOf("@", 1) : s2.indexOf("@");
+  if (firstAt <= 0) return null;
+  const rest = s2.slice(firstAt + 1);
+  if (rest.startsWith("npm:")) {
+    return extractName(rest.slice("npm:".length));
   }
-  if (atIdx <= 0) return null;
-  return s2.slice(0, atIdx);
+  return s2.slice(0, firstAt);
 }
 var YarnLockParser = class {
   ecosystem = "npm";
@@ -53672,9 +53671,14 @@ async function withRetries(requestFn, maxRetries, describe) {
     { cause: lastErr }
   );
 }
-async function fetchOnce(fetchImpl, url, init, timeoutMs, describe) {
+async function fetchOnce(fetchImpl, url, init, timeoutMs, describe, externalSignal) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
   try {
     const res = await fetchImpl(url, { ...init, signal: controller.signal });
     if (!res.ok) {
@@ -53705,6 +53709,7 @@ async function fetchOnce(fetchImpl, url, init, timeoutMs, describe) {
     );
   } finally {
     clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 }
 function chunk(items, size) {
@@ -53718,7 +53723,7 @@ function chunk(items, size) {
 }
 function createOsvClient(opts) {
   const cfg = resolveOptions(opts);
-  async function queryBatchChunk(queries) {
+  async function queryBatchChunk(queries, signal) {
     return withRetries(
       async () => {
         const res = await fetchOnce(
@@ -53730,7 +53735,8 @@ function createOsvClient(opts) {
             body: JSON.stringify({ queries })
           },
           cfg.timeoutMs,
-          "OSV querybatch"
+          "OSV querybatch",
+          signal
         );
         return await res.json();
       },
@@ -53739,17 +53745,17 @@ function createOsvClient(opts) {
     );
   }
   return {
-    async queryBatch(queries) {
+    async queryBatch(queries, opts2) {
       if (queries.length === 0) return { results: [] };
       const chunks = chunk(queries, QUERY_BATCH_LIMIT);
       const aggregated = [];
       for (const part of chunks) {
-        const resp = await queryBatchChunk(part);
+        const resp = await queryBatchChunk(part, opts2?.signal);
         aggregated.push(...resp.results);
       }
       return { results: aggregated };
     },
-    async getVuln(id) {
+    async getVuln(id, opts2) {
       return withRetries(
         async () => {
           const res = await fetchOnce(
@@ -53757,7 +53763,8 @@ function createOsvClient(opts) {
             `${cfg.endpoint}/v1/vulns/${encodeURIComponent(id)}`,
             { method: "GET" },
             cfg.timeoutMs,
-            `OSV getVuln(${id})`
+            `OSV getVuln(${id})`,
+            opts2?.signal
           );
           return await res.json();
         },
@@ -54053,7 +54060,9 @@ function createDependencyCveScanner(options) {
       }
       if (queriesToFetch.length > 0) {
         try {
-          const resp = await getOsvClient().queryBatch(queriesToFetch);
+          const resp = await getOsvClient().queryBatch(queriesToFetch, {
+            signal: deps.signal
+          });
           network_calls += 1;
           for (const [key, idx] of queryIndex) {
             const hit = resp.results[idx] ?? {};
@@ -54106,7 +54115,7 @@ function createDependencyCveScanner(options) {
         const outcomes = await Promise.all(
           idsToFetch.map(async (id) => {
             try {
-              const vuln = await getOsvClient().getVuln(id);
+              const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
               return { id, ok: true, vuln };
             } catch (err) {
               return { id, ok: false, error: err };
@@ -54540,27 +54549,25 @@ function resolveOptions2(opts) {
     logger: opts?.logger ?? logger
   };
 }
-function withTimeout(promise, timeoutMs, scannerId) {
-  return new Promise((resolve3, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`scanner ${scannerId} timed out`));
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve3(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    );
-  });
-}
 function errorResult(scannerId, started, errorMessage) {
   const base = emptyResult(scannerId, Date.now() - started);
   const err = { message: errorMessage, fatal: false };
   return { ...base, errors: [err] };
+}
+function anySignal(parent, child2) {
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([
+      parent,
+      child2
+    ]);
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener("abort", onAbort, { once: true });
+  if (child2.aborted) controller.abort();
+  else child2.addEventListener("abort", onAbort, { once: true });
+  return controller.signal;
 }
 async function runOne(scanner, deps, opts) {
   const started = Date.now();
@@ -54575,17 +54582,35 @@ async function runOne(scanner, deps, opts) {
   if (!willScan) {
     return emptyResult(scanner.id, Date.now() - started);
   }
+  const timeoutController = new AbortController();
+  const timer = setTimeout(
+    () => timeoutController.abort(),
+    opts.perScannerTimeoutMs
+  );
+  const combinedSignal = anySignal(deps.signal, timeoutController.signal);
+  const scopedDeps = { ...deps, signal: combinedSignal };
+  const abortPromise = new Promise((_resolve, reject) => {
+    if (combinedSignal.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
+    combinedSignal.addEventListener("abort", () => reject(new Error("aborted")), {
+      once: true
+    });
+  });
   try {
-    const result = await withTimeout(
-      scanner.scan(deps),
-      opts.perScannerTimeoutMs,
-      scanner.id
-    );
-    return result;
+    return await Promise.race([scanner.scan(scopedDeps), abortPromise]);
   } catch (err) {
+    if (timeoutController.signal.aborted) {
+      const message2 = `scanner ${scanner.id} timed out after ${opts.perScannerTimeoutMs}ms`;
+      void opts.logger.warn(message2);
+      return errorResult(scanner.id, started, message2);
+    }
     const message = err?.message ?? String(err);
     void opts.logger.warn(`scanner ${scanner.id} failed: ${message}`);
     return errorResult(scanner.id, started, message);
+  } finally {
+    clearTimeout(timer);
   }
 }
 async function runScanners(scanners, deps, options) {
@@ -54723,7 +54748,12 @@ async function runOrchestrator(input) {
     cache: config.security.cache.enabled ? new InMemoryScanCache() : new NoopScanCache(),
     ignoreList,
     fileReader,
-    config: config.security
+    config: config.security,
+    // Open-ended signal from the orchestrator's side — the per-scanner
+    // timeout signal is OR-ed with this one inside the runner so either
+    // can fire cancellation. Operators wanting a hard top-level deadline
+    // can wire one in here (v2 work).
+    signal: new AbortController().signal
   };
   const [agentOutcome, scanOutcome] = await Promise.allSettled([
     runAgent({

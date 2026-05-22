@@ -30,22 +30,33 @@ import type { LockfileParser, ParsedDependency } from './types.js';
  *   `foo@^1.2.3`           → 'foo'
  *   `"@scope/pkg@^2.0.0"`  → '@scope/pkg'
  *   `"@scope/pkg@npm:^2.0.0"` → '@scope/pkg'
+ *
+ * Yarn npm aliases: a spec like `alias@npm:real-package@^1.0.0` resolves to
+ * a different package than its alias name. We return the *real* package name
+ * (`real-package`) so OSV lookups hit the canonical advisory data; the alias
+ * itself is meaningless to OSV. Handles scoped aliased targets too:
+ *   `alias@npm:@scope/real-package@^1.0.0` → '@scope/real-package'
  */
 function extractName(specifier: string): string | null {
   let s = specifier.trim();
   if (s.startsWith('"') && s.endsWith('"')) {
     s = s.slice(1, -1);
   }
-  // For scoped packages, the leading '@' is the package's own scope and not
-  // the version delimiter. We need to find the SECOND '@' for scoped names.
-  let atIdx: number;
-  if (s.startsWith('@')) {
-    atIdx = s.indexOf('@', 1);
-  } else {
-    atIdx = s.indexOf('@');
+  // Find the first '@' that delimits the spec's name from its version range.
+  // Scoped packages start with '@' as part of their own name, so we look for
+  // the SECOND '@' in that case.
+  const firstAt = s.startsWith('@') ? s.indexOf('@', 1) : s.indexOf('@');
+  if (firstAt <= 0) return null;
+
+  // npm-alias form: `<alias>@npm:<real-package>@<version>`. The substring
+  // after `@npm:` is itself a valid yarn spec — recurse into it so we get
+  // scoped/unscoped alias targets right.
+  const rest = s.slice(firstAt + 1);
+  if (rest.startsWith('npm:')) {
+    return extractName(rest.slice('npm:'.length));
   }
-  if (atIdx <= 0) return null;
-  return s.slice(0, atIdx);
+
+  return s.slice(0, firstAt);
 }
 
 class YarnLockParser implements LockfileParser {
