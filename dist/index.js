@@ -53766,10 +53766,79 @@ function pickGhsaId(vuln) {
   if (/^GHSA-/i.test(vuln.id)) return vuln.id;
   return void 0;
 }
-function parseNumericCvss(score) {
+var CVSS_V3_WEIGHTS = {
+  AV: { N: 0.85, A: 0.62, L: 0.55, P: 0.2 },
+  AC: { L: 0.77, H: 0.44 },
+  PR: {
+    U: { N: 0.85, L: 0.62, H: 0.27 },
+    // Scope: Unchanged
+    C: { N: 0.85, L: 0.68, H: 0.5 }
+    // Scope: Changed
+  },
+  UI: { N: 0.85, R: 0.62 },
+  CIA: { H: 0.56, L: 0.22, N: 0 }
+};
+function parseCvssMetrics(metricPart) {
+  const map = /* @__PURE__ */ new Map();
+  for (const segment of metricPart.split("/")) {
+    if (segment.length === 0) continue;
+    const eq = segment.indexOf(":");
+    if (eq <= 0 || eq === segment.length - 1) return null;
+    const key = segment.slice(0, eq).toUpperCase();
+    const value = segment.slice(eq + 1).toUpperCase();
+    map.set(key, value);
+  }
+  return map;
+}
+function cvssRoundUp(x2) {
+  return Math.ceil(x2 * 10) / 10;
+}
+function computeCvssV3BaseScore(metrics) {
+  const av = metrics.get("AV");
+  const ac = metrics.get("AC");
+  const pr2 = metrics.get("PR");
+  const ui = metrics.get("UI");
+  const scope = metrics.get("S");
+  const c2 = metrics.get("C");
+  const i2 = metrics.get("I");
+  const a2 = metrics.get("A");
+  if (av == null || ac == null || pr2 == null || ui == null || scope == null || c2 == null || i2 == null || a2 == null) {
+    return void 0;
+  }
+  if (scope !== "U" && scope !== "C") return void 0;
+  const avW = CVSS_V3_WEIGHTS.AV[av];
+  const acW = CVSS_V3_WEIGHTS.AC[ac];
+  const prTable = CVSS_V3_WEIGHTS.PR[scope];
+  const prW = prTable[pr2];
+  const uiW = CVSS_V3_WEIGHTS.UI[ui];
+  const cW = CVSS_V3_WEIGHTS.CIA[c2];
+  const iW = CVSS_V3_WEIGHTS.CIA[i2];
+  const aW = CVSS_V3_WEIGHTS.CIA[a2];
+  if (avW == null || acW == null || prW == null || uiW == null || cW == null || iW == null || aW == null) {
+    return void 0;
+  }
+  const iss = 1 - (1 - cW) * (1 - iW) * (1 - aW);
+  const impact = scope === "U" ? 6.42 * iss : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
+  const exploitability = 8.22 * avW * acW * prW * uiW;
+  if (impact <= 0) return 0;
+  const raw = scope === "U" ? Math.min(impact + exploitability, 10) : Math.min(1.08 * (impact + exploitability), 10);
+  return cvssRoundUp(raw);
+}
+function parseCvssScore(score) {
   const trimmed = score.trim();
-  const n2 = Number(trimmed);
-  if (Number.isFinite(n2) && n2 >= 0 && n2 <= 10) return n2;
+  if (trimmed.length === 0) return void 0;
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    const n2 = Number(trimmed);
+    if (Number.isFinite(n2) && n2 >= 0 && n2 <= 10) return n2;
+    return void 0;
+  }
+  const v3Match = /^CVSS:3\.[01]\/(.+)$/i.exec(trimmed);
+  if (v3Match) {
+    const metricPart = v3Match[1];
+    const metrics = parseCvssMetrics(metricPart);
+    if (metrics == null) return void 0;
+    return computeCvssV3BaseScore(metrics);
+  }
   return void 0;
 }
 function highestCvssScore(vuln) {
@@ -53778,7 +53847,7 @@ function highestCvssScore(vuln) {
   const candidates = v3.length > 0 ? v3 : vuln.severity;
   let best;
   for (const s2 of candidates) {
-    const n2 = parseNumericCvss(s2.score);
+    const n2 = parseCvssScore(s2.score);
     if (n2 != null && (best == null || n2 > best)) best = n2;
   }
   return best;
@@ -53833,13 +53902,14 @@ function findFixedVersion(vuln, ecosystem, pkg) {
   }
   return void 0;
 }
-function buildDescription(vuln) {
+function buildDescription(vuln, fixed_version, pkg) {
   const body = (vuln.details ?? vuln.summary ?? "").trim();
   const link = `https://osv.dev/vulnerability/${vuln.id}`;
-  if (body.length === 0) return `See ${link} for details.`;
-  if (body.length <= DESCRIPTION_MAX_CHARS) return `${body} (${link})`;
+  const upgrade = fixed_version != null ? ` Upgrade ${pkg} to >=${fixed_version} (or later).` : "";
+  if (body.length === 0) return `See ${link} for details.${upgrade}`;
+  if (body.length <= DESCRIPTION_MAX_CHARS) return `${body} (${link})${upgrade}`;
   const suffix = `\u2026 (${link})`;
-  return `${body.slice(0, DESCRIPTION_MAX_CHARS - suffix.length)}${suffix}`;
+  return `${body.slice(0, DESCRIPTION_MAX_CHARS - suffix.length)}${suffix}${upgrade}`;
 }
 function buildTitle(vuln, dep, severity, identifier) {
   const tail = ` in ${dep.name}@${dep.version}`;
@@ -54065,11 +54135,10 @@ function buildFinding(r2, vuln) {
     severity,
     category: "vulnerability",
     title: buildTitle(vuln, r2.dep, severity, identifier),
-    description: buildDescription(vuln),
+    description: buildDescription(vuln, fixed_version, r2.dep.name),
     confidence: "high",
     evidence,
-    fingerprint: fingerprintOf(rule_id, r2.dep.name, r2.dep.version, r2.file_path),
-    ...fixed_version !== void 0 ? { suggestion: `Upgrade ${r2.dep.name} to >=${fixed_version}.` } : {}
+    fingerprint: fingerprintOf(rule_id, r2.dep.name, r2.dep.version, r2.file_path)
   };
   return finding;
 }

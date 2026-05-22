@@ -4,8 +4,8 @@
  * Covers the public `createDependencyCveScanner({ osvClient, parsers, logger })`
  * factory: applies/scan contract, OSV happy path, cache dedup across two
  * lockfiles, network-failure degradation, ignore-list integration (including
- * the expired-suppression notice), suggestion fix-version mapping, parser
- * no-match, and severity-bucket mapping from CVSS.
+ * the expired-suppression notice), upgrade-hint mapping in the description,
+ * parser no-match, and severity-bucket mapping from CVSS (numeric + vector).
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
@@ -199,8 +199,10 @@ describe('createDependencyCveScanner — scan() happy path', () => {
     expect(finding.evidence.package).toBe('lodash');
     expect(finding.evidence.affected_version).toBe('4.17.20');
 
-    // Suggestion mentions the fixed version.
-    expect(finding.suggestion).toContain('>=4.17.12');
+    // Upgrade hint lives in the description (NOT the suggestion field — see
+    // dependency-cve.ts buildDescription for why). No suggestion is set.
+    expect(finding.description).toContain('>=4.17.12');
+    expect('suggestion' in finding).toBe(false);
 
     // Deterministic 12-char hex fingerprint.
     expect(finding.fingerprint).toMatch(/^[0-9a-f]{12}$/);
@@ -341,8 +343,8 @@ describe('createDependencyCveScanner — expired ignore entry', () => {
 // Fixed-version mapping
 // -----------------------------------------------------------------
 
-describe('createDependencyCveScanner — suggestion fixed-version mapping', () => {
-  it("renders the suggestion as 'Upgrade <pkg> to >=<fixed>'", async () => {
+describe('createDependencyCveScanner — fixed-version upgrade hint in description', () => {
+  it("appends 'Upgrade <pkg> to >=<fixed>' to the description, and sets no suggestion field", async () => {
     const osvClient = makeOsvClient();
     const reader: FileReader = {
       read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
@@ -357,11 +359,16 @@ describe('createDependencyCveScanner — suggestion fixed-version mapping', () =
     );
 
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]!.suggestion).toBe('Upgrade lodash to >=4.17.12.');
-    if (result.findings[0]!.evidence.kind !== 'cve') {
+    const finding = result.findings[0]!;
+    // Suggestion field is reserved for code replacements GitHub will apply
+    // literally to the target line — unsafe for lockfile lines. The upgrade
+    // hint goes in the description instead.
+    expect('suggestion' in finding).toBe(false);
+    expect(finding.description).toContain('Upgrade lodash to >=4.17.12');
+    if (finding.evidence.kind !== 'cve') {
       throw new Error('expected cve evidence');
     }
-    expect(result.findings[0]!.evidence.fixed_version).toBe('4.17.12');
+    expect(finding.evidence.fixed_version).toBe('4.17.12');
   });
 });
 
@@ -392,7 +399,7 @@ describe('createDependencyCveScanner — empty deps after parsing', () => {
 });
 
 // -----------------------------------------------------------------
-// Severity mapping from CVSS
+// Severity mapping from CVSS (numeric scores)
 // -----------------------------------------------------------------
 
 describe('createDependencyCveScanner — severity mapping from CVSS', () => {
@@ -433,6 +440,148 @@ describe('createDependencyCveScanner — severity mapping from CVSS', () => {
       expect(result.findings[0]!.evidence.cvss).toBeCloseTo(Number(cvss), 5);
     });
   }
+});
+
+// -----------------------------------------------------------------
+// CVSS vector parsing (the common OSV form)
+// -----------------------------------------------------------------
+
+/**
+ * End-to-end coverage for the inline CVSS v3.0/v3.1 base-score parser.
+ *
+ * We drive the scanner with a synthetic OSV vuln whose `severity[0].score` is
+ * a vector string and assert the parsed numeric CVSS shows up on
+ * `evidence.cvss`. This exercises `parseCvssScore` → `highestCvssScore` →
+ * `deriveSeverity` → finding shape end-to-end, without exporting an internal.
+ *
+ * Vector expected values were derived from the official CVSS v3.1 formula
+ * (https://www.first.org/cvss/v3.1/specification-document §7) and
+ * cross-checked against the NIST CVSS calculator.
+ */
+describe('createDependencyCveScanner — CVSS vector parsing', () => {
+  const vectorCases: Array<{
+    name: string;
+    score: string;
+    expectedCvss: number | undefined;
+    expectedSeverity: 'critical' | 'important' | 'minor' | 'nit';
+  }> = [
+    {
+      // Canonical CVSS v3.1 worst-case vector — every metric at its highest
+      // attacker-favourable value. NIST's own example for "9.8 critical".
+      name: 'v3.1 critical (canonical 9.8)',
+      score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      expectedCvss: 9.8,
+      expectedSeverity: 'critical',
+    },
+    {
+      // Medium vector exercising PR:N + UI:R + partial impact. Computes to 5.4.
+      // (AV:N, AC:L, PR:N, UI:R, S:U, C:L, I:L, A:N) — confirmed against the
+      // NIST calculator.
+      name: 'v3.1 medium (5.4)',
+      score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N',
+      expectedCvss: 5.4,
+      expectedSeverity: 'minor',
+    },
+    {
+      // Same metric set as the canonical 9.8 case, but in v3.0 — the formula
+      // is identical for v3.0 and v3.1, so it must also score 9.8.
+      name: 'v3.0 critical (9.8 — same formula as v3.1)',
+      score: 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      expectedCvss: 9.8,
+      expectedSeverity: 'critical',
+    },
+    {
+      // Scope:Changed vector — exercises the alternate Impact formula and
+      // the 1.08 multiplier. NIST's classic "S:C" example. Computes to 10.0.
+      name: 'v3.1 scope-changed (10.0)',
+      score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
+      expectedCvss: 10.0,
+      expectedSeverity: 'critical',
+    },
+    {
+      // v4.0 vectors are intentionally not supported in v1 of this scanner;
+      // the formula differs materially. Expect parseCvssScore to return
+      // undefined so the caller falls through to database_specific.severity.
+      name: 'v4.0 vector (not supported)',
+      score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N',
+      expectedCvss: undefined,
+      expectedSeverity: 'important', // deriveSeverity default when nothing parses
+    },
+    {
+      // Garbage input — must NOT throw and must NOT spuriously parse.
+      name: 'garbage string',
+      score: 'not-a-cvss-anything',
+      expectedCvss: undefined,
+      expectedSeverity: 'important',
+    },
+  ];
+
+  for (const { name, score, expectedCvss, expectedSeverity } of vectorCases) {
+    it(`parses ${name}`, async () => {
+      const vuln: OsvVuln = {
+        ...LODASH_VULN,
+        severity: [{ type: 'CVSS_V3', score }],
+        // Strip any database_specific so the fallback path doesn't mask
+        // the undefined-cvss cases.
+        database_specific: undefined,
+      };
+      const osvClient: OsvClient = {
+        queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+        getVuln: vi.fn().mockResolvedValue(vuln),
+      };
+      const reader: FileReader = {
+        read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+      } as unknown as FileReader;
+      const scanner = createDependencyCveScanner({ osvClient });
+
+      const result = await scanner.scan(
+        makeScannerDeps({
+          changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+          fileReader: reader,
+        }),
+      );
+
+      expect(result.findings).toHaveLength(1);
+      const finding = result.findings[0]!;
+      if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+      if (expectedCvss === undefined) {
+        expect(finding.evidence.cvss).toBeUndefined();
+      } else {
+        expect(finding.evidence.cvss).toBeCloseTo(expectedCvss, 5);
+      }
+      expect(finding.severity).toBe(expectedSeverity);
+    });
+  }
+
+  it('rejects numeric strings out of [0,10] range', async () => {
+    const vuln: OsvVuln = {
+      ...LODASH_VULN,
+      severity: [{ type: 'CVSS_V3', score: '15' }],
+      database_specific: undefined,
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+      getVuln: vi.fn().mockResolvedValue(vuln),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    // Out-of-range numeric string should NOT parse — evidence.cvss must be
+    // omitted and severity falls through to the deriveSeverity default.
+    expect(finding.evidence.cvss).toBeUndefined();
+  });
 });
 
 // -----------------------------------------------------------------
@@ -644,7 +793,8 @@ describe('createDependencyCveScanner — PyPI case-folding for findFixedVersion'
     const finding = result.findings[0]!;
     if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
     expect(finding.evidence.fixed_version).toBe('2.3.3');
-    expect(finding.suggestion).toBeDefined();
-    expect(finding.suggestion).toContain('>=2.3.3');
+    // Upgrade hint is in the description, not the suggestion field.
+    expect('suggestion' in finding).toBe(false);
+    expect(finding.description).toContain('>=2.3.3');
   });
 });

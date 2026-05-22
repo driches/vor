@@ -144,19 +144,157 @@ function pickGhsaId(vuln: OsvVuln): string | undefined {
 }
 
 /**
- * Try to derive a numeric CVSS base score from an OSV severity entry. OSV
- * publishes `score` as a CVSS vector string in practice (e.g.
- * `CVSS:3.1/AV:N/...`), but some advisories also stamp the numeric value
- * directly. We accept either form: a parseable float in [0,10] wins; anything
- * else is treated as "no numeric score available" and the caller falls back
- * to `database_specific.severity`.
+ * CVSS v3.0/v3.1 metric weight tables — direct from the official spec
+ * (https://www.first.org/cvss/v3.1/specification-document, table A-1).
+ * Privileges Required (PR) is scope-aware: a Changed scope swaps in higher
+ * weights to reflect cross-component impact.
  */
-function parseNumericCvss(score: string): number | undefined {
-  // Strip a leading "CVSS:" tag if the score is "9.1" or "3.1/AV:..." style.
-  // We only want to succeed when the input cleanly parses as a single number.
+const CVSS_V3_WEIGHTS = {
+  AV: { N: 0.85, A: 0.62, L: 0.55, P: 0.2 },
+  AC: { L: 0.77, H: 0.44 },
+  PR: {
+    U: { N: 0.85, L: 0.62, H: 0.27 }, // Scope: Unchanged
+    C: { N: 0.85, L: 0.68, H: 0.5 }, // Scope: Changed
+  },
+  UI: { N: 0.85, R: 0.62 },
+  CIA: { H: 0.56, L: 0.22, N: 0.0 },
+} as const;
+
+type CvssV3MetricMap = Map<string, string>;
+
+/**
+ * Parse the metric portion of a CVSS vector string (everything after
+ * `CVSS:3.x/`) into a map of metric → value. Returns null on syntactic
+ * failure. Tolerant of trailing slashes and case.
+ */
+function parseCvssMetrics(metricPart: string): CvssV3MetricMap | null {
+  const map: CvssV3MetricMap = new Map();
+  for (const segment of metricPart.split('/')) {
+    if (segment.length === 0) continue;
+    const eq = segment.indexOf(':');
+    if (eq <= 0 || eq === segment.length - 1) return null;
+    const key = segment.slice(0, eq).toUpperCase();
+    const value = segment.slice(eq + 1).toUpperCase();
+    map.set(key, value);
+  }
+  return map;
+}
+
+/** Round up to one decimal place per CVSS v3.1 spec §7.1. */
+function cvssRoundUp(x: number): number {
+  return Math.ceil(x * 10) / 10;
+}
+
+/**
+ * Compute a CVSS v3.0/v3.1 base score from a parsed metric map. Returns
+ * undefined if any required metric is missing or carries an unrecognized
+ * value (defensive — partial vectors shouldn't silently coerce to a score).
+ *
+ * Formula follows the spec verbatim:
+ *   ISS = 1 - (1-C)(1-I)(1-A)
+ *   Impact = scope === 'U' ? 6.42 * ISS
+ *                          : 7.52 * (ISS - 0.029) - 3.25 * (ISS - 0.02)^15
+ *   Exploitability = 8.22 * AV * AC * PR * UI
+ *   BaseScore = Impact <= 0 ? 0
+ *             : scope === 'U' ? roundUp(min(Impact + Exploitability, 10))
+ *                             : roundUp(min(1.08 * (Impact + Exploitability), 10))
+ */
+function computeCvssV3BaseScore(metrics: CvssV3MetricMap): number | undefined {
+  const av = metrics.get('AV');
+  const ac = metrics.get('AC');
+  const pr = metrics.get('PR');
+  const ui = metrics.get('UI');
+  const scope = metrics.get('S');
+  const c = metrics.get('C');
+  const i = metrics.get('I');
+  const a = metrics.get('A');
+  if (
+    av == null ||
+    ac == null ||
+    pr == null ||
+    ui == null ||
+    scope == null ||
+    c == null ||
+    i == null ||
+    a == null
+  ) {
+    return undefined;
+  }
+  if (scope !== 'U' && scope !== 'C') return undefined;
+
+  const avW = CVSS_V3_WEIGHTS.AV[av as keyof typeof CVSS_V3_WEIGHTS.AV];
+  const acW = CVSS_V3_WEIGHTS.AC[ac as keyof typeof CVSS_V3_WEIGHTS.AC];
+  const prTable = CVSS_V3_WEIGHTS.PR[scope];
+  const prW = prTable[pr as keyof typeof prTable];
+  const uiW = CVSS_V3_WEIGHTS.UI[ui as keyof typeof CVSS_V3_WEIGHTS.UI];
+  const cW = CVSS_V3_WEIGHTS.CIA[c as keyof typeof CVSS_V3_WEIGHTS.CIA];
+  const iW = CVSS_V3_WEIGHTS.CIA[i as keyof typeof CVSS_V3_WEIGHTS.CIA];
+  const aW = CVSS_V3_WEIGHTS.CIA[a as keyof typeof CVSS_V3_WEIGHTS.CIA];
+
+  if (
+    avW == null ||
+    acW == null ||
+    prW == null ||
+    uiW == null ||
+    cW == null ||
+    iW == null ||
+    aW == null
+  ) {
+    return undefined;
+  }
+
+  const iss = 1 - (1 - cW) * (1 - iW) * (1 - aW);
+  const impact =
+    scope === 'U' ? 6.42 * iss : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
+  const exploitability = 8.22 * avW * acW * prW * uiW;
+
+  if (impact <= 0) return 0;
+  const raw =
+    scope === 'U'
+      ? Math.min(impact + exploitability, 10)
+      : Math.min(1.08 * (impact + exploitability), 10);
+  return cvssRoundUp(raw);
+}
+
+/**
+ * Derive a numeric CVSS base score from an OSV severity `score` entry. OSV
+ * publishes `score` as a CVSS vector string in practice (e.g.
+ * `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`), but some advisories also
+ * stamp the numeric value directly. We accept either:
+ *
+ *   - A bare numeric string in [0, 10] (fast path).
+ *   - A CVSS v3.0 or v3.1 vector string — parsed and computed inline per the
+ *     official formula. No external dep.
+ *   - A CVSS v4.0 vector string — not supported in v1 (the v4 metric set and
+ *     scoring formula are materially different and worth a separate pass);
+ *     returns undefined so the caller falls back to `database_specific.severity`.
+ *
+ * Anything else is treated as "no numeric score available".
+ */
+function parseCvssScore(score: string): number | undefined {
   const trimmed = score.trim();
-  const n = Number(trimmed);
-  if (Number.isFinite(n) && n >= 0 && n <= 10) return n;
+  if (trimmed.length === 0) return undefined;
+
+  // Fast path: bare numeric. Avoid accepting an empty string (Number('') === 0).
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n) && n >= 0 && n <= 10) return n;
+    return undefined;
+  }
+
+  // Vector form. Detect the version prefix; we currently support 3.0 and 3.1.
+  // 4.0 is intentionally NOT supported — its formula is materially different
+  // and it's rare in OSV today. Returning undefined lets the caller fall
+  // through to `database_specific.severity` which most v4-stamped advisories
+  // also carry.
+  const v3Match = /^CVSS:3\.[01]\/(.+)$/i.exec(trimmed);
+  if (v3Match) {
+    const metricPart = v3Match[1]!;
+    const metrics = parseCvssMetrics(metricPart);
+    if (metrics == null) return undefined;
+    return computeCvssV3BaseScore(metrics);
+  }
+
   return undefined;
 }
 
@@ -173,7 +311,7 @@ function highestCvssScore(vuln: OsvVuln): number | undefined {
   const candidates = v3.length > 0 ? v3 : vuln.severity;
   let best: number | undefined;
   for (const s of candidates) {
-    const n = parseNumericCvss(s.score);
+    const n = parseCvssScore(s.score);
     if (n != null && (best == null || n > best)) best = n;
   }
   return best;
@@ -271,17 +409,31 @@ function findFixedVersion(
 
 /**
  * Render the user-facing `description`. Prefers `details` (long-form prose)
- * over `summary` (one-liner). Truncated to a comment-friendly length and
- * suffixed with an OSV link so the reviewer can drill in.
+ * over `summary` (one-liner). Truncated to a comment-friendly length, then
+ * (when known) appended with the upgrade hint and the OSV link.
+ *
+ * Why the upgrade hint lives in `description` and not `suggestion`: GitHub
+ * renders `suggestion` as a `​`​`​`suggestion` code block whose "Apply" button
+ * literally replaces the target line. Since dependency-cve points at a
+ * lockfile line (JSON/YAML/TOML), an English upgrade sentence cannot be a
+ * safe code replacement — it would corrupt the lockfile if applied. So the
+ * hint lives in prose where it belongs, and `suggestion` is omitted entirely
+ * from these findings.
  */
-function buildDescription(vuln: OsvVuln): string {
+function buildDescription(
+  vuln: OsvVuln,
+  fixed_version: string | undefined,
+  pkg: string,
+): string {
   const body = (vuln.details ?? vuln.summary ?? '').trim();
   const link = `https://osv.dev/vulnerability/${vuln.id}`;
-  if (body.length === 0) return `See ${link} for details.`;
-  if (body.length <= DESCRIPTION_MAX_CHARS) return `${body} (${link})`;
-  // Reserve room for the ellipsis + link suffix.
+  const upgrade = fixed_version != null ? ` Upgrade ${pkg} to >=${fixed_version} (or later).` : '';
+  if (body.length === 0) return `See ${link} for details.${upgrade}`;
+  if (body.length <= DESCRIPTION_MAX_CHARS) return `${body} (${link})${upgrade}`;
+  // Reserve room for the ellipsis + link suffix; the upgrade hint is appended
+  // after that since it's bounded and reviewer-relevant.
   const suffix = `… (${link})`;
-  return `${body.slice(0, DESCRIPTION_MAX_CHARS - suffix.length)}${suffix}`;
+  return `${body.slice(0, DESCRIPTION_MAX_CHARS - suffix.length)}${suffix}${upgrade}`;
 }
 
 /**
@@ -583,6 +735,9 @@ function buildFinding(r: ResolvedDep, vuln: OsvVuln): ScanFinding {
     ...(cvss !== undefined ? { cvss } : {}),
   };
 
+  // No `suggestion` field — GitHub renders it as a literal code replacement,
+  // which would corrupt a lockfile if applied. Upgrade hint lives in
+  // `description` (see `buildDescription` for the rationale).
   const finding: ScanFinding = {
     scanner: SCANNER_ID,
     rule_id,
@@ -591,13 +746,10 @@ function buildFinding(r: ResolvedDep, vuln: OsvVuln): ScanFinding {
     severity,
     category: 'vulnerability',
     title: buildTitle(vuln, r.dep, severity, identifier),
-    description: buildDescription(vuln),
+    description: buildDescription(vuln, fixed_version, r.dep.name),
     confidence: 'high',
     evidence,
     fingerprint: fingerprintOf(rule_id, r.dep.name, r.dep.version, r.file_path),
-    ...(fixed_version !== undefined
-      ? { suggestion: `Upgrade ${r.dep.name} to >=${fixed_version}.` }
-      : {}),
   };
 
   return finding;
