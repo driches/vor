@@ -152,9 +152,19 @@ describe('dedupScannerFindings', () => {
     expect(out).toEqual([finding]);
   });
 
-  it('drops the scanner finding for category=bug at distance 3 (boundary)', () => {
+  it('keeps the scanner finding when the overlapping AI comment is category=bug', () => {
+    // Rationale (Codex P2): `bug` is too broad to count as security-adjacent.
+    // A nearby unrelated bug note (e.g. null deref) must NOT suppress a real
+    // scanner secret/SAST finding by line proximity alone.
     const finding = makeFinding({ scanner: 'secrets', line: 10 });
     const ai = makeAiComment({ category: 'bug', line: 7 });
+    const out = dedupScannerFindings({ scanFindings: [finding], aiComments: [ai] });
+    expect(out).toEqual([finding]);
+  });
+
+  it('drops the scanner finding for category=data-loss at distance 3 (boundary)', () => {
+    const finding = makeFinding({ scanner: 'secrets', line: 10 });
+    const ai = makeAiComment({ category: 'data-loss', line: 7 });
     const out = dedupScannerFindings({ scanFindings: [finding], aiComments: [ai] });
     expect(out).toEqual([]);
   });

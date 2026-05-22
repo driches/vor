@@ -53132,7 +53132,6 @@ var CONFIDENCE_RANK = {
 var AI_SECURITY_ADJACENT_CATEGORIES = /* @__PURE__ */ new Set([
   "security",
   "vulnerability",
-  "bug",
   "data-loss"
 ]);
 var AI_OVERLAP_LINE_WINDOW = 3;
