@@ -52873,7 +52873,7 @@ function renderProvenanceTag(c2) {
   if (!c2.source || c2.source.kind !== "scanner") return "";
   switch (c2.source.scanner) {
     case "dependency-cve": {
-      const id = c2.source.cve_id ?? c2.source.ghsa_id ?? c2.source.rule_id ?? "";
+      const id = c2.source.cve_id ?? c2.source.ghsa_id ?? c2.source.rule_id?.replace(/^osv:/, "") ?? "";
       return `
 
 _via OSV \xB7 ${id}_`;
@@ -53151,18 +53151,32 @@ function dedupAcrossScanners(findings) {
   const byFingerprint = /* @__PURE__ */ new Map();
   const byTriple = /* @__PURE__ */ new Map();
   const out = [];
+  const droppedSlots = /* @__PURE__ */ new Set();
   const tripleKey = (f2) => `${f2.file_path} ${f2.line} ${f2.rule_id}`;
   for (const f2 of findings) {
     const fpIdx = byFingerprint.get(f2.fingerprint);
     const trIdx = byTriple.get(tripleKey(f2));
-    const existingIdx = fpIdx ?? trIdx;
-    if (existingIdx === void 0) {
+    if (fpIdx === void 0 && trIdx === void 0) {
       const idx = out.length;
       out.push(f2);
       byFingerprint.set(f2.fingerprint, idx);
       byTriple.set(tripleKey(f2), idx);
       continue;
     }
+    if (fpIdx !== void 0 && trIdx !== void 0 && fpIdx !== trIdx) {
+      const keep = Math.min(fpIdx, trIdx);
+      const drop = Math.max(fpIdx, trIdx);
+      const winnerOfTwo = preferHigherConfidence(out[keep], out[drop]);
+      const winnerAll = preferHigherConfidence(winnerOfTwo, f2);
+      out[keep] = winnerAll;
+      droppedSlots.add(drop);
+      for (const [k2, v2] of byFingerprint) if (v2 === drop) byFingerprint.set(k2, keep);
+      for (const [k2, v2] of byTriple) if (v2 === drop) byTriple.set(k2, keep);
+      byFingerprint.set(f2.fingerprint, keep);
+      byTriple.set(tripleKey(f2), keep);
+      continue;
+    }
+    const existingIdx = fpIdx ?? trIdx;
     const incumbent = out[existingIdx];
     const winner = preferHigherConfidence(incumbent, f2);
     if (winner !== incumbent) {
@@ -53171,7 +53185,7 @@ function dedupAcrossScanners(findings) {
       byTriple.set(tripleKey(winner), existingIdx);
     }
   }
-  return out;
+  return out.filter((_f, i2) => !droppedSlots.has(i2));
 }
 function dedupKeptScannerComments(kept) {
   const survivingAi = kept.filter((c2) => c2.source?.kind !== "scanner");
@@ -54427,8 +54441,8 @@ function maskSecret(match) {
   if (match.length <= 8) return "****";
   return `${match.slice(0, 4)}...${match.slice(-4)}`;
 }
-function fingerprintOf2(rule_id, file_path, line) {
-  return (0, import_node_crypto2.createHash)("sha1").update(`${rule_id}:${file_path}:${line}`).digest("hex").slice(0, 12);
+function fingerprintOf2(rule_id, file_path, line, matchIndex) {
+  return (0, import_node_crypto2.createHash)("sha1").update(`${rule_id}:${file_path}:${line}:${matchIndex}`).digest("hex").slice(0, 12);
 }
 function effectivePatterns(options, deps) {
   if (options.patterns !== void 0) return options.patterns;
@@ -54490,7 +54504,10 @@ function createSecretsScanner(options = {}) {
                   title: `Possible ${pattern.display_name} in ${import_node_path5.default.basename(file.path)}`,
                   description: buildDescription2(pattern),
                   evidence,
-                  fingerprint: fingerprintOf2(rule_id, file.path, lineNo)
+                  // matchIndex = current size of `findings` array. Stable
+                  // because the outer iteration (files → added_lines →
+                  // patterns → matches) is deterministic.
+                  fingerprint: fingerprintOf2(rule_id, file.path, lineNo, findings.length)
                 };
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {

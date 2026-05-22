@@ -383,6 +383,26 @@ describe('createSecretsScanner — multiple findings', () => {
     // Fingerprints must differ (rule_id same, file same, line differs).
     expect(result.findings[0]!.fingerprint).not.toBe(result.findings[1]!.fingerprint);
   });
+
+  it('emits a separate finding per match when two secrets share a line (no fingerprint collision)', async () => {
+    // Regression: previously the fingerprint was SHA1(rule_id:file:line),
+    // so two AWS keys on the same line collapsed to one finding through
+    // pass-1 cross-scanner dedup. Now the fingerprint includes a per-match
+    // index so distinct matches at the same (rule, file, line) survive.
+    const scanner = createSecretsScanner();
+    const KEY_A = 'AKIAIOSFODNN7EXAMPLA';
+    const KEY_B = 'AKIAIOSFODNN7EXAMPLB';
+    const file = makeFileWithLines('src/colocated.ts', [
+      `const pair = ["${KEY_A}", "${KEY_B}"];`,
+    ]);
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file] }));
+
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]!.line).toBe(1);
+    expect(result.findings[1]!.line).toBe(1);
+    // Crucial: fingerprints differ so the runner's pass-1 dedup keeps both.
+    expect(result.findings[0]!.fingerprint).not.toBe(result.findings[1]!.fingerprint);
+  });
 });
 
 // -----------------------------------------------------------------

@@ -106,15 +106,19 @@ export function dedupAcrossScanners(
   const byFingerprint = new Map<string, number>();
   const byTriple = new Map<string, number>();
   const out: ScanFinding[] = [];
+  // Tombstone set for slots we've merged away. Materialised at the end via
+  // `.filter` so we keep indices stable during the loop (mutating `out`
+  // mid-iteration would invalidate every map entry).
+  const droppedSlots = new Set<number>();
 
   const tripleKey = (f: ScanFinding) => `${f.file_path} ${f.line} ${f.rule_id}`;
 
   for (const f of findings) {
     const fpIdx = byFingerprint.get(f.fingerprint);
     const trIdx = byTriple.get(tripleKey(f));
-    const existingIdx = fpIdx ?? trIdx;
 
-    if (existingIdx === undefined) {
+    // Case 1: neither key seen before — brand new finding.
+    if (fpIdx === undefined && trIdx === undefined) {
       const idx = out.length;
       out.push(f);
       byFingerprint.set(f.fingerprint, idx);
@@ -122,21 +126,44 @@ export function dedupAcrossScanners(
       continue;
     }
 
+    // Case 2: both keys hit, but DIFFERENT slots — `f` is a bridge that
+    // links two previously-disjoint equivalence groups (e.g. scanner A
+    // reported `(fp=X, t1)`, scanner B reported `(fp=Y, t2)`, and now `f`
+    // arrives with `(fp=X, t2)`). Without this case the two prior findings
+    // remain in `out` as separate entries even though they're conceptually
+    // one issue. Merge by tombstoning the higher-index slot and
+    // re-pointing every key from `drop → keep`.
+    if (fpIdx !== undefined && trIdx !== undefined && fpIdx !== trIdx) {
+      const keep = Math.min(fpIdx, trIdx);
+      const drop = Math.max(fpIdx, trIdx);
+      const winnerOfTwo = preferHigherConfidence(out[keep]!, out[drop]!);
+      const winnerAll = preferHigherConfidence(winnerOfTwo, f);
+      out[keep] = winnerAll;
+      droppedSlots.add(drop);
+      // Re-point any key currently pointing at `drop` so future finds
+      // collapse into `keep`.
+      for (const [k, v] of byFingerprint) if (v === drop) byFingerprint.set(k, keep);
+      for (const [k, v] of byTriple) if (v === drop) byTriple.set(k, keep);
+      // Ensure f's own keys point at `keep` too.
+      byFingerprint.set(f.fingerprint, keep);
+      byTriple.set(tripleKey(f), keep);
+      continue;
+    }
+
+    // Case 3: single key hit (or both hit the same slot). Standard merge.
+    const existingIdx = (fpIdx ?? trIdx) as number;
     const incumbent = out[existingIdx]!;
     const winner = preferHigherConfidence(incumbent, f);
-    // If the challenger wins we have to update both indices because the
-    // winner's fingerprint OR triple may differ from the incumbent's.
     if (winner !== incumbent) {
       out[existingIdx] = winner;
       byFingerprint.set(winner.fingerprint, existingIdx);
       byTriple.set(tripleKey(winner), existingIdx);
     }
     // Either way the loser's keys are still pointed at `existingIdx` which
-    // is correct — any future finding matching THOSE keys should also
-    // collapse onto this slot.
+    // is correct — any future finding matching THOSE keys collapses here.
   }
 
-  return out;
+  return out.filter((_f, i) => !droppedSlots.has(i));
 }
 
 /**

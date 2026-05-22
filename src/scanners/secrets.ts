@@ -88,15 +88,25 @@ function maskSecret(match: string): string {
 }
 
 /**
- * Deterministic 12-char SHA-1 fingerprint over `${rule_id}:${file_path}:${line}`.
- * Stable across re-runs of the same PR; differs across (rule, file, line)
- * triples so dedup + ignore-list pinning have something concrete to key off.
+ * Deterministic 12-char SHA-1 fingerprint over
+ * `${rule_id}:${file_path}:${line}:${matchIndex}`.
+ *
+ * `matchIndex` disambiguates multiple matches of the same pattern on the
+ * same line — without it, two AWS keys on one line would produce identical
+ * fingerprints and pass-1 dedup would silently collapse them to one
+ * finding (so the second credential never gets flagged). Stable across
+ * re-runs because pattern iteration + match ordering are both deterministic.
  *
  * SHA-1 is fine — this is not a security primitive, it's a stable identifier.
  */
-function fingerprintOf(rule_id: string, file_path: string, line: number): string {
+function fingerprintOf(
+  rule_id: string,
+  file_path: string,
+  line: number,
+  matchIndex: number,
+): string {
   return createHash('sha1')
-    .update(`${rule_id}:${file_path}:${line}`)
+    .update(`${rule_id}:${file_path}:${line}:${matchIndex}`)
     .digest('hex')
     .slice(0, 12);
 }
@@ -212,7 +222,10 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                   title: `Possible ${pattern.display_name} in ${path.basename(file.path)}`,
                   description: buildDescription(pattern),
                   evidence,
-                  fingerprint: fingerprintOf(rule_id, file.path, lineNo),
+                  // matchIndex = current size of `findings` array. Stable
+                  // because the outer iteration (files → added_lines →
+                  // patterns → matches) is deterministic.
+                  fingerprint: fingerprintOf(rule_id, file.path, lineNo, findings.length),
                 };
 
                 const match = deps.ignoreList.matches(finding);

@@ -90,7 +90,15 @@ function renderProvenanceTag(c: PostedComment): string {
   if (!c.source || c.source.kind !== 'scanner') return '';
   switch (c.source.scanner) {
     case 'dependency-cve': {
-      const id = c.source.cve_id ?? c.source.ghsa_id ?? c.source.rule_id ?? '';
+      // Prefer the explicit CVE/GHSA alias when OSV provided one. Fall back
+      // to the rule_id with the `osv:` prefix stripped (RUSTSEC, PYSEC,
+      // etc. don't have CVE/GHSA aliases but we don't want to render
+      // `_via OSV · osv:PYSEC-…_` with the redundant prefix).
+      const id =
+        c.source.cve_id ??
+        c.source.ghsa_id ??
+        c.source.rule_id?.replace(/^osv:/, '') ??
+        '';
       return `\n\n_via OSV · ${id}_`;
     }
     case 'secrets':

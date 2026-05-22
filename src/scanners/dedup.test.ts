@@ -135,6 +135,48 @@ describe('dedupAcrossScanners', () => {
   it('returns an empty array for an empty input', () => {
     expect(dedupAcrossScanners([])).toEqual([]);
   });
+
+  it('merges two previously-disjoint slots when a third finding bridges their keys', () => {
+    // Regression for the divergent-fp/triple bug: scanner A reports a
+    // finding with (fp=X, triple=t1), scanner B reports a finding with
+    // (fp=Y, triple=t2). They land in distinct slots. Then scanner C
+    // reports (fp=X, triple=t2) — which matches A by fingerprint AND B by
+    // triple. Without the merge, A and B remain as separate entries in
+    // the output (silent duplicate). With the merge, all three collapse
+    // into one finding.
+    const a = makeFinding({
+      scanner: 'secrets',
+      fingerprint: 'fp-X',
+      file_path: 'a.ts',
+      line: 1,
+      rule_id: 'rule-1',
+      confidence: 'low',
+      title: 'A',
+    });
+    const b = makeFinding({
+      scanner: 'secrets',
+      fingerprint: 'fp-Y',
+      file_path: 'a.ts',
+      line: 2,
+      rule_id: 'rule-2',
+      confidence: 'medium',
+      title: 'B',
+    });
+    const c = makeFinding({
+      scanner: 'secrets',
+      fingerprint: 'fp-X', // matches A
+      file_path: 'a.ts',
+      line: 2,
+      rule_id: 'rule-2', // matches B's triple
+      confidence: 'high',
+      title: 'C',
+    });
+    const out = dedupAcrossScanners([a, b, c]);
+    expect(out).toHaveLength(1);
+    // The highest-confidence finding wins.
+    expect(out[0]!.confidence).toBe('high');
+    expect(out[0]!.title).toBe('C');
+  });
 });
 
 // -----------------------------------------------------------------

@@ -57,6 +57,9 @@ entries:
   - file: src/scanners/secrets-patterns.test.ts
     rule: "secret:private-key-pem"
     reason: "Positive fixture for the private-key-pem pattern test"
+  - file: src/scanners/secrets-patterns.test.ts
+    rule: "secret:jwt"
+    reason: "Positive fixture for the JWT pattern test (3-segment eyJ-prefixed shape)"
 
   # ---------------------------------------------------------------
   # src/scanners/secrets.test.ts
