@@ -53122,6 +53122,15 @@ var InMemoryScanCache = class {
     return this._miss_count;
   }
 };
+var NoopScanCache = class {
+  hit_count = 0;
+  miss_count = 0;
+  get(_key) {
+    return void 0;
+  }
+  set(_key, _value) {
+  }
+};
 
 // src/scanners/dedup.ts
 var CONFIDENCE_RANK = {
@@ -54628,6 +54637,16 @@ function validateScanFinding(finding, ctx) {
 }
 
 // src/orchestrator.ts
+var SCANNER_CONFIG_KEY = {
+  "dependency-cve": "dependency_cve",
+  secrets: "secrets",
+  sast: "sast",
+  "container-cve": "container_cve"
+};
+function scannerMinSeverity(id, cfg) {
+  const key = SCANNER_CONFIG_KEY[id];
+  return cfg.scanners[key].min_severity;
+}
 async function runOrchestrator(input) {
   registerSecret(input.anthropic_api_key);
   registerSecret(input.github_token);
@@ -54697,7 +54716,11 @@ async function runOrchestrator(input) {
     contextFiles,
     diff: prContext.diff,
     workspaceDir: input.workspace_dir,
-    cache: new InMemoryScanCache(),
+    // Honor `security.cache.enabled`: when false, hand out a no-op cache so
+    // OSV/lockfile lookups are NOT deduped within a single run. Default is
+    // true (caching on); operators who explicitly opt out for debugging or
+    // forced refresh get the behavior they configured.
+    cache: config.security.cache.enabled ? new InMemoryScanCache() : new NoopScanCache(),
     ignoreList,
     fileReader,
     config: config.security
@@ -54746,6 +54769,13 @@ async function runOrchestrator(input) {
   const changedFilesMap = new Map(prContext.files.map((f2) => [f2.path, f2]));
   let addedScannerComments = 0;
   for (const finding of scanRunResult.findings) {
+    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    if (scannerFloor !== void 0 && SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]) {
+      await logger.debug(
+        `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`
+      );
+      continue;
+    }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
       await logger.debug(

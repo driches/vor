@@ -20,15 +20,42 @@ import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
 import { renderSummary } from './output/formatter.js';
 import { scanFindingToPostedComment } from './scanners/adapter.js';
-import { InMemoryScanCache } from './scanners/cache.js';
+import { InMemoryScanCache, NoopScanCache } from './scanners/cache.js';
 import { dedupKeptScannerComments } from './scanners/dedup.js';
 import { IgnoreList } from './scanners/ignore-list.js';
 import { buildEnabledScanners } from './scanners/registry.js';
 import { runScanners } from './scanners/runner.js';
 import type { ScannerDeps } from './scanners/types.js';
 import { validateScanFinding } from './scanners/validate.js';
+import { SEVERITY_RANK } from './types.js';
+import type { ScannerId, Severity } from './types.js';
 import { registerSecret } from './util/secrets.js';
 import { logger } from './util/logger.js';
+
+/**
+ * Map each ScannerId to the snake_case key the config schema uses for its
+ * sub-config (so per-scanner `min_severity` can be read without ad-hoc string
+ * replacement at call sites).
+ */
+const SCANNER_CONFIG_KEY = {
+  'dependency-cve': 'dependency_cve',
+  secrets: 'secrets',
+  sast: 'sast',
+  'container-cve': 'container_cve',
+} as const satisfies Record<ScannerId, string>;
+
+/**
+ * Resolve the configured per-scanner `min_severity`, if any. Returns
+ * `undefined` when the operator hasn't set it (the global `severity.floor`
+ * is the only gate in that case).
+ */
+function scannerMinSeverity(
+  id: ScannerId,
+  cfg: ReviewConfig['security'],
+): Severity | undefined {
+  const key = SCANNER_CONFIG_KEY[id];
+  return cfg.scanners[key].min_severity;
+}
 
 export interface OrchestratorInput {
   owner: string;
@@ -142,7 +169,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     contextFiles,
     diff: prContext.diff,
     workspaceDir: input.workspace_dir,
-    cache: new InMemoryScanCache(),
+    // Honor `security.cache.enabled`: when false, hand out a no-op cache so
+    // OSV/lockfile lookups are NOT deduped within a single run. Default is
+    // true (caching on); operators who explicitly opt out for debugging or
+    // forced refresh get the behavior they configured.
+    cache: config.security.cache.enabled ? new InMemoryScanCache() : new NoopScanCache(),
     ignoreList,
     fileReader,
     config: config.security,
@@ -220,6 +251,19 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
   let addedScannerComments = 0;
   for (const finding of scanRunResult.findings) {
+    // Per-scanner min_severity (separate from the global severity.floor that
+    // filterComments applies later). Lets operators tighten a noisy scanner
+    // without raising the global floor for the AI agent.
+    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    if (
+      scannerFloor !== undefined &&
+      SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]
+    ) {
+      await logger.debug(
+        `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`,
+      );
+      continue;
+    }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
       await logger.debug(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryScanCache } from './cache.js';
+import { InMemoryScanCache, NoopScanCache } from './cache.js';
 
 describe('InMemoryScanCache', () => {
   it('returns undefined for a missing key', () => {
@@ -62,5 +62,25 @@ describe('InMemoryScanCache', () => {
     expect(b.get('k')).toBeUndefined();
     expect(b.miss_count).toBe(1);
     expect(a.miss_count).toBe(0);
+  });
+});
+
+describe('NoopScanCache', () => {
+  it('always returns undefined from get, never stores set values', () => {
+    const cache = new NoopScanCache();
+    cache.set('k', { foo: 'bar' });
+    expect(cache.get('k')).toBeUndefined();
+    // A second set with the same key still leaves the slot empty.
+    cache.set('k', 'second-value');
+    expect(cache.get('k')).toBeUndefined();
+  });
+
+  it('reports zero hit_count and miss_count regardless of usage', () => {
+    const cache = new NoopScanCache();
+    cache.set('k', 1);
+    cache.get('k');
+    cache.get('miss');
+    expect(cache.hit_count).toBe(0);
+    expect(cache.miss_count).toBe(0);
   });
 });

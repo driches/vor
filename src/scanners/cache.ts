@@ -33,3 +33,21 @@ export class InMemoryScanCache implements ScanCache {
     return this._miss_count;
   }
 }
+
+/**
+ * No-op scanner cache used when `security.cache.enabled: false`. Every `get`
+ * misses, every `set` is dropped. Counters stay at zero so metrics still
+ * reflect "cache made no difference."
+ */
+export class NoopScanCache implements ScanCache {
+  readonly hit_count = 0;
+  readonly miss_count = 0;
+
+  get<T>(_key: string): T | undefined {
+    return undefined;
+  }
+
+  set<T>(_key: string, _value: T): void {
+    // no-op
+  }
+}
