@@ -682,6 +682,46 @@ describe('createDependencyCveScanner — CVSS vector parsing', () => {
     // omitted and severity falls through to the deriveSeverity default.
     expect(finding.evidence.cvss).toBeUndefined();
   });
+
+  it('falls back to CVSS_V2 when the preferred V3/V4 subset is unparseable', async () => {
+    // Regression: parseCvssScore returns undefined for CVSS v4 vectors
+    // (we don't implement v4's base-score formula). If an advisory has
+    // ONLY a v4 entry + a v2 entry, the old logic filtered to V3/V4 (just
+    // the v4 vector), couldn't parse it, and dropped to the
+    // database_specific fallback — even though the v2 score WAS usable.
+    // Now highestCvssScore falls through to the full severity list when
+    // the preferred subset yields nothing.
+    const vuln: OsvVuln = {
+      ...LODASH_VULN,
+      severity: [
+        { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H' },
+        { type: 'CVSS_V2', score: '8.5' },
+      ],
+      database_specific: undefined,
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+      getVuln: vi.fn().mockResolvedValue(vuln),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    // V2 score was used after V3/V4 yielded nothing parseable.
+    expect(finding.evidence.cvss).toBeCloseTo(8.5, 5);
+    expect(finding.severity).toBe('important'); // 8.5 → important
+  });
 });
 
 // -----------------------------------------------------------------

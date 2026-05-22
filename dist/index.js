@@ -53943,10 +53943,16 @@ function parseCvssScore(score) {
 }
 function highestCvssScore(vuln) {
   if (!vuln.severity || vuln.severity.length === 0) return void 0;
-  const v3 = vuln.severity.filter((s2) => s2.type === "CVSS_V3" || s2.type === "CVSS_V4");
-  const candidates = v3.length > 0 ? v3 : vuln.severity;
+  const preferred = vuln.severity.filter(
+    (s2) => s2.type === "CVSS_V3" || s2.type === "CVSS_V4"
+  );
+  const best = highestParseable(preferred);
+  if (best !== void 0) return best;
+  return highestParseable(vuln.severity);
+}
+function highestParseable(entries) {
   let best;
-  for (const s2 of candidates) {
+  for (const s2 of entries) {
     const n2 = parseCvssScore(s2.score);
     if (n2 != null && (best == null || n2 > best)) best = n2;
   }
@@ -54402,9 +54408,14 @@ var DEFAULT_SECRET_PATTERNS = [
     // Medium confidence: JWTs are not always secrets (bearer tokens may be
     // ephemeral or intended for runtime), but a committed JWT usually IS a
     // leak — especially session tokens or signed credentials.
+    //
+    // Use lookarounds against the JWT char class instead of `\b`. The JWT
+    // alphabet includes `-` which is a non-word character, so a token
+    // ending in `-` would fail the trailing `\b` (transition between two
+    // non-word chars at end-of-string) and be missed entirely.
     id: "jwt",
     display_name: "JSON Web Token (JWT)",
-    pattern: /\b(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/g,
+    pattern: /(?<![A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)(?![A-Za-z0-9_-])/g,
     severity: "important",
     confidence: "medium"
   }

@@ -304,14 +304,31 @@ function parseCvssScore(score: string): number | undefined {
  * if no parseable numeric severity is present. We prefer CVSS_V3/V4 over V2
  * when both are available; ties go to the highest number (a vuln can carry
  * multiple competing scores from different sources).
+ *
+ * Fall-through: `parseCvssScore` returns undefined for CVSS v4 vector
+ * strings (we don't implement v4's base-score formula). If an advisory
+ * publishes ONLY v3/v4 entries that don't yield a parseable score (e.g.
+ * a single v4 vector), retry against the full severity list so a v2
+ * score on the same advisory still drives severity routing. Without this
+ * fallback such findings would drop to `database_specific.severity` /
+ * default `important`, even when OSV had a usable score available.
  */
 function highestCvssScore(vuln: OsvVuln): number | undefined {
   if (!vuln.severity || vuln.severity.length === 0) return undefined;
-  // Prefer V3/V4 entries; V2 is mostly historical and shouldn't drive routing.
-  const v3 = vuln.severity.filter((s) => s.type === 'CVSS_V3' || s.type === 'CVSS_V4');
-  const candidates = v3.length > 0 ? v3 : vuln.severity;
+  const preferred = vuln.severity.filter(
+    (s) => s.type === 'CVSS_V3' || s.type === 'CVSS_V4',
+  );
+  const best = highestParseable(preferred);
+  if (best !== undefined) return best;
+  // Preferred subset yielded nothing parseable — try the full list.
+  return highestParseable(vuln.severity);
+}
+
+function highestParseable(
+  entries: ReadonlyArray<{ type: string; score: string }>,
+): number | undefined {
   let best: number | undefined;
-  for (const s of candidates) {
+  for (const s of entries) {
     const n = parseCvssScore(s.score);
     if (n != null && (best == null || n > best)) best = n;
   }

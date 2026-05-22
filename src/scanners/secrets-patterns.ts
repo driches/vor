@@ -196,9 +196,15 @@ export const DEFAULT_SECRET_PATTERNS: readonly SecretPattern[] = [
     // Medium confidence: JWTs are not always secrets (bearer tokens may be
     // ephemeral or intended for runtime), but a committed JWT usually IS a
     // leak — especially session tokens or signed credentials.
+    //
+    // Use lookarounds against the JWT char class instead of `\b`. The JWT
+    // alphabet includes `-` which is a non-word character, so a token
+    // ending in `-` would fail the trailing `\b` (transition between two
+    // non-word chars at end-of-string) and be missed entirely.
     id: 'jwt',
     display_name: 'JSON Web Token (JWT)',
-    pattern: /\b(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/g,
+    pattern:
+      /(?<![A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)(?![A-Za-z0-9_-])/g,
     severity: 'important',
     confidence: 'medium',
   },

@@ -213,6 +213,43 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
     });
   });
 
+  describe('jwt — boundary edge cases', () => {
+    const p = (): SecretPattern => findPattern('jwt');
+
+    it('matches a JWT whose signature segment ends in `-` (non-word char)', () => {
+      // Regression: the previous `\b...\b` pattern failed when the JWT
+      // ended in a non-word char like `-` — \b only fires at a
+      // word/non-word transition. Real base64url JWTs can end in any of
+      // the alphabet chars including `-` and `_`, so this was a real
+      // false-negative path for committed bearer tokens.
+      const jwt =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8-';
+      const wrapped = `const t = "${jwt}";`;
+      const hits = matches(p(), wrapped);
+      expect(hits).toHaveLength(1);
+      expect(hits[0]![1]).toBe(jwt);
+    });
+
+    it('matches a JWT whose signature segment ends in `_`', () => {
+      const jwt =
+        'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.X9_';
+      const wrapped = `auth: '${jwt}'`;
+      const hits = matches(p(), wrapped);
+      expect(hits).toHaveLength(1);
+      expect(hits[0]![1]).toBe(jwt);
+    });
+
+    it('does NOT match when the JWT is a suffix of a longer JWT-class run', () => {
+      // The 3-segment shape sits inside an even longer run of JWT-class
+      // characters. Lookarounds reject because neither boundary lands at
+      // a non-class character.
+      const text =
+        'extraeyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcMORE';
+      const hits = matches(p(), text);
+      expect(hits).toEqual([]);
+    });
+  });
+
   it('private-key-pem exposes the header text via capture group (m[1])', () => {
     // Regression: previously the pattern had no capture group, so
     // `m[1] ?? m[0]` returned `m[0]` (still the header text by accident,
