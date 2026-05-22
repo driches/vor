@@ -15,9 +15,16 @@
   <a href="https://github.com/driches/code-review/discussions"><img src="https://img.shields.io/github/discussions/driches/code-review" alt="Discussions"></a>
 </p>
 
-> AI-powered PR code review GitHub Action. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude.
+> AI-powered PR code review GitHub Action **with parallel vulnerability scanning**. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude — and now flags known CVEs in your lockfiles and hardcoded secrets in your diff alongside the AI's findings, in the same review.
 
 Built on the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with a custom tool-use loop. The agent has access to a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) and **no built-in filesystem/shell access**. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
+
+In parallel with the AI review, two deterministic scanners run:
+
+- **`dependency-cve`** parses changed lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `requirements.txt`) and queries [OSV.dev](https://osv.dev) for known CVEs. Findings appear inline on the lockfile line with the version pin, tagged `_via OSV · GHSA-…_`.
+- **`secrets`** scans added lines in the diff for ~14 high-confidence credential patterns (AWS keys, GitHub PATs, Slack tokens, Stripe keys, Google API keys, npm tokens, PEM private keys). Matches are masked before posting.
+
+Scanner findings flow through the same severity floor / per-file cap / global cap pipeline as AI comments and post in the same single PR review.
 
 ## Quick start
 
@@ -55,6 +62,7 @@ Every review has:
 - **Concrete suggestions** in `` ```suggestion `` blocks (one-click apply) for any critical/important finding
 - **A "why it matters"** sentence — user impact or maintainability cost, not "this is wrong"
 - **A summary** with 1-5 strengths, an assessment (Approve / Comment / Request changes), and reasoning
+- **Scanner findings** for known CVEs and leaked secrets, with provenance tags like `_via OSV · GHSA-jf85-cpcp-j695_` or `_via secrets scan_`, plus a "Security: N findings" line in the summary
 
 By default, the agent **never auto-blocks** — all reviews are posted as `COMMENT`. To opt into `REQUEST_CHANGES` on critical findings, see Configuration below.
 
@@ -127,7 +135,64 @@ review:
 budget:
   max_input_tokens: 500000
   max_output_tokens: 50000
+
+security:
+  enabled: true                                       # set false to skip all scanners
+  ignore_file: .code-review/security-ignore.yml
+  scanners:
+    dependency_cve:
+      enabled: true
+      # osv_endpoint: https://osv.example.com          # optional self-hosted mirror
+    secrets:
+      enabled: true
+      include_generic_entropy: false                  # opt-in; high false-positive rate
+    sast:           { enabled: false }                # v2 — stub in v1
+    container_cve:  { enabled: false }                # v2 — stub in v1
+  cache:       { enabled: true }
+  persistence: { enabled: false }                     # v2 hook point
 ```
+
+## Security scanning
+
+### Scope (v1)
+
+- **Dependency CVEs**: npm (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`) and PyPI (`requirements.txt` — only `==`-pinned lines). Queries the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost.
+- **Secrets**: AWS access keys (`AKIA…`), AWS secret keys (entropy-gated), GitHub classic + fine-grained PATs (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Slack tokens (`xox[baprs]-`), Stripe live/restricted keys (`sk_live_`, `rk_live_`), JWTs, Google API keys (`AIza…`), npm tokens (`npm_…`), PEM private key headers. Only **added lines** in the diff are scanned — pre-existing secrets in untouched code are out of scope for this PR.
+- **SAST + container scanning**: stubs in v1; not yet active. The slots in `.code-review.yml` are reserved so v2 can plug them in without breaking your config.
+
+### Suppressing findings — `.code-review/security-ignore.yml`
+
+Commit this file to your repo to suppress specific findings. All entry types support a required `reason` and an optional `expires` (`YYYY-MM-DD` or full RFC3339 timestamp). Expired entries still suppress the finding but emit a notice in the run log so you don't forget to revisit them.
+
+```yaml
+entries:
+  # Suppress a specific GHSA across any package
+  - ghsa_id: GHSA-xxxx-xxxx-xxxx
+    reason: "Internal-only service, no external input"
+    expires: 2026-12-31
+
+  # Suppress a specific CVE
+  - cve_id: CVE-2025-12345
+    reason: "Patch shipped in v2.1.0"
+
+  # Suppress by package + semver range (npm or PyPI)
+  - package:
+      name: lodash
+      ecosystem: npm           # npm | PyPI
+      version: ">=4.17.20 <4.18.0"
+    reason: "Vendor pin until next major"
+
+  # Suppress secrets in a specific file (e.g. test fixtures)
+  - file: src/__fixtures__/aws-test-key.txt
+    rule: "secret:aws-access-key-id"
+    reason: "Synthetic test fixture, never deployed"
+```
+
+Supported `rule` values for `file` entries:
+- Secrets: `secret:aws-access-key-id`, `secret:aws-secret-access-key`, `secret:github-pat-classic`, `secret:github-pat-fine-grained`, `secret:slack-token`, `secret:stripe-live-key`, `secret:google-api-key`, `secret:npm-token`, `secret:private-key-pem`, etc. (full list in [`src/scanners/secrets-patterns.ts`](src/scanners/secrets-patterns.ts))
+- Dependency CVEs: `osv:<id>` (e.g. `osv:GHSA-jf85-cpcp-j695`)
+
+If the ignore file is missing, malformed, or fails schema validation, the action degrades to "no suppressions" and logs a warning — a typo in the ignore file will **never** block your code review.
 
 ## How it works (the short version)
 
