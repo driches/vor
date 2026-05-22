@@ -146,7 +146,6 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ignoreList,
     fileReader,
     config: config.security,
-    signal: AbortSignal.timeout(120_000),
   };
 
   // Fire agent + scanners in parallel. The runner is error-isolated, so a

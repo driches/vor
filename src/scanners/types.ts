@@ -49,7 +49,6 @@ export interface ScannerDeps {
    *  of e.g. a lockfile is reused via the reader's own LRU. */
   fileReader: FileReader;
   config: SecurityConfig;
-  signal: AbortSignal;
 }
 
 /**

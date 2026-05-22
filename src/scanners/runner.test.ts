@@ -48,7 +48,6 @@ function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
     ignoreList,
     fileReader: defaultReader,
     config: {} as SecurityConfig,
-    signal: new AbortController().signal,
     ...over,
   };
 }
