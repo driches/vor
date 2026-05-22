@@ -53142,7 +53142,7 @@ function dedupAcrossScanners(findings) {
   const byFingerprint = /* @__PURE__ */ new Map();
   const byTriple = /* @__PURE__ */ new Map();
   const out = [];
-  const tripleKey = (f2) => `${f2.file_path}\0${f2.line}\0${f2.rule_id}`;
+  const tripleKey = (f2) => `${f2.file_path} ${f2.line} ${f2.rule_id}`;
   for (const f2 of findings) {
     const fpIdx = byFingerprint.get(f2.fingerprint);
     const trIdx = byTriple.get(tripleKey(f2));
@@ -53164,34 +53164,15 @@ function dedupAcrossScanners(findings) {
   }
   return out;
 }
-function dedupScannerFindings(args) {
-  const { scanFindings, aiComments } = args;
-  if (scanFindings.length === 0) return [];
-  if (aiComments.length === 0) return [...scanFindings];
-  const aiByFile = /* @__PURE__ */ new Map();
-  for (const c2 of aiComments) {
-    if (!AI_SECURITY_ADJACENT_CATEGORIES.has(c2.category)) continue;
-    const list = aiByFile.get(c2.file_path);
-    if (list) list.push(c2);
-    else aiByFile.set(c2.file_path, [c2]);
-  }
-  const out = [];
-  for (const f2 of scanFindings) {
-    if (f2.scanner === "dependency-cve") {
-      out.push(f2);
-      continue;
-    }
-    const candidates = aiByFile.get(f2.file_path);
-    if (!candidates) {
-      out.push(f2);
-      continue;
-    }
-    const overlapped = candidates.some(
-      (c2) => Math.abs(c2.line - f2.line) <= AI_OVERLAP_LINE_WINDOW
+function dedupKeptScannerComments(kept) {
+  const survivingAi = kept.filter((c2) => c2.source?.kind !== "scanner");
+  return kept.filter((c2) => {
+    if (c2.source?.kind !== "scanner") return true;
+    if (c2.source.scanner === "dependency-cve") return true;
+    return !survivingAi.some(
+      (ai) => ai.file_path === c2.file_path && Math.abs(ai.line - c2.line) <= AI_OVERLAP_LINE_WINDOW && AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category)
     );
-    if (!overlapped) out.push(f2);
-  }
-  return out;
+  });
 }
 
 // src/scanners/ignore-list.ts
@@ -53333,7 +53314,11 @@ function entryMatches(entry, finding) {
     if (normalizePackageName(entry.package.name, entry.package.ecosystem) !== normalizePackageName(finding.evidence.package, finding.evidence.ecosystem)) {
       return false;
     }
-    return semverInRange(finding.evidence.affected_version, entry.package.version);
+    return packageInRange(
+      finding.evidence.affected_version,
+      entry.package.version,
+      entry.package.ecosystem
+    );
   }
   if (isFileRuleEntry(entry)) {
     return finding.file_path === entry.file && finding.rule_id === entry.rule;
@@ -53344,13 +53329,17 @@ function normalizePackageName(name, ecosystem) {
   if (ecosystem === "npm" || ecosystem === "PyPI") return name.toLowerCase();
   return name;
 }
-function semverInRange(version, range) {
-  if ((0, import_semver.valid)(version) == null) return false;
-  try {
-    return (0, import_semver.satisfies)(version, range);
-  } catch {
-    return false;
+function packageInRange(version, range, ecosystem) {
+  if ((0, import_semver.valid)(version) != null) {
+    try {
+      return (0, import_semver.satisfies)(version, range);
+    } catch {
+    }
   }
+  if (ecosystem === "PyPI") {
+    return version.trim() === range.trim();
+  }
+  return false;
 }
 function isExpired(expires) {
   if (expires == null) return false;
@@ -54727,18 +54716,9 @@ async function runOrchestrator(input) {
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`
   );
-  const aiPredictedSurvivors = filterComments(aggregator.acceptedComments, {
-    severityFloor: config.severity.floor,
-    maxCommentsPerFile: config.severity.max_comments_per_file,
-    maxCommentsTotal: config.severity.max_comments_total
-  }).kept;
-  const dedupedFindings = dedupScannerFindings({
-    scanFindings: scanRunResult.findings,
-    aiComments: aiPredictedSurvivors
-  });
   const changedFilesMap = new Map(prContext.files.map((f2) => [f2.path, f2]));
   let addedScannerComments = 0;
-  for (const finding of dedupedFindings) {
+  for (const finding of scanRunResult.findings) {
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
       await logger.debug(
@@ -54760,6 +54740,7 @@ async function runOrchestrator(input) {
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total
   });
+  filtered.kept = dedupKeptScannerComments(filtered.kept);
   const rendered = renderSummary({
     draft: aggregator.snapshot(),
     keptComments: filtered.kept,
