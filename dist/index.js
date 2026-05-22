@@ -54006,7 +54006,14 @@ function createDependencyCveScanner(options) {
           );
           continue;
         }
-        for (const dep of parsed) {
+        const inDiff = parsed.filter((d2) => file.added_lines.has(d2.line));
+        if (inDiff.length === 0) {
+          void log2.debug(
+            `dependency-cve: ${file.path} parsed ${parsed.length} dep(s) but none on added lines; skipping`
+          );
+          continue;
+        }
+        for (const dep of inDiff) {
           resolvedDeps.push({ file_path: file.path, dep, vuln_ids: [] });
         }
       }
@@ -54755,12 +54762,26 @@ async function runOrchestrator(input) {
       `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ${addedScannerComments} added to review` + (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : "")
     );
   }
-  const filtered = filterComments(aggregator.acceptedComments, {
+  const caps = {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total
-  });
-  filtered.kept = dedupKeptScannerComments(filtered.kept);
+  };
+  let filtered = filterComments(aggregator.acceptedComments, caps);
+  const dedupedKept = dedupKeptScannerComments(filtered.kept);
+  if (dedupedKept.length < filtered.kept.length) {
+    const dedupExcluded = new Set(
+      filtered.kept.filter((c2) => !dedupedKept.includes(c2))
+    );
+    const eligible = aggregator.acceptedComments.filter(
+      (c2) => !dedupExcluded.has(c2)
+    );
+    filtered = filterComments(eligible, caps);
+    filtered.kept = dedupKeptScannerComments(filtered.kept);
+  } else {
+    filtered.kept = dedupedKept;
+  }
+  filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
   const rendered = renderSummary({
     draft: aggregator.snapshot(),
     keptComments: filtered.kept,

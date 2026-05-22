@@ -27,13 +27,19 @@ import type { IgnoreList, IgnoreMatchResult, ScannerDeps } from './types.js';
 // -----------------------------------------------------------------
 
 function makeChangedFile(over: Partial<ChangedFile> = {}): ChangedFile {
+  // Permissive default for `added_lines` (1..1000) so the test lockfile
+  // fixtures — all <30 lines — "look added" by default. Tests targeting
+  // the added-lines filter override this explicitly (e.g. with `new Set()`
+  // to assert that non-added deps are skipped).
+  const defaultAdded = new Set<number>();
+  for (let i = 1; i <= 1000; i += 1) defaultAdded.add(i);
   return {
     path: 'package-lock.json',
     status: 'modified',
     additions: 0,
     deletions: 0,
     reviewable_lines: [],
-    added_lines: new Set(),
+    added_lines: defaultAdded,
     language: 'json',
     is_generated: true,
     is_binary: false,
@@ -160,6 +166,37 @@ describe('createDependencyCveScanner — applies()', () => {
 // -----------------------------------------------------------------
 // scan() — happy path
 // -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — added-lines filter', () => {
+  it('skips deps whose line is NOT in file.added_lines (avoids OSV budget exhaustion on large lockfiles)', async () => {
+    // Regression for Codex P1: previously every parsed dep was queried,
+    // even ones the PR didn't touch. The orchestrator dropped non-reviewable
+    // findings later — but the OSV calls still happened, exhausting the
+    // 60s scanner budget. Now the scanner filters to file.added_lines first.
+    const osvClient = makeOsvClient();
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    // lodash version sits at line 8 in the fixture. Use added_lines that
+    // explicitly EXCLUDES line 8 (and the ±5-line lookahead window the parser
+    // uses).
+    const onlyOtherLines = new Set([1, 2, 3, 20, 21]);
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [
+          makeChangedFile({ path: 'package-lock.json', added_lines: onlyOtherLines }),
+        ],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(0);
+    expect(osvClient.queryBatch).not.toHaveBeenCalled();
+    expect(osvClient.getVuln).not.toHaveBeenCalled();
+  });
+});
 
 describe('createDependencyCveScanner — scan() happy path', () => {
   it('produces a critical lodash CVE finding from a package-lock.json', async () => {

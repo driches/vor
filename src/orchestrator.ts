@@ -240,19 +240,41 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     );
   }
 
-  // Apply final filters (severity floor, per-file cap, global cap, dedup) over
-  // the combined AI + scanner list, then run the post-filter scanner-vs-AI
-  // dedup so scanner findings only lose to AI comments that actually survive
-  // the caps. This is the list that ships.
-  const filtered = filterComments(aggregator.acceptedComments, {
+  // Apply final filters (severity floor, per-file cap, global cap) over the
+  // combined AI + scanner list, then run the post-filter scanner-vs-AI dedup
+  // so scanner findings only lose to AI comments that actually survive caps.
+  //
+  // If dedup removes any kept comments, rerun filterComments over the
+  // combined list minus the dedup-suppressed comments. This refills freed
+  // cap slots so we don't silently under-report when overlap + cap pressure
+  // collide. See Codex P2 on PR #8.
+  const caps = {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total,
-  });
-  // Post-filter dedup mutates `filtered.kept` in place (it's a fresh array
-  // returned by filterComments, not a view). Downstream rendering reads
-  // `filtered.kept` so this is the final list.
-  filtered.kept = dedupKeptScannerComments(filtered.kept);
+  };
+  let filtered = filterComments(aggregator.acceptedComments, caps);
+  const dedupedKept = dedupKeptScannerComments(filtered.kept);
+
+  if (dedupedKept.length < filtered.kept.length) {
+    const dedupExcluded = new Set(
+      filtered.kept.filter((c) => !dedupedKept.includes(c)),
+    );
+    const eligible = aggregator.acceptedComments.filter(
+      (c) => !dedupExcluded.has(c),
+    );
+    filtered = filterComments(eligible, caps);
+    // One more dedup pass: the refill may have admitted AI comments that
+    // overlap a kept scanner finding. Single iteration is enough in
+    // practice — worst case we ship below cap but lose no security signal.
+    filtered.kept = dedupKeptScannerComments(filtered.kept);
+  } else {
+    filtered.kept = dedupedKept;
+  }
+  // `dropped` is reported relative to the full pre-filter list so the summary
+  // line ("N additional comment(s) were dropped due to per-file/global caps")
+  // counts dedup-suppressed comments too.
+  filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
 
   const rendered = renderSummary({
     draft: aggregator.snapshot(),

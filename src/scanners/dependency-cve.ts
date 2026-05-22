@@ -550,7 +550,21 @@ export function createDependencyCveScanner(
           continue;
         }
 
-        for (const dep of parsed) {
+        // Only query OSV for deps that sit on lines this PR actually added.
+        // The orchestrator later validates findings against reviewable_lines
+        // and drops anything outside it — but OSV queries for non-added deps
+        // still consume the 60s scanner budget. On large lockfiles (10k+
+        // packages) that exhausts the budget and we lose findings for the
+        // deps that ARE on added lines. Filter early.
+        const inDiff = parsed.filter((d) => file.added_lines.has(d.line));
+        if (inDiff.length === 0) {
+          void log.debug(
+            `dependency-cve: ${file.path} parsed ${parsed.length} dep(s) but none on added lines; skipping`,
+          );
+          continue;
+        }
+
+        for (const dep of inDiff) {
           resolvedDeps.push({ file_path: file.path, dep, vuln_ids: [] });
         }
       }

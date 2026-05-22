@@ -1112,13 +1112,23 @@ describe('runOrchestrator — Scenario 4: scanner error does not block AI review
       { filename: 'src/app.ts', changes: 1, patch: appDiff },
     ];
 
+    // Multi-line lockfile so the parser's anchored line for lodash falls
+    // inside the diff's added-line range (the diff @@ -5,0 +6,4 @@ adds
+    // lines 6-9; the version sits at line 7).
     octokitState.contents.set(
       'package-lock.json',
-      JSON.stringify({
-        packages: {
-          'node_modules/lodash': { version: '4.17.20' },
-        },
-      }),
+      [
+        '{',
+        '  "lockfileVersion": 3,',
+        '  "packages": {',
+        '    "": { "name": "app", "version": "1.0.0" },',
+        '    "node_modules/other": { "version": "2.0.0" },',
+        '    "node_modules/lodash": {',
+        '      "version": "4.17.20"',
+        '    }',
+        '  }',
+        '}',
+      ].join('\n'),
     );
     octokitState.contents.set(
       '.code-review.yml',
@@ -1197,11 +1207,22 @@ describe('runOrchestrator — parallel execution of agent and scanners', () => {
       { filename: 'package-lock.json', changes: 3, patch: lockDiff },
       { filename: 'src/app.ts', changes: 1, patch: appDiff },
     ];
+    // Multi-line so the lodash version line aligns with the diff's added-line
+    // range (@@ -5,0 +6,3 @@ adds lines 6-8).
     octokitState.contents.set(
       'package-lock.json',
-      JSON.stringify({
-        packages: { 'node_modules/lodash': { version: '4.17.20' } },
-      }),
+      [
+        '{',
+        '  "lockfileVersion": 3,',
+        '  "packages": {',
+        '    "": { "name": "app", "version": "1.0.0" },',
+        '    "node_modules/other": { "version": "2.0.0" },',
+        '    "node_modules/lodash": {',
+        '      "version": "4.17.20"',
+        '    }',
+        '  }',
+        '}',
+      ].join('\n'),
     );
     octokitState.contents.set(
       '.code-review.yml',
