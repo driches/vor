@@ -576,7 +576,17 @@ export function createDependencyCveScanner(
         // still consume the 60s scanner budget. On large lockfiles (10k+
         // packages) that exhausts the budget and we lose findings for the
         // deps that ARE on added lines. Filter early.
-        const inDiff = parsed.filter((d) => file.added_lines.has(d.line));
+        //
+        // For lockfile formats with a header/body split (yarn), the parser
+        // also exposes `header_line`. A PR can add a new selector to the
+        // header while the body's `version "..."` stays unchanged — that
+        // still introduces a new dep route, so we accept the dep if EITHER
+        // line is added.
+        const inDiff = parsed.filter(
+          (d) =>
+            file.added_lines.has(d.line) ||
+            (d.header_line !== undefined && file.added_lines.has(d.header_line)),
+        );
         if (inDiff.length === 0) {
           void log.debug(
             `dependency-cve: ${file.path} parsed ${parsed.length} dep(s) but none on added lines; skipping`,

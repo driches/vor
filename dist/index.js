@@ -53510,7 +53510,13 @@ var YarnLockParser = class {
           version,
           // Anchor on the `version "..."` line; matches the user's mental
           // model of "the line that says 1.2.4 is the line that's flagged".
-          line: versionLine
+          line: versionLine,
+          // ALSO expose the header line so the dep-cve scanner's
+          // added-lines filter can catch yarn header-only changes (e.g.
+          // a new selector added to an existing entry whose body's
+          // version stays unchanged). Without this the dep would be
+          // dropped from OSV scope.
+          header_line: i2 + 1
         });
       }
       i2 = brokeOnNextHeader ? j2 : j2 + 1;
@@ -54087,7 +54093,9 @@ function createDependencyCveScanner(options) {
           );
           continue;
         }
-        const inDiff = parsed.filter((d2) => file.added_lines.has(d2.line));
+        const inDiff = parsed.filter(
+          (d2) => file.added_lines.has(d2.line) || d2.header_line !== void 0 && file.added_lines.has(d2.header_line)
+        );
         if (inDiff.length === 0) {
           void log2.debug(
             `dependency-cve: ${file.path} parsed ${parsed.length} dep(s) but none on added lines; skipping`

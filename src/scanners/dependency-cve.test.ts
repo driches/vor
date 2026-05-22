@@ -168,6 +168,45 @@ describe('createDependencyCveScanner — applies()', () => {
 // scan() — happy path
 // -----------------------------------------------------------------
 
+describe('createDependencyCveScanner — yarn header-only addition (regression)', () => {
+  it('scans a yarn dep when only the header line is added (body version is context)', async () => {
+    // Regression for Codex P2: yarn parser anchors `line` to the body's
+    // `version "..."` line. If the PR only adds a new selector to an
+    // existing header (header_line added but version line stays as
+    // context), the dep would previously be dropped because
+    // `added_lines.has(d.line)` was false. Now we also check
+    // `added_lines.has(d.header_line)` so header-only additions still
+    // trigger OSV scanning.
+    const yarnLock = [
+      '"lodash@^4.17.0":', // line 1 — header (we'll mark this as added)
+      '  version "4.17.20"', // line 2 — version body (we'll mark as context, NOT added)
+      '  resolved "https://example.com/lodash"', // line 3
+      '',
+    ].join('\n');
+    const osvClient = makeOsvClient();
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(yarnLock),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    // Only line 1 (the header) is added; line 2 (version body) is context.
+    const file = makeChangedFile({
+      path: 'yarn.lock',
+      added_lines: new Set([1]),
+    });
+    const result = await scanner.scan(
+      makeScannerDeps({ changedFiles: [file], fileReader: reader }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    expect(osvClient.queryBatch).toHaveBeenCalled();
+    // The finding still anchors on the version body line (line 2) so the
+    // comment lands on the user's mental "this is the line that says
+    // 4.17.20" — even though that line was context, not added.
+    expect(result.findings[0]!.line).toBe(2);
+  });
+});
+
 describe('createDependencyCveScanner — added-lines filter', () => {
   it('skips deps whose line is NOT in file.added_lines (avoids OSV budget exhaustion on large lockfiles)', async () => {
     // Regression for Codex P1: previously every parsed dep was queried,

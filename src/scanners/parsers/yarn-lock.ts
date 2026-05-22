@@ -134,6 +134,12 @@ class YarnLockParser implements LockfileParser {
           // Anchor on the `version "..."` line; matches the user's mental
           // model of "the line that says 1.2.4 is the line that's flagged".
           line: versionLine,
+          // ALSO expose the header line so the dep-cve scanner's
+          // added-lines filter can catch yarn header-only changes (e.g.
+          // a new selector added to an existing entry whose body's
+          // version stays unchanged). Without this the dep would be
+          // dropped from OSV scope.
+          header_line: i + 1,
         });
       }
 

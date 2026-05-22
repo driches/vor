@@ -95,7 +95,9 @@ describe('yarnLockParser.parse', () => {
       '',
     ].join('\n');
     const deps = yarnLockParser.parse(content);
-    expect(deps).toEqual([{ ecosystem: 'npm', name: 'bar', version: '2.0.0', line: 4 }]);
+    expect(deps).toEqual([
+      { ecosystem: 'npm', name: 'bar', version: '2.0.0', line: 4, header_line: 3 },
+    ]);
   });
 
   it('handles CRLF line endings', () => {
@@ -120,7 +122,7 @@ describe('yarnLockParser.parse', () => {
       ].join('\n');
       const deps = yarnLockParser.parse(content);
       expect(deps).toEqual([
-        { ecosystem: 'npm', name: 'react', version: '18.2.0', line: 2 },
+        { ecosystem: 'npm', name: 'react', version: '18.2.0', line: 2, header_line: 1 },
       ]);
     });
 
@@ -133,7 +135,13 @@ describe('yarnLockParser.parse', () => {
       ].join('\n');
       const deps = yarnLockParser.parse(content);
       expect(deps).toEqual([
-        { ecosystem: 'npm', name: '@scope/real-package', version: '1.2.3', line: 2 },
+        {
+          ecosystem: 'npm',
+          name: '@scope/real-package',
+          version: '1.2.3',
+          line: 2,
+          header_line: 1,
+        },
       ]);
     });
 
@@ -149,5 +157,24 @@ describe('yarnLockParser.parse', () => {
       const deps = yarnLockParser.parse(content);
       expect(deps.map((d) => d.name).sort()).toEqual(['@types/node', 'lodash']);
     });
+  });
+
+  it('exposes header_line distinct from line so dep-cve can match header-only additions', () => {
+    // Regression: when a yarn PR only adds a new selector to an existing
+    // entry's header (the body's `version "..."` line stays as context),
+    // dep-cve's `added_lines.has(d.line)` filter dropped the dep — the
+    // version line wasn't in added_lines. Now the parser also emits
+    // `header_line`, and the dep-cve filter accepts the dep if EITHER
+    // line was added.
+    const content = [
+      'lodash@^4.17.20:', // line 1 — header
+      '  version "4.17.21"', // line 2 — version body
+      '  resolved "https://..."', // line 3
+      '',
+    ].join('\n');
+    const deps = yarnLockParser.parse(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.line).toBe(2);
+    expect(deps[0]!.header_line).toBe(1);
   });
 });
