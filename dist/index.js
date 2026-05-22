@@ -53643,15 +53643,39 @@ function resolveOptions(opts) {
     fetch: opts?.fetch ?? fetch
   };
 }
-function sleep2(ms) {
-  return new Promise((resolve3) => setTimeout(resolve3, ms));
+function sleep2(ms, signal) {
+  return new Promise((resolve3, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve3();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 function shouldRetryStatus(status) {
   return status >= 500 && status < 600;
 }
-async function withRetries(requestFn, maxRetries, describe) {
+function isAbortError(err) {
+  if (!(err instanceof OsvClientError)) return false;
+  const cause = err.cause;
+  return cause?.name === "AbortError";
+}
+async function withRetries(requestFn, maxRetries, describe, signal) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new OsvClientError(`${describe} aborted before attempt ${attempt + 1}`, void 0, {
+        cause: lastErr ?? new DOMException("Aborted", "AbortError")
+      });
+    }
     try {
       return await requestFn();
     } catch (err) {
@@ -53659,9 +53683,16 @@ async function withRetries(requestFn, maxRetries, describe) {
       if (err instanceof OsvClientError && err.status != null && !shouldRetryStatus(err.status)) {
         throw err;
       }
+      if (isAbortError(err) || signal?.aborted) {
+        throw err instanceof OsvClientError ? err : new OsvClientError(`${describe} aborted`, void 0, { cause: err });
+      }
       if (attempt === maxRetries) break;
       const delay = BACKOFF_BASE_MS * Math.pow(BACKOFF_FACTOR, attempt);
-      await sleep2(delay);
+      try {
+        await sleep2(delay, signal);
+      } catch {
+        throw err instanceof OsvClientError ? err : new OsvClientError(`${describe} aborted during backoff`, void 0, { cause: err });
+      }
     }
   }
   if (lastErr instanceof OsvClientError) throw lastErr;
@@ -53741,7 +53772,8 @@ function createOsvClient(opts) {
         return await res.json();
       },
       cfg.maxRetries,
-      "OSV querybatch"
+      "OSV querybatch",
+      signal
     );
   }
   return {
@@ -53769,7 +53801,8 @@ function createOsvClient(opts) {
           return await res.json();
         },
         cfg.maxRetries,
-        `OSV getVuln(${id})`
+        `OSV getVuln(${id})`,
+        opts2?.signal
       );
     }
   };

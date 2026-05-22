@@ -126,12 +126,27 @@ function resolveOptions(opts?: OsvClientOptions): ResolvedOptions {
 }
 
 /**
- * Sleep with cancellation. Resolves either when the timer fires or when an
- * outer caller chooses to abort us via clearTimeout. We don't currently abort
- * the backoff itself, but the structure leaves room for it.
+ * Sleep with cancellation. Resolves when the timer fires OR when the optional
+ * `signal` aborts (in which case the returned promise REJECTS with an
+ * AbortError so the caller breaks out of the backoff loop instead of waiting
+ * the full delay).
  */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -144,18 +159,43 @@ function shouldRetryStatus(status: number): boolean {
 }
 
 /**
+ * True if `err` was caused by the caller's AbortSignal firing. We treat
+ * these as non-retryable: the scanner runner has already given up on this
+ * work, so retrying would only burn time/network budget the deadline says
+ * is gone. Detected via the AbortError name on the underlying `cause`
+ * (set by `fetchOnce` when the request's AbortController fires).
+ */
+function isAbortError(err: unknown): boolean {
+  if (!(err instanceof OsvClientError)) return false;
+  const cause = err.cause as { name?: string } | undefined;
+  return cause?.name === 'AbortError';
+}
+
+/**
  * Run `requestFn` with the retry policy. `requestFn` MUST throw on a 4xx (we
  * don't have visibility into the response here) so it's structured as an
  * async function returning the parsed body and throwing typed errors
  * otherwise.
+ *
+ * Honors `signal` (the caller-supplied cancellation): if it fires between
+ * attempts we exit the loop immediately instead of waiting out the backoff
+ * and trying again. Also short-circuits when the failure ITSELF was caused
+ * by the abort (e.g. `fetchOnce` rejected because the signal fired during
+ * the request).
  */
 async function withRetries<T>(
   requestFn: () => Promise<T>,
   maxRetries: number,
   describe: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new OsvClientError(`${describe} aborted before attempt ${attempt + 1}`, undefined, {
+        cause: lastErr ?? new DOMException('Aborted', 'AbortError'),
+      });
+    }
     try {
       return await requestFn();
     } catch (err) {
@@ -164,9 +204,23 @@ async function withRetries<T>(
       if (err instanceof OsvClientError && err.status != null && !shouldRetryStatus(err.status)) {
         throw err;
       }
+      // The caller cancelled us mid-request — don't retry, propagate.
+      if (isAbortError(err) || signal?.aborted) {
+        throw err instanceof OsvClientError
+          ? err
+          : new OsvClientError(`${describe} aborted`, undefined, { cause: err });
+      }
       if (attempt === maxRetries) break;
       const delay = BACKOFF_BASE_MS * Math.pow(BACKOFF_FACTOR, attempt);
-      await sleep(delay);
+      try {
+        await sleep(delay, signal);
+      } catch {
+        // Abort fired during backoff sleep — propagate the original error
+        // (or a wrapped abort error) without further retries.
+        throw err instanceof OsvClientError
+          ? err
+          : new OsvClientError(`${describe} aborted during backoff`, undefined, { cause: err });
+      }
     }
   }
   if (lastErr instanceof OsvClientError) throw lastErr;
@@ -275,6 +329,7 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
       },
       cfg.maxRetries,
       'OSV querybatch',
+      signal,
     );
   }
 
@@ -312,6 +367,7 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
         },
         cfg.maxRetries,
         `OSV getVuln(${id})`,
+        opts?.signal,
       );
     },
   };

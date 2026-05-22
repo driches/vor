@@ -217,3 +217,73 @@ describe('createOsvClient network error', () => {
     expect(fakeFetch).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('createOsvClient external-abort cancellation', () => {
+  it('does NOT retry after the caller-supplied signal aborts during a request', async () => {
+    // Codex P1 round 8: aborted requests used to feed back into the retry
+    // loop because the OsvClientError didn't carry an AbortError cause.
+    // Now the retry loop short-circuits on either `signal.aborted` OR an
+    // AbortError-cause failure.
+    const controller = new AbortController();
+    const fakeFetch = vi.fn().mockImplementation(async (_url, init?: RequestInit) => {
+      // Abort mid-flight, then bounce the abort back as an AbortError —
+      // mimicking real fetch behavior when its signal fires.
+      controller.abort();
+      const err = new DOMException('Aborted', 'AbortError');
+      (init?.signal as AbortSignal | undefined)?.dispatchEvent(new Event('abort'));
+      throw err;
+    });
+    const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
+    await expect(
+      client.queryBatch(
+        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
+        { signal: controller.signal },
+      ),
+    ).rejects.toBeInstanceOf(OsvClientError);
+    // Exactly ONE fetch attempt — no retry after the abort.
+    expect(fakeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT retry when the signal is already aborted before the first attempt', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fakeFetch = vi.fn().mockResolvedValue(errorResponse(503, 'down'));
+    const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
+    await expect(
+      client.queryBatch(
+        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
+        { signal: controller.signal },
+      ),
+    ).rejects.toBeInstanceOf(OsvClientError);
+    // Either zero fetches (pre-loop check) or at most one (loop entered and
+    // bailed). Anything more means we ignored the abort and retried.
+    expect(fakeFetch.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it('does NOT retry after the signal aborts during the backoff sleep', async () => {
+    // First call returns 503 (retryable); during the backoff, the caller
+    // aborts. The loop must exit instead of running another attempt.
+    const controller = new AbortController();
+    let attempts = 0;
+    const fakeFetch = vi.fn().mockImplementation(async () => {
+      attempts += 1;
+      return errorResponse(503, 'try again');
+    });
+    // Intercept setTimeout to abort the controller in place of waiting.
+    vi.spyOn(global, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void) => {
+      // Abort BEFORE invoking the timer callback — the sleep helper's
+      // listener fires, rejecting the sleep, and the retry loop exits.
+      controller.abort();
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+    const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
+    await expect(
+      client.queryBatch(
+        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
+        { signal: controller.signal },
+      ),
+    ).rejects.toBeInstanceOf(OsvClientError);
+    expect(attempts).toBe(1);
+  });
+});
