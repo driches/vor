@@ -33,6 +33,7 @@ function makeChangedFile(over: Partial<ChangedFile> = {}): ChangedFile {
     additions: 0,
     deletions: 0,
     reviewable_lines: [],
+    added_lines: new Set(),
     language: 'json',
     is_generated: true,
     is_binary: false,
@@ -796,5 +797,87 @@ describe('createDependencyCveScanner — PyPI case-folding for findFixedVersion'
     // Upgrade hint is in the description, not the suggestion field.
     expect('suggestion' in finding).toBe(false);
     expect(finding.description).toContain('>=2.3.3');
+  });
+});
+
+// -----------------------------------------------------------------
+// getVuln() calls run in parallel
+// -----------------------------------------------------------------
+
+/**
+ * Sequential `await getVuln(id)` for each vuln id makes a lockfile with N
+ * CVEs cost N * latency. The scanner runs in parallel via Promise.all so
+ * total wall-clock latency stays near the slowest single fetch.
+ *
+ * The test plants 3 different vuln ids (one per dep) each waiting 50ms,
+ * then asserts the whole scan completes in well under 3 * 50ms. The
+ * threshold is generous (well above 50ms but well below 150ms) so test-
+ * runner jitter on slower CI doesn't make this flaky.
+ */
+describe('createDependencyCveScanner — parallel getVuln', () => {
+  it('fetches multiple vuln records in parallel (not serially)', async () => {
+    // Three deps in one lockfile, each mapping to a distinct vuln id.
+    const THREE_PKG_LOCK = [
+      '{',
+      '  "name": "test",',
+      '  "version": "1.0.0",',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "test", "version": "1.0.0" },',
+      '    "node_modules/lodash": {',
+      '      "version": "4.17.20"',
+      '    },',
+      '    "node_modules/minimist": {',
+      '      "version": "1.2.5"',
+      '    },',
+      '    "node_modules/axios": {',
+      '      "version": "0.21.0"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const ID_A = 'GHSA-aaaa-aaaa-aaaa';
+    const ID_B = 'GHSA-bbbb-bbbb-bbbb';
+    const ID_C = 'GHSA-cccc-cccc-cccc';
+
+    const batchResp: OsvBatchResponse = {
+      results: [
+        { vulns: [{ id: ID_A, modified: '2024-01-01T00:00:00Z' }] },
+        { vulns: [{ id: ID_B, modified: '2024-01-01T00:00:00Z' }] },
+        { vulns: [{ id: ID_C, modified: '2024-01-01T00:00:00Z' }] },
+      ],
+    };
+
+    // Each getVuln sleeps 50ms before returning a shaped vuln. If the calls
+    // run serially the total cost is ~150ms; in parallel it's ~50ms.
+    const SLEEP_MS = 50;
+    const PARALLEL_THRESHOLD_MS = 130; // 3 * 50ms = 150ms serial; we want < that
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(batchResp),
+      getVuln: vi.fn().mockImplementation(async (id: string) => {
+        await new Promise((r) => setTimeout(r, SLEEP_MS));
+        return { ...LODASH_VULN, id };
+      }),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(THREE_PKG_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const start = Date.now();
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+    const elapsed = Date.now() - start;
+
+    expect(osvClient.getVuln).toHaveBeenCalledTimes(3);
+    expect(result.findings.length).toBeGreaterThanOrEqual(3);
+    // Parallel: should be < ~150ms (3 * 50ms serial). Threshold is generous
+    // to absorb CI jitter while still distinguishing parallel from serial.
+    expect(elapsed).toBeLessThan(PARALLEL_THRESHOLD_MS);
   });
 });

@@ -9,6 +9,7 @@ function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
     additions: 0,
     deletions: 0,
     reviewable_lines: [],
+    added_lines: new Set(),
     language: 'plaintext',
     is_generated: false,
     is_binary: false,

@@ -6,9 +6,10 @@
  *   1. Filter the changed-file set to non-binary, non-generated files. Binary
  *      blobs and generated files (lockfiles, minified JS, snapshots) are noisy
  *      and rarely the source of leaked credentials.
- *   2. Walk each file's `reviewable_lines` ranges. Only lines inside those
- *      ranges are scanned — anything outside is either context the agent
- *      cannot comment on, or pre-existing code we shouldn't flag.
+ *   2. Walk each file's `added_lines` set — ONLY lines this PR actually added
+ *      with a leading `+` in the diff. We deliberately ignore context lines
+ *      (in `reviewable_lines` but not `added_lines`) because a secret on a
+ *      context line pre-dates this PR and flagging it here would be noise.
  *   3. For each in-range line, run every effective pattern against
  *      `head_line_text.get(line)`. Patterns carry the `g` flag and may match
  *      multiple times per line; `lastIndex` is reset before each scan so
@@ -158,87 +159,88 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
         if (file.is_binary || file.is_generated) continue;
         files_examined += 1;
 
-        for (const [rangeStart, rangeEnd] of file.reviewable_lines) {
-          for (let lineNo = rangeStart; lineNo <= rangeEnd; lineNo += 1) {
-            const text = file.head_line_text.get(lineNo);
-            if (text === undefined) continue;
+        // Iterate `added_lines` (the strict `+` lines of the PR), not
+        // `reviewable_lines` (which also includes ` ` context lines). A secret
+        // on a context line was already there before this PR — out of scope.
+        for (const lineNo of file.added_lines) {
+          const text = file.head_line_text.get(lineNo);
+          if (text === undefined) continue;
 
-            for (const pattern of patterns) {
-              try {
-                // Reset shared regex state. Patterns carry the `g` flag and
-                // are shared across calls — without resetting, the next exec()
-                // would start from wherever the previous file left off.
-                pattern.pattern.lastIndex = 0;
-                let m: RegExpExecArray | null;
-                while ((m = pattern.pattern.exec(text)) !== null) {
-                  const raw = m[0];
+          for (const pattern of patterns) {
+            try {
+              // Reset shared regex state. Patterns carry the `g` flag and
+              // are shared across calls — without resetting, the next exec()
+              // would start from wherever the previous file left off.
+              pattern.pattern.lastIndex = 0;
+              let m: RegExpExecArray | null;
+              while ((m = pattern.pattern.exec(text)) !== null) {
+                const raw = m[0];
 
-                  // Apply postCheck (entropy gate, etc.) before doing anything
-                  // that could surface the value.
-                  if (pattern.postCheck && !pattern.postCheck(raw)) {
-                    if (m.index === pattern.pattern.lastIndex) {
-                      pattern.pattern.lastIndex += 1; // safety vs. zero-width
-                    }
-                    continue;
+                // Apply postCheck (entropy gate, etc.) before doing anything
+                // that could surface the value.
+                if (pattern.postCheck && !pattern.postCheck(raw)) {
+                  if (m.index === pattern.pattern.lastIndex) {
+                    pattern.pattern.lastIndex += 1; // safety vs. zero-width
                   }
+                  continue;
+                }
 
-                  // Critical ordering: register BEFORE building any object
-                  // that we might inadvertently log later.
-                  registerSecret(raw);
+                // Critical ordering: register BEFORE building any object
+                // that we might inadvertently log later.
+                registerSecret(raw);
 
-                  const rule_id = `secret:${pattern.id}`;
-                  const evidence: ScanEvidence = {
-                    kind: 'secret',
-                    masked_match: maskSecret(raw),
-                    pattern_id: pattern.id,
-                  };
-                  const finding: ScanFinding = {
-                    scanner: SCANNER_ID,
-                    rule_id,
-                    file_path: file.path,
-                    line: lineNo,
-                    severity: pattern.severity,
-                    category: 'vulnerability',
-                    confidence: pattern.confidence,
-                    title: `Possible ${pattern.display_name} in ${path.basename(file.path)}`,
-                    description: buildDescription(pattern),
-                    evidence,
-                    fingerprint: fingerprintOf(rule_id, file.path, lineNo),
-                  };
+                const rule_id = `secret:${pattern.id}`;
+                const evidence: ScanEvidence = {
+                  kind: 'secret',
+                  masked_match: maskSecret(raw),
+                  pattern_id: pattern.id,
+                };
+                const finding: ScanFinding = {
+                  scanner: SCANNER_ID,
+                  rule_id,
+                  file_path: file.path,
+                  line: lineNo,
+                  severity: pattern.severity,
+                  category: 'vulnerability',
+                  confidence: pattern.confidence,
+                  title: `Possible ${pattern.display_name} in ${path.basename(file.path)}`,
+                  description: buildDescription(pattern),
+                  evidence,
+                  fingerprint: fingerprintOf(rule_id, file.path, lineNo),
+                };
 
-                  const match = deps.ignoreList.matches(finding);
-                  if (match.ignored) {
-                    if (match.expired) {
-                      void log.notice(
-                        `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-                      );
-                    }
-                    // Advance past zero-width matches before the next iteration.
-                    if (m.index === pattern.pattern.lastIndex) {
-                      pattern.pattern.lastIndex += 1;
-                    }
-                    continue;
+                const match = deps.ignoreList.matches(finding);
+                if (match.ignored) {
+                  if (match.expired) {
+                    void log.notice(
+                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
+                    );
                   }
-                  findings.push(finding);
-
-                  // Safety: if a pattern matched at lastIndex === m.index (zero
-                  // width), bump to avoid an infinite loop.
+                  // Advance past zero-width matches before the next iteration.
                   if (m.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
                   }
+                  continue;
                 }
-              } catch (err) {
-                void log.warn(
-                  `secrets: pattern ${pattern.id} threw on ${file.path}:${lineNo}: ${(err as Error).message}`,
-                );
-                errors.push({
-                  message: `Pattern ${pattern.id} threw while scanning ${file.path}`,
-                  cause: (err as Error).message,
-                  fatal: false,
-                });
-                // Avoid leaking failed-pattern state into the next iteration.
-                pattern.pattern.lastIndex = 0;
+                findings.push(finding);
+
+                // Safety: if a pattern matched at lastIndex === m.index (zero
+                // width), bump to avoid an infinite loop.
+                if (m.index === pattern.pattern.lastIndex) {
+                  pattern.pattern.lastIndex += 1;
+                }
               }
+            } catch (err) {
+              void log.warn(
+                `secrets: pattern ${pattern.id} threw on ${file.path}:${lineNo}: ${(err as Error).message}`,
+              );
+              errors.push({
+                message: `Pattern ${pattern.id} threw while scanning ${file.path}`,
+                cause: (err as Error).message,
+                fatal: false,
+              });
+              // Avoid leaking failed-pattern state into the next iteration.
+              pattern.pattern.lastIndex = 0;
             }
           }
         }

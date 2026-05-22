@@ -637,7 +637,13 @@ export function createDependencyCveScanner(
         for (const id of r.vuln_ids) uniqueVulnIds.add(id);
       }
 
+      // Fetch full vuln records in PARALLEL. Sequential awaits here would
+      // stack: a lockfile with N CVEs makes N sequential HTTP round-trips,
+      // exhausting the 60s scanner timeout on large lockfiles. `Promise.all`
+      // is the simplest win; we keep error isolation by per-promise catch so
+      // one bad id doesn't reject the whole batch.
       const vulnRecords = new Map<string, OsvVuln>();
+      const idsToFetch: string[] = [];
       for (const id of uniqueVulnIds) {
         const cacheKey = vulnCacheKey(id);
         const cached = deps.cache.get<OsvVuln>(cacheKey);
@@ -645,21 +651,42 @@ export function createDependencyCveScanner(
           vulnRecords.set(id, cached);
           continue;
         }
-        try {
-          const fetched = await getOsvClient().getVuln(id);
-          network_calls += 1;
-          deps.cache.set<OsvVuln>(cacheKey, fetched);
-          vulnRecords.set(id, fetched);
-        } catch (err) {
-          void log.warn(
-            `dependency-cve: OSV getVuln(${id}) failed: ${(err as Error).message}`,
-          );
-          errors.push({
-            message: `OSV getVuln(${id}) failed`,
-            cause: (err as Error).message,
-            fatal: false,
-          });
-          // Don't return — other vulns may still produce findings.
+        idsToFetch.push(id);
+      }
+      if (idsToFetch.length > 0) {
+        // Each entry resolves to { id, ok: true, vuln } or { id, ok: false, error }.
+        // Bundling the id with the result keeps the loop below simple and avoids
+        // ordering assumptions about Promise.all output (which IS index-stable
+        // but the explicit id makes failure handling self-evident).
+        type FetchOutcome =
+          | { id: string; ok: true; vuln: OsvVuln }
+          | { id: string; ok: false; error: Error };
+        const outcomes = await Promise.all(
+          idsToFetch.map(async (id): Promise<FetchOutcome> => {
+            try {
+              const vuln = await getOsvClient().getVuln(id);
+              return { id, ok: true, vuln };
+            } catch (err) {
+              return { id, ok: false, error: err as Error };
+            }
+          }),
+        );
+        for (const outcome of outcomes) {
+          if (outcome.ok) {
+            network_calls += 1;
+            deps.cache.set<OsvVuln>(vulnCacheKey(outcome.id), outcome.vuln);
+            vulnRecords.set(outcome.id, outcome.vuln);
+          } else {
+            void log.warn(
+              `dependency-cve: OSV getVuln(${outcome.id}) failed: ${outcome.error.message}`,
+            );
+            errors.push({
+              message: `OSV getVuln(${outcome.id}) failed`,
+              cause: outcome.error.message,
+              fatal: false,
+            });
+            // Don't bail — other vulns may still produce findings.
+          }
         }
       }
 

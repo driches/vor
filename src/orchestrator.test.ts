@@ -539,6 +539,170 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
 });
 
 // -----------------------------------------------------------------
+// Scenario 2b: Predicted-survivor dedup — an AI comment that won't ship MUST
+// NOT suppress an overlapping scanner finding.
+//
+// Bug: the OLD ordering deduped scanner findings against the FULL
+// `acceptedComments` list before the cap pass. So a low-severity AI comment
+// that was about to be capped out could still "win" dedup, taking down a
+// higher-severity scanner finding with it.
+//
+// Setup that exercises it: 3 AI 'security' comments on `src/auth.ts`. The
+// per-file cap is 2, so the lowest-severity AI ('minor') gets dropped by the
+// final filter. That minor sits on line 10 — overlapping the planted AWS key
+// on line 11. The two surviving AIs ('important') sit on lines 5 and 7, both
+// outside the 3-line overlap window for the scanner on line 11.
+//
+//   OLD: dedup scanner vs [imp5, imp7, min10] — overlap with min10 → SUPPRESSED.
+//        filter([imp5, imp7, min10], per_file=2) → [imp5, imp7]. Scanner lost.
+//
+//   NEW: aiPredictedSurvivors = filter([imp5, imp7, min10], per_file=2) =
+//        [imp5, imp7]. dedup scanner vs [imp5, imp7] — distances 6 and 4,
+//        neither within window → scanner SURVIVES.
+//        Final filter on [imp5, imp7, min10, scan11] (sorted critical desc):
+//        [scan11(crit), imp5, imp7, min10]. per_file=2 → [scan11, imp5].
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not suppress scanner', () => {
+  it('keeps the scanner finding when the overlapping AI comment gets dropped by per-file cap', async () => {
+    // Extend the base diff for src/auth.ts to cover more added lines so all
+    // AI lines (5, 7) and the scanner line (11) are reviewable.
+    const authDiff = [
+      'diff --git a/src/auth.ts b/src/auth.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/auth.ts',
+      '+++ b/src/auth.ts',
+      '@@ -4,0 +5,8 @@',
+      '+// auth module setup',
+      '+',
+      '+// auth helper goes here',
+      '+',
+      '+export const auth = {',
+      '+  // misc comment',
+      `+  awsKey: "${PLANTED_AWS_KEY}",`,
+      '+};',
+    ].join('\n');
+    const appDiff = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 3333333..4444444 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -4,0 +5,3 @@',
+      '+export function app() {',
+      '+  return 1;',
+      '+}',
+    ].join('\n');
+    octokitState.diff = `${authDiff}\n${appDiff}\n`;
+    octokitState.filesApi = [
+      { filename: 'src/auth.ts', changes: 8, patch: authDiff },
+      { filename: 'src/app.ts', changes: 3, patch: appDiff },
+    ];
+
+    // per-file cap = 2 and 3 AI comments → the lowest-severity ('minor') one
+    // is the one that loses. The two 'important' ones survive.
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    secrets:',
+        '      enabled: true',
+        'severity:',
+        '  floor: nit',
+        '  max_comments_per_file: 2',
+        '  max_comments_total: 30',
+      ].join('\n'),
+    );
+
+    // Script three AI inline comments in a single turn, then a summary.
+    // Critical/important comments REQUIRE a `suggestion` field (see
+    // post-inline-comment.ts) — the suggestions below are non-empty stubs
+    // that differ from the current line text so validation passes.
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_a',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'important',
+            file_path: 'src/auth.ts',
+            line: 5,
+            side: 'RIGHT',
+            category: 'security',
+            title: 'Review auth module export shape',
+            why_it_matters: 'Worth a second look at how the auth module is being constructed.',
+            suggestion: '// Add an explicit summary header for the auth module',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_b',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'important',
+            file_path: 'src/auth.ts',
+            line: 7,
+            side: 'RIGHT',
+            category: 'security',
+            title: 'Auth helper placement looks off',
+            why_it_matters: 'Place this helper in a dedicated module to keep this file focused.',
+            suggestion: '// Move the auth helper into src/auth/helper.ts',
+            confidence: 'medium',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_c',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'minor',
+            file_path: 'src/auth.ts',
+            line: 11,
+            side: 'RIGHT',
+            category: 'security',
+            title: 'Document credential origin',
+            why_it_matters: 'A brief note on where this credential should come from would help readers.',
+            confidence: 'low',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_summary',
+          name: 'post_summary',
+          input: {
+            strengths: ['Clear and focused changes that are easy to follow.'],
+            assessment: 'comment',
+            assessment_reasoning: 'A few observations.',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string; body: string }>;
+    };
+    // Per-file cap=2 on src/auth.ts. With the fix:
+    //   final filter sorts by severity desc → critical scanner first, then
+    //   two important AIs, then minor. Cap=2 → keep scanner + one important.
+    expect(call.comments).toHaveLength(2);
+    // The scanner comment IS in the output (the whole point of this scenario).
+    const scannerComment = call.comments.find((c) => c.body.includes('via secrets scan'));
+    expect(scannerComment).toBeDefined();
+    expect(scannerComment!.path).toBe('src/auth.ts');
+    expect(scannerComment!.body).toContain('AWS access key id');
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 3: dependency-cve happy path — lockfile CVE makes it into the review.
 //
 // The dep-cve scanner emits its finding against the lockfile, which is

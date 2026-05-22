@@ -215,7 +215,17 @@ function entryMatches(entry: IgnoreEntry, finding: ScanFinding): boolean {
   if (isPackageEntry(entry)) {
     if (finding.evidence.kind !== 'cve') return false;
     if (finding.evidence.ecosystem !== entry.package.ecosystem) return false;
-    if (finding.evidence.package !== entry.package.name) return false;
+    // npm and PyPI normalize package names case-insensitively at the registry:
+    // `React@16.5.0` and `react@16.5.0` are the same dep. Lockfiles publish
+    // lowercase but humans typing entries don't necessarily, so we normalize
+    // both sides for those ecosystems before comparing. Other ecosystems
+    // (Maven, etc.) keep case-sensitive matching.
+    if (
+      normalizePackageName(entry.package.name, entry.package.ecosystem) !==
+      normalizePackageName(finding.evidence.package, finding.evidence.ecosystem)
+    ) {
+      return false;
+    }
     return semverInRange(finding.evidence.affected_version, entry.package.version);
   }
   if (isFileRuleEntry(entry)) {
@@ -225,6 +235,17 @@ function entryMatches(entry: IgnoreEntry, finding: ScanFinding): boolean {
     return finding.file_path === entry.file && finding.rule_id === entry.rule;
   }
   return false;
+}
+
+/**
+ * Normalize a package name to match registry behavior. npm and PyPI are
+ * case-insensitive (PyPI also dash/underscore-insensitive but that's not
+ * handled here — out of scope for this fix); other ecosystems compare
+ * verbatim.
+ */
+function normalizePackageName(name: string, ecosystem: string): string {
+  if (ecosystem === 'npm' || ecosystem === 'PyPI') return name.toLowerCase();
+  return name;
 }
 
 /**

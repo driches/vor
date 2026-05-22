@@ -160,6 +160,48 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
     });
   }
 
+  // -----------------------------------------------------------------
+  // AWS secret access key — boundary cases.
+  //
+  // The old `\b(...)\b` pattern failed to match real AWS secrets that ended
+  // in `+` or `/` because `\b` looks for a word/non-word transition and `+`
+  // and `/` are non-word. The lookaround-based replacement should match these
+  // and STILL reject runs longer than 40 chars (which are typically hashes,
+  // not credentials).
+  // -----------------------------------------------------------------
+  describe('aws-secret-access-key — boundary edge cases', () => {
+    const p = (): SecretPattern => findPattern('aws-secret-access-key');
+
+    it('matches a 40-char high-entropy string ending in `+`', () => {
+      // 39 chars of mixed base64 followed by a `+`. Total = 40. Entropy > 4.5
+      // because the prefix is uniformly mixed.
+      const value = 'abcdefghij0123456789ABCDEFGHIJklmnopqrs+';
+      expect(value).toHaveLength(40);
+      const wrapped = `secret = "${value}";`;
+      const hits = matches(p(), wrapped);
+      expect(hits.length).toBe(1);
+      expect(hits[0]![0]).toBe(value);
+    });
+
+    it('matches a 40-char high-entropy string ending in `/`', () => {
+      const value = 'abcdefghij0123456789ABCDEFGHIJklmnopqrs/';
+      expect(value).toHaveLength(40);
+      const wrapped = `secret = "${value}";`;
+      const hits = matches(p(), wrapped);
+      expect(hits.length).toBe(1);
+      expect(hits[0]![0]).toBe(value);
+    });
+
+    it('does NOT match a 41-char run (substring should not slip through)', () => {
+      // 41 chars total — lookarounds reject because the 41st char is itself
+      // a key-char, so neither end's lookaround can claim a "boundary".
+      const value = 'abcdefghij0123456789ABCDEFGHIJklmnopqrstuv';
+      expect(value.length).toBe(42);
+      const hits = matches(p(), value);
+      expect(hits).toEqual([]);
+    });
+  });
+
   it('exports exactly the documented high-confidence ids', () => {
     const ids = DEFAULT_SECRET_PATTERNS.map((p) => p.id);
     expect(ids).toEqual([

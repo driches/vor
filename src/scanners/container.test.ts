@@ -16,6 +16,7 @@ describe('containerScannerStub', () => {
           additions: 1,
           deletions: 0,
           reviewable_lines: [[1, 5]],
+          added_lines: new Set([1, 2, 3, 4, 5]),
           language: 'dockerfile',
           is_generated: false,
           is_binary: false,

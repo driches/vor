@@ -83,9 +83,17 @@ export const DEFAULT_SECRET_PATTERNS: readonly SecretPattern[] = [
     // (hashes, test fixtures), so the entropy check is what makes this
     // tractable. Even with the gate, the precision is mediocre — hence
     // confidence: medium.
+    //
+    // Boundary note: `\b` is a transition between word `[A-Za-z0-9_]` and
+    // non-word characters. With a character class that ADDS `+` and `/`
+    // (both non-word), a real AWS secret ending in `+` or `/` would land
+    // `\b` on a non-word/non-word transition and miss. We use lookarounds
+    // that explicitly assert "no key-character immediately adjacent" so the
+    // pattern catches secrets ending in `+` or `/` too — without the chronic
+    // false positive of matching inside longer base64 runs.
     id: 'aws-secret-access-key',
     display_name: 'AWS secret access key',
-    pattern: /\b([A-Za-z0-9+/]{40})\b/g,
+    pattern: /(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{40})(?![A-Za-z0-9+/])/g,
     postCheck: entropyPostCheck,
     severity: 'critical',
     confidence: 'medium',

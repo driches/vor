@@ -35,6 +35,7 @@ function makeChangedFile(over: Partial<ChangedFile> = {}): ChangedFile {
     additions: 0,
     deletions: 0,
     reviewable_lines: [],
+    added_lines: new Set(),
     language: 'typescript',
     is_generated: false,
     is_binary: false,
@@ -47,7 +48,9 @@ function makeChangedFile(over: Partial<ChangedFile> = {}): ChangedFile {
 /**
  * Build a ChangedFile whose `head_line_text` maps each consecutive line of
  * `lines` starting at line 1, and whose `reviewable_lines` covers the same
- * span (unless explicitly overridden by the caller via `over`).
+ * span (unless explicitly overridden by the caller via `over`). All lines are
+ * treated as ADDED by the PR (the default "PR adds these N lines" shape) so
+ * the secrets scanner — which iterates `added_lines` — sees them.
  */
 function makeFileWithLines(
   path_: string,
@@ -55,14 +58,17 @@ function makeFileWithLines(
   over: Partial<ChangedFile> = {},
 ): ChangedFile {
   const text = new Map<number, string>();
+  const added = new Set<number>();
   for (let i = 0; i < lines.length; i += 1) {
     text.set(i + 1, lines[i]!);
+    added.add(i + 1);
   }
   const defaultRanges: LineRange[] = lines.length > 0 ? [[1, lines.length]] : [];
   return makeChangedFile({
     path: path_,
     head_line_text: text,
     reviewable_lines: defaultRanges,
+    added_lines: added,
     ...over,
   });
 }
@@ -200,9 +206,9 @@ describe('createSecretsScanner — AWS key happy path', () => {
 // -----------------------------------------------------------------
 
 describe('createSecretsScanner — reviewable-line gate', () => {
-  it('skips a secret on a line outside `reviewable_lines`', async () => {
+  it('skips a secret on a line outside `added_lines`', async () => {
     const scanner = createSecretsScanner();
-    // Line 5 has the secret, but reviewable_lines only covers lines 1..3.
+    // Line 5 has the secret, but added_lines only covers lines 1..3.
     const file = makeChangedFile({
       path: 'src/leaky.ts',
       head_line_text: new Map([
@@ -212,6 +218,32 @@ describe('createSecretsScanner — reviewable-line gate', () => {
         [5, `secret = "${PLANTED_AWS_KEY}"`],
       ]),
       reviewable_lines: [[1, 3]],
+      added_lines: new Set([1, 2, 3]),
+    });
+
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file] }));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it('skips a secret on a CONTEXT line (in reviewable_lines but NOT added_lines)', async () => {
+    // A secret sits on a context line (`+++ -` neighborhood, no `+` marker).
+    // It IS in reviewable_lines (the agent could comment on it) but NOT in
+    // added_lines (this PR didn't add it). The scanner must skip it — that
+    // secret pre-existed and surfacing it would be out-of-scope noise.
+    const scanner = createSecretsScanner();
+    const file = makeChangedFile({
+      path: 'src/leaky.ts',
+      head_line_text: new Map([
+        [1, 'first'],
+        [2, `const k = "${PLANTED_AWS_KEY}";`],
+        [3, 'third'],
+      ]),
+      // All three lines are reviewable (e.g., context + added).
+      reviewable_lines: [[1, 3]],
+      // …but only lines 1 and 3 are ADDED. Line 2 (with the secret) is
+      // pre-existing context.
+      added_lines: new Set([1, 3]),
     });
 
     const result = await scanner.scan(makeScannerDeps({ changedFiles: [file] }));

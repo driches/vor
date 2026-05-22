@@ -188,6 +188,60 @@ entries:
     });
     expect(list.matches(finding)).toEqual({ ignored: false });
   });
+
+  it('matches npm packages case-insensitively (registry normalizes case)', async () => {
+    // User writes `React` in the YAML; lockfile publishes `react`. Both
+    // refer to the same npm package, so the entry MUST suppress the finding.
+    const yaml = `
+entries:
+  - package:
+      name: React
+      ecosystem: npm
+      version: "^16.0.0"
+    reason: Case-insensitive npm match
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-React-1',
+        ecosystem: 'npm',
+        package: 'react',
+        affected_version: '16.5.0',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'Case-insensitive npm match',
+    });
+  });
+
+  it('does NOT normalize case across non-npm/non-PyPI ecosystems', async () => {
+    // Maven (or any ecosystem that isn't npm or PyPI) is case-sensitive at
+    // the registry. The same `React` entry against a Maven finding for `react`
+    // must NOT match — the normalization is scoped to ecosystems where it's
+    // semantically correct.
+    const yaml = `
+entries:
+  - package:
+      name: React
+      ecosystem: Maven
+      version: ">=0.0.0"
+    reason: Case-sensitive ecosystem
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-React-2',
+        ecosystem: 'Maven',
+        package: 'react',
+        affected_version: '1.0.0',
+      },
+    });
+    expect(list.matches(finding)).toEqual({ ignored: false });
+  });
 });
 
 describe('IgnoreList.load — file + rule match', () => {

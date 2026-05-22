@@ -9,6 +9,7 @@ function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
     additions: 0,
     deletions: 0,
     reviewable_lines: [],
+    added_lines: new Set(),
     language: 'yaml',
     is_generated: true,
     is_binary: false,

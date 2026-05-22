@@ -183,9 +183,28 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 
   // Pass 2 dedup: drop scanner findings that overlap an AI security-adjacent
   // comment (dependency-cve findings are protected — see dedup.ts).
+  //
+  // Ordering matters here. We dedup against the AI comments that will ACTUALLY
+  // SURVIVE the post-filter (severity floor + caps), not the raw pre-cap list.
+  // The naive "dedup against acceptedComments" suppresses a scanner finding
+  // whenever an AI comment lands near it — even if the AI comment is itself
+  // about to be dropped by the cap. End result of the naive flow: a critical
+  // scanner finding silently lost because a 'minor' AI comment in the same
+  // neighborhood "won" dedup and then got chopped by the cap.
+  //
+  // Fix: predict-then-dedup. We run filterComments() over the AI-only list
+  // first to compute which AI comments survive, then dedup scanner findings
+  // against THAT smaller set. Caps run a second time over the combined list
+  // below — that's the one whose output actually gets posted. The first
+  // filterComments() call is a prediction; only its `kept` is consumed.
+  const aiPredictedSurvivors = filterComments(aggregator.acceptedComments, {
+    severityFloor: config.severity.floor,
+    maxCommentsPerFile: config.severity.max_comments_per_file,
+    maxCommentsTotal: config.severity.max_comments_total,
+  }).kept;
   const dedupedFindings = dedupScannerFindings({
     scanFindings: scanRunResult.findings,
-    aiComments: aggregator.acceptedComments,
+    aiComments: aiPredictedSurvivors,
   });
 
   // Validate + adapt surviving findings, then push into the same aggregator
@@ -213,7 +232,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     );
   }
 
-  // Apply final filters (severity floor, per-file cap, global cap, dedup)
+  // Apply final filters (severity floor, per-file cap, global cap, dedup) over
+  // the combined AI + scanner list. This is the kept-list that actually ships.
   const filtered = filterComments(aggregator.acceptedComments, {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,

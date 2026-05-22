@@ -83,8 +83,14 @@ export interface ChangedFile {
   status: 'added' | 'modified' | 'removed' | 'renamed';
   additions: number;
   deletions: number;
-  /** Inclusive ranges of lines on HEAD that the agent may comment on. */
+  /** Inclusive ranges of lines on HEAD that the agent may comment on
+   *  (includes both '+' added lines AND ' ' context lines around hunks). */
   reviewable_lines: LineRange[];
+  /** Lines on HEAD that were ADDED by this PR (the '+' lines only). Strict
+   *  subset of `reviewable_lines`. Scanners that only care about new content
+   *  (secrets, etc.) iterate this set to avoid surfacing pre-existing issues
+   *  on context lines the PR didn't actually introduce. */
+  added_lines: ReadonlySet<number>;
   language: string;
   is_generated: boolean;
   is_binary: boolean;
