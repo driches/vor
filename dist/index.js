@@ -47684,11 +47684,13 @@ function parseGrepOutput(out, cap) {
 // src/github/reviewable-lines.ts
 function computeReviewableLines(chunks) {
   const set = /* @__PURE__ */ new Set();
+  const addedSet = /* @__PURE__ */ new Set();
   const text = /* @__PURE__ */ new Map();
   for (const chunk2 of chunks) {
     for (const change of chunk2.changes) {
       if (change.type === "add") {
         set.add(change.ln);
+        addedSet.add(change.ln);
         text.set(change.ln, stripDiffMarker(change.content));
       } else if (change.type === "normal") {
         set.add(change.ln2);
@@ -47699,6 +47701,7 @@ function computeReviewableLines(chunks) {
   return {
     ranges: collapseToRanges(set),
     set,
+    addedSet,
     text
   };
 }
@@ -52702,6 +52705,7 @@ function parseUnifiedDiff(diff) {
       additions: file.additions,
       deletions: file.deletions,
       reviewable_lines: reviewable.ranges,
+      added_lines: reviewable.addedSet,
       language: detectLanguage(path11),
       is_generated: isGenerated(path11),
       is_binary: file.chunks.length === 0 && totalChanges === 0,
@@ -53327,13 +53331,19 @@ function entryMatches(entry, finding) {
   if (isPackageEntry(entry)) {
     if (finding.evidence.kind !== "cve") return false;
     if (finding.evidence.ecosystem !== entry.package.ecosystem) return false;
-    if (finding.evidence.package !== entry.package.name) return false;
+    if (normalizePackageName(entry.package.name, entry.package.ecosystem) !== normalizePackageName(finding.evidence.package, finding.evidence.ecosystem)) {
+      return false;
+    }
     return semverInRange(finding.evidence.affected_version, entry.package.version);
   }
   if (isFileRuleEntry(entry)) {
     return finding.file_path === entry.file && finding.rule_id === entry.rule;
   }
   return false;
+}
+function normalizePackageName(name, ecosystem) {
+  if (ecosystem === "npm" || ecosystem === "PyPI") return name.toLowerCase();
+  return name;
 }
 function semverInRange(version, range) {
   if ((0, import_semver.valid)(version) == null) return false;
@@ -54073,6 +54083,7 @@ function createDependencyCveScanner(options) {
         for (const id of r2.vuln_ids) uniqueVulnIds.add(id);
       }
       const vulnRecords = /* @__PURE__ */ new Map();
+      const idsToFetch = [];
       for (const id of uniqueVulnIds) {
         const cacheKey = vulnCacheKey(id);
         const cached = deps.cache.get(cacheKey);
@@ -54080,20 +54091,34 @@ function createDependencyCveScanner(options) {
           vulnRecords.set(id, cached);
           continue;
         }
-        try {
-          const fetched = await getOsvClient().getVuln(id);
-          network_calls += 1;
-          deps.cache.set(cacheKey, fetched);
-          vulnRecords.set(id, fetched);
-        } catch (err) {
-          void log2.warn(
-            `dependency-cve: OSV getVuln(${id}) failed: ${err.message}`
-          );
-          errors.push({
-            message: `OSV getVuln(${id}) failed`,
-            cause: err.message,
-            fatal: false
-          });
+        idsToFetch.push(id);
+      }
+      if (idsToFetch.length > 0) {
+        const outcomes = await Promise.all(
+          idsToFetch.map(async (id) => {
+            try {
+              const vuln = await getOsvClient().getVuln(id);
+              return { id, ok: true, vuln };
+            } catch (err) {
+              return { id, ok: false, error: err };
+            }
+          })
+        );
+        for (const outcome of outcomes) {
+          if (outcome.ok) {
+            network_calls += 1;
+            deps.cache.set(vulnCacheKey(outcome.id), outcome.vuln);
+            vulnRecords.set(outcome.id, outcome.vuln);
+          } else {
+            void log2.warn(
+              `dependency-cve: OSV getVuln(${outcome.id}) failed: ${outcome.error.message}`
+            );
+            errors.push({
+              message: `OSV getVuln(${outcome.id}) failed`,
+              cause: outcome.error.message,
+              fatal: false
+            });
+          }
         }
       }
       for (const r2 of resolvedDeps) {
@@ -54197,9 +54222,17 @@ var DEFAULT_SECRET_PATTERNS = [
     // (hashes, test fixtures), so the entropy check is what makes this
     // tractable. Even with the gate, the precision is mediocre — hence
     // confidence: medium.
+    //
+    // Boundary note: `\b` is a transition between word `[A-Za-z0-9_]` and
+    // non-word characters. With a character class that ADDS `+` and `/`
+    // (both non-word), a real AWS secret ending in `+` or `/` would land
+    // `\b` on a non-word/non-word transition and miss. We use lookarounds
+    // that explicitly assert "no key-character immediately adjacent" so the
+    // pattern catches secrets ending in `+` or `/` too — without the chronic
+    // false positive of matching inside longer base64 runs.
     id: "aws-secret-access-key",
     display_name: "AWS secret access key",
-    pattern: /\b([A-Za-z0-9+/]{40})\b/g,
+    pattern: /(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{40})(?![A-Za-z0-9+/])/g,
     postCheck: entropyPostCheck,
     severity: "critical",
     confidence: "medium"
@@ -54343,70 +54376,68 @@ function createSecretsScanner(options = {}) {
       for (const file of deps.changedFiles) {
         if (file.is_binary || file.is_generated) continue;
         files_examined += 1;
-        for (const [rangeStart, rangeEnd] of file.reviewable_lines) {
-          for (let lineNo = rangeStart; lineNo <= rangeEnd; lineNo += 1) {
-            const text = file.head_line_text.get(lineNo);
-            if (text === void 0) continue;
-            for (const pattern of patterns) {
-              try {
-                pattern.pattern.lastIndex = 0;
-                let m2;
-                while ((m2 = pattern.pattern.exec(text)) !== null) {
-                  const raw = m2[0];
-                  if (pattern.postCheck && !pattern.postCheck(raw)) {
-                    if (m2.index === pattern.pattern.lastIndex) {
-                      pattern.pattern.lastIndex += 1;
-                    }
-                    continue;
-                  }
-                  registerSecret(raw);
-                  const rule_id = `secret:${pattern.id}`;
-                  const evidence = {
-                    kind: "secret",
-                    masked_match: maskSecret(raw),
-                    pattern_id: pattern.id
-                  };
-                  const finding = {
-                    scanner: SCANNER_ID2,
-                    rule_id,
-                    file_path: file.path,
-                    line: lineNo,
-                    severity: pattern.severity,
-                    category: "vulnerability",
-                    confidence: pattern.confidence,
-                    title: `Possible ${pattern.display_name} in ${import_node_path5.default.basename(file.path)}`,
-                    description: buildDescription2(pattern),
-                    evidence,
-                    fingerprint: fingerprintOf2(rule_id, file.path, lineNo)
-                  };
-                  const match = deps.ignoreList.matches(finding);
-                  if (match.ignored) {
-                    if (match.expired) {
-                      void log2.notice(
-                        `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                      );
-                    }
-                    if (m2.index === pattern.pattern.lastIndex) {
-                      pattern.pattern.lastIndex += 1;
-                    }
-                    continue;
-                  }
-                  findings.push(finding);
+        for (const lineNo of file.added_lines) {
+          const text = file.head_line_text.get(lineNo);
+          if (text === void 0) continue;
+          for (const pattern of patterns) {
+            try {
+              pattern.pattern.lastIndex = 0;
+              let m2;
+              while ((m2 = pattern.pattern.exec(text)) !== null) {
+                const raw = m2[0];
+                if (pattern.postCheck && !pattern.postCheck(raw)) {
                   if (m2.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
                   }
+                  continue;
                 }
-              } catch (err) {
-                void log2.warn(
-                  `secrets: pattern ${pattern.id} threw on ${file.path}:${lineNo}: ${err.message}`
-                );
-                errors.push({
-                  message: `Pattern ${pattern.id} threw while scanning ${file.path}`,
-                  cause: err.message,
-                  fatal: false
-                });
-                pattern.pattern.lastIndex = 0;
+                registerSecret(raw);
+                const rule_id = `secret:${pattern.id}`;
+                const evidence = {
+                  kind: "secret",
+                  masked_match: maskSecret(raw),
+                  pattern_id: pattern.id
+                };
+                const finding = {
+                  scanner: SCANNER_ID2,
+                  rule_id,
+                  file_path: file.path,
+                  line: lineNo,
+                  severity: pattern.severity,
+                  category: "vulnerability",
+                  confidence: pattern.confidence,
+                  title: `Possible ${pattern.display_name} in ${import_node_path5.default.basename(file.path)}`,
+                  description: buildDescription2(pattern),
+                  evidence,
+                  fingerprint: fingerprintOf2(rule_id, file.path, lineNo)
+                };
+                const match = deps.ignoreList.matches(finding);
+                if (match.ignored) {
+                  if (match.expired) {
+                    void log2.notice(
+                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
+                    );
+                  }
+                  if (m2.index === pattern.pattern.lastIndex) {
+                    pattern.pattern.lastIndex += 1;
+                  }
+                  continue;
+                }
+                findings.push(finding);
+                if (m2.index === pattern.pattern.lastIndex) {
+                  pattern.pattern.lastIndex += 1;
+                }
               }
+            } catch (err) {
+              void log2.warn(
+                `secrets: pattern ${pattern.id} threw on ${file.path}:${lineNo}: ${err.message}`
+              );
+              errors.push({
+                message: `Pattern ${pattern.id} threw while scanning ${file.path}`,
+                cause: err.message,
+                fatal: false
+              });
+              pattern.pattern.lastIndex = 0;
             }
           }
         }
@@ -54697,9 +54728,14 @@ async function runOrchestrator(input) {
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`
   );
+  const aiPredictedSurvivors = filterComments(aggregator.acceptedComments, {
+    severityFloor: config.severity.floor,
+    maxCommentsPerFile: config.severity.max_comments_per_file,
+    maxCommentsTotal: config.severity.max_comments_total
+  }).kept;
   const dedupedFindings = dedupScannerFindings({
     scanFindings: scanRunResult.findings,
-    aiComments: aggregator.acceptedComments
+    aiComments: aiPredictedSurvivors
   });
   const changedFilesMap = new Map(prContext.files.map((f2) => [f2.path, f2]));
   let addedScannerComments = 0;
