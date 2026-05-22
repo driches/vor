@@ -244,6 +244,143 @@ entries:
   });
 });
 
+describe('IgnoreList.load — PyPI PEP 440 fallback', () => {
+  // Codex P2 on PR #8: PyPI uses PEP 440 (e.g. `2.0rc1`, `1.0.post1`,
+  // `2.0a3`) which the `semver` package rejects. Without a fallback, a
+  // perfectly-spelled ignore entry for those versions never matches. The
+  // v1-minimal fix: after semver fails, fall back to exact-string match
+  // when ecosystem === 'PyPI'.
+
+  it('matches a PEP 440 pre-release version (`2.0rc1`) by exact string', async () => {
+    const yaml = `
+entries:
+  - package:
+      name: cryptography
+      ecosystem: PyPI
+      version: "2.0rc1"
+    reason: PyPI exact PEP 440 match
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-PY-1',
+        ecosystem: 'PyPI',
+        package: 'cryptography',
+        affected_version: '2.0rc1',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'PyPI exact PEP 440 match',
+    });
+  });
+
+  it('matches a PEP 440 post-release version (`1.0.post1`) by exact string', async () => {
+    const yaml = `
+entries:
+  - package:
+      name: requests
+      ecosystem: PyPI
+      version: "1.0.post1"
+    reason: PyPI post-release pin
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-PY-2',
+        ecosystem: 'PyPI',
+        package: 'requests',
+        affected_version: '1.0.post1',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'PyPI post-release pin',
+    });
+  });
+
+  it('still uses the semver fast path when the PyPI version IS valid semver', async () => {
+    // `1.0.0` is both PEP 440 and semver. The semver range `>=1.0.0` must
+    // still match it — the PyPI fallback only kicks in when semver fails.
+    const yaml = `
+entries:
+  - package:
+      name: requests
+      ecosystem: PyPI
+      version: ">=1.0.0"
+    reason: PyPI semver fast path
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-PY-3',
+        ecosystem: 'PyPI',
+        package: 'requests',
+        affected_version: '1.0.0',
+      },
+    });
+    expect(list.matches(finding)).toEqual({
+      ignored: true,
+      expired: false,
+      reason: 'PyPI semver fast path',
+    });
+  });
+
+  it('does NOT match a semver-style RANGE against a non-semver PEP 440 finding', async () => {
+    // PEP 440 ranges aren't supported in v1. `>=1.0.0` against `2.0rc1`:
+    // semver rejects `2.0rc1`, falls through; exact-string compares the
+    // version `2.0rc1` to the range `>=1.0.0` — those differ → no match.
+    const yaml = `
+entries:
+  - package:
+      name: cryptography
+      ecosystem: PyPI
+      version: ">=1.0.0"
+    reason: PyPI range over non-semver version
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-PY-4',
+        ecosystem: 'PyPI',
+        package: 'cryptography',
+        affected_version: '2.0rc1',
+      },
+    });
+    expect(list.matches(finding)).toEqual({ ignored: false });
+  });
+
+  it('does NOT apply the exact-match fallback to non-PyPI ecosystems', async () => {
+    // npm ignore entry with an invalid-semver version. semver rejects both
+    // sides; the fallback is scoped to PyPI; npm ecosystems get nothing.
+    const yaml = `
+entries:
+  - package:
+      name: somepkg
+      ecosystem: npm
+      version: "2.0rc1"
+    reason: npm should not exact-match
+`;
+    const list = await IgnoreList.load(stubReader(yaml), loadArgs);
+    const finding = makeFinding({
+      evidence: {
+        kind: 'cve',
+        osv_id: 'OSV-NPM-RC',
+        ecosystem: 'npm',
+        package: 'somepkg',
+        affected_version: '2.0rc1',
+      },
+    });
+    expect(list.matches(finding)).toEqual({ ignored: false });
+  });
+});
+
 describe('IgnoreList.load — file + rule match', () => {
   it('matches a secrets finding by file_path and rule_id', async () => {
     const yaml = `

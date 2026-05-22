@@ -226,7 +226,11 @@ function entryMatches(entry: IgnoreEntry, finding: ScanFinding): boolean {
     ) {
       return false;
     }
-    return semverInRange(finding.evidence.affected_version, entry.package.version);
+    return packageInRange(
+      finding.evidence.affected_version,
+      entry.package.version,
+      entry.package.ecosystem,
+    );
   }
   if (isFileRuleEntry(entry)) {
     // v1: exact path match only. Globs (e.g. minimatch) are intentionally
@@ -249,18 +253,42 @@ function normalizePackageName(name: string, ecosystem: string): string {
 }
 
 /**
- * Semver range check. Returns false (no match) rather than throwing on
- * invalid input — a bad version string in scanner output or a bad range in
- * the ignore file should not block other entries from matching. Both values
- * must be valid for a positive match.
+ * Check whether `version` falls inside `range` for a given ecosystem.
+ *
+ * Most ecosystems (npm, Maven, etc.) use semver-shaped versions, so we try
+ * `semver.satisfies` first. PyPI is the exception: PEP 440 allows shapes
+ * the `semver` package can't parse (e.g. `2.0rc1`, `1.0.post1`, `2.0a3`).
+ * Without a fallback, an ignore entry written for one of those versions
+ * never matches even though the user typed it correctly.
+ *
+ * v1-minimal fix for the PyPI gap: after semver fails, fall back to
+ * exact-string match (trim-equality on both sides). Common PEP 440
+ * versions that DO happen to be valid semver (`1.0.0`, `4.17.20`) still
+ * take the fast path, so semver ranges like `>=1.0.0` keep working for
+ * PyPI. Full PEP 440 range parsing (`~=1.4`, etc.) is deferred to a v2
+ * pass — see Codex P2 on PR #8.
+ *
+ * Returns false (no match) rather than throwing on invalid input — a bad
+ * version string in scanner output or a bad range in the ignore file
+ * should never block other entries from matching.
  */
-function semverInRange(version: string, range: string): boolean {
-  if (semverValid(version) == null) return false;
-  try {
-    return semverSatisfies(version, range);
-  } catch {
-    return false;
+function packageInRange(version: string, range: string, ecosystem: string): boolean {
+  // Fast path: a valid semver `version` against the configured range. This
+  // covers the common-case PEP 440 X.Y.Z shape too.
+  if (semverValid(version) != null) {
+    try {
+      return semverSatisfies(version, range);
+    } catch {
+      // The range itself isn't valid semver — fall through to the fallback.
+    }
   }
+  // PyPI fallback: exact-string match so users can at least pin specific
+  // PEP 440 versions like `2.0rc1` or `1.0.post1`. Restricted to PyPI so
+  // other ecosystems keep their semver-only behavior.
+  if (ecosystem === 'PyPI') {
+    return version.trim() === range.trim();
+  }
+  return false;
 }
 
 /**
