@@ -177,6 +177,12 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
           if (text === undefined) continue;
 
           for (const pattern of patterns) {
+            // Per-(line, pattern) match index. Reset on every iteration so
+            // the fingerprint depends ONLY on (rule, file, line, ordinal-
+            // within-this-line). Stable across reruns — e.g. adding a new
+            // match in an earlier file no longer shifts subsequent
+            // fingerprints, which would otherwise break ignore-list pinning.
+            let lineMatchIndex = 0;
             try {
               // Reset shared regex state. Patterns carry the `g` flag and
               // are shared across calls — without resetting, the next exec()
@@ -222,10 +228,13 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                   title: `Possible ${pattern.display_name} in ${path.basename(file.path)}`,
                   description: buildDescription(pattern),
                   evidence,
-                  // matchIndex = current size of `findings` array. Stable
-                  // because the outer iteration (files → added_lines →
-                  // patterns → matches) is deterministic.
-                  fingerprint: fingerprintOf(rule_id, file.path, lineNo, findings.length),
+                  // Per-line ordinal of this match within (file, line,
+                  // pattern). Stable across reruns regardless of what other
+                  // files/patterns produced. Post-increment so the next
+                  // match on the same line gets index+1; ignored matches
+                  // still advance the counter so subsequent ordinals don't
+                  // shift when an ignore-list entry is added or removed.
+                  fingerprint: fingerprintOf(rule_id, file.path, lineNo, lineMatchIndex++),
                 };
 
                 const match = deps.ignoreList.matches(finding);

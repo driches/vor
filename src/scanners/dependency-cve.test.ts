@@ -313,6 +313,67 @@ describe('createDependencyCveScanner — OSV queryBatch failure', () => {
     expect(result.errors.some((e) => /osv/i.test(e.message))).toBe(true);
     expect(osvClient.getVuln).not.toHaveBeenCalled();
   });
+
+  it('still surfaces cache-hit findings when the uncached-deps batch fails', async () => {
+    // Regression: previously the catch block returned an empty findings
+    // array immediately, discarding any cache-hit vuln_ids already on
+    // resolvedDeps. Now we record the error and fall through to Step 4
+    // so cache-hit findings still get rendered.
+    //
+    // Setup: prime the cache with a known OsvBatchHit for lodash@4.17.20
+    // (no uncached deps would normally be issued, but we add a second
+    // lockfile entry with a DIFFERENT version to force a batch round-trip
+    // that fails). The scanner should still emit a finding for the cached
+    // lodash, with the failure recorded in errors[].
+    const cache = new InMemoryScanCache();
+    cache.set('osv-batch:npm:lodash:4.17.20', {
+      vulns: [{ id: 'GHSA-jf85-cpcp-j695', modified: '2024-01-01T00:00:00Z' }],
+    });
+
+    // Two-package lockfile: lodash@4.17.20 (cached) + uncached@1.0.0
+    // (forces a batch query, which we'll fail).
+    const TWO_PKG_LOCK = [
+      '{',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "app", "version": "1.0.0" },',
+      '    "node_modules/lodash": { "version": "4.17.20" },',
+      '    "node_modules/uncached-pkg": { "version": "1.0.0" }',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockRejectedValue(new OsvClientError('OSV down', 503)),
+      // getVuln is allowed to be called for the cache-hit lodash CVE.
+      getVuln: vi.fn().mockResolvedValue(LODASH_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(TWO_PKG_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+        cache,
+      }),
+    );
+
+    // Cache-hit lodash finding survives; uncached-pkg silently has no
+    // finding (we don't know if it's vulnerable).
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.evidence.kind).toBe('cve');
+    if (result.findings[0]!.evidence.kind === 'cve') {
+      expect(result.findings[0]!.evidence.package).toBe('lodash');
+    }
+    // The batch failure is recorded as a non-fatal error.
+    expect(result.errors.length).toBeGreaterThanOrEqual(1);
+    expect(result.errors[0]!.message).toMatch(/OSV batch query failed/);
+    // getVuln was still called for the cache-hit vuln.
+    expect(osvClient.getVuln).toHaveBeenCalled();
+  });
 });
 
 // -----------------------------------------------------------------

@@ -306,8 +306,13 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   const dedupedKept = dedupKeptScannerComments(filtered.kept);
 
   if (dedupedKept.length < filtered.kept.length) {
+    // Build a Set first so the membership check is O(1) per comment. The
+    // previous Array.includes()-based filter was O(n²) on the kept list —
+    // negligible at the default cap (30) but bad shape for any future
+    // bump.
+    const dedupKeptSet = new Set(dedupedKept);
     const dedupExcluded = new Set(
-      filtered.kept.filter((c) => !dedupedKept.includes(c)),
+      filtered.kept.filter((c) => !dedupKeptSet.has(c)),
     );
     const eligible = aggregator.acceptedComments.filter(
       (c) => !dedupExcluded.has(c),

@@ -630,25 +630,19 @@ export function createDependencyCveScanner(
             r.vuln_ids = cached?.vulns?.map((v) => v.id) ?? [];
           }
         } catch (err) {
+          // Don't bail entirely — some `resolvedDeps` may already have
+          // `vuln_ids` from the cache-hit pass above. Discarding them
+          // hides findings that ARE resolvable just because the
+          // uncached-deps batch round-trip failed. Record the error and
+          // proceed to Step 4 with whatever cache hits we have.
           void log.warn(
-            `dependency-cve: OSV batch query failed: ${(err as Error).message}`,
+            `dependency-cve: OSV batch query failed: ${(err as Error).message}. Proceeding with cache-hit findings only.`,
           );
           errors.push({
-            message: 'OSV batch query failed',
+            message: 'OSV batch query failed (cache-only fallback)',
             cause: (err as Error).message,
             fatal: false,
           });
-          return {
-            scanner: SCANNER_ID,
-            findings: [],
-            errors,
-            metrics: buildMetrics(
-              started,
-              files_examined,
-              network_calls,
-              deps.cache.hit_count,
-            ),
-          };
         }
       }
 

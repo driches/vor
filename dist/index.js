@@ -54136,24 +54136,13 @@ function createDependencyCveScanner(options) {
           }
         } catch (err) {
           void log2.warn(
-            `dependency-cve: OSV batch query failed: ${err.message}`
+            `dependency-cve: OSV batch query failed: ${err.message}. Proceeding with cache-hit findings only.`
           );
           errors.push({
-            message: "OSV batch query failed",
+            message: "OSV batch query failed (cache-only fallback)",
             cause: err.message,
             fatal: false
           });
-          return {
-            scanner: SCANNER_ID,
-            findings: [],
-            errors,
-            metrics: buildMetrics(
-              started,
-              files_examined,
-              network_calls,
-              deps.cache.hit_count
-            )
-          };
         }
       }
       const uniqueVulnIds = /* @__PURE__ */ new Set();
@@ -54475,6 +54464,7 @@ function createSecretsScanner(options = {}) {
           const text = file.head_line_text.get(lineNo);
           if (text === void 0) continue;
           for (const pattern of patterns) {
+            let lineMatchIndex = 0;
             try {
               pattern.pattern.lastIndex = 0;
               let m2;
@@ -54504,10 +54494,13 @@ function createSecretsScanner(options = {}) {
                   title: `Possible ${pattern.display_name} in ${import_node_path5.default.basename(file.path)}`,
                   description: buildDescription2(pattern),
                   evidence,
-                  // matchIndex = current size of `findings` array. Stable
-                  // because the outer iteration (files → added_lines →
-                  // patterns → matches) is deterministic.
-                  fingerprint: fingerprintOf2(rule_id, file.path, lineNo, findings.length)
+                  // Per-line ordinal of this match within (file, line,
+                  // pattern). Stable across reruns regardless of what other
+                  // files/patterns produced. Post-increment so the next
+                  // match on the same line gets index+1; ignored matches
+                  // still advance the counter so subsequent ordinals don't
+                  // shift when an ignore-list entry is added or removed.
+                  fingerprint: fingerprintOf2(rule_id, file.path, lineNo, lineMatchIndex++)
                 };
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {
@@ -54910,8 +54903,9 @@ async function runOrchestrator(input) {
   let filtered = filterComments(aggregator.acceptedComments, caps);
   const dedupedKept = dedupKeptScannerComments(filtered.kept);
   if (dedupedKept.length < filtered.kept.length) {
+    const dedupKeptSet = new Set(dedupedKept);
     const dedupExcluded = new Set(
-      filtered.kept.filter((c2) => !dedupedKept.includes(c2))
+      filtered.kept.filter((c2) => !dedupKeptSet.has(c2))
     );
     const eligible = aggregator.acceptedComments.filter(
       (c2) => !dedupExcluded.has(c2)
