@@ -609,7 +609,12 @@ export function createDependencyCveScanner(
           const resp = await getOsvClient().queryBatch(queriesToFetch, {
             signal: deps.signal,
           });
-          network_calls += 1;
+          // The OSV client splits queries internally at 100 per HTTP request,
+          // so PRs touching >100 unique deps still incur multiple round-trips
+          // even though we call queryBatch once. Mirror that batching here so
+          // network_calls reflects actual HTTP traffic.
+          const OSV_QUERY_BATCH_LIMIT = 100;
+          network_calls += Math.ceil(queriesToFetch.length / OSV_QUERY_BATCH_LIMIT);
           // Stitch results back to their cache keys + resolved deps.
           for (const [key, idx] of queryIndex) {
             const hit = resp.results[idx] ?? {};

@@ -178,12 +178,29 @@ export const DEFAULT_SECRET_PATTERNS: readonly SecretPattern[] = [
   {
     // Unbracketed character class — PEM headers cover RSA, OpenSSH, EC, DSA,
     // and PGP private keys. The `\b` boundary is omitted because `-` is a
-    // non-word character; the dashes act as their own boundaries.
+    // non-word character; the dashes act as their own boundaries. The whole
+    // match is wrapped in a capture group so the secrets scanner's
+    // `m[1] ?? m[0]` extraction targets the header itself (not undefined).
     id: 'private-key-pem',
     display_name: 'Private key (PEM)',
-    pattern: /-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----/g,
+    pattern: /(-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----)/g,
     severity: 'critical',
     confidence: 'high',
+  },
+  {
+    // A JWT is three base64url-encoded segments separated by dots. Both the
+    // header AND payload are JSON objects, so both segments start with `{` —
+    // which base64-encodes to the prefix `eyJ`. Requiring `eyJ` on the
+    // first TWO segments (not just the first) sharply cuts false positives:
+    // random `eyJ`-prefixed blobs followed by arbitrary `.x.y` won't match.
+    // Medium confidence: JWTs are not always secrets (bearer tokens may be
+    // ephemeral or intended for runtime), but a committed JWT usually IS a
+    // leak — especially session tokens or signed credentials.
+    id: 'jwt',
+    display_name: 'JSON Web Token (JWT)',
+    pattern: /\b(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/g,
+    severity: 'important',
+    confidence: 'medium',
   },
 ];
 

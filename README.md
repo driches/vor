@@ -157,7 +157,7 @@ security:
 ### Scope (v1)
 
 - **Dependency CVEs**: npm (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`) and PyPI (`requirements.txt` — only `==`-pinned lines). Queries the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost.
-- **Secrets**: AWS access keys (`AKIA…`), AWS secret keys (entropy-gated), GitHub classic + fine-grained PATs (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Slack tokens (`xox[baprs]-`), Stripe live/restricted keys (`sk_live_`, `rk_live_`), JWTs, Google API keys (`AIza…`), npm tokens (`npm_…`), PEM private key headers. Only **added lines** in the diff are scanned — pre-existing secrets in untouched code are out of scope for this PR.
+- **Secrets**: AWS access keys (`AKIA…`), AWS secret keys (entropy-gated), GitHub classic + fine-grained PATs (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Slack tokens (`xox[baprs]-`), Stripe live/restricted keys (`sk_live_`, `rk_live_`), Google API keys (`AIza…`), npm tokens (`npm_…`), PEM private key headers, JSON Web Tokens (`eyJ…`-prefixed 3-segment shape). Only **added lines** in the diff are scanned — pre-existing secrets in untouched code are out of scope for this PR.
 - **SAST + container scanning**: stubs in v1; not yet active. The slots in `.code-review.yml` are reserved so v2 can plug them in without breaking your config.
 
 ### Suppressing findings — `.code-review/security-ignore.yml`

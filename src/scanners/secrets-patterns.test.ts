@@ -144,6 +144,17 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
       positive: '-----BEGIN RSA PRIVATE KEY-----',
       negative: '-----BEGIN PUBLIC KEY-----',
     },
+    {
+      // Real-looking JWT shape: three base64url-encoded segments, first two
+      // starting with `eyJ` (because the header and payload are JSON
+      // objects whose first char is `{`). Negative: `eyJ` followed by only
+      // ONE more segment isn't a JWT (the second segment must also start
+      // with `eyJ`).
+      id: 'jwt',
+      positive:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+      negative: 'eyJhbGciOiJIUzI1NiJ9.somepayload.somesignature',
+    },
   ];
 
   for (const c of cases) {
@@ -202,6 +213,21 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
     });
   });
 
+  it('private-key-pem exposes the header text via capture group (m[1])', () => {
+    // Regression: previously the pattern had no capture group, so
+    // `m[1] ?? m[0]` returned `m[0]` (still the header text by accident,
+    // but the structural invariant was wrong). Now the whole header is a
+    // capture group so the secrets scanner's `m[1]` extraction targets it
+    // explicitly. Header text isn't strictly the "key material" but it's
+    // all we ever match — and what we register/mask in logs.
+    const p = findPattern('private-key-pem');
+    const text = '-----BEGIN RSA PRIVATE KEY-----';
+    const hits = matches(p, text);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]![0]).toBe(text);
+    expect(hits[0]![1]).toBe(text);
+  });
+
   it('exports exactly the documented high-confidence ids', () => {
     const ids = DEFAULT_SECRET_PATTERNS.map((p) => p.id);
     expect(ids).toEqual([
@@ -219,6 +245,7 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
       'google-api-key',
       'npm-access-token',
       'private-key-pem',
+      'jwt',
     ]);
   });
 
