@@ -14,20 +14,17 @@
  *                            capture-and-resolve `pulls.createReview` so we can
  *                            inspect what the orchestrator submitted.
  *
- * Important design note — secrets vs. dependency-cve:
+ * Coverage strategy — secrets AND dependency-cve:
  *
- *   The original Task 9 spec asked for a "happy path" scenario using a
- *   `package-lock.json` finding from the dependency-cve scanner. In practice
- *   that finding is rejected by `validateScanFinding` because the diff parser
- *   auto-classifies `package-lock.json` as `is_generated: true`, and validate
- *   refuses to post on generated files. So a lockfile-shaped scenario tests
- *   "no scanner comment in the review" rather than the desired "scanner
- *   comment in the review". To exercise the survives-the-pipeline behavior we
- *   instead plant an AWS access key in a regular source file and let the
- *   `secrets` scanner pick it up — same merge / dedup / adapter code path, no
- *   is_generated wall in the way. The dependency-cve scanner is still
- *   exercised separately to assert that the OSV path is/isn't taken depending
- *   on `security.enabled`.
+ *   We exercise the happy path twice. Scenario 1 plants an AWS access key in a
+ *   regular source file and lets the `secrets` scanner pick it up — the
+ *   simplest "scanner finding survives merge/dedup/adapter" assertion.
+ *   Scenario 3 reinstates a true dependency-cve happy path: a lockfile change
+ *   (`package-lock.json`, lodash 4.17.20 → CVE-2019-10744) flows all the way
+ *   to the posted review carrying the `via OSV` provenance tag. (Earlier this
+ *   was blocked because `validateScanFinding` refused to post on
+ *   `is_generated` files; that check has been removed for scanner findings
+ *   since lockfiles are the canonical anchor for dependency CVEs.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -542,36 +539,64 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
 });
 
 // -----------------------------------------------------------------
-// Scenario 3: dependency-cve findings are protected from cross-AI dedup.
+// Scenario 3: dependency-cve happy path — lockfile CVE makes it into the review.
 //
-// Trickier scenario: we want both an AI comment AND a dependency-cve scanner
-// finding on the same neighborhood, asserting BOTH survive.
+// The dep-cve scanner emits its finding against the lockfile, which is
+// auto-classified as `is_generated: true` by the diff parser. Scanner findings
+// are allowed on generated files (lockfiles are the canonical anchor for
+// CVEs), so the comment survives validate and appears in the posted review
+// with the `via OSV · <id>` provenance tag.
 //
-// This scenario hits an architectural snag: the dep-cve scanner emits its
-// finding against the lockfile, which `validateScanFinding` rejects because
-// the diff parser flags `package-lock.json` as `is_generated: true`. So a
-// "true" dep-cve E2E happy path through validate is not currently possible
-// without changing the orchestrator. We document this and instead assert the
-// dedup pass itself preserves CVE findings via a unit-level test on
-// `dedupScannerFindings` — already covered by `dedup.test.ts`. The piece we
-// can integration-test is that OSV IS invoked when dep-cve is enabled, which
-// proves the parallel runner reaches it.
+// Pretty-printed lockfile JSON is chosen so the parser's `findVersionLine`
+// helper places the `lodash` version on a line that's actually inside the
+// diff hunk (and therefore inside `reviewable_lines`).
 // -----------------------------------------------------------------
 
-describe('runOrchestrator — Scenario 3: dependency-cve scanner is invoked in parallel', () => {
-  it('invokes OSV.queryBatch when dependency-cve is enabled and a lockfile is changed', async () => {
-    // Build a diff with a package-lock.json change. `parse-diff` needs real
-    // hunks; we hand-craft a tiny lockfile change.
+describe('runOrchestrator — Scenario 3: dependency-cve happy path', () => {
+  it('posts a scanner comment with the OSV provenance tag when a lockfile has a known CVE', async () => {
+    // Pretty-printed lockfile so install key + version sit on separate lines.
+    //
+    //   line 1  {
+    //   line 2    "name": "test",
+    //   line 3    "version": "1.0.0",
+    //   line 4    "lockfileVersion": 3,
+    //   line 5    "packages": {
+    //   line 6      "": {
+    //   line 7        "name": "test",
+    //   line 8        "version": "1.0.0"
+    //   line 9      },
+    //   line 10     "node_modules/lodash": {
+    //   line 11       "version": "4.17.20"
+    //   line 12     }
+    //   line 13   }
+    //   line 14 }
+    //
+    // `findVersionLine` scans for `"node_modules/lodash"` (line 10) and grabs
+    // the next `"version":` (line 11). The diff hunk below covers lines 10–12,
+    // so line 11 is reviewable.
+    const lockContent = JSON.stringify(
+      {
+        name: 'test',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'test', version: '1.0.0' },
+          'node_modules/lodash': { version: '4.17.20' },
+        },
+      },
+      null,
+      2,
+    );
+
     const lockDiff = [
       'diff --git a/package-lock.json b/package-lock.json',
       'index 5555555..6666666 100644',
       '--- a/package-lock.json',
       '+++ b/package-lock.json',
-      '@@ -5,0 +6,4 @@',
+      '@@ -9,0 +10,3 @@',
       '+    "node_modules/lodash": {',
-      '+      "version": "4.17.20",',
-      '+      "resolved": "https://example/lodash-4.17.20.tgz"',
-      '+    },',
+      '+      "version": "4.17.20"',
+      '+    }',
     ].join('\n');
     const appDiff = [
       'diff --git a/src/app.ts b/src/app.ts',
@@ -583,24 +608,11 @@ describe('runOrchestrator — Scenario 3: dependency-cve scanner is invoked in p
     ].join('\n');
     octokitState.diff = `${lockDiff}\n${appDiff}\n`;
     octokitState.filesApi = [
-      { filename: 'package-lock.json', changes: 4, patch: lockDiff },
+      { filename: 'package-lock.json', changes: 3, patch: lockDiff },
       { filename: 'src/app.ts', changes: 1, patch: appDiff },
     ];
+    octokitState.contents.set('package-lock.json', lockContent);
 
-    // Provide the lockfile content to the FileReader so dep-cve's parse step
-    // actually finds lodash.
-    octokitState.contents.set(
-      'package-lock.json',
-      JSON.stringify({
-        name: 'test',
-        version: '1.0.0',
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'test', version: '1.0.0' },
-          'node_modules/lodash': { version: '4.17.20' },
-        },
-      }),
-    );
     // Enable dep-cve, disable secrets so we isolate the dep-cve trigger.
     octokitState.contents.set(
       '.code-review.yml',
@@ -640,15 +652,20 @@ describe('runOrchestrator — Scenario 3: dependency-cve scanner is invoked in p
     expect(osvBatchSpy).toHaveBeenCalledTimes(1);
     expect(osvVulnSpy).toHaveBeenCalledWith('GHSA-jf85-cpcp-j695');
 
-    // Review was still posted, even though the CVE finding gets rejected by
-    // validate (lockfile is generated → comment can't be posted on it).
+    // The scanner comment now makes it into the review.
     expect(octokitState.createReviewCalls).toHaveLength(1);
     const call = octokitState.createReviewCalls[0]!.args as {
-      comments: Array<{ body: string }>;
+      comments: Array<{ path: string; body: string }>;
+      body: string;
     };
-    // No inline comment makes it through (CVE finding rejected as generated,
-    // and no AI inline comments were scripted).
-    expect(call.comments).toHaveLength(0);
+    expect(call.comments).toHaveLength(1);
+    const lockComment = call.comments[0]!;
+    expect(lockComment.path).toBe('package-lock.json');
+    // Provenance tag is rendered with the OSV id.
+    expect(lockComment.body).toContain('via OSV');
+    expect(lockComment.body).toContain('GHSA-jf85-cpcp-j695');
+    // Body advertises the security finding count.
+    expect(call.body).toContain('Security:');
   });
 });
 

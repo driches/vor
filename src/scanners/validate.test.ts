@@ -76,14 +76,38 @@ describe('validateScanFinding', () => {
     expect(r.reason).toContain('binary');
   });
 
-  it('rejects when file is generated', () => {
+  it('accepts findings on generated files (scanner findings carry evidence)', () => {
     const ctx = makeCtx({
       changedFiles: new Map([['src/foo.ts', makeFile({ is_generated: true })]]),
     });
     const r = validateScanFinding(makeFinding(), ctx);
-    expect(r.ok).toBe(false);
-    if (r.ok) throw new Error('unreachable');
-    expect(r.reason).toContain('generated');
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a dependency-cve finding on a lockfile (canonical CVE anchor)', () => {
+    const lockfile = makeFile({
+      path: 'package-lock.json',
+      language: 'json',
+      is_generated: true,
+      reviewable_lines: [[5, 20]],
+      head_line_text: new Map([[10, '      "version": "4.17.20",']]),
+    });
+    const ctx: ScannerValidationContext = {
+      changedFiles: new Map([[lockfile.path, lockfile]]),
+    };
+    const finding = makeFinding({
+      file_path: 'package-lock.json',
+      line: 10,
+      evidence: {
+        kind: 'cve',
+        osv_id: 'GHSA-jf85-cpcp-j695',
+        ecosystem: 'npm',
+        package: 'lodash',
+        affected_version: '4.17.20',
+      },
+    });
+    const r = validateScanFinding(finding, ctx);
+    expect(r.ok).toBe(true);
   });
 
   it('rejects when line is outside reviewable ranges', () => {
