@@ -48410,6 +48410,17 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
 - "Consider adding a comment here" without saying what the comment would say
 - Style preferences when the repo has no documented convention
 
+# Things you cannot verify \u2014 DO NOT flag
+
+You CANNOT see the source, README, or \`action.yml\` of any external GitHub Action, npm package, or third-party dependency the PR uses. The tools \`read_file_at_ref\`, \`read_repo_context_file\`, and \`grep_repo_at_ref\` only see THIS repo at the PR's commit.
+
+For external code, do NOT speculate that:
+- A required \`with:\` input is missing on a third-party GitHub Action \u2014 many actions default required inputs (e.g. \`github_token\` typically defaults to \`\${{ github.token }}\`). You cannot verify the action's \`action.yml\`; assume reasonable defaults exist unless the workflow is demonstrably failing.
+- A library function "needs" a specific argument you can't see.
+- A configuration is "wrong" because a third-party tool requires X.
+
+Exceptions: when the diff itself contains evidence (a comment, an existing pattern in the same repo, or a CI failure shown in the PR), cite the evidence.
+
 # Required discipline
 
 - **One issue per comment.** If the same pattern repeats 10 times, comment ONCE on the clearest instance and write "This pattern repeats at lines X, Y, Z \u2014 same fix applies." Do not spam.
@@ -48422,6 +48433,14 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
 # Self-correction loop
 
 When \`post_inline_comment\` returns \`accepted: false\`, the response includes a \`hint\` that tells you exactly how to fix the call. Read it and try again with the corrected input. If you get 3 rejections in a row on the same comment, drop it.
+
+# Respect prior author pushback
+
+This PR may have prior review comments from you (recognizable by the \`<!-- driches/code-review: agent-review v1 -->\` marker) AND author replies on those threads. The PR description may also note design decisions you should respect.
+
+If you previously flagged a finding and the author replied with "pushing back", "won't fix", "wontdo", "by design", "duplicate", "as documented", "intentional", or similar \u2014 DO NOT re-issue that finding on this run. The author already evaluated and rejected it. Re-issuing the same finding after pushback erodes trust faster than missing a real bug.
+
+You cannot directly read prior threads in this version of the tool. As a heuristic: if a finding feels like an "obvious" critique on a config file (timeout, depth, version, tag), pause and ask yourself "is this the kind of thing a reasonable author would push back on, citing the action's own docs?" \u2014 if yes, soften severity or skip.
 
 # Output
 
@@ -52941,11 +52960,6 @@ function bySeverityDesc(a2, b2) {
 }
 
 // src/output/formatter.ts
-var ASSESSMENT_LABEL = {
-  approve: "Approve",
-  request_changes: "Request changes",
-  comment: "Comment"
-};
 function renderSummary(input) {
   const summary2 = input.draft.summary;
   if (!summary2) {
@@ -52955,14 +52969,14 @@ function renderSummary(input) {
     };
   }
   const sections = [];
-  sections.push(`### ${ASSESSMENT_LABEL[summary2.assessment]}`);
+  sections.push(`### ${severityHeader(input.keptComments)}`);
   sections.push(summary2.assessment_reasoning);
   if (summary2.strengths.length > 0) {
     sections.push("### Strengths");
     sections.push(summary2.strengths.map((s2) => `- ${s2}`).join("\n"));
   }
-  const counts = countBySeverity(input.keptComments);
   if (input.keptComments.length > 0) {
+    const counts = countBySeverity(input.keptComments);
     sections.push("### Findings");
     sections.push(formatCountsLine(counts));
     const scannerLine = formatScannerCountsLine(input.keptComments);
@@ -53008,6 +53022,13 @@ function formatCountsLine(counts) {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(", ") : "No findings.";
+}
+function severityHeader(comments) {
+  if (comments.length === 0) return "No findings";
+  if (comments.some((c2) => c2.severity === "critical")) return "Critical findings";
+  if (comments.some((c2) => c2.severity === "important")) return "Important findings";
+  if (comments.some((c2) => c2.severity === "minor")) return "Minor findings";
+  return "Notes only";
 }
 function formatScannerCountsLine(comments) {
   const byScanner = /* @__PURE__ */ new Map();
