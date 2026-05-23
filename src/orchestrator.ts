@@ -139,6 +139,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       `${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`,
   );
 
+  if (!aggregator.hasSummary()) {
+    await logger.warn(
+      'Agent did not call post_summary. Synthesizing a summary body from inline findings.',
+    );
+  }
+
   // Apply final filters (severity floor, per-file cap, global cap, dedup)
   const filtered = filterComments(aggregator.acceptedComments, {
     severityFloor: config.severity.floor,

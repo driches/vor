@@ -153,7 +153,27 @@ describe('renderSummary — body content', () => {
     expect(r.body).toContain('a.ts, b.ts, c.ts');
   });
 
-  it('handles missing summary gracefully', () => {
+  it('synthesizes a body from comments when the agent skipped post_summary', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('important'), c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'claude-sonnet-4-6',
+    });
+    // No apologetic placeholder.
+    expect(r.body).not.toContain('no summary');
+    // Real lede + findings count derived from inline comments.
+    expect(r.body).toContain('### Important findings');
+    expect(r.body).toContain('### Findings');
+    expect(r.body).toContain('1 important, 1 minor');
+    // Footer still attaches.
+    expect(r.body).toContain('claude-sonnet-4-6');
+    // No assessment → COMMENT.
+    expect(r.event).toBe('COMMENT');
+  });
+
+  it('produces a clean "No findings" body when both summary and comments are missing', () => {
     const r = renderSummary({
       draft: { comments: [], skipped: [] },
       keptComments: [],
@@ -162,7 +182,22 @@ describe('renderSummary — body content', () => {
       modelName: 'm',
     });
     expect(r.event).toBe('COMMENT');
-    expect(r.body).toContain('no summary');
+    expect(r.body).toContain('### No findings');
+    expect(r.body).not.toContain('no summary');
+    // No strengths/coverage sections sneak in.
+    expect(r.body).not.toContain('### Strengths');
+    expect(r.body).not.toContain('### Coverage');
+  });
+
+  it('still surfaces the truncated-comments line when summary is missing', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('minor')],
+      truncatedCount: 3,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('3 additional comment');
   });
 });
 
