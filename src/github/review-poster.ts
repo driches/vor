@@ -107,5 +107,14 @@ function renderProvenanceTag(c: PostedComment): string {
       return '\n\n_via SAST_';
     case 'container-cve':
       return '\n\n_via container scan_';
+    default: {
+      // Exhaustiveness check: if a new ScannerId is added to the union
+      // without updating this switch, TypeScript will error here at
+      // compile time. At runtime we still return '' rather than
+      // concatenating `undefined` into the rendered comment body.
+      const _exhaustive: never = c.source.scanner;
+      void _exhaustive;
+      return '';
+    }
   }
 }

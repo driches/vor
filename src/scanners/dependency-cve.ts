@@ -706,16 +706,27 @@ export function createDependencyCveScanner(
         type FetchOutcome =
           | { id: string; ok: true; vuln: OsvVuln }
           | { id: string; ok: false; error: Error };
-        const outcomes = await Promise.all(
-          idsToFetch.map(async (id): Promise<FetchOutcome> => {
-            try {
-              const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
-              return { id, ok: true, vuln };
-            } catch (err) {
-              return { id, ok: false, error: err as Error };
-            }
-          }),
-        );
+        // Cap concurrency to avoid thundering-herd against OSV. A PR with
+        // a fresh lockfile section can easily yield 50+ unique vuln ids;
+        // firing them all at once invites 429s + retry exhaustion that
+        // can drain the 60s scanner timeout. 10-at-a-time preserves most
+        // of the parallelism benefit while staying polite.
+        const GETVULN_CONCURRENCY = 10;
+        const outcomes: FetchOutcome[] = [];
+        for (let i = 0; i < idsToFetch.length; i += GETVULN_CONCURRENCY) {
+          const batch = idsToFetch.slice(i, i + GETVULN_CONCURRENCY);
+          const batchOutcomes = await Promise.all(
+            batch.map(async (id): Promise<FetchOutcome> => {
+              try {
+                const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
+                return { id, ok: true, vuln };
+              } catch (err) {
+                return { id, ok: false, error: err as Error };
+              }
+            }),
+          );
+          outcomes.push(...batchOutcomes);
+        }
         for (const outcome of outcomes) {
           if (outcome.ok) {
             network_calls += 1;

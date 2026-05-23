@@ -52884,6 +52884,11 @@ _via OSV \xB7 ${id}_`;
       return "\n\n_via SAST_";
     case "container-cve":
       return "\n\n_via container scan_";
+    default: {
+      const _exhaustive = c2.source.scanner;
+      void _exhaustive;
+      return "";
+    }
   }
 }
 
@@ -53221,7 +53226,15 @@ var isoDateSchema = external_exports.union([
     "expires must be ISO YYYY-MM-DD or RFC3339 datetime"
   ),
   external_exports.date()
-]).transform((v2) => v2 instanceof Date ? v2.toISOString().slice(0, 10) : v2.slice(0, 10));
+]).transform((v2) => {
+  if (v2 instanceof Date) {
+    const y2 = v2.getUTCFullYear();
+    const m2 = String(v2.getUTCMonth() + 1).padStart(2, "0");
+    const d2 = String(v2.getUTCDate()).padStart(2, "0");
+    return `${y2}-${m2}-${d2}`;
+  }
+  return v2.slice(0, 10);
+});
 var ghsaEntrySchema = external_exports.object({
   ghsa_id: external_exports.string().min(1),
   reason: external_exports.string().min(1),
@@ -54175,16 +54188,22 @@ function createDependencyCveScanner(options) {
         idsToFetch.push(id);
       }
       if (idsToFetch.length > 0) {
-        const outcomes = await Promise.all(
-          idsToFetch.map(async (id) => {
-            try {
-              const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
-              return { id, ok: true, vuln };
-            } catch (err) {
-              return { id, ok: false, error: err };
-            }
-          })
-        );
+        const GETVULN_CONCURRENCY = 10;
+        const outcomes = [];
+        for (let i2 = 0; i2 < idsToFetch.length; i2 += GETVULN_CONCURRENCY) {
+          const batch = idsToFetch.slice(i2, i2 + GETVULN_CONCURRENCY);
+          const batchOutcomes = await Promise.all(
+            batch.map(async (id) => {
+              try {
+                const vuln = await getOsvClient().getVuln(id, { signal: deps.signal });
+                return { id, ok: true, vuln };
+              } catch (err) {
+                return { id, ok: false, error: err };
+              }
+            })
+          );
+          outcomes.push(...batchOutcomes);
+        }
         for (const outcome of outcomes) {
           if (outcome.ok) {
             network_calls += 1;

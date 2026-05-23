@@ -27,14 +27,22 @@ import type {
 } from './types.js';
 
 /**
- * ISO date for the `expires` field. Accepts both bare `YYYY-MM-DD` strings
- * (yaml's default for unquoted dates) and explicit `!!timestamp` tagged values
- * (which yaml parses as `Date`). Also accepts RFC3339 datetime strings like
- * `2026-12-31T23:59:59Z` or `2026-12-31T23:59:59+02:00` so users pasting a
- * timestamp from another tool don't silently degrade their whole file. All
- * forms normalize to `YYYY-MM-DD` (UTC truncation for `Date` inputs;
- * leading-10-char slice for strings, which is correct in either timezone since
- * the date portion already starts the string).
+ * ISO date for the `expires` field. Accepts:
+ *
+ *   - Bare `YYYY-MM-DD` strings (yaml's default for unquoted dates).
+ *   - RFC3339 datetime strings like `2026-12-31T23:59:59Z` or
+ *     `2026-12-31T23:59:59+02:00`. yaml's default `core` schema keeps these
+ *     as strings, so we extract the date portion in the user's original
+ *     timezone via a leading-10-char slice — correct regardless of any
+ *     timezone suffix the user wrote.
+ *   - Explicit `!!timestamp` tagged values (which yaml parses as `Date`).
+ *     The original timezone is LOST in the Date conversion (it's normalized
+ *     to UTC), so we extract YYYY-MM-DD via UTC components. This can shift
+ *     the calendar date by ±1 day if the user's wall-clock date and the
+ *     UTC date differ (e.g. `!!timestamp 2026-12-31T23:59:59-08:00` →
+ *     UTC instant 2027-01-01T07:59:59Z → date 2027-01-01). Users who care
+ *     about a specific calendar date should use bare `YYYY-MM-DD` or a
+ *     plain (untagged) RFC3339 string.
  */
 const isoDateSchema = z
   .union([
@@ -46,7 +54,19 @@ const isoDateSchema = z
       ),
     z.date(),
   ])
-  .transform((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)));
+  .transform((v) => {
+    if (v instanceof Date) {
+      // !!timestamp path: original TZ already lost. Use UTC components
+      // explicitly so the docstring and code agree on the limitation.
+      const y = v.getUTCFullYear();
+      const m = String(v.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(v.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    // String path (the default): the date portion is the first 10 chars,
+    // regardless of whether there's a timezone suffix.
+    return v.slice(0, 10);
+  });
 
 const ghsaEntrySchema = z.object({
   ghsa_id: z.string().min(1),
