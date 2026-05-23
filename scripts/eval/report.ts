@@ -1,0 +1,90 @@
+/**
+ * Render a markdown summary comparing each config against a baseline.
+ *
+ * Win/loss colors (per the design spec, "same recall, lower cost"):
+ *   🟢 — recall ≥ baseline AND cost < baseline × 0.75
+ *   🟡 — recall ≥ baseline AND cost < baseline
+ *   🔴 — recall < baseline
+ *   ⚪ — within ±5% on both axes
+ */
+import type { ScoreResult } from './types.js';
+
+export interface RenderSummaryInput {
+  timestamp: string;
+  baseline_config: string;
+  scores: readonly ScoreResult[];
+}
+
+const COST_WIN_RATIO = 0.75;
+const INCONCLUSIVE_EPSILON = 0.05;
+
+export function renderSummaryReport(input: RenderSummaryInput): string {
+  const cases = unique(input.scores.map((s) => s.case_id));
+  const configs = unique(input.scores.map((s) => s.config_name));
+  const get = (caseId: string, cfg: string): ScoreResult | undefined =>
+    input.scores.find((s) => s.case_id === caseId && s.config_name === cfg);
+
+  const lines: string[] = [];
+  lines.push(`# Eval run ${input.timestamp}`);
+  lines.push('');
+  lines.push(`Baseline: \`${input.baseline_config}\``);
+  lines.push('');
+  lines.push(`| Case | Plants | ${configs.join(' | ')} |`);
+  lines.push(`| --- | --- | ${configs.map(() => '---').join(' | ')} |`);
+  for (const caseId of cases) {
+    const baseline = get(caseId, input.baseline_config);
+    const plants = baseline ? baseline.tp + baseline.fn : 0;
+    const row: string[] = [caseId, String(plants)];
+    for (const cfg of configs) {
+      const s = get(caseId, cfg);
+      if (!s) {
+        row.push('—');
+        continue;
+      }
+      if (cfg === input.baseline_config) {
+        row.push(`R ${pct(s.recall)} / $${s.cost.cost_usd.toFixed(2)} (base)`);
+      } else if (!baseline) {
+        row.push(`R ${pct(s.recall)} / $${s.cost.cost_usd.toFixed(2)}`);
+      } else {
+        row.push(formatCell(s, baseline));
+      }
+    }
+    lines.push(`| ${row.join(' | ')} |`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+function formatCell(s: ScoreResult, baseline: ScoreResult): string {
+  const recallOK = s.recall >= baseline.recall - INCONCLUSIVE_EPSILON;
+  const recallEqual = Math.abs(s.recall - baseline.recall) <= INCONCLUSIVE_EPSILON;
+  const costRatio = baseline.cost.cost_usd === 0 ? 1 : s.cost.cost_usd / baseline.cost.cost_usd;
+  let icon = '⚪';
+  if (!recallOK) icon = '🔴';
+  else if (costRatio < COST_WIN_RATIO) icon = '🟢';
+  else if (costRatio < 1 - INCONCLUSIVE_EPSILON) icon = '🟡';
+  else if (recallEqual && Math.abs(costRatio - 1) <= INCONCLUSIVE_EPSILON) icon = '⚪';
+  const recallDelta =
+    s.recall >= baseline.recall
+      ? `+${pct(s.recall - baseline.recall)}`
+      : `-${pct(baseline.recall - s.recall)}`;
+  const costPct = Math.round((costRatio - 1) * 100);
+  const costStr = costPct > 0 ? `+${costPct}%` : `${costPct}%`;
+  return `R ${pct(s.recall)} (${recallDelta}) / $${s.cost.cost_usd.toFixed(2)} (${costStr}) ${icon}`;
+}
+
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`;
+}
+
+function unique<T>(arr: readonly T[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+  for (const x of arr) {
+    if (!seen.has(x)) {
+      seen.add(x);
+      out.push(x);
+    }
+  }
+  return out;
+}
