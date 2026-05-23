@@ -54046,18 +54046,19 @@ function findFixedVersion(vuln, ecosystem, pkg, affectedVersion) {
       for (const e2 of r2.events) {
         if (typeof e2.introduced === "string" && e2.introduced.length > 0) {
           introduced = e2.introduced;
+          fixed = void 0;
         }
         if (typeof e2.fixed === "string" && e2.fixed.length > 0) {
           fixed = e2.fixed;
         }
+        if (fixed === void 0) continue;
+        if (fallback === void 0) fallback = fixed;
+        if (!semverComparable) continue;
+        const lowerBound = introduced ?? "0";
+        const lowerOk = lowerBound === "0" || (0, import_semver2.valid)(lowerBound) != null && (0, import_semver2.gte)(affectedVersion, lowerBound);
+        const upperOk = (0, import_semver2.valid)(fixed) != null && (0, import_semver2.lt)(affectedVersion, fixed);
+        if (lowerOk && upperOk) return fixed;
       }
-      if (fixed === void 0) continue;
-      if (fallback === void 0) fallback = fixed;
-      if (!semverComparable) continue;
-      const lowerBound = introduced ?? "0";
-      const lowerOk = lowerBound === "0" || (0, import_semver2.valid)(lowerBound) != null && (0, import_semver2.gte)(affectedVersion, lowerBound);
-      const upperOk = (0, import_semver2.valid)(fixed) != null && (0, import_semver2.lt)(affectedVersion, fixed);
-      if (lowerOk && upperOk) return fixed;
     }
   }
   return fallback;

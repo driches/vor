@@ -1240,4 +1240,78 @@ describe('createDependencyCveScanner — version-aware range matching', () => {
     expect(finding.description).toContain('>=2.3.1');
     expect(finding.description).not.toContain('>=1.8.5');
   });
+
+  it('returns the fix from window 1 when a SINGLE range encodes two disjoint windows', async () => {
+    // Regression: OSV permits a single `ranges[]` entry to interleave
+    // introduced/fixed events into multiple disjoint windows, e.g.
+    //   events: [{introduced:'1.0'}, {fixed:'1.2'}, {introduced:'1.5'}, {fixed:'1.8'}]
+    // means [1.0, 1.2) AND [1.5, 1.8) are vulnerable; [1.2, 1.5) and
+    // ≥1.8 are NOT. The previous loop overwrote introduced/fixed on
+    // every event, so only the LAST window survived. A dep on 1.1
+    // would be evaluated against [1.5, 1.8), miss the lower bound,
+    // and get no upgrade hint. Now each window is evaluated as soon
+    // as both bounds are known.
+    const MULTI_WINDOW_LOCK = [
+      '{',
+      '  "name": "test",',
+      '  "version": "1.0.0",',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "test", "version": "1.0.0" },',
+      '    "node_modules/example": {',
+      '      "version": "1.1.0"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const MULTI_WINDOW_VULN: OsvVuln = {
+      id: 'GHSA-window-aaaa-bbbb',
+      aliases: ['CVE-2024-00001'],
+      summary: 'Issue affecting two disjoint windows in 1.x',
+      severity: [{ type: 'CVSS_V3', score: '7.5' }],
+      affected: [
+        {
+          package: { name: 'example', ecosystem: 'npm' },
+          ranges: [
+            {
+              type: 'SEMVER',
+              events: [
+                { introduced: '1.0.0' },
+                { fixed: '1.2.0' },
+                { introduced: '1.5.0' },
+                { fixed: '1.8.0' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const batchResp: OsvBatchResponse = {
+      results: [{ vulns: [{ id: 'GHSA-window-aaaa-bbbb', modified: '2024-01-01T00:00:00Z' }] }],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(batchResp),
+      getVuln: vi.fn().mockResolvedValue(MULTI_WINDOW_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(MULTI_WINDOW_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    // CRITICAL: dep is 1.1.0, which is inside window 1 [1.0.0, 1.2.0).
+    // Must return 1.2.0 (window 1's fix), NOT 1.8.0 (window 2's fix).
+    expect(finding.evidence.fixed_version).toBe('1.2.0');
+    expect(finding.description).toContain('>=1.2.0');
+    expect(finding.description).not.toContain('>=1.8.0');
+  });
 });

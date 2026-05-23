@@ -442,32 +442,38 @@ function findFixedVersion(
       // useless. Skip entirely.
       if (r.type === 'GIT') continue;
 
+      // A single OSV range can encode MULTIPLE disjoint windows by
+      // interleaving introduced/fixed events, e.g.
+      //   [{introduced:"1.0"}, {fixed:"1.2"}, {introduced:"1.5"}, {fixed:"1.8"}]
+      // declares two separate vulnerable windows. Evaluate each window
+      // as soon as we have both bounds — don't wait for the loop to
+      // finish (the previous version overwrote `introduced`/`fixed` on
+      // every event, so only the LAST window was considered and a dep
+      // in window 1 would be evaluated against window 2, missing the
+      // hit). When a new `introduced` arrives, reset `fixed` so it can
+      // only be paired with that new window's bound.
       let introduced: string | undefined;
       let fixed: string | undefined;
       for (const e of r.events) {
         if (typeof e.introduced === 'string' && e.introduced.length > 0) {
           introduced = e.introduced;
+          fixed = undefined; // start a new window
         }
         if (typeof e.fixed === 'string' && e.fixed.length > 0) {
           fixed = e.fixed;
         }
+        // Evaluate as soon as we have both bounds of THIS window. The
+        // fallback (first usable fix anywhere) is also tracked here.
+        if (fixed === undefined) continue;
+        if (fallback === undefined) fallback = fixed;
+        if (!semverComparable) continue;
+        const lowerBound = introduced ?? '0';
+        const lowerOk =
+          lowerBound === '0' ||
+          (semverValid(lowerBound) != null && semverGte(affectedVersion, lowerBound));
+        const upperOk = semverValid(fixed) != null && semverLt(affectedVersion, fixed);
+        if (lowerOk && upperOk) return fixed;
       }
-      if (fixed === undefined) continue;
-
-      // Track the first usable fix as a fallback. Used when the affected
-      // version isn't semver-comparable (e.g. PEP 440 prerelease forms)
-      // or no semver-matching range existed.
-      if (fallback === undefined) fallback = fixed;
-
-      // Range-contains check via semver where possible. The `introduced`
-      // event defaults to `0` per OSV semantics (advisory has been there
-      // forever). If either bound isn't semver, we leave the decision to
-      // the fallback above.
-      if (!semverComparable) continue;
-      const lowerBound = introduced ?? '0';
-      const lowerOk = lowerBound === '0' || (semverValid(lowerBound) != null && semverGte(affectedVersion, lowerBound));
-      const upperOk = semverValid(fixed) != null && semverLt(affectedVersion, fixed);
-      if (lowerOk && upperOk) return fixed;
     }
   }
   return fallback;
