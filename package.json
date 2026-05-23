@@ -26,7 +26,8 @@
     "golden:capture": "tsx scripts/golden/capture.ts",
     "golden:capture-batch": "tsx scripts/golden/capture-batch.ts",
     "golden:discover": "tsx scripts/golden/discover.ts",
-    "golden:eval": "tsx scripts/golden/eval.ts"
+    "golden:eval": "tsx scripts/golden/eval.ts",
+    "golden:plant": "tsx scripts/plant.ts"
   },
   "dependencies": {
     "@actions/core": "3.0.1",
