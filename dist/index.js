@@ -53550,6 +53550,14 @@ function parsePnpmKey(rawKey) {
   if (parenIdx >= 0) {
     s2 = s2.slice(0, parenIdx);
   }
+  const initial = parseSurface(s2);
+  if (initial == null) return null;
+  if (initial.version.startsWith("npm:")) {
+    return parsePnpmKey("/" + initial.version.slice("npm:".length));
+  }
+  return initial;
+}
+function parseSurface(s2) {
   if (s2.startsWith("@")) {
     const slashIdx2 = s2.indexOf("/");
     if (slashIdx2 < 0) return null;

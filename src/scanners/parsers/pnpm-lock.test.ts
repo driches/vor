@@ -111,4 +111,57 @@ describe('pnpmLockParser.parse', () => {
     expect(deps[0]!.name).toBe('button');
     expect(deps[0]!.version).toBe('1.0.0');
   });
+
+  it('resolves unscoped npm:alias keys to the real package name', () => {
+    // Regression: previously `/lodash-old@npm:lodash@3.10.1` returned
+    // (name='lodash-old', version='npm:lodash@3.10.1'). OSV is keyed to
+    // the real package (`lodash`), so the alias label can't drive lookups.
+    const content = [
+      "lockfileVersion: '6.0'",
+      'packages:',
+      '  /lodash-old@npm:lodash@3.10.1:',
+      '    resolution: {integrity: x}',
+      '',
+    ].join('\n');
+
+    const deps = pnpmLockParser.parse(content);
+    expect(deps).toEqual([
+      { ecosystem: 'npm', name: 'lodash', version: '3.10.1', line: 3 },
+    ]);
+  });
+
+  it('resolves scoped npm:alias targets', () => {
+    const content = [
+      "lockfileVersion: '6.0'",
+      'packages:',
+      '  /my-react@npm:@scope/real@1.0.0:',
+      '    resolution: {integrity: x}',
+      '',
+    ].join('\n');
+
+    const deps = pnpmLockParser.parse(content);
+    expect(deps).toEqual([
+      { ecosystem: 'npm', name: '@scope/real', version: '1.0.0', line: 3 },
+    ]);
+  });
+
+  it('leaves non-alias entries unchanged when the lockfile mixes both', () => {
+    const content = [
+      "lockfileVersion: '6.0'",
+      'packages:',
+      '  /lodash@4.17.21:',
+      '    resolution: {integrity: x}',
+      '  /lodash-old@npm:lodash@3.10.1:',
+      '    resolution: {integrity: x}',
+      '',
+    ].join('\n');
+
+    const deps = pnpmLockParser.parse(content);
+    // Both entries resolve to `lodash` (different versions) — dedup keys on
+    // (name, version), so both survive.
+    expect(deps.map((d) => `${d.name}@${d.version}`).sort()).toEqual([
+      'lodash@3.10.1',
+      'lodash@4.17.21',
+    ]);
+  });
 });

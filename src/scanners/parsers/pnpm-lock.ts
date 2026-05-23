@@ -52,6 +52,29 @@ function parsePnpmKey(rawKey: string): { name: string; version: string } | null 
     s = s.slice(0, parenIdx);
   }
 
+  // Initial parse: returns the spec's surface (name, version) where version
+  // may still be an `npm:<real-package>@<ver>` alias spec — we unwrap below.
+  const initial = parseSurface(s);
+  if (initial == null) return null;
+
+  // pnpm npm aliases: a key like `/lodash-old@npm:lodash@3.10.1` declares
+  // `lodash-old` as a route to the real `lodash@3.10.1`. Advisories are
+  // keyed to the REAL package, so we must emit the alias target's name —
+  // not the alias label — for OSV lookups. Scoped alias targets work too:
+  // `/my-react@npm:@scope/real@1.0.0` → name `@scope/real`, version `1.0.0`.
+  if (initial.version.startsWith('npm:')) {
+    return parsePnpmKey('/' + initial.version.slice('npm:'.length));
+  }
+
+  return initial;
+}
+
+/**
+ * Split a pnpm key's body (post-`/`, peer suffix already stripped) into
+ * `name` + `version` per the scoped/unscoped and v5/v6 separator rules.
+ * Caller is responsible for unwrapping `npm:` aliases on the `version` field.
+ */
+function parseSurface(s: string): { name: string; version: string } | null {
   // Scoped packages start with `@scope/pkg<sep>version`. Find the separator
   // that comes AFTER the scope.
   if (s.startsWith('@')) {
