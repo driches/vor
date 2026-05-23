@@ -152,6 +152,15 @@ export interface ScanError {
 export interface ScannerMetrics {
   duration_ms: number;
   files_examined: number;
+  /**
+   * Best-effort count of LOGICAL network operations the scanner initiated,
+   * NOT a literal HTTP-request counter. Each scanner defines its own
+   * accounting; `dependency-cve` for example counts OSV `queryBatch` chunks
+   * accurately (1 per HTTP request) but counts `getVuln` per requested ID
+   * (so transparent retries inside the OSV client are invisible here).
+   * Operators monitoring spend or rate-limit risk should treat this as a
+   * lower bound on actual HTTP traffic.
+   */
   network_calls: number;
   cache_hits: number;
 }

@@ -201,6 +201,50 @@ describe('createOsvClient timeout', () => {
     expect(err).toBeInstanceOf(OsvClientError);
     expect((err as OsvClientError).message).toMatch(/timed out/);
   });
+
+  it('reports "aborted by caller" when an external signal aborts mid-flight (not "timed out")', async () => {
+    // Regression: previously every AbortError was labelled "timed out", even
+    // when the abort came from the EXTERNAL caller signal rather than the
+    // internal request timer. Operators reading logs would be misled into
+    // thinking OSV was slow when the parent orchestrator had explicitly
+    // cancelled. fetchOnce now distinguishes the two by tracking whether the
+    // internal timer fired.
+    //
+    // We exercise the fetchOnce branch directly by aborting AFTER the request
+    // has started (withRetries short-circuits a pre-aborted signal before
+    // fetchOnce even runs).
+    const controller = new AbortController();
+    const fakeFetch = vi.fn().mockImplementation(async (_url, init?: RequestInit) => {
+      // Trigger the external abort first — this fires the relay inside
+      // fetchOnce, which calls controller.abort() WITHOUT setting
+      // internalTimedOut. Then bounce back as AbortError like real fetch.
+      controller.abort();
+      const sig = (init?.signal ?? undefined) as AbortSignal | undefined;
+      // Yield a tick so the listener inside fetchOnce sees the abort and
+      // calls the internal controller.abort() — that propagates to `sig`
+      // (the combined controller signal) so the assertion below holds.
+      await new Promise<void>((r) => setImmediate(r));
+      if (sig?.aborted) {
+        const err = new DOMException('Aborted', 'AbortError');
+        throw err;
+      }
+      return new Promise<Response>(() => undefined);
+    });
+    // Generous internal timeout so it never naturally fires within the test —
+    // confirms the abort-message branch is selected by external signal only.
+    const client = createOsvClient({ fetch: fakeFetch, timeoutMs: 10_000, maxRetries: 0 });
+    const err = await client
+      .queryBatch(
+        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
+        { signal: controller.signal },
+      )
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(OsvClientError);
+    // The key assertion: NOT labelled "timed out" — the external caller
+    // aborted, and the message must say so.
+    expect((err as OsvClientError).message).toMatch(/aborted by caller/);
+    expect((err as OsvClientError).message).not.toMatch(/timed out/);
+  });
 });
 
 describe('createOsvClient network error', () => {

@@ -159,6 +159,15 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // same aggregator so the filter pipeline applies uniformly to both.
   const aggregator = new ReviewAggregator();
   const scanners = buildEnabledScanners(config.security);
+  // Top-level scanner-side abort controller. Held outside ScannerDeps so we
+  // can fire it from the agent-failure branch below: when the agent rejects,
+  // we re-throw its error and would otherwise leak in-flight scanner network
+  // calls (OSV requests, GitHub Contents reads) as detached tasks until
+  // their per-request timeouts elapse. This signal is OR-ed with the
+  // per-scanner timeout inside the runner so either side can fire cancellation.
+  // Operators wanting a hard top-level deadline can wire one in by `abort()`-ing
+  // this controller from a custom timer (v2 work).
+  const orchestratorAbort = new AbortController();
   const scannerDeps: ScannerDeps = {
     octokit,
     owner: input.owner,
@@ -177,11 +186,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ignoreList,
     fileReader,
     config: config.security,
-    // Open-ended signal from the orchestrator's side — the per-scanner
-    // timeout signal is OR-ed with this one inside the runner so either
-    // can fire cancellation. Operators wanting a hard top-level deadline
-    // can wire one in here (v2 work).
-    signal: new AbortController().signal,
+    signal: orchestratorAbort.signal,
   };
 
   // Fire agent + scanners in parallel. The runner is error-isolated, so a
@@ -190,6 +195,13 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // agent doesn't leave in-flight scanner network calls running as detached
   // tasks (they'd live until the 60s scanner timeout). Surfaces partial
   // scanner results in logs even on agent failure.
+  //
+  // Pairing with `orchestratorAbort`: allSettled lets the scanner branch
+  // FINISH (success or natural error) before we ditch the run, and the abort
+  // below lets us actively cancel any still-in-flight scanner work in the
+  // narrow window between agent rejection and the scanner branch settling.
+  // Without the abort, a long-running scanner could keep doing useful network
+  // I/O after we've already decided to throw the agent error away.
   const [agentOutcome, scanOutcome] = await Promise.allSettled([
     runAgent({
       deps: {
@@ -220,6 +232,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
           `Re-throwing agent error.`,
       );
     }
+    // Fire the abort BEFORE re-throwing so any scanner work still in flight
+    // (already past allSettled wouldn't be possible, but defensively in case
+    // a future scanner schedules detached promises) gets a cancellation
+    // signal rather than running to its per-request timeout. No-op if the
+    // scanner branch already settled.
+    orchestratorAbort.abort();
     throw agentOutcome.reason;
   }
   const result = agentOutcome.value;

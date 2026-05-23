@@ -247,7 +247,18 @@ async function fetchOnce(
   externalSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Track which side of the abort fired so the error message is accurate.
+  // - `internalTimedOut`: the timeout callback below ran, meaning the request
+  //   exceeded `timeoutMs`.
+  // - external abort: caught via `externalSignal.aborted` in the catch block.
+  // Both can be true if the external signal fires AFTER the internal timer
+  // (rare but possible) — in that case we report internal timeout because
+  // chronologically that's what aborted the request.
+  let internalTimedOut = false;
+  const timer = setTimeout(() => {
+    internalTimedOut = true;
+    controller.abort();
+  }, timeoutMs);
   // Combine internal timeout signal with caller-supplied signal (if any).
   // Either firing aborts the fetch — prefer native AbortSignal.any when
   // available (Node 20.3+); fall back to a manual relay otherwise.
@@ -274,12 +285,21 @@ async function fetchOnce(
     return res;
   } catch (err) {
     if (err instanceof OsvClientError) throw err;
-    // AbortError → user-facing "timed out". Distinguish by name so tests
-    // can assert on it without coupling to platform error strings.
+    // AbortError → distinguish internal-timeout vs external-cancellation so
+    // the operator sees an accurate cause. Without this, every abort was
+    // labelled "timed out", which is wrong when the caller explicitly
+    // cancelled (e.g. a parent AbortController firing from a higher-level
+    // deadline). Tests can assert on the precise phrasing.
     if ((err as Error)?.name === 'AbortError') {
-      throw new OsvClientError(`${describe} timed out after ${timeoutMs}ms`, undefined, {
-        cause: err,
-      });
+      let message: string;
+      if (internalTimedOut) {
+        message = `${describe} timed out after ${timeoutMs}ms`;
+      } else if (externalSignal?.aborted) {
+        message = `${describe} aborted by caller`;
+      } else {
+        message = `${describe} aborted (internal timeout or external signal)`;
+      }
+      throw new OsvClientError(message, undefined, { cause: err });
     }
     throw new OsvClientError(
       `${describe} network error: ${(err as Error)?.message ?? err}`,

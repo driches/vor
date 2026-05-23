@@ -526,6 +526,26 @@ export function createDependencyCveScanner(
       const errors: ScanError[] = [];
       const findings: ScanFinding[] = [];
       let files_examined = 0;
+      // network_calls is best-effort and counts LOGICAL operations rather
+      // than literal HTTP requests. Two specific inconsistencies operators
+      // should be aware of:
+      //
+      //   - `queryBatch` increments by `ceil(queries / 100)` — i.e. one
+      //     count per OSV-side HTTP chunk we send. The OSV client splits
+      //     internally at 100 queries per request, so this matches actual
+      //     HTTP traffic for the batch path.
+      //
+      //   - `getVuln` increments by 1 per ID we ask for, NOT per HTTP
+      //     request. Retries inside the OSV client (network errors, 5xx)
+      //     are INVISIBLE here because the client does not expose a retry
+      //     count via its current API. A vuln id that retries 3 times
+      //     before succeeding still counts as 1.
+      //
+      // Net effect: the metric is a useful upper bound on "things the
+      // scanner asked the network to do" but a lower bound on "HTTP
+      // requests actually sent." If retry visibility becomes important
+      // we'd need to thread a per-attempt counter through `withRetries`
+      // in `osv-client.ts` (out of scope for this round).
       let network_calls = 0;
 
       // -----------------------------------------------------------------
@@ -729,6 +749,9 @@ export function createDependencyCveScanner(
         }
         for (const outcome of outcomes) {
           if (outcome.ok) {
+            // +1 per LOGICAL getVuln call (one ID). The OSV client may have
+            // retried this internally on transient failures and we don't see
+            // those retries here — see the network_calls comment above.
             network_calls += 1;
             deps.cache.set<OsvVuln>(vulnCacheKey(outcome.id), outcome.vuln);
             vulnRecords.set(outcome.id, outcome.vuln);

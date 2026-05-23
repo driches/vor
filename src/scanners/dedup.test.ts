@@ -265,6 +265,18 @@ describe('dedupKeptScannerComments', () => {
     expect(dedupKeptScannerComments([])).toEqual([]);
   });
 
+  it('keeps the scanner comment when the AI comment is on a different side (LEFT vs RIGHT)', () => {
+    // A LEFT-side AI comment anchors at the PR's BASE blob; a RIGHT-side
+    // scanner finding points at HEAD. They reference different code
+    // positions even though file_path + line numerically overlap, so they
+    // must NOT cross-dedup. Without the `side` check the LEFT-side AI
+    // would silently suppress the RIGHT-side scanner finding.
+    const scanner = makeScannerComment({ scanner: 'secrets', line: 10, side: 'RIGHT' });
+    const ai = makeAiComment({ category: 'security', line: 10, side: 'LEFT' });
+    const out = dedupKeptScannerComments([scanner, ai]);
+    expect(out).toEqual([scanner, ai]);
+  });
+
   it('treats a comment with no `source` as AI (backward compat) and dedups against it', () => {
     // `source` is optional on PostedComment; absence is treated as AI per the
     // type comment. A scanner finding overlapping a sourceless security

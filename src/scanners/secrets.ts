@@ -207,10 +207,6 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                   continue;
                 }
 
-                // Critical ordering: register BEFORE building any object
-                // that we might inadvertently log later.
-                registerSecret(raw);
-
                 const rule_id = `secret:${pattern.id}`;
                 const evidence: ScanEvidence = {
                   kind: 'secret',
@@ -248,8 +244,22 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                   if (m.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
                   }
+                  // NOTE: we deliberately do NOT call `registerSecret(raw)` on
+                  // the ignored path. Doing so would pollute the
+                  // `@actions/core` mask set with intentionally-suppressed
+                  // values, and any subsequent log line containing those
+                  // values would be masked even though the operator told us
+                  // to ignore them. The ordinal counter has already advanced,
+                  // so removing or adding an ignore entry doesn't shift the
+                  // fingerprints of unrelated subsequent matches.
                   continue;
                 }
+
+                // Register the raw value with the redactor ONLY for findings
+                // that will be surfaced. Critical ordering: register BEFORE
+                // building any subsequent log line or rendered output that
+                // might inadvertently contain the value.
+                registerSecret(raw);
                 findings.push(finding);
 
                 // Safety: if a pattern matched at lastIndex === m.index (zero
@@ -276,12 +286,60 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
 
       return {
         scanner: SCANNER_ID,
-        findings,
+        findings: suppressAwsBodyOverlapsWithPem(findings),
         errors,
         metrics: buildMetrics(started, files_examined, deps.cache.hit_count),
       };
     },
   };
+}
+
+/**
+ * Post-scan dedup pass: drop `aws-secret-access-key` findings that fall within
+ * ±20 lines of a `private-key-pem` finding on the SAME file.
+ *
+ * Why: the AWS-secret pattern `/(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{40})(?![A-Za-z0-9+/])/g`
+ * plus the entropy gate happily matches the BODY lines of a PEM private-key
+ * block (e.g. `MIIEpAIBAAKCAQEA3Ro...`) whenever a line happens to be exactly
+ * 40 characters of base64. The `private-key-pem` pattern already fires on the
+ * header `-----BEGIN ... PRIVATE KEY-----`, so without this pass a single
+ * leaked PEM produces 1 PEM finding plus N AWS findings (one per ~40-char body
+ * line) that are all the same underlying issue.
+ *
+ * Approach: collect the per-file set of PEM-header line numbers, then filter
+ * AWS-secret findings whose `line` is within ±20 of any PEM header on that
+ * file. 20 lines is generous enough to cover RSA-4096 PEMs (which produce
+ * roughly 50 body lines at 64 chars each, but only a handful would be exactly
+ * 40 chars after base64 wrapping) without being so wide that an unrelated AWS
+ * key on the same file gets suppressed.
+ *
+ * Implementation note: PEM findings themselves are never suppressed — this is
+ * a one-way suppression of the noisier AWS pattern. The function preserves
+ * input order so the runner's deterministic ordering is unchanged.
+ */
+const PEM_AWS_DEDUP_WINDOW = 20;
+function suppressAwsBodyOverlapsWithPem(
+  findings: readonly ScanFinding[],
+): ScanFinding[] {
+  // Bucket PEM headers by file once so the AWS filter is O(N*K) per file
+  // (K = PEM headers in that file, typically 0 or 1) instead of O(N²) overall.
+  const pemLinesByFile = new Map<string, number[]>();
+  for (const f of findings) {
+    if (f.rule_id !== 'secret:private-key-pem') continue;
+    const list = pemLinesByFile.get(f.file_path);
+    if (list) list.push(f.line);
+    else pemLinesByFile.set(f.file_path, [f.line]);
+  }
+  if (pemLinesByFile.size === 0) return [...findings];
+  return findings.filter((f) => {
+    if (f.rule_id !== 'secret:aws-secret-access-key') return true;
+    const pemLines = pemLinesByFile.get(f.file_path);
+    if (!pemLines) return true;
+    for (const pemLine of pemLines) {
+      if (Math.abs(f.line - pemLine) <= PEM_AWS_DEDUP_WINDOW) return false;
+    }
+    return true;
+  });
 }
 
 function buildMetrics(

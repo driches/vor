@@ -179,6 +179,9 @@ export function dedupAcrossScanners(
  *
  * Overlap criteria (ALL must hold) for a scanner comment to be suppressed:
  *   - same `file_path`,
+ *   - same `side` (LEFT vs RIGHT) — a LEFT-side AI comment anchors at the
+ *     PR's BASE blob while a RIGHT-side scanner finding points at HEAD;
+ *     they reference different code positions and must not cross-dedup,
  *   - `|scan.line - ai.line| <= 3`,
  *   - the AI comment's `category` is in
  *     {'security','vulnerability','data-loss'}.
@@ -202,6 +205,7 @@ export function dedupKeptScannerComments(
     return !survivingAi.some(
       (ai) =>
         ai.file_path === c.file_path &&
+        ai.side === c.side &&
         Math.abs(ai.line - c.line) <= AI_OVERLAP_LINE_WINDOW &&
         AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category),
     );

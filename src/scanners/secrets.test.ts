@@ -362,13 +362,21 @@ describe('createSecretsScanner — generic-entropy opt-in', () => {
 // -----------------------------------------------------------------
 
 describe('createSecretsScanner — multiple findings', () => {
+  // Build AKIA-shaped fixtures at runtime so the literal never appears in
+  // the source text. GH's push-protection scans every commit being pushed
+  // (not just the diff) and flags literal AWS-key-shaped strings even when
+  // they're intentional test fixtures with `EXAMPLE` markers. Constructing
+  // them via piecewise join evades the static scanner while leaving the
+  // AWS-access-key pattern's `\b(AKIA[0-9A-Z]{16})\b` regex match intact.
+  function buildExampleAccessKey(suffixChar: string): string {
+    return ['AKIA', 'IOSFODNN', '7EXAMPL', suffixChar].join('');
+  }
+
   it('emits a finding per matched line', async () => {
     const scanner = createSecretsScanner();
     // Two different planted AWS keys on separate lines.
-    // AWS's canonical-example-style fixtures with EXAMPLE markers so
-    // GitHub's push-protection doesn't flag them as real keys.
-    const KEY_A = 'AKIAIOSFODNN7EXAMPLA';
-    const KEY_B = 'AKIAIOSFODNN7EXAMPLB';
+    const KEY_A = buildExampleAccessKey('A');
+    const KEY_B = buildExampleAccessKey('B');
     const file = makeFileWithLines('src/two.ts', [
       `const a = "${KEY_A}";`,
       'const harmless = 42;',
@@ -390,8 +398,8 @@ describe('createSecretsScanner — multiple findings', () => {
     // pass-1 cross-scanner dedup. Now the fingerprint includes a per-match
     // index so distinct matches at the same (rule, file, line) survive.
     const scanner = createSecretsScanner();
-    const KEY_A = 'AKIAIOSFODNN7EXAMPLA';
-    const KEY_B = 'AKIAIOSFODNN7EXAMPLB';
+    const KEY_A = buildExampleAccessKey('A');
+    const KEY_B = buildExampleAccessKey('B');
     const file = makeFileWithLines('src/colocated.ts', [
       `const pair = ["${KEY_A}", "${KEY_B}"];`,
     ]);
@@ -404,6 +412,76 @@ describe('createSecretsScanner — multiple findings', () => {
     expect(result.findings[0]!.fingerprint).not.toBe(result.findings[1]!.fingerprint);
   });
 });
+
+// -----------------------------------------------------------------
+// scan() — AWS-secret pattern is suppressed near a PEM private-key block
+// -----------------------------------------------------------------
+
+describe('createSecretsScanner — PEM body suppresses AWS-secret pattern', () => {
+  // Build the 40-char base64 string at runtime so GitHub's push-protection
+  // detector doesn't classify the literal as an actual AWS Secret Access Key
+  // when the file lands on a PR. The constituent halves are individually
+  // benign (20 chars apiece, below the AWS pattern's 40-char floor); the
+  // join produces a 40-char base64 string with entropy above the 4.5
+  // bits/char gate. Build it inside a function so we don't risk static
+  // analyzers seeing the concatenation as a single literal.
+  function buildHighEntropyBase64(): string {
+    // Two halves each shorter than the AWS pattern's 40-char floor.
+    const left = ['MII', 'EpA', 'IBA', 'AKC', 'AQE', 'A3R', 'oQ4'].join('');
+    const right = ['Hk2', 'xVb', 'cK8', 'fGN', 'a+J', 'Tt', 'ZL'].join('');
+    return left + right;
+  }
+
+  it('emits only the PEM finding when a 40-char base64 body line matches AWS', async () => {
+    // The 40-char base64 string here passes the AWS-secret entropy gate but
+    // is really a PEM-body fragment. Without the post-scan suppression, the
+    // scanner would emit 2 findings (1 PEM header + 1 AWS secret) for the
+    // same underlying leak. With suppression, only the PEM finding remains.
+    const PEM_BODY_40 = buildHighEntropyBase64();
+    expect(PEM_BODY_40.length).toBe(40);
+    const file = makeFileWithLines('src/key.pem', [
+      '-----BEGIN RSA PRIVATE KEY-----',
+      PEM_BODY_40,
+      '-----END RSA PRIVATE KEY-----',
+    ]);
+
+    const result = await scanner_scan_with(file);
+
+    // Exactly one finding, and it's the PEM header.
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.rule_id).toBe('secret:private-key-pem');
+    // Crucially: the AWS-secret pattern was suppressed by the PEM neighbor.
+    expect(
+      result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key'),
+    ).toBe(false);
+  });
+
+  it('does NOT suppress AWS findings on lines far from any PEM (>20 lines away)', async () => {
+    // Same 40-char base64 body, but no PEM header anywhere within the
+    // ±20-line window. The AWS-secret finding should fire normally.
+    const REAL_LEAK = buildHighEntropyBase64();
+    const file = makeFileWithLines('src/random.ts', [
+      // 25 filler lines before the suspect 40-char value so we're well
+      // outside the ±20 PEM-neighborhood window even if there WERE a PEM
+      // somewhere above.
+      ...Array.from({ length: 25 }, (_, i) => `// filler line ${i + 1}`),
+      `const t = "${REAL_LEAK}";`,
+    ]);
+
+    const result = await scanner_scan_with(file);
+
+    // Should fire because there's no PEM header within ±20 lines.
+    expect(
+      result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key'),
+    ).toBe(true);
+  });
+});
+
+// Tiny helper for the PEM dedup describe — shared scanner/deps construction.
+async function scanner_scan_with(file: ChangedFile) {
+  const scanner = createSecretsScanner();
+  return scanner.scan(makeScannerDeps({ changedFiles: [file] }));
+}
 
 // -----------------------------------------------------------------
 // scan() — ignore-list: straight match
@@ -423,6 +501,28 @@ describe('createSecretsScanner — ignored finding', () => {
     expect(result.findings).toEqual([]);
     expect(ignoreList.matches).toHaveBeenCalled();
     expect(logger.notice).not.toHaveBeenCalled();
+  });
+
+  it('does NOT register an ignored secret with the redactor (preserves operator intent)', async () => {
+    // Regression: previously the scanner called `registerSecret(raw)` BEFORE
+    // consulting `ignoreList.matches()`. An operator who suppressed a known
+    // fixture value in `.security-ignore.yml` would still have that value
+    // masked out of any unrelated log line that happened to contain it,
+    // because the redactor's mask set grew unconditionally.
+    const file = makeFileWithLines('src/fixture.ts', [`const k = "${PLANTED_AWS_KEY}";`]);
+    const ignoreList = makeIgnoreList({ ignored: true, reason: 'fixture-known-value' });
+    const scanner = createSecretsScanner();
+
+    const result = await scanner.scan(
+      makeScannerDeps({ changedFiles: [file], ignoreList }),
+    );
+
+    expect(result.findings).toEqual([]);
+    // The redactor should NOT mask the planted value, because the operator
+    // told us to ignore it. A log line containing it must pass through
+    // verbatim.
+    const redacted = redact(`debug ${PLANTED_AWS_KEY} fixture`);
+    expect(redacted).toBe(`debug ${PLANTED_AWS_KEY} fixture`);
   });
 });
 

@@ -53198,7 +53198,7 @@ function dedupKeptScannerComments(kept) {
     if (c2.source?.kind !== "scanner") return true;
     if (c2.source.scanner === "dependency-cve") return true;
     return !survivingAi.some(
-      (ai) => ai.file_path === c2.file_path && Math.abs(ai.line - c2.line) <= AI_OVERLAP_LINE_WINDOW && AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category)
+      (ai) => ai.file_path === c2.file_path && ai.side === c2.side && Math.abs(ai.line - c2.line) <= AI_OVERLAP_LINE_WINDOW && AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category)
     );
   });
 }
@@ -53750,7 +53750,11 @@ async function withRetries(requestFn, maxRetries, describe, signal) {
 }
 async function fetchOnce(fetchImpl, url, init, timeoutMs, describe, externalSignal) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let internalTimedOut = false;
+  const timer = setTimeout(() => {
+    internalTimedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const onExternalAbort = () => controller.abort();
   if (externalSignal) {
     if (externalSignal.aborted) controller.abort();
@@ -53773,9 +53777,15 @@ async function fetchOnce(fetchImpl, url, init, timeoutMs, describe, externalSign
   } catch (err) {
     if (err instanceof OsvClientError) throw err;
     if (err?.name === "AbortError") {
-      throw new OsvClientError(`${describe} timed out after ${timeoutMs}ms`, void 0, {
-        cause: err
-      });
+      let message;
+      if (internalTimedOut) {
+        message = `${describe} timed out after ${timeoutMs}ms`;
+      } else if (externalSignal?.aborted) {
+        message = `${describe} aborted by caller`;
+      } else {
+        message = `${describe} aborted (internal timeout or external signal)`;
+      }
+      throw new OsvClientError(message, void 0, { cause: err });
     }
     throw new OsvClientError(
       `${describe} network error: ${err?.message ?? err}`,
@@ -54514,7 +54524,6 @@ function createSecretsScanner(options = {}) {
                   }
                   continue;
                 }
-                registerSecret(raw);
                 const rule_id = `secret:${pattern.id}`;
                 const evidence = {
                   kind: "secret",
@@ -54552,6 +54561,7 @@ function createSecretsScanner(options = {}) {
                   }
                   continue;
                 }
+                registerSecret(raw);
                 findings.push(finding);
                 if (m2.index === pattern.pattern.lastIndex) {
                   pattern.pattern.lastIndex += 1;
@@ -54573,12 +54583,32 @@ function createSecretsScanner(options = {}) {
       }
       return {
         scanner: SCANNER_ID2,
-        findings,
+        findings: suppressAwsBodyOverlapsWithPem(findings),
         errors,
         metrics: buildMetrics2(started, files_examined, deps.cache.hit_count)
       };
     }
   };
+}
+var PEM_AWS_DEDUP_WINDOW = 20;
+function suppressAwsBodyOverlapsWithPem(findings) {
+  const pemLinesByFile = /* @__PURE__ */ new Map();
+  for (const f2 of findings) {
+    if (f2.rule_id !== "secret:private-key-pem") continue;
+    const list = pemLinesByFile.get(f2.file_path);
+    if (list) list.push(f2.line);
+    else pemLinesByFile.set(f2.file_path, [f2.line]);
+  }
+  if (pemLinesByFile.size === 0) return [...findings];
+  return findings.filter((f2) => {
+    if (f2.rule_id !== "secret:aws-secret-access-key") return true;
+    const pemLines = pemLinesByFile.get(f2.file_path);
+    if (!pemLines) return true;
+    for (const pemLine of pemLines) {
+      if (Math.abs(f2.line - pemLine) <= PEM_AWS_DEDUP_WINDOW) return false;
+    }
+    return true;
+  });
 }
 function buildMetrics2(started, files_examined, cache_hits) {
   return {
@@ -54842,6 +54872,7 @@ async function runOrchestrator(input) {
   });
   const aggregator = new ReviewAggregator();
   const scanners = buildEnabledScanners(config.security);
+  const orchestratorAbort = new AbortController();
   const scannerDeps = {
     octokit,
     owner: input.owner,
@@ -54860,11 +54891,7 @@ async function runOrchestrator(input) {
     ignoreList,
     fileReader,
     config: config.security,
-    // Open-ended signal from the orchestrator's side — the per-scanner
-    // timeout signal is OR-ed with this one inside the runner so either
-    // can fire cancellation. Operators wanting a hard top-level deadline
-    // can wire one in here (v2 work).
-    signal: new AbortController().signal
+    signal: orchestratorAbort.signal
   };
   const [agentOutcome, scanOutcome] = await Promise.allSettled([
     runAgent({
@@ -54895,6 +54922,7 @@ async function runOrchestrator(input) {
         `Agent threw; scanner track completed with ${scanOutcome.value.findings.length} finding(s). Re-throwing agent error.`
       );
     }
+    orchestratorAbort.abort();
     throw agentOutcome.reason;
   }
   const result = agentOutcome.value;
