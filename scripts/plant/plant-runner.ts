@@ -1,0 +1,77 @@
+/**
+ * Read a case's `plants.yml`, apply each plant in order against the case's
+ * `before/` snapshot, and write `after/` + `truth.yml`.
+ *
+ * Plants apply in array order. Each plant sees the file as it exists at
+ * apply-time (so subsequent plants on the same file see the cumulative
+ * mutations). Truth entries are written in the same order with sequential
+ * `plant_id`s starting at 0.
+ */
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { getTemplate } from './registry.js';
+import type { PlantConfig, TruthEntry } from '../eval/types.js';
+
+interface PlantsYaml {
+  plants: PlantConfig[];
+}
+
+export async function runPlants(caseDir: string): Promise<void> {
+  const plantsPath = join(caseDir, 'plants.yml');
+  if (!existsSync(plantsPath)) {
+    throw new Error(`Case ${caseDir} is missing plants.yml`);
+  }
+  const yamlRaw = readFileSync(plantsPath, 'utf-8');
+  const parsed = parseYaml(yamlRaw) as PlantsYaml | null;
+  if (!parsed || !Array.isArray(parsed.plants)) {
+    throw new Error(`plants.yml in ${caseDir} has no top-level 'plants:' array`);
+  }
+
+  const beforeDir = join(caseDir, 'before');
+  const afterDir = join(caseDir, 'after');
+  if (!existsSync(beforeDir)) {
+    throw new Error(`Case ${caseDir} is missing before/ snapshot`);
+  }
+
+  // Copy before/ → after/ as the starting state, then mutate after/ in place.
+  copyTree(beforeDir, afterDir);
+
+  const truths: TruthEntry[] = [];
+  for (let i = 0; i < parsed.plants.length; i++) {
+    const plant = parsed.plants[i]!;
+    const filePath = join(afterDir, String(plant.file));
+    if (!existsSync(filePath)) {
+      throw new Error(
+        `Plant #${i} (${plant.type}) references file '${String(plant.file)}' which does not exist in before/`,
+      );
+    }
+    const template = getTemplate(plant.type);
+    const source = readFileSync(filePath, 'utf-8');
+    const result = template.apply(source, plant);
+    writeFileSync(filePath, result.mutated);
+    truths.push({ ...result.truth, plant_id: i });
+  }
+
+  writeFileSync(
+    join(caseDir, 'truth.yml'),
+    stringifyYaml({ truths }),
+  );
+}
+
+/** Recursive directory copy. Creates dest if missing. Overwrites files. */
+function copyTree(src: string, dest: string): void {
+  if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src)) {
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    const st = statSync(srcPath);
+    if (st.isDirectory()) {
+      copyTree(srcPath, destPath);
+    } else if (st.isFile()) {
+      const parent = dirname(destPath);
+      if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+      copyFileSync(srcPath, destPath);
+    }
+  }
+}
