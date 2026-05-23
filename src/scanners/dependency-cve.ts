@@ -21,6 +21,7 @@
  * findings array with a populated `errors[]` per the {@link Scanner} contract.
  */
 import { createHash } from 'node:crypto';
+import { gte as semverGte, lt as semverLt, valid as semverValid } from 'semver';
 import { canonicalizePackageName } from './canonicalize.js';
 import { npmPackageLockParser } from './parsers/npm-package-lock.js';
 import { yarnLockParser } from './parsers/yarn-lock.js';
@@ -392,17 +393,33 @@ function deriveSeverity(vuln: OsvVuln): DerivedSeverity {
 }
 
 /**
- * Find the smallest `fixed` event across affected ranges for the given
- * (ecosystem, package). OSV publishes one or more `affected[]` blocks per
+ * Find the `fixed` event for the affected range that ACTUALLY contains the
+ * version we queried. OSV publishes one or more `affected[]` blocks per
  * vuln; we only care about the one that matches the dep we just queried.
- * If multiple `fixed` events exist (e.g. backported fixes on multiple
- * branches), the FIRST one we encounter wins — we don't attempt semver
- * sorting in v1 because that requires a per-ecosystem comparator.
+ *
+ * Why range-aware matching matters: an advisory can publish multiple
+ * SEMVER ranges in parallel — e.g. one covering 1.x with `fixed: 1.8.5`
+ * and another covering 2.x with `fixed: 2.3.1`. A lockfile pinned to
+ * 2.0.0 must surface `2.3.1` as the upgrade target; returning the first
+ * `fixed` event blindly would render "Upgrade to >=1.8.5", which is a
+ * downgrade and breaks the advice.
+ *
+ * GIT-type ranges are skipped entirely: their `fixed` events are commit
+ * SHAs, which are NEVER valid version specifiers. Rendering
+ * "Upgrade lodash to >=abc123def" would be confusing and useless.
+ *
+ * Cross-ecosystem version comparison: we use `semver` for any value that
+ * parses as semver (covers npm cleanly and most PyPI advisories in
+ * practice). PEP 440 prerelease quirks (e.g. `1.0a1`, `1.0.dev0`) fall
+ * back to a permissive "first non-GIT fixed event for a matching package"
+ * lookup — accepting v2's earlier limitation that ranges spanning
+ * non-semver PyPI versions may pick a sub-optimal fix.
  */
 function findFixedVersion(
   vuln: OsvVuln,
   ecosystem: string,
   pkg: string,
+  affectedVersion: string,
 ): string | undefined {
   if (!vuln.affected) return undefined;
   // Compare names via the shared per-ecosystem canonical form. For PyPI
@@ -411,18 +428,49 @@ function findFixedVersion(
   // `zope-interface`. npm gets case-insensitive matching. Without this
   // we silently drop the fixed-version hint for valid advisories.
   const wantedName = canonicalizePackageName(pkg, ecosystem);
+  const semverComparable = semverValid(affectedVersion) != null;
+
+  let fallback: string | undefined; // first non-GIT fix we saw, used only when no range-match
   for (const a of vuln.affected) {
     if (!a.package) continue;
     if (a.package.ecosystem !== ecosystem) continue;
     if (canonicalizePackageName(a.package.name, ecosystem) !== wantedName) continue;
     if (!a.ranges) continue;
     for (const r of a.ranges) {
+      // GIT-type ranges store commit SHAs in their `fixed` events; those
+      // aren't valid version specifiers, so the upgrade hint would be
+      // useless. Skip entirely.
+      if (r.type === 'GIT') continue;
+
+      let introduced: string | undefined;
+      let fixed: string | undefined;
       for (const e of r.events) {
-        if (typeof e.fixed === 'string' && e.fixed.length > 0) return e.fixed;
+        if (typeof e.introduced === 'string' && e.introduced.length > 0) {
+          introduced = e.introduced;
+        }
+        if (typeof e.fixed === 'string' && e.fixed.length > 0) {
+          fixed = e.fixed;
+        }
       }
+      if (fixed === undefined) continue;
+
+      // Track the first usable fix as a fallback. Used when the affected
+      // version isn't semver-comparable (e.g. PEP 440 prerelease forms)
+      // or no semver-matching range existed.
+      if (fallback === undefined) fallback = fixed;
+
+      // Range-contains check via semver where possible. The `introduced`
+      // event defaults to `0` per OSV semantics (advisory has been there
+      // forever). If either bound isn't semver, we leave the decision to
+      // the fallback above.
+      if (!semverComparable) continue;
+      const lowerBound = introduced ?? '0';
+      const lowerOk = lowerBound === '0' || (semverValid(lowerBound) != null && semverGte(affectedVersion, lowerBound));
+      const upperOk = semverValid(fixed) != null && semverLt(affectedVersion, fixed);
+      if (lowerOk && upperOk) return fixed;
     }
   }
-  return undefined;
+  return fallback;
 }
 
 /**
@@ -823,7 +871,7 @@ function buildFinding(r: ResolvedDep, vuln: OsvVuln): ScanFinding {
   const cve_id = pickCveId(vuln.aliases);
   const ghsa_id = pickGhsaId(vuln);
   const { severity, cvss } = deriveSeverity(vuln);
-  const fixed_version = findFixedVersion(vuln, r.dep.ecosystem, r.dep.name);
+  const fixed_version = findFixedVersion(vuln, r.dep.ecosystem, r.dep.name, r.dep.version);
   const rule_id = `osv:${vuln.id}`;
   // Prefer the CVE id in the title when available — that's the form most
   // reviewers can paste straight into NVD or their org's vuln tracker.

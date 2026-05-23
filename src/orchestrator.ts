@@ -202,28 +202,42 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // narrow window between agent rejection and the scanner branch settling.
   // Without the abort, a long-running scanner could keep doing useful network
   // I/O after we've already decided to throw the agent error away.
+  const agentPromise = runAgent({
+    deps: {
+      octokit,
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      prContext,
+      fileReader,
+      aggregator,
+      config,
+      workspaceDir: input.workspace_dir,
+    },
+    systemPrompt,
+    userPrompt,
+    model: config.model,
+    maxTurns: config.max_turns,
+    maxInputTokens: config.budget.max_input_tokens,
+    maxOutputTokens: config.budget.max_output_tokens,
+    apiKey: input.anthropic_api_key,
+  });
+  const scannerPromise = runScanners(scanners, scannerDeps);
+
+  // Fire the abort the moment the agent rejects — synchronously, before we
+  // even reach `await Promise.allSettled(...)` below. Without this, the abort
+  // can ONLY fire after the await tuple resolves, which means the scanner
+  // branch has already settled (or hit its own per-scanner timeout) and the
+  // signal can no longer cancel anything in flight. Attaching the .catch
+  // here doesn't change rejection semantics — allSettled never propagates
+  // rejection — but it gives us the synchronous side-effect we need.
+  agentPromise.catch(() => {
+    orchestratorAbort.abort();
+  });
+
   const [agentOutcome, scanOutcome] = await Promise.allSettled([
-    runAgent({
-      deps: {
-        octokit,
-        owner: input.owner,
-        repo: input.repo,
-        pull_number: input.pull_number,
-        prContext,
-        fileReader,
-        aggregator,
-        config,
-        workspaceDir: input.workspace_dir,
-      },
-      systemPrompt,
-      userPrompt,
-      model: config.model,
-      maxTurns: config.max_turns,
-      maxInputTokens: config.budget.max_input_tokens,
-      maxOutputTokens: config.budget.max_output_tokens,
-      apiKey: input.anthropic_api_key,
-    }),
-    runScanners(scanners, scannerDeps),
+    agentPromise,
+    scannerPromise,
   ]);
   if (agentOutcome.status === 'rejected') {
     if (scanOutcome.status === 'fulfilled') {
@@ -232,11 +246,10 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
           `Re-throwing agent error.`,
       );
     }
-    // Fire the abort BEFORE re-throwing so any scanner work still in flight
-    // (already past allSettled wouldn't be possible, but defensively in case
-    // a future scanner schedules detached promises) gets a cancellation
-    // signal rather than running to its per-request timeout. No-op if the
-    // scanner branch already settled.
+    // Belt-and-suspenders: the .catch above already fired abort at agent
+    // rejection time, but call again here so a future refactor that drops
+    // the early hook still leaves a cancellation signal on the way out.
+    // `.abort()` is idempotent.
     orchestratorAbort.abort();
     throw agentOutcome.reason;
   }

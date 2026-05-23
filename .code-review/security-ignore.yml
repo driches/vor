@@ -68,6 +68,9 @@ entries:
   - file: src/scanners/secrets.test.ts
     rule: "secret:aws-access-key-id"
     reason: "PLANTED_AWS_KEY + KEY_A + KEY_B fixtures for the secrets scanner happy-path and multi-finding tests"
+  - file: src/scanners/secrets.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Test fixture for the PEM-overlap suppression behavior"
 
   # ---------------------------------------------------------------
   # src/orchestrator.test.ts

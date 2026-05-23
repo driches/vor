@@ -285,6 +285,58 @@ describe('runScanners — timeout', () => {
     expect(capturedSignal).toBeInstanceOf(AbortSignal);
     expect(capturedSignal!.aborted).toBe(true);
   });
+
+  it('does not emit an unhandled rejection when an external abort fires AFTER the scanner already resolved', async () => {
+    // Regression: `abortPromise` inside `runOne` registers an abort listener
+    // on the combined signal. If the scanner resolves first (winning the
+    // race), `clearTimeout` clears the internal timer but the external
+    // (caller-supplied) signal's abort listener stays attached. When the
+    // caller later aborts (e.g. orchestrator abort fires post-scan because
+    // the agent rejected late), `abortPromise` rejects with no `.catch` —
+    // Node 20 emits an unhandledRejection warning. The fix attaches a
+    // permissive `.catch(() => {})` so a late abort is silently absorbed.
+    //
+    // Strategy: install a process-level `unhandledRejection` listener,
+    // run a fast-resolving scanner, then abort the caller-supplied signal,
+    // and verify no unhandled rejection was emitted within a short wait.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const fast = makeScanner({
+        id: 'secrets',
+        scan: async () => ({
+          ...emptyResult('secrets'),
+          findings: [makeFinding({ scanner: 'secrets', fingerprint: 'fp-fast-late-abort' })],
+        }),
+      });
+
+      const callerAbort = new AbortController();
+      const deps = makeScannerDeps({ signal: callerAbort.signal });
+
+      const { findings } = await runScanners([fast], deps, {
+        perScannerTimeoutMs: 1000,
+        logger: makeLogger(),
+      });
+      expect(findings).toHaveLength(1);
+
+      // Now fire the caller-supplied abort. The runner has already
+      // returned, so this exercises the "late abort" code path that
+      // previously left abortPromise's rejection unhandled.
+      callerAbort.abort();
+
+      // Allow microtask + macrotask queues to drain so any handler the
+      // platform was going to fire actually runs. Two short ticks is
+      // enough on Node 20 — `unhandledRejection` is observed on the
+      // next tick after the rejection.
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
 
 // -----------------------------------------------------------------

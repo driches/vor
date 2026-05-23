@@ -165,6 +165,14 @@ async function runOne(
       once: true,
     });
   });
+  // Suppress unhandled-rejection warnings when the scanner wins the race.
+  // `Promise.race` only propagates the FIRST settled branch — if the scanner
+  // resolves first, the later abort still rejects this promise, but no one
+  // is awaiting it. In Node 20 that fires an `unhandledRejection` warning
+  // (and in tests appears as test-suite noise). This .catch attaches a
+  // listener so the rejection is "handled" without changing race semantics:
+  // the race below still receives whichever branch settles first.
+  abortPromise.catch(() => {});
   try {
     return await Promise.race([scanner.scan(scopedDeps), abortPromise]);
   } catch (err) {

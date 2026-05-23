@@ -53398,6 +53398,7 @@ function isExpired(expires) {
 
 // src/scanners/dependency-cve.ts
 var import_node_crypto = require("node:crypto");
+var import_semver2 = __toESM(require_semver2(), 1);
 
 // src/scanners/parsers/npm-package-lock.ts
 var import_node_path = __toESM(require("node:path"), 1);
@@ -54020,21 +54021,38 @@ function deriveSeverity(vuln) {
   }
   return { severity: "important", cvss: void 0 };
 }
-function findFixedVersion(vuln, ecosystem, pkg) {
+function findFixedVersion(vuln, ecosystem, pkg, affectedVersion) {
   if (!vuln.affected) return void 0;
   const wantedName = canonicalizePackageName(pkg, ecosystem);
+  const semverComparable = (0, import_semver2.valid)(affectedVersion) != null;
+  let fallback;
   for (const a2 of vuln.affected) {
     if (!a2.package) continue;
     if (a2.package.ecosystem !== ecosystem) continue;
     if (canonicalizePackageName(a2.package.name, ecosystem) !== wantedName) continue;
     if (!a2.ranges) continue;
     for (const r2 of a2.ranges) {
+      if (r2.type === "GIT") continue;
+      let introduced;
+      let fixed;
       for (const e2 of r2.events) {
-        if (typeof e2.fixed === "string" && e2.fixed.length > 0) return e2.fixed;
+        if (typeof e2.introduced === "string" && e2.introduced.length > 0) {
+          introduced = e2.introduced;
+        }
+        if (typeof e2.fixed === "string" && e2.fixed.length > 0) {
+          fixed = e2.fixed;
+        }
       }
+      if (fixed === void 0) continue;
+      if (fallback === void 0) fallback = fixed;
+      if (!semverComparable) continue;
+      const lowerBound = introduced ?? "0";
+      const lowerOk = lowerBound === "0" || (0, import_semver2.valid)(lowerBound) != null && (0, import_semver2.gte)(affectedVersion, lowerBound);
+      const upperOk = (0, import_semver2.valid)(fixed) != null && (0, import_semver2.lt)(affectedVersion, fixed);
+      if (lowerOk && upperOk) return fixed;
     }
   }
-  return void 0;
+  return fallback;
 }
 function buildDescription(vuln, fixed_version, pkg) {
   const body = (vuln.details ?? vuln.summary ?? "").trim();
@@ -54269,7 +54287,7 @@ function buildFinding(r2, vuln) {
   const cve_id = pickCveId(vuln.aliases);
   const ghsa_id = pickGhsaId(vuln);
   const { severity, cvss } = deriveSeverity(vuln);
-  const fixed_version = findFixedVersion(vuln, r2.dep.ecosystem, r2.dep.name);
+  const fixed_version = findFixedVersion(vuln, r2.dep.ecosystem, r2.dep.name, r2.dep.version);
   const rule_id = `osv:${vuln.id}`;
   const identifier = cve_id ?? ghsa_id ?? vuln.id;
   const evidence = {
@@ -54739,6 +54757,8 @@ async function runOne(scanner, deps, opts) {
       once: true
     });
   });
+  abortPromise.catch(() => {
+  });
   try {
     return await Promise.race([scanner.scan(scopedDeps), abortPromise]);
   } catch (err) {
@@ -54893,28 +54913,33 @@ async function runOrchestrator(input) {
     config: config.security,
     signal: orchestratorAbort.signal
   };
+  const agentPromise = runAgent({
+    deps: {
+      octokit,
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      prContext,
+      fileReader,
+      aggregator,
+      config,
+      workspaceDir: input.workspace_dir
+    },
+    systemPrompt,
+    userPrompt,
+    model: config.model,
+    maxTurns: config.max_turns,
+    maxInputTokens: config.budget.max_input_tokens,
+    maxOutputTokens: config.budget.max_output_tokens,
+    apiKey: input.anthropic_api_key
+  });
+  const scannerPromise = runScanners(scanners, scannerDeps);
+  agentPromise.catch(() => {
+    orchestratorAbort.abort();
+  });
   const [agentOutcome, scanOutcome] = await Promise.allSettled([
-    runAgent({
-      deps: {
-        octokit,
-        owner: input.owner,
-        repo: input.repo,
-        pull_number: input.pull_number,
-        prContext,
-        fileReader,
-        aggregator,
-        config,
-        workspaceDir: input.workspace_dir
-      },
-      systemPrompt,
-      userPrompt,
-      model: config.model,
-      maxTurns: config.max_turns,
-      maxInputTokens: config.budget.max_input_tokens,
-      maxOutputTokens: config.budget.max_output_tokens,
-      apiKey: input.anthropic_api_key
-    }),
-    runScanners(scanners, scannerDeps)
+    agentPromise,
+    scannerPromise
   ]);
   if (agentOutcome.status === "rejected") {
     if (scanOutcome.status === "fulfilled") {

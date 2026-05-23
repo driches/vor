@@ -60,7 +60,7 @@ export interface OsvVuln {
     package?: { name: string; ecosystem: string };
     ranges?: Array<{
       type: string;
-      events: Array<{ introduced?: string; fixed?: string }>;
+      events: Array<{ introduced?: string; fixed?: string; last_affected?: string }>;
     }>;
   }>;
   /** GHSA severity if available (LOW/MODERATE/HIGH/CRITICAL). */

@@ -1062,3 +1062,182 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
     expect(elapsed).toBeLessThan(PARALLEL_THRESHOLD_MS);
   });
 });
+
+// -----------------------------------------------------------------
+// findFixedVersion ignores GIT-type ranges
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — GIT range filter for findFixedVersion', () => {
+  it('does NOT surface a commit SHA as the fixed_version when the only range is GIT-typed', async () => {
+    // Regression: OSV ranges have three types (SEMVER, ECOSYSTEM, GIT).
+    // GIT-typed ranges store commit SHAs in their `fixed` events; without
+    // filtering, the scanner would render "Upgrade lodash to >=abc123..." —
+    // useless advice that doesn't map to a published version.
+    //
+    // Vuln has ONLY a GIT range with a sha-shaped `fixed` event. Expected:
+    // no fixed_version surfaced (we never pick a SHA), and the description
+    // doesn't carry an upgrade hint.
+    const SHA = 'abc123def4567890abc123def4567890abc12345';
+    const GIT_ONLY_VULN: OsvVuln = {
+      ...LODASH_VULN,
+      affected: [
+        {
+          package: { name: 'lodash', ecosystem: 'npm' },
+          ranges: [
+            {
+              type: 'GIT',
+              events: [{ introduced: '0' }, { fixed: SHA }],
+            },
+          ],
+        },
+      ],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+      getVuln: vi.fn().mockResolvedValue(GIT_ONLY_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    // The SHA must NOT leak as an upgrade target.
+    expect(finding.evidence.fixed_version).toBeUndefined();
+    expect(finding.description).not.toContain(SHA);
+    // And the upgrade-hint sentence is absent.
+    expect(finding.description).not.toContain('Upgrade');
+  });
+
+  it('prefers a non-GIT range when GIT and SEMVER ranges coexist on the same advisory', async () => {
+    // Mixed advisory: a SEMVER range with a real version-string fix AND a
+    // sibling GIT range with a sha. The scanner must pick the SEMVER fix
+    // (the published advice) regardless of array order.
+    const SHA = 'fedcba9876543210fedcba9876543210fedcba98';
+    const MIXED_VULN: OsvVuln = {
+      ...LODASH_VULN,
+      affected: [
+        {
+          package: { name: 'lodash', ecosystem: 'npm' },
+          ranges: [
+            {
+              type: 'GIT',
+              events: [{ introduced: '0' }, { fixed: SHA }],
+            },
+            {
+              type: 'SEMVER',
+              events: [{ introduced: '0' }, { fixed: '4.17.21' }],
+            },
+          ],
+        },
+      ],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(LODASH_BATCH_RESPONSE),
+      getVuln: vi.fn().mockResolvedValue(MIXED_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(LODASH_PACKAGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    expect(finding.evidence.fixed_version).toBe('4.17.21');
+    expect(finding.description).toContain('>=4.17.21');
+    expect(finding.description).not.toContain(SHA);
+  });
+});
+
+// -----------------------------------------------------------------
+// findFixedVersion picks the range containing the affected version
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — version-aware range matching', () => {
+  it('returns the fix from the 2.x range (not the 1.x range) when the lockfile is on 2.0.0', async () => {
+    // Regression: an advisory can publish multiple SEMVER ranges in parallel
+    // — e.g. one covering 1.x with `fixed: 1.8.5` and another covering 2.x
+    // with `fixed: 2.3.1`. A lockfile pinned to 2.0.0 must surface `2.3.1`
+    // as the upgrade target. The old code returned the FIRST `fixed` event
+    // seen, which would render "Upgrade to >=1.8.5" — a downgrade.
+    //
+    // Use a non-real package to avoid noisy cache conflicts.
+    const MULTI_RANGE_LOCK = [
+      '{',
+      '  "name": "test",',
+      '  "version": "1.0.0",',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": { "name": "test", "version": "1.0.0" },',
+      '    "node_modules/example": {',
+      '      "version": "2.0.0"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    const MULTI_RANGE_VULN: OsvVuln = {
+      id: 'GHSA-multi-aaaa-bbbb',
+      aliases: ['CVE-2024-00000'],
+      summary: 'Issue affecting both 1.x and 2.x release lines',
+      severity: [{ type: 'CVSS_V3', score: '7.5' }],
+      affected: [
+        {
+          package: { name: 'example', ecosystem: 'npm' },
+          ranges: [
+            {
+              type: 'SEMVER',
+              events: [{ introduced: '1.0.0' }, { fixed: '1.8.5' }],
+            },
+            {
+              type: 'SEMVER',
+              events: [{ introduced: '2.0.0' }, { fixed: '2.3.1' }],
+            },
+          ],
+        },
+      ],
+    };
+    const batchResp: OsvBatchResponse = {
+      results: [{ vulns: [{ id: 'GHSA-multi-aaaa-bbbb', modified: '2024-01-01T00:00:00Z' }] }],
+    };
+    const osvClient: OsvClient = {
+      queryBatch: vi.fn().mockResolvedValue(batchResp),
+      getVuln: vi.fn().mockResolvedValue(MULTI_RANGE_VULN),
+    };
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(MULTI_RANGE_LOCK),
+    } as unknown as FileReader;
+    const scanner = createDependencyCveScanner({ osvClient });
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    // CRITICAL: must pick 2.3.1 (the 2.x line fix), NOT 1.8.5 (the 1.x fix).
+    expect(finding.evidence.fixed_version).toBe('2.3.1');
+    expect(finding.description).toContain('>=2.3.1');
+    expect(finding.description).not.toContain('>=1.8.5');
+  });
+});

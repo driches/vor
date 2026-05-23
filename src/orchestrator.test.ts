@@ -1268,6 +1268,110 @@ describe('runOrchestrator — parallel execution of agent and scanners', () => {
 });
 
 // -----------------------------------------------------------------
+// Scenario 4b: agent rejection aborts the in-flight scanner signal.
+//
+// Bug: `orchestratorAbort.abort()` used to run AFTER `await Promise.allSettled`,
+// at which point the scanner branch had already settled (or hit its own
+// per-scanner timeout). The abort couldn't actually cancel in-flight scanner
+// work. The fix attaches `.catch()` directly to the agent promise so abort
+// fires synchronously on agent rejection, well before the allSettled tuple
+// resolves.
+//
+// Strategy: hang the OSV batch call inside a long-running promise that
+// captures the signal and only resolves when the signal aborts. Make the
+// agent reject (no scripted turn → SDK mock throws 'agentScript exhausted').
+// Assert the captured signal is `.aborted === true` — proving the abort
+// fired while the scanner was still in flight.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner signal in-flight', () => {
+  it('aborts the scanner deps.signal when the agent throws (no waiting for the per-scanner timeout)', async () => {
+    // Lockfile so dep-cve actually runs and OSV is invoked.
+    const lockDiff = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      'index 5555555..6666666 100644',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      '@@ -5,0 +6,3 @@',
+      '+    "node_modules/lodash": {',
+      '+      "version": "4.17.20"',
+      '+    },',
+    ].join('\n');
+    octokitState.diff = `${lockDiff}\n`;
+    octokitState.filesApi = [
+      { filename: 'package-lock.json', changes: 3, patch: lockDiff },
+    ];
+    octokitState.contents.set(
+      'package-lock.json',
+      [
+        '{',
+        '  "lockfileVersion": 3,',
+        '  "packages": {',
+        '    "": { "name": "app", "version": "1.0.0" },',
+        '    "node_modules/other": { "version": "2.0.0" },',
+        '    "node_modules/lodash": {',
+        '      "version": "4.17.20"',
+        '    }',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: true',
+        '    secrets:',
+        '      enabled: false',
+      ].join('\n'),
+    );
+
+    // OSV's queryBatch captures the signal it receives and waits on its
+    // abort. If the orchestrator's abort actually fires while we're still
+    // in-flight, the promise resolves; otherwise this hangs until the
+    // per-scanner timeout, the test times out, and we know the fix is gone.
+    let capturedSignal: AbortSignal | undefined;
+    osvBatchSpy.mockImplementation(async (_queries: unknown, opts?: { signal?: AbortSignal }) => {
+      capturedSignal = opts?.signal;
+      // Wait for the signal to abort, then resolve with an empty result so
+      // the scanner branch can finish settling. We don't reject here because
+      // the runner's `Promise.race` against `abortPromise` would settle on
+      // the race side anyway — this branch just unblocks for a tidy exit.
+      await new Promise<void>((resolve) => {
+        if (capturedSignal?.aborted) {
+          resolve();
+          return;
+        }
+        capturedSignal?.addEventListener(
+          'abort',
+          () => resolve(),
+          { once: true },
+        );
+      });
+      return { results: [{}] };
+    });
+
+    // Don't script any agent turn — the SDK mock will throw "agentScript
+    // exhausted", which propagates as the agent rejection.
+    agentScript.length = 0;
+
+    // The orchestrator re-throws the agent error. We catch and assert the
+    // scanner signal observed the abort while it was still in flight.
+    await expect(runOrchestrator(baseInput())).rejects.toThrow(/exhausted/);
+
+    // The scanner saw a signal. Critical assertion: it was aborted before
+    // the runScanners branch fulfilled — meaning the orchestrator-level
+    // abort fired BEFORE allSettled resolved (otherwise our hang above
+    // would never have released).
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(true);
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 5: `security.enabled: false` short-circuits the scanner pipeline.
 // -----------------------------------------------------------------
 
