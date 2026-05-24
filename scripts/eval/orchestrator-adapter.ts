@@ -53,8 +53,17 @@ const MODEL_PRICING: Record<
 function computeCostUsd(cost: AdapterState['costAccum'], model: string): number {
   const pricing = MODEL_PRICING[model];
   if (!pricing) {
-    // Unknown model — fall back to flat estimate so eval doesn't crash.
-    return cost.turns * 0.01;
+    // The eval harness's purpose is cost comparison; silently falling back
+    // to a synthetic `turns * 0.01` estimate produces report cells that
+    // LOOK valid but mis-rank configs on the cost axis. Throw so a typo
+    // or newly-introduced model id fails the eval run rather than
+    // corrupting metrics. See PR #10 Codex P2 3295074807.
+    throw new Error(
+      `computeCostUsd: no pricing entry for model "${model}". ` +
+        `Known models: ${Object.keys(MODEL_PRICING).join(', ')}. ` +
+        `Add an entry to MODEL_PRICING (with the correct per-million rates) ` +
+        `or fix the model name in your pipeline config.`,
+    );
   }
   return (
     (cost.input_tokens * pricing.input) / 1_000_000 +

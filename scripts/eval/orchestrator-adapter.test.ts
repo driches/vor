@@ -141,6 +141,31 @@ describe('evalRun', () => {
     expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
   });
 
+  it('throws when an unknown model id is used (no silent synthetic-cost fallback)', async () => {
+    // Regression for PR #10 Codex P2 3295074807. The eval harness's whole
+    // purpose is to compare costs across configs; a typo or new model id
+    // that silently fell back to `turns * 0.01` would produce report cells
+    // that LOOK valid but mis-rank configs on the cost axis. Fail loud.
+    const minimalCase: LoadedCase = {
+      case_id: 'unknown-model',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    // Note: evalRun rejects (the throw inside the orchestrator path bubbles
+    // up). The error mentions the offending model id and lists known models.
+    await expect(
+      evalRun({
+        case: minimalCase,
+        config: { ...DEFAULT_CONFIG, model: 'claude-sonet-4-6' as unknown as string }, // typo
+        anthropicApiKey: 'sk-ant-test',
+        agentScript: [
+          { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+        ],
+      }),
+    ).rejects.toThrow(/no pricing entry.*claude-sonet-4-6/);
+  });
+
   it('prices both claude-opus-4-7 and claude-opus-4-1 at Opus-tier (not the fallback)', async () => {
     // Regression for PR #10 Codex P1 3294995644. The opus-only.yml pipeline
     // config uses claude-opus-4-7; if MODEL_PRICING is missing that key,
