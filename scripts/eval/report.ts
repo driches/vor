@@ -67,6 +67,11 @@ function formatCell(s: ScoreResult, baseline: ScoreResult): string {
   else if (costRatio < COST_WIN_RATIO) icon = '🟢';
   else if (costRatio < 1 - INCONCLUSIVE_EPSILON) icon = '🟡';
   else if (recallEqual && Math.abs(costRatio - 1) <= INCONCLUSIVE_EPSILON) icon = '⚪';
+  // Spec's 4 cells don't cover "recall improved + cost neutral". The default
+  // ⚪ would silently misrepresent a recall win. Surface it as 🟡 so a
+  // genuine recall improvement is visible even when cost is roughly flat.
+  // See PR #10 comment 3294976845.
+  else if (!recallEqual && s.recall > baseline.recall) icon = '🟡';
   const recallDelta =
     s.recall >= baseline.recall
       ? `+${pct(s.recall - baseline.recall)}`

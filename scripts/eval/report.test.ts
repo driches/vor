@@ -89,4 +89,29 @@ describe('renderSummaryReport', () => {
     expect(md).toContain('🔴');
     expect(md).not.toContain('🟢');
   });
+
+  it('flags recall-improved + cost-neutral as 🟡 (not ⚪)', () => {
+    // Regression for PR #10 comment 3294976845. The spec's 4 cells don't
+    // cover "recall improved while cost is roughly flat". The default ⚪
+    // would silently misrepresent a genuine recall win — surface it as 🟡
+    // so the reviewer can spot the improvement.
+    const baselineCost = score({ config_name: 'x' }).cost;
+    const md = renderSummaryReport({
+      timestamp: '2026-05-23T15:42:00Z',
+      baseline_config: 'sonnet-only',
+      scores: [
+        score({ config_name: 'sonnet-only', recall: 0.7, tp: 7, fn: 3 }),
+        score({
+          config_name: 'haiku-only',
+          recall: 0.9, // +20pp recall — well outside ±5%
+          tp: 9,
+          fn: 1,
+          // Same cost ($0.50 == baseline $0.50) — within ±5% on cost.
+          cost: { ...baselineCost, cost_usd: 0.5 },
+        }),
+      ],
+    });
+    expect(md).toContain('🟡');
+    expect(md).not.toContain('⚪');
+  });
 });
