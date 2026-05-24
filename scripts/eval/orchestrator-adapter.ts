@@ -515,7 +515,7 @@ function renderModifiedFile(
  * produces.
  *
  * Shape (from renderCommentBody):
- *   **[<SEVERITY> · <category>( · low confidence)?]** <title>
+ *   **[<SEVERITY> · <category>( · medium confidence | · low confidence)?]** <title>
  *
  *   <why_it_matters>
  *   [optional ```suggestion ... ``` block]
@@ -536,11 +536,12 @@ function parseRenderedComment(body: string): {
   const headingMatch = body.match(/^\*\*\[([^\]]+)\]\*\*\s*(.*)$/m);
   let severity: Severity = 'minor';
   let category: Category = 'security';
-  // `renderCommentBody` only tags `· low confidence` in the heading; `high`
-  // and `medium` are silent. Default to 'high' so absence-of-tag round-trips
-  // to the scanner-default (every scanner finding posts at confidence: 'high'
-  // — anchoring the default elsewhere would silently downgrade them).
-  // See PR #10 dogfood comment 3295026560.
+  // `renderCommentBody` tags both `low confidence` and `medium confidence`
+  // explicitly; `high` is silent (it's the agent default and would clutter
+  // every finding). Default to 'high' so absence-of-tag round-trips to that
+  // default. The other two values come from explicit segment matches below.
+  // See PR #10 dogfood comments 3295026560 (default to high) and
+  // 3295156534 (don't silently round medium up).
   let confidence: Confidence = 'high';
   let title = '';
   if (headingMatch) {
@@ -557,6 +558,7 @@ function parseRenderedComment(body: string): {
     }
     for (const seg of segments.slice(2)) {
       if (/low\s+confidence/i.test(seg)) confidence = 'low';
+      else if (/medium\s+confidence/i.test(seg)) confidence = 'medium';
     }
   }
   // Body after the heading line. The first non-empty paragraph is why_it_matters.

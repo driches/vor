@@ -332,6 +332,32 @@ describe('reconstructFinding', () => {
     expect(finding.severity).toBe('critical');
   });
 
+  it('preserves medium confidence (regression: round-up to high)', () => {
+    // Regression for PR #10 dogfood MINOR 3295156534. renderCommentBody now
+    // tags both `low confidence` and `medium confidence` explicitly so the
+    // adapter can round-trip the original value. Before this fix, medium
+    // was silent in the heading (same as high) and parseRenderedComment
+    // defaulted to high — every medium-confidence scanner finding (AWS
+    // secret, JWT) silently rounded up to high in RunRecord.findings.
+    const finding = reconstructFinding({
+      path: 'src/auth.ts',
+      line: 5,
+      side: 'RIGHT',
+      body: '**[IMPORTANT · vulnerability · medium confidence]** Maybe leaked\n\nThe match could be a base64 string with high entropy that happens to match the AWS secret pattern.',
+    });
+    expect(finding.confidence).toBe('medium');
+  });
+
+  it('preserves low confidence (regression: explicit tag wins)', () => {
+    const finding = reconstructFinding({
+      path: 'src/foo.ts',
+      line: 1,
+      side: 'RIGHT',
+      body: '**[MINOR · readability · low confidence]** Style thought\n\nNot a strong opinion.',
+    });
+    expect(finding.confidence).toBe('low');
+  });
+
   it('omits start_line for single-line comments (no spurious field)', () => {
     // start_line is optional on PostedComment; reconstructFinding must NOT
     // add it as an explicit undefined or 0 when the source payload has no
