@@ -98,6 +98,56 @@ describe('loadCase', () => {
     rmSync(dir, { recursive: true });
   });
 
+  it('throws on a truth.yml line_range with non-integer values', () => {
+    // Regression for PR #10 Codex P2 3295092576. The earlier check only
+    // verified line_range was two numbers, so floats slipped through.
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [1.5, 2.5]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/must be integers/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws on a truth.yml line_range with zero or negative values', () => {
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [0, 0]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/must be >= 1/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws on a truth.yml line_range that is reversed (start > end)', () => {
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [20, 10]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/must be ordered/);
+    rmSync(dir, { recursive: true });
+  });
+
   it('throws on a truth.yml entry with malformed category (non-array)', () => {
     const { dir } = makeCase({
       truthYaml: [

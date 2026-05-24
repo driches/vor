@@ -99,6 +99,27 @@ function validateTruthEntry(raw: unknown, caseId: string, index: number): TruthE
       `${where} 'line_range' must be a [start, end] number tuple, got ${JSON.stringify(entry.line_range)}`,
     );
   }
+  const [rangeStart, rangeEnd] = entry.line_range as [number, number];
+  // Require ordered 1-based positive integers. scoreRun applies line-slack
+  // matching against this range and assumes start <= end; malformed ranges
+  // like [0, 0], floats, or reversed ranges ([20, 10]) would silently
+  // produce spurious TP/FN/FP outcomes instead of failing fast as dataset
+  // corruption. See PR #10 Codex P2 3295092576.
+  if (!Number.isInteger(rangeStart) || !Number.isInteger(rangeEnd)) {
+    throw new Error(
+      `${where} 'line_range' values must be integers (1-based line numbers), got [${rangeStart}, ${rangeEnd}]`,
+    );
+  }
+  if (rangeStart < 1 || rangeEnd < 1) {
+    throw new Error(
+      `${where} 'line_range' values must be >= 1 (1-based line numbers), got [${rangeStart}, ${rangeEnd}]`,
+    );
+  }
+  if (rangeStart > rangeEnd) {
+    throw new Error(
+      `${where} 'line_range' must be ordered [start, end] with start <= end, got [${rangeStart}, ${rangeEnd}]`,
+    );
+  }
   if (typeof entry.bug_type !== 'string' || entry.bug_type.length === 0) {
     throw new Error(`${where} missing required string field 'bug_type'`);
   }
