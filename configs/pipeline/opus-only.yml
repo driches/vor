@@ -1,0 +1,11 @@
+# Higher-capability ceiling for recall comparison. max_turns reduced because Opus
+# tends to be more decisive per turn (and the per-turn cost is higher).
+model: claude-opus-4-7
+max_turns: 30
+severity:
+  floor: minor
+  max_comments_per_file: 5
+  max_comments_total: 30
+budget:
+  max_input_tokens: 500000
+  max_output_tokens: 50000

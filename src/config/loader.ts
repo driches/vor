@@ -8,7 +8,7 @@ import type { ReviewConfig } from './types.js';
 /**
  * Deep merge: user values override defaults. Arrays are REPLACED, not concatenated.
  */
-function deepMerge<T>(base: T, override: unknown): T {
+export function deepMerge<T>(base: T, override: unknown): T {
   if (override === undefined || override === null) return base;
   if (Array.isArray(base) || Array.isArray(override)) return override as T;
   if (typeof base !== 'object' || typeof override !== 'object') return override as T;

@@ -71,7 +71,18 @@ export async function postReview(
 
 export function renderCommentBody(c: PostedComment): string {
   const severityTag = c.severity.toUpperCase();
-  const confTag = c.confidence === 'low' ? ' · low confidence' : '';
+  // Tag both `low` and `medium`; `high` stays silent (it's the agent default
+  // and would clutter every finding). Tagging medium makes the heading
+  // self-describing for human reviewers (so they know not to assume hard
+  // evidence) and lets the eval-harness adapter round-trip the original
+  // confidence without silently rounding medium up to high.
+  // See PR #10 comment 3295156534.
+  const confTag =
+    c.confidence === 'low'
+      ? ' · low confidence'
+      : c.confidence === 'medium'
+        ? ' · medium confidence'
+        : '';
   const heading = `**[${severityTag} · ${c.category}${confTag}]** ${c.title}`;
   const why = c.why_it_matters;
   const suggestion = c.suggestion

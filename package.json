@@ -26,7 +26,8 @@
     "golden:capture": "tsx scripts/golden/capture.ts",
     "golden:capture-batch": "tsx scripts/golden/capture-batch.ts",
     "golden:discover": "tsx scripts/golden/discover.ts",
-    "golden:eval": "tsx scripts/golden/eval.ts"
+    "golden:eval": "tsx scripts/golden/eval.ts",
+    "golden:plant": "tsx scripts/plant.ts"
   },
   "dependencies": {
     "@actions/core": "3.0.1",
@@ -41,7 +42,9 @@
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/node": "^20.17.10",
+    "diff": "^9.0.0",
     "@types/semver": "^7.7.1",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
