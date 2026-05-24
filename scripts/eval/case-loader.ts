@@ -76,7 +76,14 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
 }
 
 function walk(dir: string, onFile: (p: string) => void): void {
-  for (const entry of readdirSync(dir)) {
+  // Sort lexicographically so multi-file cases produce a deterministic file
+  // order across runs and machines. Raw `readdirSync` order is
+  // filesystem-dependent (e.g. ext4 returns insertion order, APFS/HFS+
+  // return name order). Without sorting, the adapter's synthesized diff and
+  // pulls.listFiles output would vary between runs, introducing eval
+  // variance unrelated to model quality. See PR #10 Codex P2 3295006721.
+  const entries = readdirSync(dir).sort();
+  for (const entry of entries) {
     const p = join(dir, entry);
     const st = statSync(p);
     if (st.isDirectory()) walk(p, onFile);

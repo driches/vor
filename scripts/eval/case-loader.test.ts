@@ -78,4 +78,40 @@ describe('loadCase', () => {
     expect(() => loadCase(dir, 'example')).toThrow(/must be an array/);
     rmSync(dir, { recursive: true });
   });
+
+  it('returns files in deterministic lexicographic order across runs', () => {
+    // Regression for PR #10 Codex P2 3295006721. Raw readdirSync order is
+    // filesystem-dependent; without sorting, multi-file cases would
+    // produce different diffs/file lists across machines or even across
+    // runs on the same machine, introducing eval variance unrelated to
+    // model quality.
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-test-'));
+    const id = 'multi';
+    const caseDir = join(root, 'cases', id);
+    mkdirSync(join(caseDir, 'after/src'), { recursive: true });
+    mkdirSync(join(caseDir, 'before/src'), { recursive: true });
+    // Create files in an order that filesystem traversal would NOT
+    // necessarily preserve (z first, then a, then b).
+    for (const name of ['z.ts', 'a.ts', 'b.ts']) {
+      writeFileSync(join(caseDir, 'after/src', name), `// ${name}\n`);
+      writeFileSync(join(caseDir, 'before/src', name), '// empty\n');
+    }
+    writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
+
+    const c1 = loadCase(root, id);
+    const c2 = loadCase(root, id);
+    const paths1 = c1.files.map((f) => f.path);
+    const paths2 = c2.files.map((f) => f.path);
+    expect(paths1).toEqual(paths2);
+    // And the order is the sorted one.
+    expect(paths1).toEqual(['src/a.ts', 'src/b.ts', 'src/z.ts']);
+
+    // beforeFiles must also be sorted.
+    expect(c1.beforeFiles.map((f) => f.path)).toEqual([
+      'src/a.ts',
+      'src/b.ts',
+      'src/z.ts',
+    ]);
+    rmSync(root, { recursive: true });
+  });
 });
