@@ -7,26 +7,11 @@
 import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { validateInlineComment } from '../agent/validate-comment.js';
-import type { Category, Severity, Side } from '../types.js';
+import { CATEGORIES, type Category, type Severity, type Side } from '../types.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
-const categorySchema = z.enum([
-  'bug',
-  'security',
-  'data-loss',
-  'race-condition',
-  'error-handling',
-  'performance',
-  'architecture',
-  'api-design',
-  'test-gap',
-  'readability',
-  'naming',
-  'docs',
-  'yagni',
-  'duplication',
-]);
+const categorySchema = z.enum(CATEGORIES);
 
 export function makePostInlineCommentTool(deps: ToolDeps) {
   return tool(

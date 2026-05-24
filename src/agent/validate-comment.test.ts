@@ -17,6 +17,7 @@ function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
       [10, 15],
       [25, 30],
     ],
+    added_lines: new Set([10, 11, 12, 13, 14, 15, 25, 26, 27, 28, 29, 30]),
     language: 'typescript',
     is_generated: false,
     is_binary: false,

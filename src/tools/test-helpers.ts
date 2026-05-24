@@ -72,6 +72,7 @@ export function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
     additions: 5,
     deletions: 1,
     reviewable_lines: [[10, 15]],
+    added_lines: new Set([10, 11, 12, 13, 14, 15]),
     language: 'typescript',
     is_generated: false,
     is_binary: false,

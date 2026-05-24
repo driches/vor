@@ -11,21 +11,54 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   nit: 1,
 };
 
-export type Category =
-  | 'bug'
-  | 'security'
-  | 'data-loss'
-  | 'race-condition'
-  | 'error-handling'
-  | 'performance'
-  | 'architecture'
-  | 'api-design'
-  | 'test-gap'
-  | 'readability'
-  | 'naming'
-  | 'docs'
-  | 'yagni'
-  | 'duplication';
+/**
+ * Single source of truth for finding categories. The runtime array is consumed
+ * by Zod enums (`z.enum(CATEGORIES)`); the TypeScript `Category` union is derived
+ * from it. Add new categories here only.
+ *
+ * Note on 'security' vs 'vulnerability':
+ *   'security'      = agent-flagged design concern (e.g. missing auth check)
+ *   'vulnerability' = scanner-confirmed CVE / secret / SAST finding
+ */
+export const CATEGORIES = [
+  'bug',
+  'security',
+  'vulnerability',
+  'data-loss',
+  'race-condition',
+  'error-handling',
+  'performance',
+  'architecture',
+  'api-design',
+  'test-gap',
+  'readability',
+  'naming',
+  'docs',
+  'yagni',
+  'duplication',
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * Identifier for a security scanner plugin. Used by `FindingSource` to attribute
+ * scanner-originated findings.
+ */
+export type ScannerId = 'dependency-cve' | 'secrets' | 'sast' | 'container-cve';
+
+/**
+ * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;
+ * scanner-originated comments use `{ kind: 'scanner', scanner, ... }`.
+ */
+export type FindingSource =
+  | { kind: 'agent'; model: string }
+  | {
+      kind: 'scanner';
+      scanner: ScannerId;
+      rule_id?: string;
+      cve_id?: string;
+      ghsa_id?: string;
+    };
 
 export type Side = 'RIGHT' | 'LEFT';
 
@@ -50,8 +83,14 @@ export interface ChangedFile {
   status: 'added' | 'modified' | 'removed' | 'renamed';
   additions: number;
   deletions: number;
-  /** Inclusive ranges of lines on HEAD that the agent may comment on. */
+  /** Inclusive ranges of lines on HEAD that the agent may comment on
+   *  (includes both '+' added lines AND ' ' context lines around hunks). */
   reviewable_lines: LineRange[];
+  /** Lines on HEAD that were ADDED by this PR (the '+' lines only). Strict
+   *  subset of `reviewable_lines`. Scanners that only care about new content
+   *  (secrets, etc.) iterate this set to avoid surfacing pre-existing issues
+   *  on context lines the PR didn't actually introduce. */
+  added_lines: ReadonlySet<number>;
   language: string;
   is_generated: boolean;
   is_binary: boolean;
@@ -62,6 +101,7 @@ export interface ChangedFile {
 
 /**
  * One inline comment accepted by the validator and queued for posting.
+ * `source` is optional; absence is treated as AI-originated for backward compatibility.
  */
 export interface PostedComment {
   severity: Severity;
@@ -74,6 +114,7 @@ export interface PostedComment {
   why_it_matters: string;
   suggestion?: string;
   confidence: Confidence;
+  source?: FindingSource;
 }
 
 export interface SummaryInput {

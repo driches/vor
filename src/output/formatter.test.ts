@@ -272,6 +272,34 @@ describe('renderSummary — body content', () => {
     });
     expect(r.event).toBe('COMMENT');
   });
+
+  it('emits a Security sub-line when scanner-sourced comments are kept', () => {
+    const scannerComment: PostedComment = {
+      ...c('important'),
+      category: 'vulnerability',
+      source: { kind: 'scanner', scanner: 'dependency-cve', cve_id: 'CVE-2024-0001' },
+    };
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('critical'), scannerComment],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('Security:');
+    expect(r.body).toContain('dependency CVE');
+  });
+
+  it('omits the Security sub-line when no scanner-sourced comments are kept', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('critical'), c('important')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).not.toContain('Security:');
+  });
 });
 
 describe('renderSummary — event selection (unchanged)', () => {

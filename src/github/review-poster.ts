@@ -77,5 +77,44 @@ export function renderCommentBody(c: PostedComment): string {
   const suggestion = c.suggestion
     ? `\n\n\`\`\`suggestion\n${c.suggestion.replace(/\n$/, '')}\n\`\`\``
     : '';
-  return `${heading}\n\n${why}${suggestion}`;
+  const provenance = renderProvenanceTag(c);
+  return `${heading}\n\n${why}${suggestion}${provenance}`;
+}
+
+/**
+ * Renders a small inline tag identifying the scanner that produced a finding.
+ * AI-originated comments (no `source` field, or `source.kind === 'agent'`)
+ * produce no tag so their rendered body is unchanged.
+ */
+function renderProvenanceTag(c: PostedComment): string {
+  if (!c.source || c.source.kind !== 'scanner') return '';
+  switch (c.source.scanner) {
+    case 'dependency-cve': {
+      // Prefer the explicit CVE/GHSA alias when OSV provided one. Fall back
+      // to the rule_id with the `osv:` prefix stripped (RUSTSEC, PYSEC,
+      // etc. don't have CVE/GHSA aliases but we don't want to render
+      // `_via OSV · osv:PYSEC-…_` with the redundant prefix).
+      const id =
+        c.source.cve_id ??
+        c.source.ghsa_id ??
+        c.source.rule_id?.replace(/^osv:/, '') ??
+        '';
+      return `\n\n_via OSV · ${id}_`;
+    }
+    case 'secrets':
+      return '\n\n_via secrets scan_';
+    case 'sast':
+      return '\n\n_via SAST_';
+    case 'container-cve':
+      return '\n\n_via container scan_';
+    default: {
+      // Exhaustiveness check: if a new ScannerId is added to the union
+      // without updating this switch, TypeScript will error here at
+      // compile time. At runtime we still return '' rather than
+      // concatenating `undefined` into the rendered comment body.
+      const _exhaustive: never = c.source.scanner;
+      void _exhaustive;
+      return '';
+    }
+  }
 }

@@ -1,5 +1,5 @@
 name: 'Claude Code Review'
-description: 'AI code review for GitHub PRs — inline comments via Claude Agent SDK'
+description: 'AI code review + parallel vulnerability scanning for GitHub PRs — inline comments via Claude'
 author: 'driches'
 
 branding:

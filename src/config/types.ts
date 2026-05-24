@@ -43,4 +43,24 @@ export interface ReviewConfig {
     max_input_tokens: number;
     max_output_tokens: number;
   };
+
+  security: SecurityConfig;
+}
+
+export interface ScannerConfig {
+  enabled: boolean;
+  min_severity?: Severity;
+}
+
+export interface SecurityConfig {
+  enabled: boolean;
+  ignore_file: string;
+  scanners: {
+    dependency_cve: ScannerConfig & { osv_endpoint?: string };
+    secrets: ScannerConfig & { include_generic_entropy: boolean };
+    sast: ScannerConfig;
+    container_cve: ScannerConfig;
+  };
+  cache: { enabled: boolean };
+  persistence: { enabled: boolean };
 }

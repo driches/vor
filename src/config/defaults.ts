@@ -64,4 +64,17 @@ export const DEFAULT_CONFIG: ReviewConfig = {
     max_input_tokens: 500_000,
     max_output_tokens: 50_000,
   },
+
+  security: {
+    enabled: true,
+    ignore_file: '.code-review/security-ignore.yml',
+    scanners: {
+      dependency_cve: { enabled: true },
+      secrets: { enabled: true, include_generic_entropy: false },
+      sast: { enabled: false },
+      container_cve: { enabled: false },
+    },
+    cache: { enabled: true },
+    persistence: { enabled: false },
+  },
 };

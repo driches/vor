@@ -112,6 +112,7 @@ export function parseUnifiedDiff(diff: string): ChangedFile[] {
       additions: file.additions,
       deletions: file.deletions,
       reviewable_lines: reviewable.ranges,
+      added_lines: reviewable.addedSet,
       language: detectLanguage(path),
       is_generated: isGenerated(path),
       is_binary: file.chunks.length === 0 && totalChanges === 0,

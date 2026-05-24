@@ -110,6 +110,29 @@ describe('computeReviewableLines', () => {
     expect(map.text.get(1)).toBe('a');
   });
 
+  it('separates added-only lines from context lines via addedSet', () => {
+    // addedSet contains ONLY '+' lines (lines this PR actually added). Context
+    // lines (' ') land in the broader `set` but not in `addedSet`. Scanners
+    // that should ignore pre-existing content (secrets) iterate `addedSet`.
+    const map = computeReviewableLines([
+      {
+        content: '@@ -1,3 +1,4 @@',
+        oldStart: 1,
+        oldLines: 3,
+        newStart: 1,
+        newLines: 4,
+        changes: [
+          { type: 'normal', ln1: 1, ln2: 1, normal: true, content: ' a' },
+          { type: 'add', add: true, ln: 2, content: '+b' },
+          { type: 'normal', ln1: 2, ln2: 3, normal: true, content: ' c' },
+          { type: 'add', add: true, ln: 4, content: '+d' },
+        ],
+      },
+    ]);
+    expect(map.set).toEqual(new Set([1, 2, 3, 4]));
+    expect(map.addedSet).toEqual(new Set([2, 4]));
+  });
+
   it('excludes deleted lines (they are LEFT side only)', () => {
     const map = computeReviewableLines([
       {

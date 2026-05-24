@@ -4,7 +4,7 @@
  */
 
 import type { RunAgentResult } from '../agent/runner.js';
-import type { PostedComment, ReviewDraft, ReviewEvent, Severity } from '../types.js';
+import type { PostedComment, ReviewDraft, ReviewEvent, ScannerId, Severity } from '../types.js';
 
 export interface SummaryRenderInput {
   draft: ReviewDraft;
@@ -71,6 +71,12 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     const counts = countBySeverity(input.keptComments);
     sections.push('### Findings');
     sections.push(formatCountsLine(counts));
+    const scannerLine = formatScannerCountsLine(input.keptComments);
+    if (scannerLine) sections.push(scannerLine);
+  } else if (summary && summary.assessment !== 'approve') {
+    // When summary is missing we already emit the prominent missing-summary
+    // warning above; don't pile on with a redundant "no inline comments" note.
+    sections.push('_No inline comments were posted._');
   }
 
   // Coverage notes (only available from the agent's summary)
@@ -177,4 +183,37 @@ function severityHeader(comments: readonly PostedComment[]): string {
   if (comments.some((c) => c.severity === 'important')) return 'Important findings';
   if (comments.some((c) => c.severity === 'minor')) return 'Minor findings';
   return 'Notes only';
+}
+
+/**
+ * Returns a "Security:" sub-line summarizing how many of the kept comments
+ * came from scanners, broken down by scanner id. Returns `null` when no
+ * scanner-sourced comments are present so the line is suppressed.
+ */
+function formatScannerCountsLine(comments: readonly PostedComment[]): string | null {
+  const byScanner = new Map<ScannerId, number>();
+  for (const c of comments) {
+    if (c.source?.kind !== 'scanner') continue;
+    byScanner.set(c.source.scanner, (byScanner.get(c.source.scanner) ?? 0) + 1);
+  }
+  const total = Array.from(byScanner.values()).reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+
+  const labels: Array<[ScannerId, string, string]> = [
+    ['dependency-cve', 'dependency CVE', 'dependency CVEs'],
+    ['secrets', 'secret', 'secrets'],
+    ['sast', 'SAST', 'SAST'],
+    ['container-cve', 'container CVE', 'container CVEs'],
+  ];
+  const breakdown = labels
+    .map(([id, singular, plural]) => {
+      const n = byScanner.get(id) ?? 0;
+      if (n === 0) return null;
+      return `${n} ${n === 1 ? singular : plural}`;
+    })
+    .filter((s): s is string => s !== null)
+    .join(', ');
+
+  const noun = total === 1 ? 'finding' : 'findings';
+  return `**Security:** ${total} ${noun} from scanners (${breakdown})`;
 }
