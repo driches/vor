@@ -66,4 +66,27 @@ describe('renderSummaryReport', () => {
     });
     expect(md).toContain('🟡');
   });
+
+  it('flags any recall drop below baseline as 🔴 (no epsilon softening)', () => {
+    // Regression for PR #10 comment 3294915018. A small recall drop (e.g.
+    // 0.98 vs 1.0 = 2pp, well within the legacy 5% epsilon) must still be
+    // 🔴 — the spec says regression is strict `recall < baseline`.
+    const baselineCost = score({ config_name: 'x' }).cost;
+    const md = renderSummaryReport({
+      timestamp: '2026-05-23T15:42:00Z',
+      baseline_config: 'sonnet-only',
+      scores: [
+        score({ config_name: 'sonnet-only', recall: 1.0, tp: 50, fn: 0 }),
+        score({
+          config_name: 'haiku-only',
+          recall: 0.98,
+          tp: 49,
+          fn: 1,
+          cost: { ...baselineCost, cost_usd: 0.1 },
+        }),
+      ],
+    });
+    expect(md).toContain('🔴');
+    expect(md).not.toContain('🟢');
+  });
 });

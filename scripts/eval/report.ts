@@ -56,7 +56,10 @@ export function renderSummaryReport(input: RenderSummaryInput): string {
 }
 
 function formatCell(s: ScoreResult, baseline: ScoreResult): string {
-  const recallOK = s.recall >= baseline.recall - INCONCLUSIVE_EPSILON;
+  // Strict comparison: any recall drop below baseline is a 🔴 regression.
+  // The earlier `>= baseline.recall - INCONCLUSIVE_EPSILON` softened this and
+  // let a 4pp drop sneak through as ⚪. See PR #10 comment 3294915018.
+  const recallOK = s.recall >= baseline.recall;
   const recallEqual = Math.abs(s.recall - baseline.recall) <= INCONCLUSIVE_EPSILON;
   const costRatio = baseline.cost.cost_usd === 0 ? 1 : s.cost.cost_usd / baseline.cost.cost_usd;
   let icon = '⚪';
