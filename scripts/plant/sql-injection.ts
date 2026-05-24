@@ -8,6 +8,12 @@ import type { PlantTemplate } from './types.js';
 export const sqlInjectionTemplate: PlantTemplate = {
   type: 'sql-injection',
   apply(source, config) {
+    if (typeof config.file !== 'string' || config.file.length === 0) {
+      // Same rationale as aws-access-key.ts — an empty truth.file makes the
+      // scoreRun match impossible and silently guarantees FN. See PR #10
+      // dogfood comment 3295156535.
+      throw new Error(`sql-injection: missing or empty 'file' param in plants.yml entry`);
+    }
     const line = typeof config.line === 'number' ? config.line : NaN;
     const lines = source.split('\n');
     if (!Number.isInteger(line) || line < 1 || line > lines.length + 1) {
@@ -24,7 +30,7 @@ export const sqlInjectionTemplate: PlantTemplate = {
     return {
       mutated: [...before, insertion, ...after].join('\n'),
       truth: {
-        file: typeof config.file === 'string' ? config.file : '',
+        file: config.file,
         line_range: [line, line] as const,
         bug_type: 'sql-injection',
         severity: 'critical',

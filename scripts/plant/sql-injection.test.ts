@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { sqlInjectionTemplate } from './sql-injection.js';
+import type { PlantConfig } from '../eval/types.js';
 
 describe('sqlInjectionTemplate', () => {
   it('inserts a template-literal SQL query interpolating an unsanitized variable', () => {
@@ -37,5 +38,25 @@ describe('sqlInjectionTemplate', () => {
         line: 999,
       }),
     ).toThrow(/line/i);
+  });
+
+  it('throws when `file` param is missing or empty (regression: silent FN)', () => {
+    // Regression for PR #10 dogfood MINOR 3295156535. Same root cause as in
+    // aws-access-key.ts: an empty truth.file makes scoreRun never match,
+    // silently producing FN with no diagnostic. Cast to bypass the type-level
+    // requirement on `file` — testing the runtime guard against malformed yml.
+    expect(() =>
+      sqlInjectionTemplate.apply('a\nb', {
+        type: 'sql-injection',
+        line: 1,
+      } as unknown as PlantConfig),
+    ).toThrow(/missing or empty 'file'/);
+    expect(() =>
+      sqlInjectionTemplate.apply('a\nb', {
+        type: 'sql-injection',
+        file: '',
+        line: 1,
+      } as unknown as PlantConfig),
+    ).toThrow(/missing or empty 'file'/);
   });
 });

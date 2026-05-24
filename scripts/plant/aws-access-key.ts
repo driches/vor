@@ -12,6 +12,13 @@ const DEFAULT_VALUE = 'AKIAIOSFODNN7EXAMPLE';
 export const awsAccessKeyTemplate: PlantTemplate = {
   type: 'secret:aws-access-key',
   apply(source, config) {
+    if (typeof config.file !== 'string' || config.file.length === 0) {
+      // Without a non-empty file, the resulting TruthEntry.file would be ''
+      // and scoreRun's `finding.file_path === truth.file` would never match
+      // → guaranteed FN for this plant with no diagnostic. Fail loud at
+      // plant time. See PR #10 dogfood comment 3295156535.
+      throw new Error(`aws-access-key: missing or empty 'file' param in plants.yml entry`);
+    }
     const value = typeof config.value === 'string' ? config.value : DEFAULT_VALUE;
     if (!/^AKIA[0-9A-Z]{16}$/.test(value)) {
       throw new Error(
@@ -33,7 +40,7 @@ export const awsAccessKeyTemplate: PlantTemplate = {
     return {
       mutated,
       truth: {
-        file: typeof config.file === 'string' ? config.file : '',
+        file: config.file,
         line_range: [line, line] as const,
         bug_type: 'secret:aws-access-key',
         severity: 'critical',
