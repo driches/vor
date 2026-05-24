@@ -51,10 +51,12 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
       `Case ${caseId}: truth.yml 'truths' field must be an array, got ${typeof rawTruths}`,
     );
   }
-  // We don't validate every TruthEntry field shape here — downstream scoring
-  // tolerates partial shapes via fallback semantics. Top-level array shape is
-  // the load-bearing invariant.
-  const truths = rawTruths as TruthEntry[];
+  // Validate every entry shape before downstream scoring touches it.
+  // scoreRun destructures `truth.line_range` and calls `truth.category.includes(...)`
+  // — a malformed entry (missing category, non-tuple line_range, etc.) would
+  // crash scoring at runtime with an obscure TypeError instead of a clear
+  // dataset error. Fail loud at load. See PR #10 Codex P2 3295049301.
+  const truths: TruthEntry[] = rawTruths.map((raw, i) => validateTruthEntry(raw, caseId, i));
 
   const files: LoadedFile[] = [];
   walk(afterDir, (path) => {
@@ -73,6 +75,55 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
   });
 
   return { case_id: caseId, files, beforeFiles, truths };
+}
+
+const SEVERITY_VALUES = new Set(['critical', 'important', 'minor', 'nit']);
+
+function validateTruthEntry(raw: unknown, caseId: string, index: number): TruthEntry {
+  const where = `Case ${caseId}: truth.yml entry [${index}]`;
+  if (raw == null || typeof raw !== 'object') {
+    throw new Error(`${where} must be an object, got ${typeof raw}`);
+  }
+  const entry = raw as Record<string, unknown>;
+
+  if (typeof entry.file !== 'string' || entry.file.length === 0) {
+    throw new Error(`${where} missing required string field 'file'`);
+  }
+  if (
+    !Array.isArray(entry.line_range) ||
+    entry.line_range.length !== 2 ||
+    typeof entry.line_range[0] !== 'number' ||
+    typeof entry.line_range[1] !== 'number'
+  ) {
+    throw new Error(
+      `${where} 'line_range' must be a [start, end] number tuple, got ${JSON.stringify(entry.line_range)}`,
+    );
+  }
+  if (typeof entry.bug_type !== 'string' || entry.bug_type.length === 0) {
+    throw new Error(`${where} missing required string field 'bug_type'`);
+  }
+  if (typeof entry.severity !== 'string' || !SEVERITY_VALUES.has(entry.severity)) {
+    throw new Error(
+      `${where} 'severity' must be one of critical|important|minor|nit, got ${JSON.stringify(entry.severity)}`,
+    );
+  }
+  if (typeof entry.plant_id !== 'number') {
+    throw new Error(`${where} missing required number field 'plant_id'`);
+  }
+  if (
+    !Array.isArray(entry.category) ||
+    entry.category.length === 0 ||
+    !entry.category.every((c) => typeof c === 'string')
+  ) {
+    throw new Error(
+      `${where} 'category' must be a non-empty array of category strings, got ${JSON.stringify(entry.category)}`,
+    );
+  }
+  // We deliberately don't validate that each category string is in the
+  // Category union — scoreRun's `truth.category.includes(finding.category)`
+  // tolerates unknown categories (they just never match). Strictness here
+  // would refuse forward-compatible truth files that name future categories.
+  return entry as unknown as TruthEntry;
 }
 
 function walk(dir: string, onFile: (p: string) => void): void {

@@ -79,6 +79,80 @@ describe('loadCase', () => {
     rmSync(dir, { recursive: true });
   });
 
+  it('throws on a truth.yml entry missing required line_range', () => {
+    // Regression for PR #10 Codex P2 3295049301. Without per-entry
+    // validation, scoreRun's `truth.line_range[0]` would throw a TypeError
+    // at runtime instead of failing fast with a clear dataset error.
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+        // line_range missing
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/line_range/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws on a truth.yml entry with malformed category (non-array)', () => {
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [1, 1]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: vulnerability', // should be a list, got scalar
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/category.*array/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws on a truth.yml entry with invalid severity', () => {
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [1, 1]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: SUPER_CRITICAL', // not in the enum
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+      ].join('\n'),
+    });
+    expect(() => loadCase(dir, 'example')).toThrow(/critical\|important\|minor\|nit/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws naming the offending entry index for a malformed truth among valid ones', () => {
+    const { dir } = makeCase({
+      truthYaml: [
+        'truths:',
+        '  - file: src/auth.ts', // valid
+        '    line_range: [1, 1]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability]',
+        '  - file: src/other.ts', // malformed (missing severity)
+        '    line_range: [10, 10]',
+        '    bug_type: secret:github-pat',
+        '    plant_id: 1',
+        '    category: [vulnerability]',
+      ].join('\n'),
+    });
+    // The error must call out index [1], not [0], so the operator can locate
+    // the bad entry without manual bisection.
+    expect(() => loadCase(dir, 'example')).toThrow(/entry \[1\]/);
+    rmSync(dir, { recursive: true });
+  });
+
   it('returns files in deterministic lexicographic order across runs', () => {
     // Regression for PR #10 Codex P2 3295006721. Raw readdirSync order is
     // filesystem-dependent; without sorting, multi-file cases would
