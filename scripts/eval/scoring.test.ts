@@ -177,4 +177,35 @@ describe('scoreRun', () => {
     expect(fnResult.fn).toBe(1);
     expect(fnResult.fp).toBe(1);
   });
+
+  it('finds optimal matching when truth compat sets overlap (regression: greedy bias)', () => {
+    // Truth A is permissive: matches both 'security' and 'vulnerability'.
+    // Truth B is restrictive: matches only 'security'.
+    // Finding F1 is 'security'; F2 is 'vulnerability'.
+    // Greedy in input order (A, B) would pair A→F1, leaving B with no
+    // compatible finding (F2 is 'vulnerability', not in B's category list).
+    // Optimal pairs A→F2, B→F1, achieving 2 TPs.
+    const truthA = truth({
+      plant_id: 0,
+      line_range: [10, 10],
+      category: ['security', 'vulnerability'],
+    });
+    const truthB = truth({
+      plant_id: 1,
+      line_range: [10, 10],
+      category: ['security'],
+    });
+    const f1 = finding({ line: 10, category: 'security' });
+    const f2 = finding({ line: 10, category: 'vulnerability' });
+    const result = scoreRun({
+      case_id: 'opt',
+      config_name: 'cfg',
+      truths: [truthA, truthB],
+      findings: [f1, f2],
+      cost,
+    });
+    expect(result.tp).toBe(2);
+    expect(result.fn).toBe(0);
+    expect(result.fp).toBe(0);
+  });
 });
