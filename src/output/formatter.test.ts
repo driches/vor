@@ -153,7 +153,75 @@ describe('renderSummary — body content', () => {
     expect(r.body).toContain('a.ts, b.ts, c.ts');
   });
 
-  it('handles missing summary gracefully', () => {
+  it('synthesizes a body from comments when the agent skipped post_summary', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('important'), c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'claude-sonnet-4-6',
+      agentEnded: 'max_turns',
+    });
+    // No apologetic standalone-body placeholder.
+    expect(r.body).not.toMatch(/^_Code review completed by/);
+    // Real lede + findings count derived from inline comments.
+    expect(r.body).toContain('### Important findings');
+    expect(r.body).toContain('### Findings');
+    expect(r.body).toContain('1 important, 1 minor');
+    // The incomplete-run warning is present and names the ended reason.
+    // NB: `max_turns` in the runner actually means "model stopped early",
+    // not "turn-cap hit" (real cap exhaustion → budget_exceeded), so the
+    // wording must reflect what happened, not the enum name.
+    expect(r.body).toContain('did not call `post_summary`');
+    expect(r.body).toContain('model stopped replying');
+    expect(r.body).toContain('ended: max_turns');
+    expect(r.body).not.toContain('turn limit');
+    // Footer still attaches.
+    expect(r.body).toContain('claude-sonnet-4-6');
+    // No assessment → COMMENT.
+    expect(r.event).toBe('COMMENT');
+  });
+
+  it('warns prominently even when there are zero findings + no summary (avoids false-negative clean reviews)', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      agentEnded: 'budget_exceeded',
+    });
+    expect(r.event).toBe('COMMENT');
+    // Header still reflects the (empty) inline findings honestly...
+    expect(r.body).toContain('### No findings');
+    // ...but the warning sits right after it so a PR reader can't mistake
+    // a truncated run for a clean review.
+    const headerIdx = r.body.indexOf('### No findings');
+    const warningIdx = r.body.indexOf('did not call `post_summary`');
+    expect(warningIdx).toBeGreaterThan(headerIdx);
+    // `budget_exceeded` covers both turn-cap and token-cap exhaustion, so
+    // the wording must not commit to one over the other.
+    expect(r.body).toContain('exceeded a configured budget');
+    expect(r.body).toContain('ended: budget_exceeded');
+    // No strengths/coverage sections sneak in.
+    expect(r.body).not.toContain('### Strengths');
+    expect(r.body).not.toContain('### Coverage');
+  });
+
+  it('still surfaces the truncated-comments line when summary is missing', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('minor')],
+      truncatedCount: 3,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      agentEnded: 'error',
+    });
+    expect(r.body).toContain('3 additional comment');
+    expect(r.body).toContain('errored out');
+  });
+
+  it('falls back to a generic warning when agentEnded is not supplied', () => {
     const r = renderSummary({
       draft: { comments: [], skipped: [] },
       keptComments: [],
@@ -161,8 +229,48 @@ describe('renderSummary — body content', () => {
       configEvent: 'COMMENT',
       modelName: 'm',
     });
+    expect(r.body).toContain('did not call `post_summary`');
+    // No `ended:` annotation when we don't know how it ended.
+    expect(r.body).not.toContain('ended:');
+  });
+
+  it('does NOT emit the missing-summary warning when summary IS present', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      agentEnded: 'summary_posted',
+    });
+    expect(r.body).not.toContain('did not call `post_summary`');
+  });
+
+  it('clamps to COMMENT when no summary is present, even when configEvent ceiling is REQUEST_CHANGES', () => {
+    // The point of the no-summary → COMMENT default: without an agent
+    // assessment, we cannot justify escalating the review event, regardless of
+    // what the repo config would otherwise permit.
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('critical')],
+      truncatedCount: 0,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
     expect(r.event).toBe('COMMENT');
-    expect(r.body).toContain('no summary');
+  });
+
+  it('clamps to COMMENT when no summary is present, even when configEvent ceiling is APPROVE', () => {
+    // APPROVE has a different rank than REQUEST_CHANGES in chooseEvent, so
+    // it's a distinct code path through the clamp logic.
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'APPROVE',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('COMMENT');
   });
 
   it('emits a Security sub-line when scanner-sourced comments are kept', () => {

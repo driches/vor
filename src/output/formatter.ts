@@ -3,6 +3,7 @@
  * Inline comment bodies are rendered separately in github/review-poster.ts.
  */
 
+import type { RunAgentResult } from '../agent/runner.js';
 import type { PostedComment, ReviewDraft, ReviewEvent, ScannerId, Severity } from '../types.js';
 
 export interface SummaryRenderInput {
@@ -11,6 +12,13 @@ export interface SummaryRenderInput {
   truncatedCount: number;
   configEvent: ReviewEvent;
   modelName: string;
+  /**
+   * How the agent run terminated. When the run ended in anything other than
+   * `summary_posted`, we surface that in the body so PR readers don't mistake
+   * a truncated run for a clean review. Optional for backwards compatibility
+   * with tests; orchestrator always supplies it.
+   */
+  agentEnded?: RunAgentResult['ended'];
 }
 
 export interface RenderedSummary {
@@ -33,21 +41,27 @@ export interface RenderedSummary {
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   const summary = input.draft.summary;
-  if (!summary) {
-    return {
-      body: `_Code review completed by [driches/code-review](https://github.com/driches/code-review) (${input.modelName}) but no summary was produced._`,
-      event: 'COMMENT',
-    };
-  }
-
   const sections: string[] = [];
 
-  // Headline: severity of the highest-severity finding (or "No findings")
+  // Headline: severity of the highest-severity finding (or "No findings").
+  // Always rendered, even without an agent-supplied summary, so the body has a
+  // real lede instead of an apologetic placeholder.
   sections.push(`### ${severityHeader(input.keptComments)}`);
-  sections.push(summary.assessment_reasoning);
 
-  // Strengths
-  if (summary.strengths.length > 0) {
+  // When the agent didn't post a summary, surface that prominently — otherwise
+  // a truncated run with zero findings looks indistinguishable from a clean
+  // "No findings" review. The blockquote sits between the lede and any
+  // findings/strengths so a PR reader can't miss it.
+  if (!summary) {
+    sections.push(missingSummaryWarning(input.agentEnded));
+  }
+
+  if (summary) {
+    sections.push(summary.assessment_reasoning);
+  }
+
+  // Strengths (only available from the agent's summary)
+  if (summary && summary.strengths.length > 0) {
     sections.push('### Strengths');
     sections.push(summary.strengths.map((s) => `- ${s}`).join('\n'));
   }
@@ -59,16 +73,18 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     sections.push(formatCountsLine(counts));
     const scannerLine = formatScannerCountsLine(input.keptComments);
     if (scannerLine) sections.push(scannerLine);
-  } else if (summary.assessment !== 'approve') {
+  } else if (summary && summary.assessment !== 'approve') {
+    // When summary is missing we already emit the prominent missing-summary
+    // warning above; don't pile on with a redundant "no inline comments" note.
     sections.push('_No inline comments were posted._');
   }
 
-  // Coverage notes
-  if (summary.coverage_note) {
+  // Coverage notes (only available from the agent's summary)
+  if (summary?.coverage_note) {
     sections.push('### Coverage');
     sections.push(summary.coverage_note);
   }
-  if (summary.unreviewed_paths && summary.unreviewed_paths.length > 0) {
+  if (summary?.unreviewed_paths && summary.unreviewed_paths.length > 0) {
     sections.push(
       `_Skipped (out of budget):_ ${summary.unreviewed_paths.slice(0, 20).join(', ')}` +
         (summary.unreviewed_paths.length > 20
@@ -88,8 +104,10 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   );
 
   // Choose the final event: take the min of (agent assessment, configured ceiling).
-  const agentEvent: ReviewEvent =
-    summary.assessment === 'approve'
+  // No summary → no assessment → default to COMMENT.
+  const agentEvent: ReviewEvent = !summary
+    ? 'COMMENT'
+    : summary.assessment === 'approve'
       ? 'APPROVE'
       : summary.assessment === 'request_changes'
         ? 'REQUEST_CHANGES'
@@ -118,6 +136,38 @@ function formatCountsLine(counts: Record<Severity, number>): string {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(', ') : 'No findings.';
+}
+
+/**
+ * Warning emitted when the agent finished without calling `post_summary`.
+ * Names the `ended` reason when known so a reader can tell a model that
+ * stopped early from a budget blowup from an error abort.
+ *
+ * Wording note: the `ended` values in `RunAgentResult` are slightly misleading
+ * by name — the runner sets `max_turns` when the model returns `end_turn`
+ * (or stops emitting tool_use blocks) without posting a summary, NOT when the
+ * configured turn cap is hit. Real turn-cap exhaustion is thrown as a
+ * `BudgetError` from `Budget.startTurn` and surfaces as `budget_exceeded`
+ * (alongside actual token-cap exhaustion). The phrasing here reflects what
+ * actually happened, not what the enum name suggests. See runner.ts:151-153
+ * and budget.ts:30-52 — renaming the enum is a follow-up.
+ */
+function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): string {
+  const reasons: Record<RunAgentResult['ended'], string> = {
+    summary_posted: '', // Unreachable: we only call this when summary is missing.
+    max_turns: 'the model stopped replying before calling `post_summary`',
+    budget_exceeded: 'the run exceeded a configured budget (turns or tokens)',
+    aborted: 'the agent run was aborted',
+    error: 'the agent run errored out',
+  };
+  const tail =
+    ended && ended !== 'summary_posted'
+      ? ` — ${reasons[ended]} (\`ended: ${ended}\`).`
+      : '.';
+  return (
+    `> ⚠️ The agent did not call \`post_summary\`${tail} ` +
+    `The body was synthesized from inline findings and may be incomplete.`
+  );
 }
 
 /**

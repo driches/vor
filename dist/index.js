@@ -52971,16 +52971,15 @@ function bySeverityDesc(a2, b2) {
 // src/output/formatter.ts
 function renderSummary(input) {
   const summary2 = input.draft.summary;
-  if (!summary2) {
-    return {
-      body: `_Code review completed by [driches/code-review](https://github.com/driches/code-review) (${input.modelName}) but no summary was produced._`,
-      event: "COMMENT"
-    };
-  }
   const sections = [];
   sections.push(`### ${severityHeader(input.keptComments)}`);
-  sections.push(summary2.assessment_reasoning);
-  if (summary2.strengths.length > 0) {
+  if (!summary2) {
+    sections.push(missingSummaryWarning(input.agentEnded));
+  }
+  if (summary2) {
+    sections.push(summary2.assessment_reasoning);
+  }
+  if (summary2 && summary2.strengths.length > 0) {
     sections.push("### Strengths");
     sections.push(summary2.strengths.map((s2) => `- ${s2}`).join("\n"));
   }
@@ -52990,14 +52989,14 @@ function renderSummary(input) {
     sections.push(formatCountsLine(counts));
     const scannerLine = formatScannerCountsLine(input.keptComments);
     if (scannerLine) sections.push(scannerLine);
-  } else if (summary2.assessment !== "approve") {
+  } else if (summary2 && summary2.assessment !== "approve") {
     sections.push("_No inline comments were posted._");
   }
-  if (summary2.coverage_note) {
+  if (summary2?.coverage_note) {
     sections.push("### Coverage");
     sections.push(summary2.coverage_note);
   }
-  if (summary2.unreviewed_paths && summary2.unreviewed_paths.length > 0) {
+  if (summary2?.unreviewed_paths && summary2.unreviewed_paths.length > 0) {
     sections.push(
       `_Skipped (out of budget):_ ${summary2.unreviewed_paths.slice(0, 20).join(", ")}` + (summary2.unreviewed_paths.length > 20 ? ` _+${summary2.unreviewed_paths.length - 20} more_` : "")
     );
@@ -53011,7 +53010,7 @@ function renderSummary(input) {
   sections.push(
     `_Reviewed by [driches/code-review](https://github.com/driches/code-review) using \`${input.modelName}\`._`
   );
-  const agentEvent = summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
+  const agentEvent = !summary2 ? "COMMENT" : summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
   const event = chooseEvent(input.configEvent, agentEvent);
   return { body: sections.join("\n\n"), event };
 }
@@ -53031,6 +53030,18 @@ function formatCountsLine(counts) {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(", ") : "No findings.";
+}
+function missingSummaryWarning(ended) {
+  const reasons = {
+    summary_posted: "",
+    // Unreachable: we only call this when summary is missing.
+    max_turns: "the model stopped replying before calling `post_summary`",
+    budget_exceeded: "the run exceeded a configured budget (turns or tokens)",
+    aborted: "the agent run was aborted",
+    error: "the agent run errored out"
+  };
+  const tail = ended && ended !== "summary_posted" ? ` \u2014 ${reasons[ended]} (\`ended: ${ended}\`).` : ".";
+  return `> \u26A0\uFE0F The agent did not call \`post_summary\`${tail} The body was synthesized from inline findings and may be incomplete.`;
 }
 function severityHeader(comments) {
   if (comments.length === 0) return "No findings";
@@ -54969,6 +54980,11 @@ async function runOrchestrator(input) {
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`
   );
+  if (!aggregator.hasSummary()) {
+    await logger.warn(
+      "Agent did not call post_summary. Synthesizing a summary body from inline findings."
+    );
+  }
   const changedFilesMap = new Map(prContext.files.map((f2) => [f2.path, f2]));
   let addedScannerComments = 0;
   for (const finding of scanRunResult.findings) {
@@ -55021,7 +55037,8 @@ async function runOrchestrator(input) {
     keptComments: filtered.kept,
     truncatedCount: filtered.dropped,
     configEvent: config.review.event,
-    modelName: config.model
+    modelName: config.model,
+    agentEnded: result.ended
   });
   if (input.dry_run) {
     await logDryRunReview({

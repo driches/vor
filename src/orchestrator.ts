@@ -271,6 +271,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       `${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`,
   );
 
+  if (!aggregator.hasSummary()) {
+    await logger.warn(
+      'Agent did not call post_summary. Synthesizing a summary body from inline findings.',
+    );
+  }
+
   // Validate + adapt ALL scanner findings, then push into the same aggregator
   // so the filter pipeline (severity floor + caps) applies uniformly to both
   // AI and scanner comments. Dedup between scanner and AI runs AFTER the
@@ -367,6 +373,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     truncatedCount: filtered.dropped,
     configEvent: config.review.event,
     modelName: config.model,
+    agentEnded: result.ended,
   });
 
   // Dry run: log instead of posting
