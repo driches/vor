@@ -28,6 +28,14 @@ describe('vulnDepNpmTemplate', () => {
     // line_range points at the "version": line inside the new node_modules/lodash entry.
     expect(truth.line_range[0]).toBeGreaterThan(0);
     expect(truth.line_range[1]).toBeGreaterThanOrEqual(truth.line_range[0]);
+
+    // Regression for PR #10 comment 3295026564. The truth line MUST point at
+    // an actual "version": declaration. The previous code silently fell back
+    // to the package-key line if the search loop didn't match, which would
+    // anchor the truth at the wrong line and cause the CVE truth to score
+    // as FN despite a correct scanner hit (scanner anchors at "version:").
+    const truthLineContent = mutated.split('\n')[truth.line_range[0] - 1];
+    expect(truthLineContent).toContain('"version":');
   });
 
   it('rejects a non-package-lock.json file', () => {

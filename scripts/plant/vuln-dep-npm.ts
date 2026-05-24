@@ -56,12 +56,23 @@ export const vulnDepNpmTemplate: PlantTemplate = {
         `vuln-dep:npm: failed to locate planted entry for ${pkg}`,
       );
     }
-    let versionLine = entryLine;
+    let versionLine = -1;
     for (let i = entryLine; i < lines.length; i++) {
       if (lines[i]!.includes('"version":')) {
         versionLine = i + 1;
         break;
       }
+    }
+    // Refuse to silently fall back to entryLine — a missing "version": line
+    // means the JSON serializer produced a shape we don't recognise, and
+    // anchoring the truth at the package-key line would make the CVE truth
+    // score as FN despite a correct scanner hit (the scanner anchors at
+    // "version":). See PR #10 comment 3295026564.
+    if (versionLine < 0) {
+      throw new Error(
+        `vuln-dep:npm: planted entry for ${pkg} has no "version": line — ` +
+          `cannot anchor truth, refusing to silently mis-anchor at the key line`,
+      );
     }
     return {
       mutated,
