@@ -158,6 +158,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     truncatedCount: filtered.dropped,
     configEvent: config.review.event,
     modelName: config.model,
+    agentEnded: result.ended,
   });
 
   // Dry run: log instead of posting

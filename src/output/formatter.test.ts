@@ -160,30 +160,43 @@ describe('renderSummary — body content', () => {
       truncatedCount: 0,
       configEvent: 'COMMENT',
       modelName: 'claude-sonnet-4-6',
+      agentEnded: 'max_turns',
     });
-    // No apologetic placeholder.
-    expect(r.body).not.toContain('no summary');
+    // No apologetic standalone-body placeholder.
+    expect(r.body).not.toMatch(/^_Code review completed by/);
     // Real lede + findings count derived from inline comments.
     expect(r.body).toContain('### Important findings');
     expect(r.body).toContain('### Findings');
     expect(r.body).toContain('1 important, 1 minor');
+    // The incomplete-run warning is present and names the ended reason.
+    expect(r.body).toContain('did not call `post_summary`');
+    expect(r.body).toContain('turn limit');
+    expect(r.body).toContain('ended: max_turns');
     // Footer still attaches.
     expect(r.body).toContain('claude-sonnet-4-6');
     // No assessment → COMMENT.
     expect(r.event).toBe('COMMENT');
   });
 
-  it('produces a clean "No findings" body when both summary and comments are missing', () => {
+  it('warns prominently even when there are zero findings + no summary (avoids false-negative clean reviews)', () => {
     const r = renderSummary({
       draft: { comments: [], skipped: [] },
       keptComments: [],
       truncatedCount: 0,
       configEvent: 'COMMENT',
       modelName: 'm',
+      agentEnded: 'budget_exceeded',
     });
     expect(r.event).toBe('COMMENT');
+    // Header still reflects the (empty) inline findings honestly...
     expect(r.body).toContain('### No findings');
-    expect(r.body).not.toContain('no summary');
+    // ...but the warning sits right after it so a PR reader can't mistake
+    // a truncated run for a clean review.
+    const headerIdx = r.body.indexOf('### No findings');
+    const warningIdx = r.body.indexOf('did not call `post_summary`');
+    expect(warningIdx).toBeGreaterThan(headerIdx);
+    expect(r.body).toContain('token budget');
+    expect(r.body).toContain('ended: budget_exceeded');
     // No strengths/coverage sections sneak in.
     expect(r.body).not.toContain('### Strengths');
     expect(r.body).not.toContain('### Coverage');
@@ -196,8 +209,35 @@ describe('renderSummary — body content', () => {
       truncatedCount: 3,
       configEvent: 'COMMENT',
       modelName: 'm',
+      agentEnded: 'error',
     });
     expect(r.body).toContain('3 additional comment');
+    expect(r.body).toContain('errored out');
+  });
+
+  it('falls back to a generic warning when agentEnded is not supplied', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).toContain('did not call `post_summary`');
+    // No `ended:` annotation when we don't know how it ended.
+    expect(r.body).not.toContain('ended:');
+  });
+
+  it('does NOT emit the missing-summary warning when summary IS present', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      agentEnded: 'summary_posted',
+    });
+    expect(r.body).not.toContain('did not call `post_summary`');
   });
 
   it('clamps to COMMENT when no summary is present, even when configEvent ceiling is REQUEST_CHANGES', () => {
@@ -209,6 +249,19 @@ describe('renderSummary — body content', () => {
       keptComments: [c('critical')],
       truncatedCount: 0,
       configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('COMMENT');
+  });
+
+  it('clamps to COMMENT when no summary is present, even when configEvent ceiling is APPROVE', () => {
+    // APPROVE has a different rank than REQUEST_CHANGES in chooseEvent, so
+    // it's a distinct code path through the clamp logic.
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'APPROVE',
       modelName: 'm',
     });
     expect(r.event).toBe('COMMENT');

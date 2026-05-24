@@ -3,6 +3,7 @@
  * Inline comment bodies are rendered separately in github/review-poster.ts.
  */
 
+import type { RunAgentResult } from '../agent/runner.js';
 import type { PostedComment, ReviewDraft, ReviewEvent, Severity } from '../types.js';
 
 export interface SummaryRenderInput {
@@ -11,6 +12,13 @@ export interface SummaryRenderInput {
   truncatedCount: number;
   configEvent: ReviewEvent;
   modelName: string;
+  /**
+   * How the agent run terminated. When the run ended in anything other than
+   * `summary_posted`, we surface that in the body so PR readers don't mistake
+   * a truncated run for a clean review. Optional for backwards compatibility
+   * with tests; orchestrator always supplies it.
+   */
+  agentEnded?: RunAgentResult['ended'];
 }
 
 export interface RenderedSummary {
@@ -39,6 +47,15 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   // Always rendered, even without an agent-supplied summary, so the body has a
   // real lede instead of an apologetic placeholder.
   sections.push(`### ${severityHeader(input.keptComments)}`);
+
+  // When the agent didn't post a summary, surface that prominently — otherwise
+  // a truncated run with zero findings looks indistinguishable from a clean
+  // "No findings" review. The blockquote sits between the lede and any
+  // findings/strengths so a PR reader can't miss it.
+  if (!summary) {
+    sections.push(missingSummaryWarning(input.agentEnded));
+  }
+
   if (summary) {
     sections.push(summary.assessment_reasoning);
   }
@@ -113,6 +130,29 @@ function formatCountsLine(counts: Record<Severity, number>): string {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(', ') : 'No findings.';
+}
+
+/**
+ * Warning emitted when the agent finished without calling `post_summary`.
+ * Names the `ended` reason when known so a reader can tell turn-limit from
+ * budget-blowup from an error abort.
+ */
+function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): string {
+  const reasons: Record<RunAgentResult['ended'], string> = {
+    summary_posted: '', // Unreachable: we only call this when summary is missing.
+    max_turns: 'the agent hit the turn limit before finishing',
+    budget_exceeded: 'the agent exhausted its token budget before finishing',
+    aborted: 'the agent run was aborted',
+    error: 'the agent run errored out',
+  };
+  const tail =
+    ended && ended !== 'summary_posted'
+      ? ` — ${reasons[ended]} (\`ended: ${ended}\`).`
+      : '.';
+  return (
+    `> ⚠️ The agent did not call \`post_summary\`${tail} ` +
+    `The body was synthesized from inline findings and may be incomplete.`
+  );
 }
 
 /**

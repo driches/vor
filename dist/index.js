@@ -50942,6 +50942,9 @@ function renderSummary(input) {
   const summary2 = input.draft.summary;
   const sections = [];
   sections.push(`### ${severityHeader(input.keptComments)}`);
+  if (!summary2) {
+    sections.push(missingSummaryWarning(input.agentEnded));
+  }
   if (summary2) {
     sections.push(summary2.assessment_reasoning);
   }
@@ -50992,6 +50995,18 @@ function formatCountsLine(counts) {
   if (counts.minor) parts.push(`${counts.minor} minor`);
   if (counts.nit) parts.push(`${counts.nit} nit`);
   return parts.length ? parts.join(", ") : "No findings.";
+}
+function missingSummaryWarning(ended) {
+  const reasons = {
+    summary_posted: "",
+    // Unreachable: we only call this when summary is missing.
+    max_turns: "the agent hit the turn limit before finishing",
+    budget_exceeded: "the agent exhausted its token budget before finishing",
+    aborted: "the agent run was aborted",
+    error: "the agent run errored out"
+  };
+  const tail = ended && ended !== "summary_posted" ? ` \u2014 ${reasons[ended]} (\`ended: ${ended}\`).` : ".";
+  return `> \u26A0\uFE0F The agent did not call \`post_summary\`${tail} The body was synthesized from inline findings and may be incomplete.`;
 }
 function severityHeader(comments) {
   if (comments.length === 0) return "No findings";
@@ -51092,7 +51107,8 @@ async function runOrchestrator(input) {
     keptComments: filtered.kept,
     truncatedCount: filtered.dropped,
     configEvent: config.review.event,
-    modelName: config.model
+    modelName: config.model,
+    agentEnded: result.ended
   });
   if (input.dry_run) {
     await logDryRunReview({
