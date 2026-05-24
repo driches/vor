@@ -34,6 +34,12 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
   if (!existsSync(beforeDir)) {
     throw new Error(`Case ${caseId} is missing before/ snapshot`);
   }
+  // Refuse symlinked roots. walk()'s per-entry lstatSync only catches symlinks
+  // INSIDE before/ and after/; a root-level `after -> /tmp/outside` symlink
+  // would have readdirSync silently follow the link and ingest external
+  // files. See PR #10 Codex P2 3295250485.
+  rejectSymlinkRoot(afterDir, caseId, 'after');
+  rejectSymlinkRoot(beforeDir, caseId, 'before');
   const truthPath = join(caseDir, 'truth.yml');
   if (!existsSync(truthPath)) {
     throw new Error(
@@ -80,6 +86,17 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
   });
 
   return { case_id: caseId, files, beforeFiles, truths };
+}
+
+function rejectSymlinkRoot(dir: string, caseId: string, label: 'before' | 'after'): void {
+  const lst = lstatSync(dir);
+  if (lst.isSymbolicLink()) {
+    throw new Error(
+      `case-loader: case ${caseId} has a symlinked ${label}/ root (${dir}) — ` +
+        `refusing to follow. Replace the symlink with a real directory; eval ` +
+        `cases must be self-contained.`,
+    );
+  }
 }
 
 const SEVERITY_VALUES = new Set(['critical', 'important', 'minor', 'nit']);

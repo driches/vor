@@ -213,6 +213,43 @@ describe('loadCase', () => {
     rmSync(root, { recursive: true });
   });
 
+  it('rejects a symlinked after/ root (refuses to follow before walk)', () => {
+    // Regression for PR #10 Codex P2 3295250485. walk()'s per-entry lstatSync
+    // only catches symlinks INSIDE after/; a root-level `after -> /tmp/outside`
+    // symlink would have readdirSync silently follow the link. lstat the
+    // root explicitly before walking.
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-root-symlink-'));
+    const id = 'symlinked-after-root';
+    const caseDir = join(root, 'cases', id);
+    mkdirSync(caseDir, { recursive: true });
+    mkdirSync(join(caseDir, 'before'));
+    // Set up the malicious target dir outside the case.
+    const outsideAfter = mkdtempSync(join(tmpdir(), 'case-loader-outside-after-'));
+    writeFileSync(join(outsideAfter, 'host-file.ts'), 'host content');
+    // Symlink after/ -> outsideAfter
+    symlinkSync(outsideAfter, join(caseDir, 'after'));
+    writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
+    expect(() => loadCase(root, id)).toThrow(/symlinked after\/ root/);
+    rmSync(outsideAfter, { recursive: true });
+    rmSync(root, { recursive: true });
+  });
+
+  it('rejects a symlinked before/ root', () => {
+    // Same gap as the after/ test above but on the before/ side.
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-before-root-symlink-'));
+    const id = 'symlinked-before-root';
+    const caseDir = join(root, 'cases', id);
+    mkdirSync(caseDir, { recursive: true });
+    mkdirSync(join(caseDir, 'after'));
+    const outsideBefore = mkdtempSync(join(tmpdir(), 'case-loader-outside-before-'));
+    writeFileSync(join(outsideBefore, 'host-file.ts'), 'host content');
+    symlinkSync(outsideBefore, join(caseDir, 'before'));
+    writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
+    expect(() => loadCase(root, id)).toThrow(/symlinked before\/ root/);
+    rmSync(outsideBefore, { recursive: true });
+    rmSync(root, { recursive: true });
+  });
+
   it('rejects a symlinked file inside after/ (refuses to follow during walk)', () => {
     // Regression for PR #10 Codex P2 3295138894. walk() previously used
     // statSync, which follows symlinks. A symlinked file inside after/ or
