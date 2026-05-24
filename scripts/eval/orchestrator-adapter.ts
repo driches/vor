@@ -242,6 +242,20 @@ export interface EvalRunOutput {
 }
 
 export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
+  // Pre-flight: reject unknown model ids BEFORE we spend any API tokens.
+  // The same check fires inside `computeCostUsd` at the end of the run, but
+  // at that point we've already paid for a full orchestrator pass against
+  // a real model and then discarded the findings — wasted money and time
+  // for a typo'd config. Validate at the top so the failure mode is fast
+  // and cheap. See PR #10 dogfood MINOR 3295239967.
+  if (!MODEL_PRICING[input.config.model]) {
+    throw new Error(
+      `evalRun: no pricing entry for model "${input.config.model}". ` +
+        `Known models: ${Object.keys(MODEL_PRICING).join(', ')}. ` +
+        `Add an entry to MODEL_PRICING (with the correct per-million rates) ` +
+        `or fix the model name in your pipeline config.`,
+    );
+  }
   if (runActive) {
     throw new Error(
       'evalRun does not support concurrent invocations — module-scope state would corrupt across calls. Use sequential calls only (see LIMITATION comment near `state`).',

@@ -402,6 +402,55 @@ describe('synthesizeDiff', () => {
       'src/zzz.ts',
     ]);
   });
+
+  it('emits a valid unified-diff body for modified files', () => {
+    // Regression for PR #10 dogfood MINOR 3295239968. The file-order test
+    // above only checks `filesApi[].filename`. A broken `--- a/`/`+++ b/`
+    // prefix substitution or off-by-one in renderModifiedFile's `idx + 2`
+    // skip would pass silently while breaking the orchestrator's downstream
+    // diff parser. Assert the actual diff body has the expected headers
+    // and hunk shape.
+    const c: LoadedCase = {
+      case_id: 'diff-body',
+      beforeFiles: [{ path: 'src/auth.ts', content: 'line1\nline2\nline3\n' }],
+      files: [{ path: 'src/auth.ts', content: 'line1\nline2-edited\nline3\n' }],
+      truths: [],
+    };
+    const { diff, filesApi } = synthesizeDiff(c);
+    expect(filesApi).toHaveLength(1);
+    // Required diff structure for the orchestrator's parse-diff consumer:
+    expect(diff).toContain('diff --git a/src/auth.ts b/src/auth.ts');
+    expect(diff).toContain('--- a/src/auth.ts');
+    expect(diff).toContain('+++ b/src/auth.ts');
+    expect(diff).toMatch(/^@@ -\d+,\d+ \+\d+,\d+ @@/m);
+    // The modified line shows up as a remove + add pair.
+    expect(diff).toContain('-line2');
+    expect(diff).toContain('+line2-edited');
+    // Context lines (`line1` and `line3`) are present without `+`/`-` markers.
+    expect(diff).toMatch(/^ line1$/m);
+    expect(diff).toMatch(/^ line3$/m);
+  });
+
+  it('emits a valid unified-diff body for new files', () => {
+    // Companion coverage for renderNewFile, which uses a different
+    // code path (the synthetic `diff --git`, `new file mode`,
+    // `--- /dev/null`, `+++ b/...` shape, all `+` lines).
+    const c: LoadedCase = {
+      case_id: 'new-file',
+      beforeFiles: [],
+      files: [{ path: 'src/brand-new.ts', content: 'export const x = 1;\n' }],
+      truths: [],
+    };
+    const { diff, filesApi } = synthesizeDiff(c);
+    expect(filesApi).toHaveLength(1);
+    expect(filesApi[0]!.filename).toBe('src/brand-new.ts');
+    expect(diff).toContain('diff --git a/src/brand-new.ts b/src/brand-new.ts');
+    expect(diff).toContain('new file mode 100644');
+    expect(diff).toContain('--- /dev/null');
+    expect(diff).toContain('+++ b/src/brand-new.ts');
+    expect(diff).toContain('@@ -0,0 +1,1 @@');
+    expect(diff).toContain('+export const x = 1;');
+  });
 });
 
 describe('serializeConfigAsYaml', () => {
