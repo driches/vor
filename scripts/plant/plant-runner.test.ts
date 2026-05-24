@@ -96,4 +96,48 @@ describe('runPlants', () => {
     expect(occurrences).toBe(2);
     rmSync(caseDir, { recursive: true });
   });
+
+  it('clears after/ between runs so stale files from a prior plant do not leak in', async () => {
+    // Regression for PR #10 comment 3294902774. Iterating on plants.yml used
+    // to leave behind files that a previous run created.
+    const caseDir = makeCase();
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      [
+        'plants:',
+        '  - type: secret:aws-access-key',
+        '    file: src/config/aws.ts',
+        '    line: 2',
+      ].join('\n'),
+    );
+    await runPlants(caseDir);
+    // Author manually adds a stale file directly into after/ — could equally
+    // be a file the previous plants.yml referenced but the new one does not.
+    writeFileSync(join(caseDir, 'after/stale.txt'), 'leftover');
+    expect(existsSync(join(caseDir, 'after/stale.txt'))).toBe(true);
+
+    await runPlants(caseDir);
+    expect(existsSync(join(caseDir, 'after/stale.txt'))).toBe(false);
+    // And the legit content is still there post-replant.
+    const mutated = readFileSync(join(caseDir, 'after/src/config/aws.ts'), 'utf-8');
+    expect(mutated).toContain('AKIAIOSFODNN7EXAMPLE');
+    rmSync(caseDir, { recursive: true });
+  });
+
+  it('rejects a plant.file path that escapes the case directory', async () => {
+    // Regression for PR #10 comment 3294915016. A malicious or buggy
+    // plants.yml must not be able to write outside the case via `..`.
+    const caseDir = makeCase();
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      [
+        'plants:',
+        '  - type: secret:aws-access-key',
+        '    file: ../../../tmp/escaped-target.ts',
+        '    line: 1',
+      ].join('\n'),
+    );
+    await expect(runPlants(caseDir)).rejects.toThrow(/escapes/);
+    rmSync(caseDir, { recursive: true });
+  });
 });

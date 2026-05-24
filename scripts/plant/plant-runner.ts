@@ -7,8 +7,17 @@
  * mutations). Truth entries are written in the same order with sequential
  * `plant_id`s starting at 0.
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, copyFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  copyFileSync,
+  rmSync,
+} from 'node:fs';
+import { join, dirname, resolve, sep } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { getTemplate } from './registry.js';
 import type { PlantConfig, TruthEntry } from '../eval/types.js';
@@ -34,13 +43,31 @@ export async function runPlants(caseDir: string): Promise<void> {
     throw new Error(`Case ${caseDir} is missing before/ snapshot`);
   }
 
+  // Clear after/ first so stale files from a prior plant run don't leak in.
+  // Without this, iterating on plants.yml gives non-reproducible runs because
+  // files removed from the plant set continue to exist in after/.
+  rmSync(afterDir, { recursive: true, force: true });
   // Copy before/ → after/ as the starting state, then mutate after/ in place.
   copyTree(beforeDir, afterDir);
 
+  const resolvedAfterDir = resolve(afterDir);
   const truths: TruthEntry[] = [];
   for (let i = 0; i < parsed.plants.length; i++) {
     const plant = parsed.plants[i]!;
     const filePath = join(afterDir, String(plant.file));
+    // Reject `..` / absolute paths that escape afterDir. resolvedFilePath
+    // must live inside resolvedAfterDir (or be the dir itself, though that
+    // case is nonsensical for a plant). Path.sep guarantees we match a
+    // boundary so a sibling dir with the same prefix doesn't sneak through.
+    const resolvedFilePath = resolve(filePath);
+    if (
+      resolvedFilePath !== resolvedAfterDir &&
+      !resolvedFilePath.startsWith(resolvedAfterDir + sep)
+    ) {
+      throw new Error(
+        `Plant #${i} (${plant.type}) file '${String(plant.file)}' escapes the case directory`,
+      );
+    }
     if (!existsSync(filePath)) {
       throw new Error(
         `Plant #${i} (${plant.type}) references file '${String(plant.file)}' which does not exist in before/`,
