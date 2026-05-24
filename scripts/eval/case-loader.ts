@@ -8,13 +8,14 @@ import { parse as parseYaml } from 'yaml';
 import type { TruthEntry } from './types.js';
 
 export interface LoadedFile {
-  path: string;     // relative to after/
+  path: string;     // relative to after/ (or before/)
   content: string;
 }
 
 export interface LoadedCase {
   case_id: string;
-  files: LoadedFile[];
+  files: LoadedFile[];        // after/ contents
+  beforeFiles: LoadedFile[];  // before/ contents — used by the adapter to synthesize a real diff
   truths: TruthEntry[];
 }
 
@@ -23,6 +24,10 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
   const afterDir = join(caseDir, 'after');
   if (!existsSync(afterDir)) {
     throw new Error(`Case ${caseId} not found at ${afterDir}`);
+  }
+  const beforeDir = join(caseDir, 'before');
+  if (!existsSync(beforeDir)) {
+    throw new Error(`Case ${caseId} is missing before/ snapshot`);
   }
   const truthPath = join(caseDir, 'truth.yml');
   if (!existsSync(truthPath)) {
@@ -42,7 +47,15 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
     });
   });
 
-  return { case_id: caseId, files, truths };
+  const beforeFiles: LoadedFile[] = [];
+  walk(beforeDir, (path) => {
+    beforeFiles.push({
+      path: relative(beforeDir, path).replaceAll('\\', '/'),
+      content: readFileSync(path, 'utf-8'),
+    });
+  });
+
+  return { case_id: caseId, files, beforeFiles, truths };
 }
 
 function walk(dir: string, onFile: (p: string) => void): void {

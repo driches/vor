@@ -8,6 +8,9 @@ const fakeCase: LoadedCase = {
   files: [
     { path: 'src/auth.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
   ],
+  // Empty before/ so the planted AWS key appears as an added line in the
+  // synthesized diff (matches a "fresh plant" scenario in golden cases).
+  beforeFiles: [{ path: 'src/auth.ts', content: '\n' }],
   truths: [
     {
       file: 'src/auth.ts',
@@ -99,5 +102,51 @@ describe('evalRun', () => {
     expect(awsFinding!.category).toBe('vulnerability');
     expect(awsFinding!.severity).toBe('critical');
     expect(awsFinding!.title.length).toBeGreaterThan(0);
+  });
+
+  it('does NOT flag pre-existing content (before/ === after/)', async () => {
+    // Regression for PR #10 comment 3294950624. Previously the synthesized
+    // diff marked every file as `new file mode` with all content on `+`
+    // lines, so scanners saw pre-existing issues in before/ as added — biasing
+    // precision. With a real unified diff, an unchanged file produces no
+    // patch entry and no findings.
+    const unchangedCase: LoadedCase = {
+      case_id: 'unit-unchanged',
+      files: [
+        { path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
+      ],
+      beforeFiles: [
+        { path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
+      ],
+      truths: [],
+    };
+    const result = await evalRun({
+      case: unchangedCase,
+      config: DEFAULT_CONFIG,
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        {
+          content: [
+            {
+              type: 'tool_use',
+              id: 't1',
+              name: 'post_summary',
+              input: {
+                strengths: [],
+                assessment: 'comment',
+                assessment_reasoning: 'No changes',
+              },
+            },
+          ],
+          stop_reason: 'tool_use',
+        },
+        {
+          content: [{ type: 'text', text: 'end' }],
+          stop_reason: 'end_turn',
+        },
+      ],
+    });
+    // The AWS key was already in before/. No diff entry → no findings.
+    expect(result.findings.filter((f) => f.file_path === 'src/foo.ts')).toHaveLength(0);
   });
 });

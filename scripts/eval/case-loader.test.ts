@@ -9,7 +9,9 @@ function makeCase(): { dir: string; id: string } {
   const id = 'example';
   const caseDir = join(root, 'cases', id);
   mkdirSync(join(caseDir, 'after/src'), { recursive: true });
+  mkdirSync(join(caseDir, 'before/src'), { recursive: true });
   writeFileSync(join(caseDir, 'after/src/auth.ts'), 'const k = "AKIAIOSFODNN7EXAMPLE";\n');
+  writeFileSync(join(caseDir, 'before/src/auth.ts'), '// empty\n');
   writeFileSync(
     join(caseDir, 'truth.yml'),
     [
@@ -26,11 +28,13 @@ function makeCase(): { dir: string; id: string } {
 }
 
 describe('loadCase', () => {
-  it('reads after/ files and truth.yml from a case directory', () => {
+  it('reads after/ files, before/ files, and truth.yml from a case directory', () => {
     const { dir, id } = makeCase();
     const c = loadCase(dir, id);
     expect(c.case_id).toBe('example');
     expect(c.files.find((f) => f.path === 'src/auth.ts')?.content).toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(c.beforeFiles.find((f) => f.path === 'src/auth.ts')?.content).toContain('// empty');
+    expect(c.beforeFiles.length).toBeGreaterThan(0);
     expect(c.truths).toHaveLength(1);
     expect(c.truths[0]!.bug_type).toBe('secret:aws-access-key');
     rmSync(dir, { recursive: true });
@@ -45,7 +49,17 @@ describe('loadCase', () => {
   it('throws when truth.yml is missing (case not planted yet)', () => {
     const root = mkdtempSync(join(tmpdir(), 'case-loader-test-'));
     mkdirSync(join(root, 'cases', 'no-truth', 'after'), { recursive: true });
+    mkdirSync(join(root, 'cases', 'no-truth', 'before'), { recursive: true });
     expect(() => loadCase(root, 'no-truth')).toThrow(/truth\.yml/);
+    rmSync(root, { recursive: true });
+  });
+
+  it('throws when before/ snapshot is missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-test-'));
+    const caseDir = join(root, 'cases', 'no-before');
+    mkdirSync(join(caseDir, 'after'), { recursive: true });
+    writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
+    expect(() => loadCase(root, 'no-before')).toThrow(/before\/ snapshot/);
     rmSync(root, { recursive: true });
   });
 });
