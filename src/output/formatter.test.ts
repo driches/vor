@@ -199,6 +199,20 @@ describe('renderSummary — body content', () => {
     });
     expect(r.body).toContain('3 additional comment');
   });
+
+  it('clamps to COMMENT when no summary is present, even when configEvent ceiling is REQUEST_CHANGES', () => {
+    // The point of the no-summary → COMMENT default: without an agent
+    // assessment, we cannot justify escalating the review event, regardless of
+    // what the repo config would otherwise permit.
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [c('critical')],
+      truncatedCount: 0,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+    expect(r.event).toBe('COMMENT');
+  });
 });
 
 describe('renderSummary — event selection (unchanged)', () => {
