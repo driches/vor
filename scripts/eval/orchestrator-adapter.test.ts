@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { evalRun } from './orchestrator-adapter.js';
+import { evalRun, serializeConfigAsYaml } from './orchestrator-adapter.js';
 import type { LoadedCase } from './case-loader.js';
 import { DEFAULT_CONFIG } from '../../src/config/defaults.js';
+import type { ReviewConfig } from '../../src/config/types.js';
 
 const fakeCase: LoadedCase = {
   case_id: 'unit',
@@ -209,5 +210,20 @@ describe('evalRun', () => {
     });
     // The AWS key was already in before/. No diff entry → no findings.
     expect(result.findings.filter((f) => f.file_path === 'src/foo.ts')).toHaveLength(0);
+  });
+});
+
+describe('serializeConfigAsYaml', () => {
+  it('preserves non-default fields like prompt.additions (regression: hand-rolled drop)', () => {
+    // The previous hand-rolled YAML serializer silently dropped fields outside
+    // its short whitelist (prompt, focus, context, review.*, security.cache,
+    // security.persistence). Switching to yaml.stringify covers every field
+    // automatically.
+    const cfg: ReviewConfig = {
+      ...DEFAULT_CONFIG,
+      prompt: { ...DEFAULT_CONFIG.prompt, additions: 'TEST-PERSONA' },
+    };
+    const yaml = serializeConfigAsYaml(cfg);
+    expect(yaml).toContain('TEST-PERSONA');
   });
 });

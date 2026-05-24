@@ -13,6 +13,7 @@
  */
 import { vi } from 'vitest';
 import { createPatch } from 'diff';
+import { stringify as stringifyYaml } from 'yaml';
 import type { LoadedCase } from './case-loader.js';
 import type { RunRecord } from './types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
@@ -515,28 +516,11 @@ function parseRenderedComment(body: string): {
   return { severity, category, confidence, title, why_it_matters };
 }
 
-function serializeConfigAsYaml(cfg: ReviewConfig): string {
-  const lines: string[] = [];
-  lines.push(`model: ${cfg.model}`);
-  lines.push(`max_turns: ${cfg.max_turns}`);
-  lines.push('severity:');
-  lines.push(`  floor: ${cfg.severity.floor}`);
-  lines.push(`  max_comments_per_file: ${cfg.severity.max_comments_per_file}`);
-  lines.push(`  max_comments_total: ${cfg.severity.max_comments_total}`);
-  lines.push('budget:');
-  lines.push(`  max_input_tokens: ${cfg.budget.max_input_tokens}`);
-  lines.push(`  max_output_tokens: ${cfg.budget.max_output_tokens}`);
-  lines.push('security:');
-  lines.push(`  enabled: ${cfg.security.enabled}`);
-  lines.push('  scanners:');
-  lines.push('    dependency_cve:');
-  lines.push(`      enabled: ${cfg.security.scanners.dependency_cve.enabled}`);
-  lines.push('    secrets:');
-  lines.push(`      enabled: ${cfg.security.scanners.secrets.enabled}`);
-  if (cfg.security.scanners.secrets.include_generic_entropy !== undefined) {
-    lines.push(
-      `      include_generic_entropy: ${cfg.security.scanners.secrets.include_generic_entropy}`,
-    );
-  }
-  return lines.join('\n') + '\n';
+// exported for tests
+export function serializeConfigAsYaml(cfg: ReviewConfig): string {
+  // yaml.stringify covers every ReviewConfig field automatically. Hand-rolling
+  // this used to silently drop new fields (prompt, focus, context, review.*,
+  // security.cache, security.persistence) when the schema grew. See PR #10
+  // comments 3294958549 and 3294969031.
+  return stringifyYaml(cfg as unknown as Record<string, unknown>);
 }
