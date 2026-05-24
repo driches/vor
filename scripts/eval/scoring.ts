@@ -3,13 +3,20 @@
  *
  * Match criteria (a finding F matches truth T when ALL hold):
  *   - F.file_path === T.file
- *   - T.line_range[0] - 3 <= F.line <= T.line_range[1] + 3
+ *   - F's commented range overlaps T's truth range with ±LINE_SLACK
+ *     tolerance on either side. F's range is [F.start_line ?? F.line, F.line];
+ *     T's range is T.line_range. Overlap test:
+ *       findingStart <= truthEnd + slack  AND  findingEnd >= truthStart - slack
  *   - F.category ∈ T.category   (the truth declares the compatible category set)
  *
  * Each truth is matched at most once. We solve maximum bipartite matching by
  * augmenting paths so the result is order-independent and does not undercount
  * TPs when truth-finding compatibility sets overlap (a greedy pass would).
  * Unmatched findings become FPs ("unaligned"). Unmatched truths become FNs.
+ *
+ * Range-based matching (vs. previous end-line-only) accounts for multi-line
+ * findings where the planted bug is near the start of the comment range but
+ * the end line is outside the slack window. See PR #10 Codex P2 3295074806.
  */
 import type { PostedComment } from '../../src/types.js';
 import type { RunRecord, TruthEntry, ScoreResult, TruthOutcome } from './types.js';
@@ -32,14 +39,22 @@ export function scoreRun(input: ScoreInput): ScoreResult {
   const compat: boolean[][] = [];
   for (let t = 0; t < T; t++) {
     const truth = input.truths[t]!;
-    const [rangeStart, rangeEnd] = truth.line_range;
+    const [truthStart, truthEnd] = truth.line_range;
     const row: boolean[] = [];
     for (let i = 0; i < F; i++) {
       const finding = input.findings[i]!;
+      // GitHub's PostedComment may carry a multi-line range via `start_line`;
+      // a single-line comment has `start_line` absent and `line` carries the
+      // single anchor. Treat the finding as [findingStart, findingEnd] and
+      // test range overlap with slack on both ends.
+      const findingStart = finding.start_line ?? finding.line;
+      const findingEnd = finding.line;
+      const overlaps =
+        findingStart <= truthEnd + LINE_SLACK &&
+        findingEnd >= truthStart - LINE_SLACK;
       const ok =
         finding.file_path === truth.file &&
-        finding.line >= rangeStart - LINE_SLACK &&
-        finding.line <= rangeEnd + LINE_SLACK &&
+        overlaps &&
         truth.category.includes(finding.category);
       row.push(ok);
     }
