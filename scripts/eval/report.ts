@@ -3,9 +3,14 @@
  *
  * Win/loss colors (per the design spec, "same recall, lower cost"):
  *   🟢 — recall ≥ baseline AND cost < baseline × 0.75
- *   🟡 — recall ≥ baseline AND cost < baseline
- *   🔴 — recall < baseline
+ *   🟡 — recall ≥ baseline AND (cost < baseline  OR  recall improved by >5pp)
+ *   🔴 — recall < baseline  OR  (recall flat AND cost up by >5%)
  *   ⚪ — within ±5% on both axes
+ *
+ * 🔴 covers regression on EITHER axis: a recall drop is the spec's strict
+ * case, and "same recall but the challenger costs >5% more" is also a
+ * meaningful regression that the dogfood reviewer (PR #10 comment
+ * 3295026563) called out should not silently render as ⚪.
  */
 import type { ScoreResult } from './types.js';
 
@@ -66,12 +71,17 @@ function formatCell(s: ScoreResult, baseline: ScoreResult): string {
   if (!recallOK) icon = '🔴';
   else if (costRatio < COST_WIN_RATIO) icon = '🟢';
   else if (costRatio < 1 - INCONCLUSIVE_EPSILON) icon = '🟡';
-  else if (recallEqual && Math.abs(costRatio - 1) <= INCONCLUSIVE_EPSILON) icon = '⚪';
   // Spec's 4 cells don't cover "recall improved + cost neutral". The default
   // ⚪ would silently misrepresent a recall win. Surface it as 🟡 so a
   // genuine recall improvement is visible even when cost is roughly flat.
   // See PR #10 comment 3294976845.
   else if (!recallEqual && s.recall > baseline.recall) icon = '🟡';
+  // Same-recall-but-cost-regressed should not silently render as ⚪. The
+  // previous branch here unconditionally set `⚪` (a no-op since that's
+  // already the default), masking the case where a challenger keeps recall
+  // flat but pays >5% more. Flag it as 🔴 — it's a regression on the cost
+  // axis. See PR #10 comment 3295026563.
+  else if (recallEqual && costRatio > 1 + INCONCLUSIVE_EPSILON) icon = '🔴';
   const recallDelta =
     s.recall >= baseline.recall
       ? `+${pct(s.recall - baseline.recall)}`

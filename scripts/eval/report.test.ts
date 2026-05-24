@@ -90,6 +90,33 @@ describe('renderSummaryReport', () => {
     expect(md).not.toContain('🟢');
   });
 
+  it('flags same-recall + cost-regressed as 🔴 (not ⚪)', () => {
+    // Regression for PR #10 comment 3295026563. The previous report logic
+    // had a dead-code `⚪` branch that masked this case: when a challenger
+    // matches the baseline's recall but costs >5% more, the cell silently
+    // rendered as ⚪ ("inconclusive") even though it's an unambiguous cost
+    // regression on the only axis the operator cares about when recall is
+    // flat.
+    const baselineCost = score({ config_name: 'x' }).cost;
+    const md = renderSummaryReport({
+      timestamp: '2026-05-23T15:42:00Z',
+      baseline_config: 'sonnet-only',
+      scores: [
+        score({ config_name: 'sonnet-only', recall: 1.0, tp: 10, fn: 0 }),
+        score({
+          config_name: 'opus-only',
+          recall: 1.0, // identical recall
+          tp: 10,
+          fn: 0,
+          // Cost is 50% higher than baseline ($0.75 vs $0.50) — well past the
+          // ±5% inconclusive band.
+          cost: { ...baselineCost, cost_usd: 0.75 },
+        }),
+      ],
+    });
+    expect(md).toContain('🔴');
+  });
+
   it('flags recall-improved + cost-neutral as 🟡 (not ⚪)', () => {
     // Regression for PR #10 comment 3294976845. The spec's 4 cells don't
     // cover "recall improved while cost is roughly flat". The default ⚪
