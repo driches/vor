@@ -62,4 +62,27 @@ describe('loadPipelineConfig', () => {
     expect(() => loadPipelineConfig(path)).toThrow(/floor|enum/i);
     rmSync(dir, { recursive: true });
   });
+
+  it('throws on an empty file (no silent fallback to DEFAULT_CONFIG)', () => {
+    // Regression for PR #10 Codex P1 3295006715. An empty pipeline file was
+    // silently giving the eval baseline defaults, hiding config typos in
+    // the test matrix.
+    const dir = makeTempDir();
+    const path = join(dir, 'empty.yml');
+    writeFileSync(path, '');
+    expect(() => loadPipelineConfig(path)).toThrow(/empty/i);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws on a scalar root (e.g. typo strips a colon)', () => {
+    // Regression for PR #10 Codex P1 3295006715. A YAML file containing just
+    // `claude-sonnet-4-6` (no `model:` key) parses as a scalar string. The
+    // pre-fix loader would silently return DEFAULT_CONFIG and run evals with
+    // baseline settings instead of the intended override.
+    const dir = makeTempDir();
+    const path = join(dir, 'scalar.yml');
+    writeFileSync(path, 'claude-sonnet-4-6');
+    expect(() => loadPipelineConfig(path)).toThrow(/must be a YAML mapping/);
+    rmSync(dir, { recursive: true });
+  });
 });

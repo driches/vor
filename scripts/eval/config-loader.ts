@@ -36,9 +36,23 @@ export function loadPipelineConfig(path: string): ReviewConfig {
     );
   }
 
-  // Empty file or scalar → just use defaults.
-  if (parsed == null || typeof parsed !== 'object') {
-    return DEFAULT_CONFIG;
+  // Empty file or scalar root is almost always a mistake (an empty file with
+  // a typo'd pipeline name, or a config with a missing colon that parses as
+  // a bare string). Falling back to DEFAULT_CONFIG would silently run the
+  // eval with baseline defaults and hide the bug in the test matrix. The
+  // docstring above promises loud failure — honor it. See PR #10 Codex P1
+  // comment 3295006715.
+  if (parsed == null) {
+    throw new Error(
+      `Pipeline config ${path} is empty — expected at least \`model:\` and/or other override fields. ` +
+        `If you want all defaults, configure that explicitly.`,
+    );
+  }
+  if (typeof parsed !== 'object') {
+    throw new Error(
+      `Pipeline config ${path} root must be a YAML mapping (object); got ${typeof parsed === 'string' ? `string ${JSON.stringify(parsed)}` : typeof parsed}. ` +
+        `Did a top-level field get its colon stripped?`,
+    );
   }
 
   const result = partialConfigSchema.safeParse(parsed);
