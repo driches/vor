@@ -2,6 +2,9 @@
  * Score one run record against a case's truths.
  *
  * Match criteria (a finding F matches truth T when ALL hold):
+ *   - F.side === 'RIGHT' (truths are anchored to the after/ snapshot; LEFT
+ *     comments target base/deleted lines and can't legitimately satisfy a
+ *     truth there even if the line numbers happen to overlap)
  *   - F.file_path === T.file
  *   - F's commented range overlaps T's truth range with ±LINE_SLACK
  *     tolerance on either side. F's range is [F.start_line ?? F.line, F.line];
@@ -17,6 +20,10 @@
  * Range-based matching (vs. previous end-line-only) accounts for multi-line
  * findings where the planted bug is near the start of the comment range but
  * the end line is outside the slack window. See PR #10 Codex P2 3295074806.
+ *
+ * Side-aware matching prevents LEFT-side comments from inflating recall when
+ * line numbers coincidentally overlap an after/-anchored truth. See PR #10
+ * Codex P2 3295113234.
  */
 import type { PostedComment } from '../../src/types.js';
 import type { RunRecord, TruthEntry, ScoreResult, TruthOutcome } from './types.js';
@@ -53,6 +60,7 @@ export function scoreRun(input: ScoreInput): ScoreResult {
         findingStart <= truthEnd + LINE_SLACK &&
         findingEnd >= truthStart - LINE_SLACK;
       const ok =
+        finding.side === 'RIGHT' &&
         finding.file_path === truth.file &&
         overlaps &&
         truth.category.includes(finding.category);

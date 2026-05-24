@@ -178,6 +178,36 @@ describe('scoreRun', () => {
     expect(fnResult.fp).toBe(1);
   });
 
+  it('does not match a LEFT-side finding against an after/-anchored truth (regression: side ignored)', () => {
+    // Regression for PR #10 Codex P2 3295113234. Truths are anchored to the
+    // after/ snapshot (RIGHT side). A LEFT-side comment targets base/deleted
+    // lines and can't legitimately satisfy that truth, even if the line
+    // numbers coincidentally overlap. Pre-fix, scoreRun ignored finding.side
+    // and would count this as a TP, inflating recall for models that emit
+    // LEFT comments.
+    const leftResult = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [finding({ side: 'LEFT' })], // line + file + category all match, but LEFT
+      cost,
+    });
+    expect(leftResult.tp).toBe(0);
+    expect(leftResult.fn).toBe(1);
+    expect(leftResult.fp).toBe(1);
+
+    // Sanity: same finding on RIGHT side IS a TP — the side gate is the only
+    // discriminating factor.
+    const rightResult = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [finding({ side: 'RIGHT' })],
+      cost,
+    });
+    expect(rightResult.tp).toBe(1);
+  });
+
   it('matches a multi-line finding when its range covers the truth line (regression: end-line-only bias)', () => {
     // Regression for PR #10 Codex P2 3295074806. PostedComment carries
     // `start_line` for multi-line comments. The previous scorer only
