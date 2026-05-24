@@ -136,4 +136,45 @@ describe('scoreRun', () => {
     expect(result.outcomes[0]!.status).toBe('matched');
     expect(result.outcomes[1]!.status).toBe('missed');
   });
+
+  it('matches a finding inside a multi-line truth range (regression: range-end-anchor)', () => {
+    // Truth spans lines 10..20; a finding at line 15 must match. The previous
+    // code anchored only to range[0] and failed |15 - 10| <= 3.
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ line_range: [10, 20] })],
+      findings: [finding({ line: 15 })],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fn).toBe(0);
+    expect(result.fp).toBe(0);
+  });
+
+  it('applies the line slack at both ends of a multi-line range', () => {
+    // At rangeEnd + LINE_SLACK (20 + 3 = 23) → still TP.
+    const tpResult = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ line_range: [10, 20] })],
+      findings: [finding({ line: 23 })],
+      cost,
+    });
+    expect(tpResult.tp).toBe(1);
+    expect(tpResult.fn).toBe(0);
+    expect(tpResult.fp).toBe(0);
+
+    // At rangeEnd + LINE_SLACK + 1 (20 + 4 = 24) → FN + FP.
+    const fnResult = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ line_range: [10, 20] })],
+      findings: [finding({ line: 24 })],
+      cost,
+    });
+    expect(fnResult.tp).toBe(0);
+    expect(fnResult.fn).toBe(1);
+    expect(fnResult.fp).toBe(1);
+  });
 });

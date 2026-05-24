@@ -3,7 +3,7 @@
  *
  * Match criteria (a finding F matches truth T when ALL hold):
  *   - F.file_path === T.file
- *   - |F.line - T.line_range[0]| <= 3
+ *   - T.line_range[0] - 3 <= F.line <= T.line_range[1] + 3
  *   - F.category ∈ T.category   (the truth declares the compatible category set)
  *
  * Each truth is matched at most once (greedy first-match). Unmatched findings
@@ -32,7 +32,8 @@ export function scoreRun(input: ScoreInput): ScoreResult {
       if (matchedFindings.has(i)) continue;
       const f = input.findings[i]!;
       if (f.file_path !== truth.file) continue;
-      if (Math.abs(f.line - truth.line_range[0]) > LINE_SLACK) continue;
+      const [rangeStart, rangeEnd] = truth.line_range;
+      if (f.line < rangeStart - LINE_SLACK || f.line > rangeEnd + LINE_SLACK) continue;
       if (!truth.category.includes(f.category)) continue;
       matchedIdx = i;
       break;
