@@ -270,22 +270,25 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
 
     const wallStart = Date.now();
-    let endedReason = 'summary_posted';
-    try {
-      const out = await runOrchestrator({
-        owner: 'eval',
-        repo: 'eval',
-        pull_number: 1,
-        anthropic_api_key: input.anthropicApiKey,
-        github_token: 'gh-test',
-        config_path: '.code-review.yml',
-        dry_run: false,
-        workspace_dir: '/tmp/eval',
-      });
-      endedReason = out.ended;
-    } catch (err) {
-      endedReason = `error: ${(err as Error).message}`;
-    }
+    // Do NOT swallow runOrchestrator exceptions. Converting them into a
+    // synthetic `ended_reason: 'error: ...'` and continuing would let the
+    // resulting run flow through scoring with an empty `findings` array,
+    // and every truth would score as FN — making a transient API/infra
+    // failure look like a model recall regression in the eval report.
+    // Let the exception propagate; the CLI caller (golden:eval) decides
+    // whether to log-and-skip vs abort the matrix. See PR #10 Codex P1
+    // 3295104167.
+    const out = await runOrchestrator({
+      owner: 'eval',
+      repo: 'eval',
+      pull_number: 1,
+      anthropic_api_key: input.anthropicApiKey,
+      github_token: 'gh-test',
+      config_path: '.code-review.yml',
+      dry_run: false,
+      workspace_dir: '/tmp/eval',
+    });
+    const endedReason = out.ended;
     const wall_ms = Math.max(1, Date.now() - wallStart);
 
     // Flatten comments across ALL createReview calls. Production posts exactly

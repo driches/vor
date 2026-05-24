@@ -146,6 +146,32 @@ describe('evalRun', () => {
     expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
   });
 
+  it('propagates orchestrator exceptions instead of swallowing them into ended_reason', async () => {
+    // Regression for PR #10 Codex P1 3295104167. The previous code wrapped
+    // runOrchestrator in try/catch and converted any throw into
+    // `ended_reason: 'error: ...'` with an empty `findings` array — which
+    // then flowed into scoring as a 0% recall result, making transient
+    // API/infra failures look like real model regressions in the report.
+    //
+    // We force a throw by handing the agent script an EMPTY array: the
+    // mocked SDK throws `agentScript exhausted` on the first turn,
+    // simulating an unexpected runtime failure deep in the orchestrator.
+    const minimalCase: LoadedCase = {
+      case_id: 'propagation',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    await expect(
+      evalRun({
+        case: minimalCase,
+        config: DEFAULT_CONFIG,
+        anthropicApiKey: 'sk-ant-test',
+        agentScript: [], // empty → SDK mock will throw on the first turn
+      }),
+    ).rejects.toThrow(/agentScript exhausted/);
+  });
+
   it('throws when an unknown model id is used (no silent synthetic-cost fallback)', async () => {
     // Regression for PR #10 Codex P2 3295074807. The eval harness's whole
     // purpose is to compare costs across configs; a typo or new model id
