@@ -79,3 +79,44 @@ entries:
   - file: src/orchestrator.test.ts
     rule: "secret:aws-access-key-id"
     reason: "PLANTED_AWS_KEY fixture for the orchestrator integration test (Scenarios 1, 2b)"
+
+  # ---------------------------------------------------------------
+  # eval harness — design/plan docs reference the AKIA canonical example.
+  # ---------------------------------------------------------------
+  - file: docs/superpowers/specs/2026-05-23-eval-harness-design.md
+    rule: "secret:aws-access-key-id"
+    reason: "Spec doc references canonical AKIAIOSFODNN7EXAMPLE in plant catalog table"
+  - file: docs/superpowers/plans/2026-05-23-eval-harness-mvp.md
+    rule: "secret:aws-access-key-id"
+    reason: "Plan doc references canonical AKIAIOSFODNN7EXAMPLE in code examples"
+
+  # ---------------------------------------------------------------
+  # eval harness — plant catalog template + its tests use the canonical AKIA marker.
+  # ---------------------------------------------------------------
+  - file: scripts/plant/aws-access-key.ts
+    rule: "secret:aws-access-key-id"
+    reason: "DEFAULT_VALUE constant is AKIAIOSFODNN7EXAMPLE (canonical AWS example marker)"
+  - file: scripts/plant/aws-access-key.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "Positive fixtures for the AWS-key plant template"
+  - file: scripts/plant/plant-runner.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "Integration fixtures that exercise the AWS-key plant template"
+
+  # ---------------------------------------------------------------
+  # eval harness — case-loader + orchestrator-adapter tests use the canonical AKIA marker.
+  # ---------------------------------------------------------------
+  - file: scripts/eval/case-loader.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "Fixture LoadedCase contains the canonical AWS example marker"
+  - file: scripts/eval/orchestrator-adapter.test.ts
+    rule: "secret:aws-access-key-id"
+    reason: "Fixture LoadedCase contains the canonical AWS example marker"
+
+  # ---------------------------------------------------------------
+  # this file — reason strings above reference the canonical AKIA marker
+  # when documenting why other test fixtures need suppression.
+  # ---------------------------------------------------------------
+  - file: .code-review/security-ignore.yml
+    rule: "secret:aws-access-key-id"
+    reason: "Self-reference: this file's reason strings mention AKIAIOSFODNN7EXAMPLE (canonical test marker) when documenting suppression entries for other fixtures"
