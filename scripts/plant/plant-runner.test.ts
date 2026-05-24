@@ -132,6 +132,31 @@ describe('runPlants', () => {
     rmSync(caseDir, { recursive: true });
   });
 
+  it('rejects a symlinked before/ root (refuses to follow before copyTree)', async () => {
+    // Regression for PR #10 Codex P2 3295250486. copyTree's per-entry
+    // lstatSync only catches symlinks INSIDE before/; a root-level
+    // `before/ -> /tmp/outside` symlink would have readdirSync follow the
+    // link and copy arbitrary external directories into after/. lstat the
+    // root before copying.
+    const root = mkdtempSync(join(tmpdir(), 'plant-runner-root-symlink-'));
+    const caseDir = join(root, 'cases', 'x');
+    mkdirSync(caseDir, { recursive: true });
+    // Outside target with a sentinel file.
+    const outsideTarget = mkdtempSync(join(tmpdir(), 'plant-runner-outside-target-'));
+    writeFileSync(join(outsideTarget, 'host.txt'), 'host content');
+    // before/ is a symlink to the outside dir.
+    symlinkSync(outsideTarget, join(caseDir, 'before'));
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      ['plants:', '  - type: secret:aws-access-key', '    file: x.ts', '    line: 1'].join('\n'),
+    );
+    await expect(runPlants(caseDir)).rejects.toThrow(/symlinked before\/ root/);
+    // The host content must NOT have been copied into after/.
+    expect(existsSync(join(caseDir, 'after/host.txt'))).toBe(false);
+    rmSync(outsideTarget, { recursive: true });
+    rmSync(root, { recursive: true });
+  });
+
   it('rejects a symlink entry in before/ (refuses to follow during copyTree)', async () => {
     // Regression for PR #10 Codex P2 3295129340. copyTree previously used
     // statSync, which follows symlinks. A symlinked directory in before/

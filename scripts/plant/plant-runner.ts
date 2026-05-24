@@ -43,6 +43,19 @@ export async function runPlants(caseDir: string): Promise<void> {
   if (!existsSync(beforeDir)) {
     throw new Error(`Case ${caseDir} is missing before/ snapshot`);
   }
+  // Refuse a symlinked before/ root. copyTree's per-entry lstatSync only
+  // catches symlinks INSIDE before/; a root-level symlink (`before/ -> /tmp/x`)
+  // would have readdirSync follow the link and copy arbitrary external
+  // directories into after/, making the case non-self-contained and
+  // potentially huge. See PR #10 Codex P2 3295250486.
+  const beforeLst = lstatSync(beforeDir);
+  if (beforeLst.isSymbolicLink()) {
+    throw new Error(
+      `plant-runner: case ${caseDir} has a symlinked before/ root — refusing ` +
+        `to follow. Replace the symlink with a real directory; eval cases ` +
+        `must be self-contained.`,
+    );
+  }
 
   // Clear after/ first so stale files from a prior plant run don't leak in.
   // Without this, iterating on plants.yml gives non-reproducible runs because
