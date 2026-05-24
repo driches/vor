@@ -19,8 +19,43 @@ import { ReviewAggregator } from './output/aggregator.js';
 import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
 import { renderSummary } from './output/formatter.js';
+import { scanFindingToPostedComment } from './scanners/adapter.js';
+import { InMemoryScanCache, NoopScanCache } from './scanners/cache.js';
+import { dedupKeptScannerComments } from './scanners/dedup.js';
+import { IgnoreList } from './scanners/ignore-list.js';
+import { buildEnabledScanners } from './scanners/registry.js';
+import { runScanners } from './scanners/runner.js';
+import type { ScannerDeps } from './scanners/types.js';
+import { validateScanFinding } from './scanners/validate.js';
+import { SEVERITY_RANK } from './types.js';
+import type { ScannerId, Severity } from './types.js';
 import { registerSecret } from './util/secrets.js';
 import { logger } from './util/logger.js';
+
+/**
+ * Map each ScannerId to the snake_case key the config schema uses for its
+ * sub-config (so per-scanner `min_severity` can be read without ad-hoc string
+ * replacement at call sites).
+ */
+const SCANNER_CONFIG_KEY = {
+  'dependency-cve': 'dependency_cve',
+  secrets: 'secrets',
+  sast: 'sast',
+  'container-cve': 'container_cve',
+} as const satisfies Record<ScannerId, string>;
+
+/**
+ * Resolve the configured per-scanner `min_severity`, if any. Returns
+ * `undefined` when the operator hasn't set it (the global `severity.floor`
+ * is the only gate in that case).
+ */
+function scannerMinSeverity(
+  id: ScannerId,
+  cfg: ReviewConfig['security'],
+): Severity | undefined {
+  const key = SCANNER_CONFIG_KEY[id];
+  return cfg.scanners[key].min_severity;
+}
 
 export interface OrchestratorInput {
   owner: string;
@@ -111,9 +146,63 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     pull_number: input.pull_number,
   });
 
-  // Build aggregator + tool deps
+  // Load the security ignore list at HEAD. Always returns a usable instance —
+  // malformed YAML / missing file degrades to an empty list inside .load().
+  const ignoreList = await IgnoreList.load(fileReader, {
+    owner: input.owner,
+    repo: input.repo,
+    ref: prContext.metadata.head_sha,
+    path: config.security.ignore_file,
+  });
+
+  // Build aggregator + scanner pipeline. The agent and scanners share the
+  // same aggregator so the filter pipeline applies uniformly to both.
   const aggregator = new ReviewAggregator();
-  const result = await runAgent({
+  const scanners = buildEnabledScanners(config.security);
+  // Top-level scanner-side abort controller. Held outside ScannerDeps so we
+  // can fire it from the agent-failure branch below: when the agent rejects,
+  // we re-throw its error and would otherwise leak in-flight scanner network
+  // calls (OSV requests, GitHub Contents reads) as detached tasks until
+  // their per-request timeouts elapse. This signal is OR-ed with the
+  // per-scanner timeout inside the runner so either side can fire cancellation.
+  // Operators wanting a hard top-level deadline can wire one in by `abort()`-ing
+  // this controller from a custom timer (v2 work).
+  const orchestratorAbort = new AbortController();
+  const scannerDeps: ScannerDeps = {
+    octokit,
+    owner: input.owner,
+    repo: input.repo,
+    pull_number: input.pull_number,
+    head_sha: prContext.metadata.head_sha,
+    changedFiles: prContext.files,
+    contextFiles,
+    diff: prContext.diff,
+    workspaceDir: input.workspace_dir,
+    // Honor `security.cache.enabled`: when false, hand out a no-op cache so
+    // OSV/lockfile lookups are NOT deduped within a single run. Default is
+    // true (caching on); operators who explicitly opt out for debugging or
+    // forced refresh get the behavior they configured.
+    cache: config.security.cache.enabled ? new InMemoryScanCache() : new NoopScanCache(),
+    ignoreList,
+    fileReader,
+    config: config.security,
+    signal: orchestratorAbort.signal,
+  };
+
+  // Fire agent + scanners in parallel. The runner is error-isolated, so a
+  // scanner failure cannot reject the scan branch. The agent itself can throw,
+  // and we let that propagate — but we use Promise.allSettled so a thrown
+  // agent doesn't leave in-flight scanner network calls running as detached
+  // tasks (they'd live until the 60s scanner timeout). Surfaces partial
+  // scanner results in logs even on agent failure.
+  //
+  // Pairing with `orchestratorAbort`: allSettled lets the scanner branch
+  // FINISH (success or natural error) before we ditch the run, and the abort
+  // below lets us actively cancel any still-in-flight scanner work in the
+  // narrow window between agent rejection and the scanner branch settling.
+  // Without the abort, a long-running scanner could keep doing useful network
+  // I/O after we've already decided to throw the agent error away.
+  const agentPromise = runAgent({
     deps: {
       octokit,
       owner: input.owner,
@@ -133,18 +222,144 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     maxOutputTokens: config.budget.max_output_tokens,
     apiKey: input.anthropic_api_key,
   });
+  const scannerPromise = runScanners(scanners, scannerDeps);
+
+  // Fire the abort the moment the agent rejects — synchronously, before we
+  // even reach `await Promise.allSettled(...)` below. Without this, the abort
+  // can ONLY fire after the await tuple resolves, which means the scanner
+  // branch has already settled (or hit its own per-scanner timeout) and the
+  // signal can no longer cancel anything in flight. Attaching the .catch
+  // here doesn't change rejection semantics — allSettled never propagates
+  // rejection — but it gives us the synchronous side-effect we need.
+  agentPromise.catch(() => {
+    orchestratorAbort.abort();
+  });
+
+  const [agentOutcome, scanOutcome] = await Promise.allSettled([
+    agentPromise,
+    scannerPromise,
+  ]);
+  if (agentOutcome.status === 'rejected') {
+    if (scanOutcome.status === 'fulfilled') {
+      await logger.info(
+        `Agent threw; scanner track completed with ${scanOutcome.value.findings.length} finding(s). ` +
+          `Re-throwing agent error.`,
+      );
+    }
+    // Belt-and-suspenders: the .catch above already fired abort at agent
+    // rejection time, but call again here so a future refactor that drops
+    // the early hook still leaves a cancellation signal on the way out.
+    // `.abort()` is idempotent.
+    orchestratorAbort.abort();
+    throw agentOutcome.reason;
+  }
+  const result = agentOutcome.value;
+  const scanRunResult =
+    scanOutcome.status === 'fulfilled'
+      ? scanOutcome.value
+      : { findings: [], perScanner: [] };
+  if (scanOutcome.status === 'rejected') {
+    // runScanners is supposed to be error-isolated, but harden against a
+    // hypothetical regression there so the agent's review still posts.
+    await logger.warn(
+      `runScanners rejected unexpectedly: ${(scanOutcome.reason as Error).message}. Continuing with no scanner findings.`,
+    );
+  }
 
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ` +
       `${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`,
   );
 
-  // Apply final filters (severity floor, per-file cap, global cap, dedup)
-  const filtered = filterComments(aggregator.acceptedComments, {
+  // Validate + adapt ALL scanner findings, then push into the same aggregator
+  // so the filter pipeline (severity floor + caps) applies uniformly to both
+  // AI and scanner comments. Dedup between scanner and AI runs AFTER the
+  // filter — see Codex P1 on PR #8.
+  //
+  // Why no early dedup here: an earlier predict-then-dedup approach ran the
+  // filter over AI-only comments to compute "predicted survivors" and deduped
+  // scanner findings against them. That was still wrong: a scanner finding
+  // could be deduped against an AI comment that ended up dropped by the
+  // combined cap (e.g. when other scanner findings outranked it), silently
+  // losing the security signal in the line area. The simpler correct flow is
+  // to add everything to the aggregator and let post-filter dedup decide
+  // based on what ACTUALLY survives.
+  const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
+  let addedScannerComments = 0;
+  for (const finding of scanRunResult.findings) {
+    // Per-scanner min_severity (separate from the global severity.floor that
+    // filterComments applies later). Lets operators tighten a noisy scanner
+    // without raising the global floor for the AI agent.
+    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    if (
+      scannerFloor !== undefined &&
+      SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]
+    ) {
+      await logger.debug(
+        `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`,
+      );
+      continue;
+    }
+    const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
+    if (!valid.ok) {
+      await logger.debug(
+        `Skipping scanner finding from ${finding.scanner}: ${valid.reason}`,
+      );
+      continue;
+    }
+    aggregator.addComment(scanFindingToPostedComment(finding));
+    addedScannerComments += 1;
+  }
+
+  if (scanners.length > 0) {
+    const scannerErrors = scanRunResult.perScanner.flatMap((r) => r.errors);
+    await logger.info(
+      `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ` +
+        `${addedScannerComments} added to review` +
+        (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : ''),
+    );
+  }
+
+  // Apply final filters (severity floor, per-file cap, global cap) over the
+  // combined AI + scanner list, then run the post-filter scanner-vs-AI dedup
+  // so scanner findings only lose to AI comments that actually survive caps.
+  //
+  // If dedup removes any kept comments, rerun filterComments over the
+  // combined list minus the dedup-suppressed comments. This refills freed
+  // cap slots so we don't silently under-report when overlap + cap pressure
+  // collide. See Codex P2 on PR #8.
+  const caps = {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total,
-  });
+  };
+  let filtered = filterComments(aggregator.acceptedComments, caps);
+  const dedupedKept = dedupKeptScannerComments(filtered.kept);
+
+  if (dedupedKept.length < filtered.kept.length) {
+    // Build a Set first so the membership check is O(1) per comment. The
+    // previous Array.includes()-based filter was O(n²) on the kept list —
+    // negligible at the default cap (30) but bad shape for any future
+    // bump.
+    const dedupKeptSet = new Set(dedupedKept);
+    const dedupExcluded = new Set(
+      filtered.kept.filter((c) => !dedupKeptSet.has(c)),
+    );
+    const eligible = aggregator.acceptedComments.filter(
+      (c) => !dedupExcluded.has(c),
+    );
+    filtered = filterComments(eligible, caps);
+    // One more dedup pass: the refill may have admitted AI comments that
+    // overlap a kept scanner finding. Single iteration is enough in
+    // practice — worst case we ship below cap but lose no security signal.
+    filtered.kept = dedupKeptScannerComments(filtered.kept);
+  } else {
+    filtered.kept = dedupedKept;
+  }
+  // `dropped` is reported relative to the full pre-filter list so the summary
+  // line ("N additional comment(s) were dropped due to per-file/global caps")
+  // counts dedup-suppressed comments too.
+  filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
 
   const rendered = renderSummary({
     draft: aggregator.snapshot(),

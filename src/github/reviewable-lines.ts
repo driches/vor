@@ -18,8 +18,11 @@ import type { LineRange } from '../types.js';
 export interface ReviewableLineMap {
   /** Inclusive ranges of reviewable lines on HEAD, e.g., [[12,15], [23,30]]. */
   ranges: LineRange[];
-  /** Set of every reviewable line for O(1) lookup. */
+  /** Set of every reviewable line for O(1) lookup (added + context). */
   set: ReadonlySet<number>;
+  /** Set of lines on HEAD that were ADDED by the PR (the '+' lines only).
+   *  Strict subset of `set` — context lines around hunks are NOT in this set. */
+  addedSet: ReadonlySet<number>;
   /** Map of line number → exact text content on HEAD (used to verify suggestion ≠ existing). */
   text: Map<number, string>;
 }
@@ -30,12 +33,14 @@ export interface ReviewableLineMap {
  */
 export function computeReviewableLines(chunks: parseDiff.Chunk[]): ReviewableLineMap {
   const set = new Set<number>();
+  const addedSet = new Set<number>();
   const text = new Map<number, string>();
 
   for (const chunk of chunks) {
     for (const change of chunk.changes) {
       if (change.type === 'add') {
         set.add(change.ln);
+        addedSet.add(change.ln);
         text.set(change.ln, stripDiffMarker(change.content));
       } else if (change.type === 'normal') {
         set.add(change.ln2);
@@ -48,6 +53,7 @@ export function computeReviewableLines(chunks: parseDiff.Chunk[]): ReviewableLin
   return {
     ranges: collapseToRanges(set),
     set,
+    addedSet,
     text,
   };
 }

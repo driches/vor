@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from './defaults.js';
 import { loadConfigFromString, loadConfigStrict } from './loader.js';
+import { configSchema, partialConfigSchema } from './schema.js';
 import { ConfigError } from '../util/errors.js';
 
 describe('loadConfigFromString', () => {
@@ -85,5 +86,52 @@ describe('loadConfigStrict', () => {
   it('returns merged config on valid input', () => {
     const cfg = loadConfigStrict('model: claude-opus-4-7');
     expect(cfg.model).toBe('claude-opus-4-7');
+  });
+});
+
+describe('security config schema', () => {
+  it('DEFAULT_CONFIG parses cleanly through the strict schema', () => {
+    expect(() => configSchema.parse(DEFAULT_CONFIG)).not.toThrow();
+  });
+
+  it('valid config without security: block merges security defaults', () => {
+    // Non-empty YAML so we exercise parse → safeParse(partial) → deepMerge,
+    // not the empty-string early-return in loadConfigFromString.
+    const cfg = loadConfigFromString('model: claude-opus-4-7');
+    expect(cfg.security).toEqual(DEFAULT_CONFIG.security);
+  });
+
+  it('partial security override merges into defaults', () => {
+    const cfg = loadConfigFromString(`
+security:
+  enabled: false
+`);
+    expect(cfg.security.enabled).toBe(false);
+    // Sibling fields preserved from defaults
+    expect(cfg.security.ignore_file).toBe(DEFAULT_CONFIG.security.ignore_file);
+    expect(cfg.security.scanners.dependency_cve.enabled).toBe(true);
+    expect(cfg.security.scanners.secrets.include_generic_entropy).toBe(false);
+  });
+
+  it('rejects non-URL osv_endpoint', () => {
+    const result = partialConfigSchema.safeParse({
+      security: {
+        scanners: {
+          dependency_cve: { enabled: true, osv_endpoint: 'not-a-url' },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a valid URL osv_endpoint', () => {
+    const result = partialConfigSchema.safeParse({
+      security: {
+        scanners: {
+          dependency_cve: { enabled: true, osv_endpoint: 'https://api.osv.dev/v1/query' },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
   });
 });

@@ -3,6 +3,24 @@ import { z } from 'zod';
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
 const eventSchema = z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
 
+const scannerCommon = z.object({
+  enabled: z.boolean(),
+  min_severity: severitySchema.optional(),
+});
+
+const securitySchema = z.object({
+  enabled: z.boolean(),
+  ignore_file: z.string(),
+  scanners: z.object({
+    dependency_cve: scannerCommon.extend({ osv_endpoint: z.string().url().optional() }),
+    secrets: scannerCommon.extend({ include_generic_entropy: z.boolean() }),
+    sast: scannerCommon,
+    container_cve: scannerCommon,
+  }),
+  cache: z.object({ enabled: z.boolean() }),
+  persistence: z.object({ enabled: z.boolean() }),
+});
+
 /**
  * Zod schema for `.code-review.yml`. All fields optional; missing values are
  * merged from DEFAULT_CONFIG by the loader.
@@ -51,6 +69,8 @@ export const configSchema = z
       max_input_tokens: z.number().int().positive(),
       max_output_tokens: z.number().int().positive(),
     }),
+
+    security: securitySchema,
   })
   .strict();
 
