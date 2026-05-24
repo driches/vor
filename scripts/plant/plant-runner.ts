@@ -13,6 +13,7 @@ import {
   mkdirSync,
   existsSync,
   readdirSync,
+  lstatSync,
   statSync,
   copyFileSync,
   rmSync,
@@ -86,12 +87,30 @@ export async function runPlants(caseDir: string): Promise<void> {
   );
 }
 
-/** Recursive directory copy. Creates dest if missing. Overwrites files. */
+/**
+ * Recursive directory copy. Creates dest if missing. Overwrites files.
+ *
+ * Refuses symlink entries. statSync follows symlinks, so a symlinked
+ * directory in before/ would silently traverse outside the case tree and
+ * pull host files into after/, and a cycle (`loop -> ..`) would recurse
+ * forever. Use lstatSync to detect the symlink and throw — eval cases
+ * should be self-contained trees of regular files. See PR #10 Codex P2
+ * 3295129340.
+ */
 function copyTree(src: string, dest: string): void {
   if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(src)) {
     const srcPath = join(src, entry);
     const destPath = join(dest, entry);
+    const lst = lstatSync(srcPath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(
+        `plant-runner: refusing to copy symlink ${srcPath} — eval cases must be ` +
+          `self-contained regular-file trees. Replace the symlink with a real file/directory.`,
+      );
+    }
+    // Now safe to use statSync — we know srcPath is NOT a symlink, so
+    // statSync's symlink-following behavior is a no-op here.
     const st = statSync(srcPath);
     if (st.isDirectory()) {
       copyTree(srcPath, destPath);

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -121,6 +129,30 @@ describe('runPlants', () => {
     // And the legit content is still there post-replant.
     const mutated = readFileSync(join(caseDir, 'after/src/config/aws.ts'), 'utf-8');
     expect(mutated).toContain('AKIAIOSFODNN7EXAMPLE');
+    rmSync(caseDir, { recursive: true });
+  });
+
+  it('rejects a symlink entry in before/ (refuses to follow during copyTree)', async () => {
+    // Regression for PR #10 Codex P2 3295129340. copyTree previously used
+    // statSync, which follows symlinks. A symlinked directory in before/
+    // would silently pull external files into after/, and a cycle like
+    // `loop -> ..` would recurse indefinitely. Now lstatSync detects the
+    // symlink and throws — eval cases must be self-contained.
+    const caseDir = makeCase();
+    // Plant a symlink in before/ pointing somewhere outside the case.
+    const outsideTarget = mkdtempSync(join(tmpdir(), 'plant-runner-symlink-target-'));
+    writeFileSync(join(outsideTarget, 'sensitive.txt'), 'host file content');
+    symlinkSync(outsideTarget, join(caseDir, 'before/leaky-link'));
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      ['plants:', '  - type: secret:aws-access-key', '    file: src/config/aws.ts', '    line: 2'].join(
+        '\n',
+      ),
+    );
+    await expect(runPlants(caseDir)).rejects.toThrow(/refusing to copy symlink/);
+    // Sensitive file in the symlink target must NOT have been copied into after/.
+    expect(existsSync(join(caseDir, 'after/leaky-link/sensitive.txt'))).toBe(false);
+    rmSync(outsideTarget, { recursive: true });
     rmSync(caseDir, { recursive: true });
   });
 
