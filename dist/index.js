@@ -50940,16 +50940,12 @@ function bySeverityDesc(a2, b2) {
 // src/output/formatter.ts
 function renderSummary(input) {
   const summary2 = input.draft.summary;
-  if (!summary2) {
-    return {
-      body: `_Code review completed by [driches/code-review](https://github.com/driches/code-review) (${input.modelName}) but no summary was produced._`,
-      event: "COMMENT"
-    };
-  }
   const sections = [];
   sections.push(`### ${severityHeader(input.keptComments)}`);
-  sections.push(summary2.assessment_reasoning);
-  if (summary2.strengths.length > 0) {
+  if (summary2) {
+    sections.push(summary2.assessment_reasoning);
+  }
+  if (summary2 && summary2.strengths.length > 0) {
     sections.push("### Strengths");
     sections.push(summary2.strengths.map((s2) => `- ${s2}`).join("\n"));
   }
@@ -50958,11 +50954,11 @@ function renderSummary(input) {
     sections.push("### Findings");
     sections.push(formatCountsLine(counts));
   }
-  if (summary2.coverage_note) {
+  if (summary2?.coverage_note) {
     sections.push("### Coverage");
     sections.push(summary2.coverage_note);
   }
-  if (summary2.unreviewed_paths && summary2.unreviewed_paths.length > 0) {
+  if (summary2?.unreviewed_paths && summary2.unreviewed_paths.length > 0) {
     sections.push(
       `_Skipped (out of budget):_ ${summary2.unreviewed_paths.slice(0, 20).join(", ")}` + (summary2.unreviewed_paths.length > 20 ? ` _+${summary2.unreviewed_paths.length - 20} more_` : "")
     );
@@ -50976,7 +50972,7 @@ function renderSummary(input) {
   sections.push(
     `_Reviewed by [driches/code-review](https://github.com/driches/code-review) using \`${input.modelName}\`._`
   );
-  const agentEvent = summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
+  const agentEvent = !summary2 ? "COMMENT" : summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
   const event = chooseEvent(input.configEvent, agentEvent);
   return { body: sections.join("\n\n"), event };
 }
@@ -51081,6 +51077,11 @@ async function runOrchestrator(input) {
   await logger.info(
     `Agent finished: ${result.ended}, ${result.turns} turns, ${aggregator.acceptedComments.length} comments collected, $${result.costUsd.toFixed(4)}`
   );
+  if (!aggregator.hasSummary()) {
+    await logger.warn(
+      "Agent did not call post_summary. Synthesizing a summary body from inline findings."
+    );
+  }
   const filtered = filterComments(aggregator.acceptedComments, {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
