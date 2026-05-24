@@ -297,22 +297,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       (call) =>
         (call.args as { comments?: Array<Record<string, unknown>> }).comments ?? [],
     );
-    const findings: RunRecord['findings'] = allComments.map(
-      (c) => {
-        const body = typeof c.body === 'string' ? c.body : '';
-        const parsed = parseRenderedComment(body);
-        return {
-          severity: parsed.severity,
-          file_path: c.path as string,
-          line: c.line as number,
-          side: (c.side as 'RIGHT' | 'LEFT') ?? 'RIGHT',
-          category: parsed.category,
-          title: parsed.title,
-          why_it_matters: parsed.why_it_matters,
-          confidence: parsed.confidence,
-        } satisfies RunRecord['findings'][number];
-      },
-    );
+    const findings: RunRecord['findings'] = allComments.map(reconstructFinding);
 
     return {
       findings,
@@ -326,6 +311,38 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
   } finally {
     runActive = false;
   }
+}
+
+/**
+ * Reconstruct a `PostedComment` from one of the `createReview` payload
+ * entries the orchestrator captured. Splits out so it's directly unit-testable
+ * — the inline-map version was hard to exercise for edge cases like the
+ * multi-line `start_line` preservation contract.
+ *
+ * Exported for tests; production callers go through `evalRun`.
+ */
+export function reconstructFinding(
+  c: Record<string, unknown>,
+): RunRecord['findings'][number] {
+  const body = typeof c.body === 'string' ? c.body : '';
+  const parsed = parseRenderedComment(body);
+  // Preserve `start_line` for multi-line review comments. scoreRun treats a
+  // finding as the range [start_line ?? line, line]; dropping start_line
+  // here would collapse every multi-line finding back to a single-line
+  // anchor and defeat the range-overlap matching added in Fix N. See PR #10
+  // Codex P2 3295082015.
+  const start_line = typeof c.start_line === 'number' ? c.start_line : undefined;
+  return {
+    severity: parsed.severity,
+    file_path: c.path as string,
+    line: c.line as number,
+    ...(start_line !== undefined ? { start_line } : {}),
+    side: (c.side as 'RIGHT' | 'LEFT') ?? 'RIGHT',
+    category: parsed.category,
+    title: parsed.title,
+    why_it_matters: parsed.why_it_matters,
+    confidence: parsed.confidence,
+  } satisfies RunRecord['findings'][number];
 }
 
 // Exported for unit tests to verify the file-order determinism contract.

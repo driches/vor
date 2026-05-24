@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evalRun, serializeConfigAsYaml, synthesizeDiff } from './orchestrator-adapter.js';
+import {
+  evalRun,
+  reconstructFinding,
+  serializeConfigAsYaml,
+  synthesizeDiff,
+} from './orchestrator-adapter.js';
 import type { LoadedCase } from './case-loader.js';
 import { DEFAULT_CONFIG } from '../../src/config/defaults.js';
 import type { ReviewConfig } from '../../src/config/types.js';
@@ -277,6 +282,43 @@ describe('evalRun', () => {
     });
     // The AWS key was already in before/. No diff entry → no findings.
     expect(result.findings.filter((f) => f.file_path === 'src/foo.ts')).toHaveLength(0);
+  });
+});
+
+describe('reconstructFinding', () => {
+  it('preserves start_line for multi-line review comments', () => {
+    // Regression for PR #10 Codex P2 3295082015. scoreRun matches findings
+    // by the range [start_line ?? line, line]. If the adapter drops
+    // start_line during reconstruction, every multi-line comment collapses
+    // back to a single-line anchor at `line` and the range-overlap logic
+    // (added in Fix N) is defeated.
+    const finding = reconstructFinding({
+      path: 'src/auth.ts',
+      line: 25,
+      start_line: 10,
+      side: 'RIGHT',
+      body: '**[CRITICAL · vulnerability]** AWS key in source\n\nLeaked credential.',
+    });
+    expect(finding.line).toBe(25);
+    expect(finding.start_line).toBe(10);
+    expect(finding.file_path).toBe('src/auth.ts');
+    expect(finding.category).toBe('vulnerability');
+    expect(finding.severity).toBe('critical');
+  });
+
+  it('omits start_line for single-line comments (no spurious field)', () => {
+    // start_line is optional on PostedComment; reconstructFinding must NOT
+    // add it as an explicit undefined or 0 when the source payload has no
+    // start_line. Both downstream consumers (scoreRun and any JSON
+    // serializer for RunRecord) rely on its absence to mean "single-line".
+    const finding = reconstructFinding({
+      path: 'src/auth.ts',
+      line: 5,
+      side: 'RIGHT',
+      body: '**[MINOR · readability]** Title\n\nBody text here.',
+    });
+    expect(finding.line).toBe(5);
+    expect('start_line' in finding).toBe(false);
   });
 });
 
