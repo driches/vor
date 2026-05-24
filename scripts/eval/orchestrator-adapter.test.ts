@@ -135,6 +135,42 @@ describe('evalRun', () => {
     expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
   });
 
+  it('prices both claude-opus-4-7 and claude-opus-4-1 at Opus-tier (not the fallback)', async () => {
+    // Regression for PR #10 Codex P1 3294995644. The opus-only.yml pipeline
+    // config uses claude-opus-4-7; if MODEL_PRICING is missing that key,
+    // costs fall through to the synthetic `turns * 0.01` fallback and
+    // every Opus run reports a flat fake cost.
+    const minimalCase: LoadedCase = {
+      case_id: 'opus-pricing',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const opus47 = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'claude-opus-4-7' },
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      ],
+    });
+    const opus41 = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'claude-opus-4-1' },
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      ],
+    });
+    // The fallback is exactly `turns * 0.01` = $0.01 for a 1-turn script.
+    // Real Opus pricing on 100 in + 50 out tokens is:
+    //   100 * 15 / 1e6 + 50 * 75 / 1e6 = 0.0015 + 0.00375 = $0.00525
+    // — well under $0.01. Asserting <$0.01 distinguishes Opus pricing from
+    // the fallback.
+    expect(opus47.cost.cost_usd).toBeLessThan(0.01);
+    expect(opus47.cost.cost_usd).toBe(opus41.cost.cost_usd);
+  });
+
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {
     // Regression for the dogfood finding that module-scope `state` would
     // corrupt if two evalRun calls overlap. Phase B intends to Promise.all

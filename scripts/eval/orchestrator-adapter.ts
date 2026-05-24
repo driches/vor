@@ -41,6 +41,11 @@ const MODEL_PRICING: Record<
   { input: number; output: number; cache_creation: number; cache_read: number }
 > = {
   'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  // Opus 4-7 and 4-1 share Opus-tier pricing today. Keep both keys so
+  // configs/pipeline/opus-only.yml (4-7) and any legacy 4-1 configs both
+  // resolve to real pricing instead of falling through to the synthetic
+  // flat 0.01/turn estimate. See PR #10 comment 3294995644.
+  'claude-opus-4-7': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
   'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
   'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
 };
