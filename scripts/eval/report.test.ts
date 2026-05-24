@@ -154,6 +154,32 @@ describe('renderSummaryReport', () => {
     expect(md).toContain('🔴');
   });
 
+  it('flags recall-improved + cost-regressed as ⚪ (ambiguous tradeoff, not a clear win)', () => {
+    // Regression for PR #10 dogfood IMPORTANT 3295156531. Previously the
+    // `recall improved → 🟡` branch fired for ANY recall gain, even when
+    // the challenger cost >5% more — operator sees apparent win where it
+    // was actually a mixed result. Now: recall-up + cost-up significantly
+    // → ⚪ (ambiguous); recall-up + cost-neutral or down → 🟡 (genuine win).
+    const baselineCost = score({ config_name: 'x' }).cost;
+    const md = renderSummaryReport({
+      timestamp: '2026-05-23T15:42:00Z',
+      baseline_config: 'sonnet-only',
+      scores: [
+        score({ config_name: 'sonnet-only', recall: 0.7, tp: 7, fn: 3 }),
+        score({
+          config_name: 'opus-only',
+          recall: 0.9, // +20pp recall (recall-improved branch fires)
+          tp: 9,
+          fn: 1,
+          // Cost is 2× baseline — well past the ±5% inconclusive band.
+          cost: { ...baselineCost, cost_usd: 1.0 },
+        }),
+      ],
+    });
+    expect(md).toContain('⚪');
+    expect(md).not.toContain('🟡'); // the apparent-win miscolor is gone
+  });
+
   it('flags recall-improved + cost-neutral as 🟡 (not ⚪)', () => {
     // Regression for PR #10 comment 3294976845. The spec's 4 cells don't
     // cover "recall improved while cost is roughly flat". The default ⚪

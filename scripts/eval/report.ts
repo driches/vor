@@ -3,14 +3,20 @@
  *
  * Win/loss colors (per the design spec, "same recall, lower cost"):
  *   🟢 — recall ≥ baseline AND cost < baseline × 0.75
- *   🟡 — recall ≥ baseline AND (cost < baseline  OR  recall improved by >5pp)
+ *   🟡 — recall ≥ baseline AND (cost < baseline  OR
+ *        recall improved by >5pp AND cost didn't regress by >5%)
  *   🔴 — recall < baseline  OR  (recall flat AND cost up by >5%)
- *   ⚪ — within ±5% on both axes
+ *   ⚪ — within ±5% on both axes  OR  ambiguous tradeoff
+ *        (recall improved AND cost regressed by >5%)
  *
  * 🔴 covers regression on EITHER axis: a recall drop is the spec's strict
  * case, and "same recall but the challenger costs >5% more" is also a
  * meaningful regression that the dogfood reviewer (PR #10 comment
  * 3295026563) called out should not silently render as ⚪.
+ *
+ * ⚪ also catches the mixed-result tradeoff (recall up, cost also up)
+ * called out in PR #10 comment 3295156531 — a 5% recall gain at 2× cost
+ * is not a clear win, so render it as ambiguous instead of 🟡.
  */
 import type { ScoreResult } from './types.js';
 
@@ -100,10 +106,14 @@ function formatCell(s: ScoreResult, baseline: ScoreResult): string {
   else if (costRatio < COST_WIN_RATIO) icon = '🟢';
   else if (costRatio < 1 - INCONCLUSIVE_EPSILON) icon = '🟡';
   // Spec's 4 cells don't cover "recall improved + cost neutral". The default
-  // ⚪ would silently misrepresent a recall win. Surface it as 🟡 so a
-  // genuine recall improvement is visible even when cost is roughly flat.
-  // See PR #10 comment 3294976845.
-  else if (!recallEqual && s.recall > baseline.recall) icon = '🟡';
+  // ⚪ would silently misrepresent a recall win. Surface a genuine recall
+  // improvement at flat-or-reduced cost as 🟡; when cost regressed
+  // significantly alongside the recall gain, render ⚪ instead — a 5%
+  // recall gain at 2× cost is an ambiguous tradeoff, not a clear win.
+  // See PR #10 comments 3294976845 and 3295156531.
+  else if (!recallEqual && s.recall > baseline.recall) {
+    icon = costRatio > 1 + INCONCLUSIVE_EPSILON ? '⚪' : '🟡';
+  }
   // Same-recall-but-cost-regressed should not silently render as ⚪. The
   // previous branch here unconditionally set `⚪` (a no-op since that's
   // already the default), masking the case where a challenger keeps recall
