@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCase } from './case-loader.js';
 
-function makeCase(): { dir: string; id: string } {
+function makeCase(opts: { truthYaml?: string } = {}): { dir: string; id: string } {
   const root = mkdtempSync(join(tmpdir(), 'case-loader-test-'));
   const id = 'example';
   const caseDir = join(root, 'cases', id);
@@ -14,15 +14,16 @@ function makeCase(): { dir: string; id: string } {
   writeFileSync(join(caseDir, 'before/src/auth.ts'), '// empty\n');
   writeFileSync(
     join(caseDir, 'truth.yml'),
-    [
-      'truths:',
-      '  - file: src/auth.ts',
-      '    line_range: [1, 1]',
-      '    bug_type: secret:aws-access-key',
-      '    severity: critical',
-      '    plant_id: 0',
-      '    category: [vulnerability, security]',
-    ].join('\n'),
+    opts.truthYaml ??
+      [
+        'truths:',
+        '  - file: src/auth.ts',
+        '    line_range: [1, 1]',
+        '    bug_type: secret:aws-access-key',
+        '    severity: critical',
+        '    plant_id: 0',
+        '    category: [vulnerability, security]',
+      ].join('\n'),
   );
   return { dir: root, id };
 }
@@ -61,5 +62,20 @@ describe('loadCase', () => {
     writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
     expect(() => loadCase(root, 'no-before')).toThrow(/before\/ snapshot/);
     rmSync(root, { recursive: true });
+  });
+
+  it('throws when truth.yml has the wrong top-level key (missing truths:)', () => {
+    // Regression for PR #10 comment 3294950627. Previously a malformed
+    // truth.yml silently parsed to `{ truths: [] }`, and scoreRun then
+    // reported recall=1.0 (perfect!) on a case with zero ground truth.
+    const { dir } = makeCase({ truthYaml: 'not_truths: []\n' });
+    expect(() => loadCase(dir, 'example')).toThrow(/truth\.yml is malformed/);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('throws when truth.yml truths is not an array (wrong shape)', () => {
+    const { dir } = makeCase({ truthYaml: 'truths: "not an array"\n' });
+    expect(() => loadCase(dir, 'example')).toThrow(/must be an array/);
+    rmSync(dir, { recursive: true });
   });
 });

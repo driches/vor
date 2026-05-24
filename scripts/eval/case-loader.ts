@@ -36,8 +36,25 @@ export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
     );
   }
   const truthYaml = readFileSync(truthPath, 'utf-8');
-  const parsed = parseYaml(truthYaml) as { truths?: TruthEntry[] } | null;
-  const truths = parsed?.truths ?? [];
+  // Validate strictly: a malformed truth.yml (missing top-level `truths:` or
+  // wrong shape) would silently yield zero truths and `scoreRun` would then
+  // report recall=1.0 on the malformed case. Fail loud instead.
+  const parsed = parseYaml(truthYaml) as unknown;
+  if (parsed == null || typeof parsed !== 'object' || !('truths' in parsed)) {
+    throw new Error(
+      `Case ${caseId}: truth.yml is malformed — expected top-level 'truths:' array, got ${JSON.stringify(parsed)}`,
+    );
+  }
+  const rawTruths = (parsed as { truths: unknown }).truths;
+  if (!Array.isArray(rawTruths)) {
+    throw new Error(
+      `Case ${caseId}: truth.yml 'truths' field must be an array, got ${typeof rawTruths}`,
+    );
+  }
+  // We don't validate every TruthEntry field shape here — downstream scoring
+  // tolerates partial shapes via fallback semantics. Top-level array shape is
+  // the load-bearing invariant.
+  const truths = rawTruths as TruthEntry[];
 
   const files: LoadedFile[] = [];
   walk(afterDir, (path) => {
