@@ -55,7 +55,17 @@ export const vulnDepNpmTemplate: PlantTemplate = {
           `Pick a different version or remove the existing entry from before/.`,
       );
     }
-    parsed.packages[`node_modules/${pkg}`] = { version: ver };
+    // Preserve any pre-existing fields (resolved, integrity, requires, etc.)
+    // on an upgrade-pin so the mutated lockfile stays realistic. A real
+    // package-lock.json carries `resolved` URLs and `integrity` SHA hashes;
+    // wholesale replacement strips those, and downstream tools (the
+    // dependency-cve scanner here is forgiving, but production npm/yarn
+    // tooling typically requires them) may skip or error on the entry.
+    // See PR #10 dogfood IMPORTANT 3295239963.
+    parsed.packages[`node_modules/${pkg}`] = {
+      ...(existingEntry != null && typeof existingEntry === 'object' ? existingEntry : {}),
+      version: ver,
+    };
     const mutated = JSON.stringify(parsed, null, 2) + '\n';
 
     // Locate the new "version": line. Re-serialization is deterministic

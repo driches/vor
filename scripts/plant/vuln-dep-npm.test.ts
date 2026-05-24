@@ -96,6 +96,43 @@ describe('vulnDepNpmTemplate', () => {
     ).toThrow(/already pinned.*no-op/);
   });
 
+  it('preserves resolved/integrity/other fields on a version re-pin', () => {
+    // Regression for PR #10 dogfood IMPORTANT 3295239963. The previous code
+    // wholesale-replaced the package entry, stripping `resolved`,
+    // `integrity`, and any other fields. Real lockfiles carry those; the
+    // mutated after/ should stay realistic.
+    const source = JSON.stringify(
+      {
+        name: 'test',
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'test', version: '1.0.0' },
+          'node_modules/lodash': {
+            version: '4.17.10', // about to be upgraded
+            resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.10.tgz',
+            integrity: 'sha512-OLD-SHA',
+            engines: { node: '>=12' },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    const { mutated } = vulnDepNpmTemplate.apply(source, {
+      type: 'vuln-dep:npm',
+      file: 'package-lock.json',
+      package: 'lodash',
+      version: '4.17.20',
+    });
+    const parsed = JSON.parse(mutated);
+    const entry = parsed.packages['node_modules/lodash'];
+    expect(entry.version).toBe('4.17.20'); // new version
+    // Sibling fields must survive the re-pin.
+    expect(entry.resolved).toBe('https://registry.npmjs.org/lodash/-/lodash-4.17.10.tgz');
+    expect(entry.integrity).toBe('sha512-OLD-SHA');
+    expect(entry.engines).toEqual({ node: '>=12' });
+  });
+
   it('accepts a re-pin to a different version of an already-present package', () => {
     // Companion to the no-op-rejection test: pinning lodash@4.17.20 when the
     // lockfile already has lodash@4.17.10 IS a real mutation (different
