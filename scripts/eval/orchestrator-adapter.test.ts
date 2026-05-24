@@ -57,4 +57,47 @@ describe('evalRun', () => {
     expect(result.cost.wall_ms).toBeGreaterThan(0);
     expect(result.cost.ended_reason).toBe('summary_posted');
   });
+
+  it('preserves the scanner-emitted category and severity (no hardcoded security/minor)', async () => {
+    // Regression for PR #10 comments 3294902772 + 3294915010. Previously every
+    // finding came back as `{ severity: 'minor', category: 'security' }` no
+    // matter what the orchestrator actually produced — which meant any truth
+    // with `category: ['vulnerability']` (e.g. secrets, CVEs) always scored
+    // as FN.
+    const result = await evalRun({
+      case: fakeCase,
+      config: DEFAULT_CONFIG,
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        {
+          content: [
+            {
+              type: 'tool_use',
+              id: 't1',
+              name: 'post_summary',
+              input: {
+                strengths: [],
+                assessment: 'comment',
+                assessment_reasoning: 'No AI findings in unit test',
+              },
+            },
+          ],
+          stop_reason: 'tool_use',
+        },
+        {
+          content: [{ type: 'text', text: 'end' }],
+          stop_reason: 'end_turn',
+        },
+      ],
+    });
+
+    // The secrets scanner emits the AWS-key finding as
+    // { severity: 'critical', category: 'vulnerability' }. The eval-adapter
+    // must round-trip both faithfully.
+    const awsFinding = result.findings.find((f) => f.file_path === 'src/auth.ts');
+    expect(awsFinding).toBeDefined();
+    expect(awsFinding!.category).toBe('vulnerability');
+    expect(awsFinding!.severity).toBe('critical');
+    expect(awsFinding!.title.length).toBeGreaterThan(0);
+  });
 });

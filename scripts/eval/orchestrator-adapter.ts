@@ -15,6 +15,20 @@ import { vi } from 'vitest';
 import type { LoadedCase } from './case-loader.js';
 import type { RunRecord } from './types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
+import {
+  type Severity,
+  type Category,
+  type Confidence,
+  CATEGORIES,
+} from '../../src/types.js';
+
+const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
+  'critical',
+  'important',
+  'minor',
+  'nit',
+]);
+const VALID_CATEGORIES: ReadonlySet<Category> = new Set(CATEGORIES);
 
 interface AgentTurnResponse {
   content: Array<
@@ -39,6 +53,13 @@ interface AdapterState {
   };
 }
 
+// LIMITATION: This module-scope state is shared across calls. v1's CLI and
+// integration tests only invoke evalRun sequentially, so this is safe today.
+// Concurrent invocations (e.g. Promise.all over multiple configs) would
+// corrupt each other's runs. If we ever need concurrent eval, restructure
+// to per-call state passed through a closure or pass-by-context. Tracking
+// as a known limitation rather than fixing speculatively. See PR #10
+// comment 3294915014.
 const state: AdapterState = {
   agentScript: [],
   caseFiles: new Map(),
@@ -217,17 +238,20 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     | { comments?: Array<Record<string, unknown>> }
     | undefined;
   const findings: RunRecord['findings'] = (captured?.comments ?? []).map(
-    (c) =>
-      ({
-        severity: 'minor',
+    (c) => {
+      const body = typeof c.body === 'string' ? c.body : '';
+      const parsed = parseRenderedComment(body);
+      return {
+        severity: parsed.severity,
         file_path: c.path as string,
         line: c.line as number,
         side: (c.side as 'RIGHT' | 'LEFT') ?? 'RIGHT',
-        category: 'security',
-        title: '',
-        why_it_matters: '',
-        confidence: 'medium',
-      }) as RunRecord['findings'][number],
+        category: parsed.category,
+        title: parsed.title,
+        why_it_matters: parsed.why_it_matters,
+        confidence: parsed.confidence,
+      } satisfies RunRecord['findings'][number];
+    },
   );
 
   return {
@@ -276,6 +300,65 @@ function synthesizeDiff(c: LoadedCase): {
     });
   }
   return { diff: chunks.join('\n') + '\n', filesApi };
+}
+
+/**
+ * Recover severity / category / title / why-it-matters / confidence from the
+ * rendered comment body that `src/github/review-poster.ts:renderCommentBody`
+ * produces.
+ *
+ * Shape (from renderCommentBody):
+ *   **[<SEVERITY> · <category>( · low confidence)?]** <title>
+ *
+ *   <why_it_matters>
+ *   [optional ```suggestion ... ``` block]
+ *   [optional `_via <scanner>_` provenance tag]
+ *
+ * We parse the bracketed tag to recover the structured fields. The text
+ * after the tag (on the same line) is the title; the next paragraph is
+ * why_it_matters. If parsing fails we fall back to sane defaults so a
+ * malformed body still produces *something* downstream rather than throwing.
+ */
+function parseRenderedComment(body: string): {
+  severity: Severity;
+  category: Category;
+  confidence: Confidence;
+  title: string;
+  why_it_matters: string;
+} {
+  const headingMatch = body.match(/^\*\*\[([^\]]+)\]\*\*\s*(.*)$/m);
+  let severity: Severity = 'minor';
+  let category: Category = 'security';
+  let confidence: Confidence = 'medium';
+  let title = '';
+  if (headingMatch) {
+    const tagInner = headingMatch[1]!;
+    title = (headingMatch[2] ?? '').trim();
+    const segments = tagInner.split('·').map((s) => s.trim());
+    const sevToken = segments[0]?.toLowerCase();
+    if (sevToken && VALID_SEVERITIES.has(sevToken as Severity)) {
+      severity = sevToken as Severity;
+    }
+    const catToken = segments[1]?.toLowerCase();
+    if (catToken && VALID_CATEGORIES.has(catToken as Category)) {
+      category = catToken as Category;
+    }
+    for (const seg of segments.slice(2)) {
+      if (/low\s+confidence/i.test(seg)) confidence = 'low';
+    }
+  }
+  // Body after the heading line. The first non-empty paragraph is why_it_matters.
+  let why_it_matters = '';
+  if (headingMatch) {
+    const afterHeading = body.slice(headingMatch.index! + headingMatch[0].length);
+    // Strip optional ```suggestion / provenance trailer for the "why" capture.
+    const stripped = afterHeading
+      .replace(/\n\n```suggestion[\s\S]*?```/g, '')
+      .replace(/\n\n_via [^_]+_\s*$/g, '');
+    const paragraphs = stripped.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    why_it_matters = paragraphs[0] ?? '';
+  }
+  return { severity, category, confidence, title, why_it_matters };
 }
 
 function serializeConfigAsYaml(cfg: ReviewConfig): string {
