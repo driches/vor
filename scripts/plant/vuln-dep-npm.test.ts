@@ -68,4 +68,58 @@ describe('vulnDepNpmTemplate', () => {
       }),
     ).toThrow(/package.*version/i);
   });
+
+  it('rejects a no-op plant when the same package@version is already pinned', () => {
+    // Regression for PR #10 Codex P2 3295066582. If the planted version
+    // matches what's already in before/, the mutation is a no-op,
+    // synthesizeDiff drops the file, and the truth entry scores as a
+    // guaranteed FN. Fail loud at plant time instead.
+    const source = JSON.stringify(
+      {
+        name: 'test',
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'test', version: '1.0.0' },
+          'node_modules/lodash': { version: '4.17.20' }, // already pinned
+        },
+      },
+      null,
+      2,
+    );
+    expect(() =>
+      vulnDepNpmTemplate.apply(source, {
+        type: 'vuln-dep:npm',
+        file: 'package-lock.json',
+        package: 'lodash',
+        version: '4.17.20', // same version as already pinned
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('accepts a re-pin to a different version of an already-present package', () => {
+    // Companion to the no-op-rejection test: pinning lodash@4.17.20 when the
+    // lockfile already has lodash@4.17.10 IS a real mutation (different
+    // versions), so it should succeed and produce a meaningful diff.
+    const source = JSON.stringify(
+      {
+        name: 'test',
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'test', version: '1.0.0' },
+          'node_modules/lodash': { version: '4.17.10' }, // different version
+        },
+      },
+      null,
+      2,
+    );
+    const { mutated, truth } = vulnDepNpmTemplate.apply(source, {
+      type: 'vuln-dep:npm',
+      file: 'package-lock.json',
+      package: 'lodash',
+      version: '4.17.20', // upgrade pin to vulnerable version
+    });
+    expect(mutated).toContain('"4.17.20"');
+    expect(mutated).not.toContain('"4.17.10"');
+    expect(truth.bug_type).toBe('vuln-dep:npm:lodash@4.17.20');
+  });
 });

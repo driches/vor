@@ -36,6 +36,25 @@ export const vulnDepNpmTemplate: PlantTemplate = {
       );
     }
     parsed.packages = parsed.packages ?? {};
+    // Refuse no-op plants: if the lockfile already pins exactly this
+    // package@version, the mutation produces an identical `after/` file.
+    // synthesizeDiff then drops the file (before === after), the
+    // dependency-cve scanner never sees an "added" line, and the truth
+    // entry scores as a guaranteed FN — silently biasing eval metrics.
+    // Fail loud at plant time so the operator can pick a version that
+    // ISN'T already in the lockfile. See PR #10 Codex P2 3295066582.
+    const existingEntry = parsed.packages[`node_modules/${pkg}`];
+    if (
+      existingEntry != null &&
+      typeof existingEntry === 'object' &&
+      (existingEntry as { version?: unknown }).version === ver
+    ) {
+      throw new Error(
+        `vuln-dep:npm: ${pkg}@${ver} is already pinned in the lockfile — ` +
+          `plant would be a no-op and the truth entry would score as FN. ` +
+          `Pick a different version or remove the existing entry from before/.`,
+      );
+    }
     parsed.packages[`node_modules/${pkg}`] = { version: ver };
     const mutated = JSON.stringify(parsed, null, 2) + '\n';
 
