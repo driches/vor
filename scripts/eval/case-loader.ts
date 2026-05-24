@@ -2,9 +2,10 @@
  * Read a planted case from disk into an in-memory representation that the
  * orchestrator adapter can feed to runOrchestrator.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { resolveCaseDir } from '../plant/case-paths.js';
 import type { TruthEntry } from './types.js';
 
 export interface LoadedFile {
@@ -20,7 +21,11 @@ export interface LoadedCase {
 }
 
 export function loadCase(goldenRepo: string, caseId: string): LoadedCase {
-  const caseDir = join(goldenRepo, 'cases', caseId);
+  // Same lexical + symlink guard the planter uses, so `--case ../other-repo/case`
+  // (or a symlinked alias pointing outside the golden tree) can't make loadCase
+  // read after/, before/, and truth.yml from arbitrary locations. See PR #10
+  // Codex P2 3295138893.
+  const caseDir = resolveCaseDir(goldenRepo, caseId);
   const afterDir = join(caseDir, 'after');
   if (!existsSync(afterDir)) {
     throw new Error(`Case ${caseId} not found at ${afterDir}`);
@@ -157,6 +162,18 @@ function walk(dir: string, onFile: (p: string) => void): void {
   const entries = readdirSync(dir).sort();
   for (const entry of entries) {
     const p = join(dir, entry);
+    // Use lstatSync (does NOT follow symlinks) and refuse symlink entries.
+    // statSync follows symlinks, so a symlinked directory inside before/ or
+    // after/ would pull external files into LoadedCase.files[]/beforeFiles[],
+    // and a cycle like `loop -> ..` would recurse indefinitely. Same threat
+    // model as the planter's copyTree (Fix V). See PR #10 Codex P2 3295138894.
+    const lst = lstatSync(p);
+    if (lst.isSymbolicLink()) {
+      throw new Error(
+        `case-loader: refusing to traverse symlink ${p} — eval cases must be ` +
+          `self-contained regular-file trees. Replace the symlink with a real file/directory.`,
+      );
+    }
     const st = statSync(p);
     if (st.isDirectory()) walk(p, onFile);
     else if (st.isFile()) onFile(p);

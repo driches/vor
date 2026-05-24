@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCase } from './case-loader.js';
@@ -201,6 +201,38 @@ describe('loadCase', () => {
     // the bad entry without manual bisection.
     expect(() => loadCase(dir, 'example')).toThrow(/entry \[1\]/);
     rmSync(dir, { recursive: true });
+  });
+
+  it('rejects a caseId that escapes the golden cases/ tree (../-style)', () => {
+    // Regression for PR #10 Codex P2 3295138893. The old loadCase used
+    // `join(goldenRepo, 'cases', caseId)` without any validation, so
+    // `--case ../other-repo/case` could read after/, before/, and truth.yml
+    // from outside the golden tree.
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-traversal-'));
+    expect(() => loadCase(root, '../escape')).toThrow(/resolves outside cases root/);
+    rmSync(root, { recursive: true });
+  });
+
+  it('rejects a symlinked file inside after/ (refuses to follow during walk)', () => {
+    // Regression for PR #10 Codex P2 3295138894. walk() previously used
+    // statSync, which follows symlinks. A symlinked file inside after/ or
+    // before/ would pull external content into LoadedCase.files[]; a cycle
+    // like `loop -> ..` would recurse indefinitely.
+    const root = mkdtempSync(join(tmpdir(), 'case-loader-symlink-'));
+    const id = 'with-symlink';
+    const caseDir = join(root, 'cases', id);
+    mkdirSync(join(caseDir, 'after'), { recursive: true });
+    mkdirSync(join(caseDir, 'before'), { recursive: true });
+    writeFileSync(join(caseDir, 'after/legit.ts'), '// legit\n');
+    writeFileSync(join(caseDir, 'before/legit.ts'), '// legit\n');
+    writeFileSync(join(caseDir, 'truth.yml'), 'truths: []\n');
+    // Plant a symlink in after/ pointing at an outside-tree sentinel file.
+    const outsideTarget = mkdtempSync(join(tmpdir(), 'case-loader-symlink-target-'));
+    writeFileSync(join(outsideTarget, 'host.txt'), 'host content');
+    symlinkSync(join(outsideTarget, 'host.txt'), join(caseDir, 'after/leaky-link'));
+    expect(() => loadCase(root, id)).toThrow(/refusing to traverse symlink/);
+    rmSync(outsideTarget, { recursive: true });
+    rmSync(root, { recursive: true });
   });
 
   it('returns files in deterministic lexicographic order across runs', () => {
