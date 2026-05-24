@@ -104,6 +104,36 @@ describe('evalRun', () => {
     expect(awsFinding!.title.length).toBeGreaterThan(0);
   });
 
+  it('computes cost_usd per-model (sonnet > haiku for identical token usage)', async () => {
+    // Regression for the dogfood finding that `state.costAccum.turns * 0.01`
+    // made every model produce the same cost, defeating the cost-comparison
+    // axis of the eval harness. Per-model pricing must differentiate sonnet
+    // vs. haiku for identical token usage.
+    const minimalCase: LoadedCase = {
+      case_id: 'pricing',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const sonnetResult = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'claude-sonnet-4-6' },
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      ],
+    });
+    const haikuResult = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'claude-haiku-4-5' },
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      ],
+    });
+    expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
+  });
+
   it('does NOT flag pre-existing content (before/ === after/)', async () => {
     // Regression for PR #10 comment 3294950624. Previously the synthesized
     // diff marked every file as `new file mode` with all content on `+`

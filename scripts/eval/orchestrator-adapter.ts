@@ -31,6 +31,33 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
 ]);
 const VALID_CATEGORIES: ReadonlySet<Category> = new Set(CATEGORIES);
 
+// Per-million-token pricing as of 2026-05. Source: Anthropic pricing page.
+// Used to compute eval-harness cost from the synthetic 100/50 in/out tokens-per-turn
+// recorded by the mocked SDK. The orchestrator's own cost_usd hardcodes Sonnet pricing
+// (see src/agent/runner.ts), so we can't reuse it for cross-model comparison.
+const MODEL_PRICING: Record<
+  string,
+  { input: number; output: number; cache_creation: number; cache_read: number }
+> = {
+  'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
+  'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
+};
+
+function computeCostUsd(cost: AdapterState['costAccum'], model: string): number {
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) {
+    // Unknown model — fall back to flat estimate so eval doesn't crash.
+    return cost.turns * 0.01;
+  }
+  return (
+    (cost.input_tokens * pricing.input) / 1_000_000 +
+    (cost.output_tokens * pricing.output) / 1_000_000 +
+    (cost.cache_creation_input_tokens * pricing.cache_creation) / 1_000_000 +
+    (cost.cache_read_input_tokens * pricing.cache_read) / 1_000_000
+  );
+}
+
 interface AgentTurnResponse {
   content: Array<
     | { type: 'text'; text: string }
@@ -259,7 +286,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     findings,
     cost: {
       ...state.costAccum,
-      cost_usd: state.costAccum.turns * 0.01,
+      cost_usd: computeCostUsd(state.costAccum, input.config.model),
       wall_ms,
       ended_reason: endedReason,
     },
