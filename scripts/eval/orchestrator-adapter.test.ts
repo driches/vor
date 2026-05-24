@@ -134,6 +134,37 @@ describe('evalRun', () => {
     expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
   });
 
+  it('throws when invoked concurrently (module-scope state would corrupt)', async () => {
+    // Regression for the dogfood finding that module-scope `state` would
+    // corrupt if two evalRun calls overlap. Phase B intends to Promise.all
+    // across configs, so we fail fast.
+    const minimalCase: LoadedCase = {
+      case_id: 'concurrency',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const first = evalRun({
+      case: minimalCase,
+      config: DEFAULT_CONFIG,
+      anthropicApiKey: 'sk-ant-test',
+      agentScript: [
+        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+      ],
+    });
+    await expect(
+      evalRun({
+        case: minimalCase,
+        config: DEFAULT_CONFIG,
+        anthropicApiKey: 'sk-ant-test',
+        agentScript: [
+          { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+        ],
+      }),
+    ).rejects.toThrow(/concurrent invocations/);
+    await first; // drain the first one
+  });
+
   it('does NOT flag pre-existing content (before/ === after/)', async () => {
     // Regression for PR #10 comment 3294950624. Previously the synthesized
     // diff marked every file as `new file mode` with all content on `+`

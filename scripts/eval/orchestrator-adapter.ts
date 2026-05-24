@@ -103,6 +103,10 @@ const state: AdapterState = {
   },
 };
 
+// Concurrency guard: see LIMITATION comment above. Module-scope `state` is not
+// safe for parallel evalRun calls — fail fast rather than silently corrupting.
+let runActive = false;
+
 vi.mock('@anthropic-ai/sdk', () => {
   class FakeAnthropic {
     public messages = {
@@ -223,74 +227,84 @@ export interface EvalRunOutput {
 }
 
 export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
-  // Reset shared state for this run.
-  state.agentScript = [...input.agentScript];
-  state.caseFiles = new Map(input.case.files.map((f) => [f.path, f.content]));
-  const { diff, filesApi } = synthesizeDiff(input.case);
-  state.caseDiff = diff;
-  state.filesApi = filesApi;
-  state.createReviewCalls = [];
-  state.costAccum = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_creation_input_tokens: 0,
-    turns: 0,
-  };
-
-  // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
-  // serve a serialized form of the supplied config so the orchestrator picks
-  // up exactly what the test asked for.
-  state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
-
-  const wallStart = Date.now();
-  let endedReason = 'summary_posted';
-  try {
-    const out = await runOrchestrator({
-      owner: 'eval',
-      repo: 'eval',
-      pull_number: 1,
-      anthropic_api_key: input.anthropicApiKey,
-      github_token: 'gh-test',
-      config_path: '.code-review.yml',
-      dry_run: false,
-      workspace_dir: '/tmp/eval',
-    });
-    endedReason = out.ended;
-  } catch (err) {
-    endedReason = `error: ${(err as Error).message}`;
+  if (runActive) {
+    throw new Error(
+      'evalRun does not support concurrent invocations — module-scope state would corrupt across calls. Use sequential calls only (see LIMITATION comment near `state`).',
+    );
   }
-  const wall_ms = Math.max(1, Date.now() - wallStart);
+  runActive = true;
+  try {
+    // Reset shared state for this run.
+    state.agentScript = [...input.agentScript];
+    state.caseFiles = new Map(input.case.files.map((f) => [f.path, f.content]));
+    const { diff, filesApi } = synthesizeDiff(input.case);
+    state.caseDiff = diff;
+    state.filesApi = filesApi;
+    state.createReviewCalls = [];
+    state.costAccum = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      turns: 0,
+    };
 
-  const captured = state.createReviewCalls[0]?.args as
-    | { comments?: Array<Record<string, unknown>> }
-    | undefined;
-  const findings: RunRecord['findings'] = (captured?.comments ?? []).map(
-    (c) => {
-      const body = typeof c.body === 'string' ? c.body : '';
-      const parsed = parseRenderedComment(body);
-      return {
-        severity: parsed.severity,
-        file_path: c.path as string,
-        line: c.line as number,
-        side: (c.side as 'RIGHT' | 'LEFT') ?? 'RIGHT',
-        category: parsed.category,
-        title: parsed.title,
-        why_it_matters: parsed.why_it_matters,
-        confidence: parsed.confidence,
-      } satisfies RunRecord['findings'][number];
-    },
-  );
+    // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
+    // serve a serialized form of the supplied config so the orchestrator picks
+    // up exactly what the test asked for.
+    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
 
-  return {
-    findings,
-    cost: {
-      ...state.costAccum,
-      cost_usd: computeCostUsd(state.costAccum, input.config.model),
-      wall_ms,
-      ended_reason: endedReason,
-    },
-  };
+    const wallStart = Date.now();
+    let endedReason = 'summary_posted';
+    try {
+      const out = await runOrchestrator({
+        owner: 'eval',
+        repo: 'eval',
+        pull_number: 1,
+        anthropic_api_key: input.anthropicApiKey,
+        github_token: 'gh-test',
+        config_path: '.code-review.yml',
+        dry_run: false,
+        workspace_dir: '/tmp/eval',
+      });
+      endedReason = out.ended;
+    } catch (err) {
+      endedReason = `error: ${(err as Error).message}`;
+    }
+    const wall_ms = Math.max(1, Date.now() - wallStart);
+
+    const captured = state.createReviewCalls[0]?.args as
+      | { comments?: Array<Record<string, unknown>> }
+      | undefined;
+    const findings: RunRecord['findings'] = (captured?.comments ?? []).map(
+      (c) => {
+        const body = typeof c.body === 'string' ? c.body : '';
+        const parsed = parseRenderedComment(body);
+        return {
+          severity: parsed.severity,
+          file_path: c.path as string,
+          line: c.line as number,
+          side: (c.side as 'RIGHT' | 'LEFT') ?? 'RIGHT',
+          category: parsed.category,
+          title: parsed.title,
+          why_it_matters: parsed.why_it_matters,
+          confidence: parsed.confidence,
+        } satisfies RunRecord['findings'][number];
+      },
+    );
+
+    return {
+      findings,
+      cost: {
+        ...state.costAccum,
+        cost_usd: computeCostUsd(state.costAccum, input.config.model),
+        wall_ms,
+        ended_reason: endedReason,
+      },
+    };
+  } finally {
+    runActive = false;
+  }
 }
 
 function synthesizeDiff(c: LoadedCase): {
