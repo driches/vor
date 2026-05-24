@@ -6,7 +6,7 @@
  * plant pipeline for that case.
  */
 import { runPlants } from './plant/plant-runner.js';
-import { join } from 'node:path';
+import { resolveCaseDir } from './plant/case-paths.js';
 
 function arg(flag: string): string | undefined {
   const idx = process.argv.indexOf(flag);
@@ -25,7 +25,13 @@ async function main(): Promise<void> {
     console.error('--golden-repo or GOLDEN_REPO_PATH is required');
     process.exit(2);
   }
-  const caseDir = join(goldenRepo, 'cases', caseId);
+  let caseDir: string;
+  try {
+    caseDir = resolveCaseDir(goldenRepo, caseId);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(2);
+  }
   await runPlants(caseDir);
   console.log(`Planted case ${caseId} → ${caseDir}/after, ${caseDir}/truth.yml`);
 }
