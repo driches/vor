@@ -26,6 +26,17 @@ const INCONCLUSIVE_EPSILON = 0.05;
 export function renderSummaryReport(input: RenderSummaryInput): string {
   const cases = unique(input.scores.map((s) => s.case_id));
   const configs = unique(input.scores.map((s) => s.config_name));
+  // Fail fast if the named baseline isn't present in `scores`. A misspelled
+  // baseline_config or a missing baseline run otherwise renders a table
+  // where every challenger column shows the "no baseline available" branch
+  // and `plants` silently shows 0 for every row — looks like a valid
+  // report but every comparison is meaningless. See PR #10 comment 3295052527.
+  if (!configs.includes(input.baseline_config)) {
+    throw new Error(
+      `baseline_config "${input.baseline_config}" not found in scores. ` +
+        `Available configs: ${configs.join(', ') || '(none)'}`,
+    );
+  }
   const get = (caseId: string, cfg: string): ScoreResult | undefined =>
     input.scores.find((s) => s.case_id === caseId && s.config_name === cfg);
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evalRun, serializeConfigAsYaml } from './orchestrator-adapter.js';
+import { evalRun, serializeConfigAsYaml, synthesizeDiff } from './orchestrator-adapter.js';
 import type { LoadedCase } from './case-loader.js';
 import { DEFAULT_CONFIG } from '../../src/config/defaults.js';
 import type { ReviewConfig } from '../../src/config/types.js';
@@ -252,6 +252,36 @@ describe('evalRun', () => {
     });
     // The AWS key was already in before/. No diff entry → no findings.
     expect(result.findings.filter((f) => f.file_path === 'src/foo.ts')).toHaveLength(0);
+  });
+});
+
+describe('synthesizeDiff', () => {
+  it('emits file chunks in lexicographic order even when after/ adds new files', () => {
+    // Regression for PR #10 comment 3295052526. Before this fix, `allPaths`
+    // came from a Set that preserved before-keys-first insertion order, so a
+    // case with before/{zzz.ts} and after/{zzz.ts, aaa-new.ts} emitted the
+    // new file AFTER the existing one. Sorting the merged Set makes the
+    // synthesized diff fully lexicographic across before-only, modified,
+    // and after-only paths.
+    const c: LoadedCase = {
+      case_id: 'sort-test',
+      beforeFiles: [
+        { path: 'src/zzz.ts', content: '// existing\n' },
+      ],
+      files: [
+        // Intentionally non-alphabetical order: 'zzz' (modified) listed first
+        // in the case, then 'aaa-new' (new-only) — exercises the
+        // before-keys-then-after-only-keys merge in synthesizeDiff.
+        { path: 'src/zzz.ts', content: '// existing, edited\n' },
+        { path: 'src/aaa-new.ts', content: '// new file\n' },
+      ],
+      truths: [],
+    };
+    const { filesApi } = synthesizeDiff(c);
+    expect(filesApi.map((f) => f.filename)).toEqual([
+      'src/aaa-new.ts',
+      'src/zzz.ts',
+    ]);
   });
 });
 

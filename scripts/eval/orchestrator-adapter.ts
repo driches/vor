@@ -279,10 +279,16 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     }
     const wall_ms = Math.max(1, Date.now() - wallStart);
 
-    const captured = state.createReviewCalls[0]?.args as
-      | { comments?: Array<Record<string, unknown>> }
-      | undefined;
-    const findings: RunRecord['findings'] = (captured?.comments ?? []).map(
+    // Flatten comments across ALL createReview calls. Production posts exactly
+    // one review per run, but a future refactor that splits posting (e.g. AI
+    // vs scanner findings into separate reviews) would silently drop everything
+    // past the first call if we only read `createReviewCalls[0]`, causing
+    // artificially low TPs without any signal. See PR #10 comment 3295052517.
+    const allComments = state.createReviewCalls.flatMap(
+      (call) =>
+        (call.args as { comments?: Array<Record<string, unknown>> }).comments ?? [],
+    );
+    const findings: RunRecord['findings'] = allComments.map(
       (c) => {
         const body = typeof c.body === 'string' ? c.body : '';
         const parsed = parseRenderedComment(body);
@@ -313,7 +319,9 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
   }
 }
 
-function synthesizeDiff(c: LoadedCase): {
+// Exported for unit tests to verify the file-order determinism contract.
+// Production callers go through evalRun.
+export function synthesizeDiff(c: LoadedCase): {
   diff: string;
   filesApi: AdapterState['filesApi'];
 } {
@@ -328,7 +336,17 @@ function synthesizeDiff(c: LoadedCase): {
   beforeByPath.delete('.code-review.yml');
   afterByPath.delete('.code-review.yml');
 
-  const allPaths = new Set<string>([...beforeByPath.keys(), ...afterByPath.keys()]);
+  // Sort merged paths so the synthesized diff is fully lexicographic. Set
+  // preserves insertion order: before-keys first, then new-only after-keys
+  // appended — that's deterministic but NOT alphabetical, so a case whose
+  // before/ has `zzz-existing.ts` and after/ adds `aaa-new.ts` would emit
+  // the new file AFTER the existing one. Two cases with different
+  // before/after splits would then produce differently-ordered diffs,
+  // introducing variance unrelated to model quality. See PR #10 comment
+  // 3295052526.
+  const allPaths = [
+    ...new Set<string>([...beforeByPath.keys(), ...afterByPath.keys()]),
+  ].sort();
   const chunks: string[] = [];
   const filesApi: AdapterState['filesApi'] = [];
   for (const path of allPaths) {

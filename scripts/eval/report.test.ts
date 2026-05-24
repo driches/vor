@@ -90,6 +90,22 @@ describe('renderSummaryReport', () => {
     expect(md).not.toContain('🟢');
   });
 
+  it('throws when baseline_config is not present in scores', () => {
+    // Regression for PR #10 comment 3295052527. A misspelled or missing
+    // baseline silently rendered a useless report (every row showed
+    // `plants: 0` and every challenger column hit the "no baseline" branch).
+    expect(() =>
+      renderSummaryReport({
+        timestamp: '2026-05-23T15:42:00Z',
+        baseline_config: 'sonnet-only', // doesn't exist in scores
+        scores: [
+          score({ config_name: 'opus-only' }),
+          score({ config_name: 'haiku-only' }),
+        ],
+      }),
+    ).toThrow(/baseline_config.*not found/);
+  });
+
   it('flags same-recall + cost-regressed as 🔴 (not ⚪)', () => {
     // Regression for PR #10 comment 3295026563. The previous report logic
     // had a dead-code `⚪` branch that masked this case: when a challenger
