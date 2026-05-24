@@ -1,0 +1,8 @@
+plants:
+  - type: secret:aws-access-key
+    file: src/auth.ts
+    line: 2
+  - type: vuln-dep:npm
+    file: package-lock.json
+    package: lodash
+    version: "4.17.20"

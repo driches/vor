@@ -52856,7 +52856,7 @@ ${input.body}`;
 }
 function renderCommentBody(c2) {
   const severityTag = c2.severity.toUpperCase();
-  const confTag = c2.confidence === "low" ? " \xB7 low confidence" : "";
+  const confTag = c2.confidence === "low" ? " \xB7 low confidence" : c2.confidence === "medium" ? " \xB7 medium confidence" : "";
   const heading = `**[${severityTag} \xB7 ${c2.category}${confTag}]** ${c2.title}`;
   const why = c2.why_it_matters;
   const suggestion = c2.suggestion ? `
