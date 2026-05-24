@@ -51000,8 +51000,8 @@ function missingSummaryWarning(ended) {
   const reasons = {
     summary_posted: "",
     // Unreachable: we only call this when summary is missing.
-    max_turns: "the agent hit the turn limit before finishing",
-    budget_exceeded: "the agent exhausted its token budget before finishing",
+    max_turns: "the model stopped replying before calling `post_summary`",
+    budget_exceeded: "the run exceeded a configured budget (turns or tokens)",
     aborted: "the agent run was aborted",
     error: "the agent run errored out"
   };

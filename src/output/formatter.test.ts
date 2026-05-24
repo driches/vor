@@ -169,9 +169,13 @@ describe('renderSummary — body content', () => {
     expect(r.body).toContain('### Findings');
     expect(r.body).toContain('1 important, 1 minor');
     // The incomplete-run warning is present and names the ended reason.
+    // NB: `max_turns` in the runner actually means "model stopped early",
+    // not "turn-cap hit" (real cap exhaustion → budget_exceeded), so the
+    // wording must reflect what happened, not the enum name.
     expect(r.body).toContain('did not call `post_summary`');
-    expect(r.body).toContain('turn limit');
+    expect(r.body).toContain('model stopped replying');
     expect(r.body).toContain('ended: max_turns');
+    expect(r.body).not.toContain('turn limit');
     // Footer still attaches.
     expect(r.body).toContain('claude-sonnet-4-6');
     // No assessment → COMMENT.
@@ -195,7 +199,9 @@ describe('renderSummary — body content', () => {
     const headerIdx = r.body.indexOf('### No findings');
     const warningIdx = r.body.indexOf('did not call `post_summary`');
     expect(warningIdx).toBeGreaterThan(headerIdx);
-    expect(r.body).toContain('token budget');
+    // `budget_exceeded` covers both turn-cap and token-cap exhaustion, so
+    // the wording must not commit to one over the other.
+    expect(r.body).toContain('exceeded a configured budget');
     expect(r.body).toContain('ended: budget_exceeded');
     // No strengths/coverage sections sneak in.
     expect(r.body).not.toContain('### Strengths');

@@ -134,14 +134,23 @@ function formatCountsLine(counts: Record<Severity, number>): string {
 
 /**
  * Warning emitted when the agent finished without calling `post_summary`.
- * Names the `ended` reason when known so a reader can tell turn-limit from
- * budget-blowup from an error abort.
+ * Names the `ended` reason when known so a reader can tell a model that
+ * stopped early from a budget blowup from an error abort.
+ *
+ * Wording note: the `ended` values in `RunAgentResult` are slightly misleading
+ * by name — the runner sets `max_turns` when the model returns `end_turn`
+ * (or stops emitting tool_use blocks) without posting a summary, NOT when the
+ * configured turn cap is hit. Real turn-cap exhaustion is thrown as a
+ * `BudgetError` from `Budget.startTurn` and surfaces as `budget_exceeded`
+ * (alongside actual token-cap exhaustion). The phrasing here reflects what
+ * actually happened, not what the enum name suggests. See runner.ts:151-153
+ * and budget.ts:30-52 — renaming the enum is a follow-up.
  */
 function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): string {
   const reasons: Record<RunAgentResult['ended'], string> = {
     summary_posted: '', // Unreachable: we only call this when summary is missing.
-    max_turns: 'the agent hit the turn limit before finishing',
-    budget_exceeded: 'the agent exhausted its token budget before finishing',
+    max_turns: 'the model stopped replying before calling `post_summary`',
+    budget_exceeded: 'the run exceeded a configured budget (turns or tokens)',
     aborted: 'the agent run was aborted',
     error: 'the agent run errored out',
   };
