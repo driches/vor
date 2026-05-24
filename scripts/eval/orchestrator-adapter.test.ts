@@ -103,6 +103,12 @@ describe('evalRun', () => {
     expect(awsFinding!.category).toBe('vulnerability');
     expect(awsFinding!.severity).toBe('critical');
     expect(awsFinding!.title.length).toBeGreaterThan(0);
+    // Regression for dogfood comment 3295026560. Scanner findings post at
+    // confidence: 'high', and renderCommentBody is silent for high/medium
+    // (only 'low' gets a heading tag). The adapter's default must therefore
+    // be 'high', not 'medium', or every scanner finding round-trips as a
+    // downgraded medium-confidence comment.
+    expect(awsFinding!.confidence).toBe('high');
   });
 
   it('computes cost_usd per-model (sonnet > haiku for identical token usage)', async () => {

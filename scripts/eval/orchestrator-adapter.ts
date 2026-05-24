@@ -489,7 +489,12 @@ function parseRenderedComment(body: string): {
   const headingMatch = body.match(/^\*\*\[([^\]]+)\]\*\*\s*(.*)$/m);
   let severity: Severity = 'minor';
   let category: Category = 'security';
-  let confidence: Confidence = 'medium';
+  // `renderCommentBody` only tags `· low confidence` in the heading; `high`
+  // and `medium` are silent. Default to 'high' so absence-of-tag round-trips
+  // to the scanner-default (every scanner finding posts at confidence: 'high'
+  // — anchoring the default elsewhere would silently downgrade them).
+  // See PR #10 dogfood comment 3295026560.
+  let confidence: Confidence = 'high';
   let title = '';
   if (headingMatch) {
     const tagInner = headingMatch[1]!;
