@@ -90,6 +90,27 @@ describe('renderSummaryReport', () => {
     expect(md).not.toContain('🟢');
   });
 
+  it('throws when one case row is missing the baseline run', () => {
+    // Regression for PR #10 Codex P2 3295092572. The previous report renderer
+    // silently rendered `plants: 0` and a baseline-less challenger cell when
+    // a specific case had no baseline run — making an incomplete eval matrix
+    // look valid. The check now happens per-case.
+    const baselineCost = score({ config_name: 'x' }).cost;
+    expect(() =>
+      renderSummaryReport({
+        timestamp: '2026-05-23T15:42:00Z',
+        baseline_config: 'sonnet-only',
+        scores: [
+          // case-A: baseline + challenger both ran.
+          score({ case_id: 'case-A', config_name: 'sonnet-only' }),
+          score({ case_id: 'case-A', config_name: 'haiku-only', cost: { ...baselineCost, cost_usd: 0.1 } }),
+          // case-B: baseline DIDN'T run (challenger-only).
+          score({ case_id: 'case-B', config_name: 'haiku-only' }),
+        ],
+      }),
+    ).toThrow(/case-B/);
+  });
+
   it('throws when baseline_config is not present in scores', () => {
     // Regression for PR #10 comment 3295052527. A misspelled or missing
     // baseline silently rendered a useless report (every row showed

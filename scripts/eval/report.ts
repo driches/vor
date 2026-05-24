@@ -47,9 +47,28 @@ export function renderSummaryReport(input: RenderSummaryInput): string {
   lines.push('');
   lines.push(`| Case | Plants | ${configs.join(' | ')} |`);
   lines.push(`| --- | --- | ${configs.map(() => '---').join(' | ')} |`);
+  // Pre-flight: every case row must have a baseline run. Without it, the
+  // `plants` count silently renders as 0 and challenger cells lose their
+  // comparison. An incomplete eval matrix that looks valid is worse than
+  // a hard fail — the operator can't tell the difference between "haiku
+  // didn't catch anything" and "baseline didn't run". See PR #10 Codex P2
+  // 3295092572.
+  const casesMissingBaseline = cases.filter(
+    (caseId) => !input.scores.some(
+      (s) => s.case_id === caseId && s.config_name === input.baseline_config,
+    ),
+  );
+  if (casesMissingBaseline.length > 0) {
+    throw new Error(
+      `baseline_config "${input.baseline_config}" is missing scores for ` +
+        `${casesMissingBaseline.length} case(s): ${casesMissingBaseline.join(', ')}. ` +
+        `Re-run the baseline for those cases, or remove them from the score input.`,
+    );
+  }
   for (const caseId of cases) {
-    const baseline = get(caseId, input.baseline_config);
-    const plants = baseline ? baseline.tp + baseline.fn : 0;
+    // `baseline` is guaranteed defined by the pre-flight check above.
+    const baseline = get(caseId, input.baseline_config)!;
+    const plants = baseline.tp + baseline.fn;
     const row: string[] = [caseId, String(plants)];
     for (const cfg of configs) {
       const s = get(caseId, cfg);
@@ -59,8 +78,6 @@ export function renderSummaryReport(input: RenderSummaryInput): string {
       }
       if (cfg === input.baseline_config) {
         row.push(`R ${pct(s.recall)} / $${s.cost.cost_usd.toFixed(2)} (base)`);
-      } else if (!baseline) {
-        row.push(`R ${pct(s.recall)} / $${s.cost.cost_usd.toFixed(2)}`);
       } else {
         row.push(formatCell(s, baseline));
       }
