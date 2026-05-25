@@ -1,18 +1,14 @@
 /**
  * Anthropic adapter implementing the canonical `LLMProvider` surface.
  *
- * The runner currently still drives the Anthropic SDK directly (see
- * `src/agent/runner.ts`) — Task 4 will refactor that loop to call
- * `provider.complete()`. Until then, this module owns:
- *  1. The class adapter (`AnthropicProvider`) that future provider-agnostic
- *     callers will use.
+ * The runner calls `provider.complete()` through this adapter — vendor-shaped
+ * payloads (cache_control breakpoints, Anthropic usage fields) are confined
+ * to this module. It owns:
+ *  1. The class adapter (`AnthropicProvider`) — the public surface for the
+ *     runner and any future provider-agnostic caller.
  *  2. The cache-breakpoint helpers (`markLatestMessageForCaching`,
- *     `markLastBlockForCaching`) the runner imports today — moved here so the
- *     Anthropic-specific behavior lives in one place.
- *  3. A standalone `billableInputTokensForBudget(usage)` that takes the raw
- *     Anthropic-SDK usage shape, so the runner can keep its current budget
- *     gate without instantiating the class (the class method takes
- *     `CanonicalUsage` instead — both exist intentionally).
+ *     `markLastBlockForCaching`) used internally by `complete()` to maintain
+ *     the sliding-window cache_control on tool-result turns.
  *
  * The conversion helpers (canonicalMessagesToAnthropic, canonicalToolsToAnthropic,
  * anthropicResponseToCanonical) are exported as named exports so the unit tests
@@ -69,11 +65,26 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   /**
-   * Canonical-shape input budget formula. Mirrors the standalone
-   * `billableInputTokensForBudget(usage)` below but takes the canonical
-   * `CanonicalUsage` field names (`cache_creation_tokens` vs Anthropic's raw
-   * `cache_creation_input_tokens`). See that function's JSDoc for the
-   * rationale on excluding cache reads.
+   * Input-token count that counts against the runner's `max_input_tokens`
+   * budget gate, given a canonical-usage response.
+   *
+   * Includes:
+   *   - `input_tokens` (non-cached input — billed at full rate, 1×)
+   *   - `cache_creation_tokens` (Anthropic bills cache writes at 1.25× input
+   *     rate — full-cost equivalent, so it counts against any "input budget"
+   *     gate)
+   *
+   * Deliberately EXCLUDES `cache_read_tokens`. Cache reads are billed at
+   * 0.1× input rate (effectively free) and typically dominate the raw token
+   * count on cached runs (real eval data: cache_read ≈ 800K-1.5M per case vs
+   * input ≈ 400 per turn). Counting them would make the default 500K
+   * `max_input_tokens` cap fire on the first turn of any cache-heavy run,
+   * regressing every operator config sized against the pre-caching semantic.
+   *
+   * Pinned by the class-method tests in anthropic-provider.test.ts — if the
+   * formula ever changes (e.g. someone "fixes" it to count all three), those
+   * tests should fail visibly rather than silently shifting the budget
+   * threshold.
    */
   billableInputTokensForBudget(usage: CanonicalUsage): number {
     return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
@@ -233,8 +244,8 @@ export function anthropicResponseToCanonical(response: Anthropic.Message): Compl
 }
 
 // ---------------------------------------------------------------------------
-// Cache-control helpers (still imported by src/agent/runner.ts today; will
-// only be called from inside this module once Task 4 lands)
+// Cache-control helpers (called internally by AnthropicProvider.complete and
+// exported only so the unit tests can pin behavior on edge cases)
 // ---------------------------------------------------------------------------
 
 /**
@@ -298,36 +309,4 @@ export function markLastBlockForCaching(message: Anthropic.MessageParam): void {
   const lastBlock = message.content[message.content.length - 1];
   if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) return;
   (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
-}
-
-// ---------------------------------------------------------------------------
-// Standalone budget helper for the runner (kept until Task 4 refactors the
-// loop to call provider.billableInputTokensForBudget on a CanonicalUsage).
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the input-token count that should count against the runner's
- * `max_input_tokens` budget gate, given an Anthropic API response usage block.
- *
- * Includes:
- *   - `input_tokens` (non-cached input — billed at full rate, 1×)
- *   - `cache_creation_input_tokens` (billed at 1.25× input rate — full-cost
- *     equivalent, so it should count against any "input budget" gate)
- *
- * Deliberately EXCLUDES `cache_read_input_tokens`. Cache reads are billed at
- * 0.1× input rate (effectively free) and typically dominate the raw token
- * count on cached runs (real eval data: cache_read ≈ 800K-1.5M per case vs
- * input ≈ 400 per turn). Counting them would make the default 500K
- * `max_input_tokens` cap fire on the first turn of any cache-heavy run,
- * regressing every operator config sized against the pre-caching semantic.
- *
- * Exported so the unit tests can pin this contract — if the formula ever
- * changes (e.g. someone "fixes" it to count all three), the test should fail
- * visibly rather than silently shifting the budget threshold.
- */
-export function billableInputTokensForBudget(usage: {
-  input_tokens: number;
-  cache_creation_input_tokens?: number | null;
-}): number {
-  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
 }

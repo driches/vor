@@ -22,7 +22,6 @@ vi.mock('@anthropic-ai/sdk', () => {
 import {
   AnthropicProvider,
   anthropicResponseToCanonical,
-  billableInputTokensForBudget,
   canonicalMessagesToAnthropic,
   canonicalToolsToAnthropic,
   markLastBlockForCaching,
@@ -200,47 +199,6 @@ describe('markLastBlockForCaching', () => {
   it('is a no-op for empty content arrays', () => {
     const msg: Anthropic.MessageParam = userResults([]);
     expect(() => markLastBlockForCaching(msg)).not.toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// billableInputTokensForBudget — standalone (Anthropic-SDK usage shape)
-// ---------------------------------------------------------------------------
-
-describe('billableInputTokensForBudget (standalone, raw Anthropic-usage shape)', () => {
-  it('counts non-cached input_tokens', () => {
-    expect(billableInputTokensForBudget({ input_tokens: 100 })).toBe(100);
-  });
-
-  it('counts cache_creation_input_tokens (billed at 1.25× — full-cost equivalent)', () => {
-    expect(
-      billableInputTokensForBudget({ input_tokens: 100, cache_creation_input_tokens: 50 }),
-    ).toBe(150);
-  });
-
-  it('does NOT count cache_read_input_tokens (billed at 0.1× — would over-trip the budget cap)', () => {
-    // Pinning the asymmetry. A future "fix" that includes cache_read would
-    // make the default 500K cap fire on turn 1 of any cached run (real eval
-    // data showed cache_read ≈ 800K-1.5M per case). The helper's input type
-    // doesn't declare cache_read_input_tokens at all, so the only way to
-    // regress is to actually change the formula — at which point this test
-    // and the JSDoc both need explicit updates.
-    expect(
-      billableInputTokensForBudget({ input_tokens: 100, cache_creation_input_tokens: 0 }),
-    ).toBe(100);
-  });
-
-  it('treats missing/null cache_creation_input_tokens as 0', () => {
-    expect(billableInputTokensForBudget({ input_tokens: 42 })).toBe(42);
-    expect(
-      billableInputTokensForBudget({ input_tokens: 42, cache_creation_input_tokens: null }),
-    ).toBe(42);
-    expect(
-      billableInputTokensForBudget({
-        input_tokens: 42,
-        cache_creation_input_tokens: undefined,
-      }),
-    ).toBe(42);
   });
 });
 

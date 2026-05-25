@@ -11,8 +11,8 @@
  * right adapter for `claude-*` vs `gpt-*` model ids. Those tests don't make
  * network calls — they only inspect `provider.id`.
  *
- * Helper-level tests (`markLatestMessageForCaching`, the standalone
- * `billableInputTokensForBudget`, etc.) live in
+ * Helper-level tests (`markLatestMessageForCaching`,
+ * `AnthropicProvider#billableInputTokensForBudget`, etc.) live in
  * `src/llm/anthropic-provider.test.ts` — this file is purely about the loop.
  */
 
@@ -164,6 +164,21 @@ describe('runAgent', () => {
     await runAgent(baseInput());
 
     expect(provider.completeCalls[0]!.opts.abortSignal).toBeUndefined();
+  });
+
+  it('passes the caller-supplied temperature through to the provider (and defaults to 0.5 when omitted)', async () => {
+    // Default path: input.temperature undefined → DEFAULT_TEMPERATURE (0.5).
+    const defaultProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(defaultProvider);
+    await runAgent(baseInput());
+    expect(defaultProvider.completeCalls[0]!.opts.temperature).toBe(0.5);
+
+    // Override path: input.temperature = 0.2 → forwarded verbatim. Pins the
+    // contract so future config plumbing (Task 5) lands on a tested seam.
+    const overrideProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(overrideProvider);
+    await runAgent({ ...baseInput(), temperature: 0.2 });
+    expect(overrideProvider.completeCalls[0]!.opts.temperature).toBe(0.2);
   });
 
   it('passes canonical tools (without handler) to provider.complete', async () => {
@@ -480,18 +495,19 @@ describe('runAgent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Provider-routing integration — un-mock createProvider and assert the real
-// router resolves the right adapter for each model id. These don't make
-// network calls because the runner never reaches `provider.complete()` (the
-// constructor is enough to confirm routing) — we abort before turn 1.
+// Provider-routing smoke — un-mock createProvider and call it directly to pin
+// that each model-id family round-trips through the REAL factory and produces
+// the right adapter instance. Not a runner integration — the runner is
+// already covered above through FakeProvider; this block deliberately bypasses
+// it because the routing decision happens in `createProvider`, not in
+// `runAgent`. No network calls (we only inspect `provider.id`, never
+// `.complete()`).
 // ---------------------------------------------------------------------------
 
-describe('runAgent — provider routing', () => {
-  // These tests un-mock the createProvider factory and exercise it directly,
-  // confirming `claude-*` → AnthropicProvider and `gpt-*`/`o\d` → OpenAIProvider.
-  // The runner integration is already covered by the FakeProvider tests above;
-  // here we just pin the router behavior so a future regression in
-  // `inferProviderFromModel` surfaces as a runner-level test failure.
+describe('createProvider (real factory) — model-id routing', () => {
+  // These tests pin the router contract so a regression in
+  // `inferProviderFromModel` surfaces as a runner-package test failure
+  // (the runner is the only production caller of `createProvider`).
 
   it('routes claude-* model ids to the Anthropic adapter', async () => {
     const actual = await vi.importActual<typeof import('../llm/index.js')>('../llm/index.js');

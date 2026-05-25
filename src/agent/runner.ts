@@ -56,6 +56,22 @@ import type { ToolDeps } from '../tools/types.js';
 import { renderPreflightSection, runPreflight } from './preflight.js';
 import { WorkerClient } from './worker.js';
 
+/**
+ * Default sampling temperature. PR #14 pinned this at 0.1 and saw recall
+ * drop from 5/7 → 3/7 on the golden-eval set; PR #15 settled on 0.5 (recall
+ * restored at no cost increase). Treat as a tuned constant — change only
+ * with eval evidence.
+ */
+const DEFAULT_TEMPERATURE = 0.5;
+
+/**
+ * Input to `runAgent`. The plan called for a nested
+ * `providerInput: {modelId, apiKey, providerHint?}` wrapper, but we keep
+ * these fields flat at the top level: each has an independent provenance
+ * in the orchestrator (model from config, apiKey from env, providerHint
+ * from config override) and nesting would just add boilerplate at the
+ * call site for no readability gain.
+ */
 export interface RunAgentInput {
   deps: ToolDeps;
   systemPrompt: string;
@@ -74,6 +90,11 @@ export interface RunAgentInput {
    * shim, or pinning explicit provider selection in `.code-review.yml`.
    */
   providerHint?: ProviderId;
+  /**
+   * Sampling temperature. Defaults to `DEFAULT_TEMPERATURE` (0.5) when
+   * omitted — see that constant's JSDoc for the recall/cost rationale.
+   */
+  temperature?: number;
   abortController?: AbortController;
 }
 
@@ -149,6 +170,8 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     description: t.description,
     input_schema: t.input_schema,
   }));
+
+  const temperature = input.temperature ?? DEFAULT_TEMPERATURE;
 
   await logger.info(
     `Agent ready: provider=${provider.id}, model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` +
@@ -228,14 +251,10 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         model: input.model,
         maxOutputTokens: 8192,
         system: input.systemPrompt,
-        // Mid-range temperature: trims the wide sampling at the default (1.0)
-        // that produced run-to-run variance on identical diffs, while staying
-        // high enough to preserve recall. v0.2.1 tried 0.1 and saw recall
-        // drop from 5/7 → 3/7 matches on the golden-eval set (one case missed
-        // entirely, another hit the turn cap on dead-end investigation). 0.5
-        // restored 5/7 recall with cost unchanged. The OpenAI adapter ignores
-        // this for o-series reasoning models which reject the field.
-        temperature: 0.5,
+        // Centralized via DEFAULT_TEMPERATURE up top — see that constant's
+        // JSDoc for the recall/cost history. The OpenAI adapter drops the
+        // field automatically for o-series reasoning models that reject it.
+        temperature,
         ...(input.abortController ? { abortSignal: input.abortController.signal } : {}),
       });
 
