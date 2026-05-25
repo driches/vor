@@ -173,6 +173,43 @@ describe('vulnDepPypiTemplate', () => {
     expect(truth.bug_type).toBe('vuln-dep:pypi:requests@2.5.0');
   });
 
+  it('treats `~=` (compatible-release) as a valid operator distinct from `==`', () => {
+    // Sanity check that the operator enumeration covers PEP 440's full set.
+    // `~=2.5.0` means "compatible with 2.5.x" — not pinned to 2.5.0, so
+    // rewriting it to `requests==2.5.0` is a real mutation.
+    const source = ['requests~=2.5.0', ''].join('\n');
+    const { mutated } = vulnDepPypiTemplate.apply(source, {
+      type: 'vuln-dep:pypi',
+      file: 'requirements.txt',
+      package: 'requests',
+      version: '2.5.0',
+    });
+    expect(mutated.split('\n')[0]).toBe('requests==2.5.0');
+  });
+
+  it('falls through to append when the existing line uses a non-PEP-440 operator', () => {
+    // Regression for PR #19 self-review on the regex shape. A malformed
+    // line like `requests~2.5.0` (bare `~`, a typo for `~=`) is NOT a
+    // valid PEP 440 requirement. The enumerated-operator regex correctly
+    // rejects it, so the search loop finds no match and the plant
+    // appends a fresh `requests==2.5.0` at the end. The malformed line
+    // stays as-is — the case author's bug to fix, not the planter's.
+    const source = ['requests~2.5.0', 'flask==2.3.0', ''].join('\n');
+    const { mutated, truth } = vulnDepPypiTemplate.apply(source, {
+      type: 'vuln-dep:pypi',
+      file: 'requirements.txt',
+      package: 'requests',
+      version: '2.5.0',
+    });
+    const lines = mutated.split('\n');
+    // Original malformed line untouched.
+    expect(lines[0]).toBe('requests~2.5.0');
+    expect(lines[1]).toBe('flask==2.3.0');
+    // New requirement appended at the end.
+    expect(lines[2]).toBe('requests==2.5.0');
+    expect(truth.line_range).toEqual([3, 3]);
+  });
+
   it('treats `>=` range as a real mutation when planting the same version pin', () => {
     // An existing `requests>=2.5.0` allows but doesn't pin 2.5.0; rewriting
     // it as `requests==2.5.0` is a real lockfile-resolution change.

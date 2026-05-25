@@ -14,13 +14,19 @@
  */
 import type { PlantTemplate } from './types.js';
 
-// Operator alternation order matters: `[<>=!~]=?` is greedy and would
-// consume `==` from a `===` operator before the `===` branch ever ran,
-// so `requests===2.5.0` would parse with operator=`==` and version=`=2.5.0`.
-// Behavior was incidentally correct (version didn't match the requested
-// `2.5.0` → no-op skipped) but the regex intent was wrong. List `===`
-// first so it's tried before the greedy branch.
-const REQUIREMENT_LINE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(===|[<>=!~]=?)\s*([^\s#]+)/;
+// Enumerate exactly the PEP 440 operators (`===`, `~=`, `==`, `!=`, `<=`,
+// `>=`, `<`, `>`) — no more, no less. The earlier `[<>=!~]=?` shape made
+// the trailing `=` optional, so bare `~`, `!`, `=` would falsely match.
+// `~2.5.0` (a typo for `~=`) would parse with operator=`~` and version=
+// `2.5.0`, silently rewriting a malformed line instead of falling through
+// to "no matching line, append".
+//
+// Alternation order also matters: longer operators must come first so a
+// `===` input isn't shortened to `==` by an earlier branch greedily
+// consuming part of it. The ordering below is correct because
+// `[<>=!]=` requires a trailing `=`, so it cannot eat the first two
+// chars of `===`.
+const REQUIREMENT_LINE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(===|~=|[<>=!]=|[<>])\s*([^\s#]+)/;
 
 export const vulnDepPypiTemplate: PlantTemplate = {
   type: 'vuln-dep:pypi',
