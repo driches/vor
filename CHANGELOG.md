@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-25
+
+### Added
+- **Agentic worker delegation (experimental, default off).** Sonnet's tool list now includes a tenth tool, `worker_check_usage_claim`, that delegates verification work to a cheap Haiku 4.5 worker. Sonnet calls it during phase 5 (verify) to check whether a symbol is unused, has a single caller, or violates a documented pattern — and gets back a structured `{ verdict, call_sites, confidence, evidence }` JSON to reason about. The worker is a single-shot text-in/JSON-out call (no nested tool loop) and shares the parent's budget. Opt-in via `experimental.worker_delegation.enabled: true` in `.code-review.yml`.
+- **Validator-enforced read-before-post discipline.** When `worker_delegation` is enabled, `post_inline_comment` rejects critical/important findings unless Sonnet has called `read_file_at_ref` on the target line range earlier in the same run. Worker output does NOT count as a read. This is the "and it will check the work" half of the design — it lets us trust worker output for exploration without trusting it for final judgment. See [src/agent/validate-comment.ts](src/agent/validate-comment.ts) and [src/agent/run-context.ts](src/agent/run-context.ts).
+- **Per-model cost tracking.** `Budget` now tracks token usage per model, and `RunAgentResult.perModelCost` exposes the Sonnet/Haiku split. Golden-eval runs persist `per_model_cost` in the run JSON so cost-vs-recall comparisons across delegation modes can be measured directly. `costFromUsage(model, usage)` in [src/util/pricing.ts](src/util/pricing.ts) is now the single source of truth for cost calculation (production runner + eval harness consume it).
+- **`--worker-delegation` flag in `npm run golden:eval`** to A/B test the experimental delegation on the captured cases.
+
+### Experimental ship gate (be aware before enabling)
+- Flag OFF eval (default behavior): 5/7 matches = 71% recall, $1.82 — matches v0.2.2 baseline exactly. Zero regression for anyone who doesn't opt in.
+- Flag ON eval: 4/7 matches = 57% recall, $2.03 (+12% cost). Recall regression of 14 percentage points vs baseline.
+- Failure mode is the one the design called out: across 3 cases, Sonnet invoked the worker on only 1, and even there it didn't shorten the loop (33 turns vs 31 baseline). The system prompt language describing when to delegate isn't compelling enough yet.
+- **Recommended for now: do NOT enable in production.** The infrastructure is shipped so we can iterate on the worker prompt and (next ship) add additional worker tools without another foundation PR. The flag will flip to recommended once eval data clears ≥5/7 recall with measurable cost reduction.
+
+### Why ship anyway
+- All infrastructure (per-model cost, validator hardening, worker client) is independently valuable.
+- Zero behavior change on the default (opt-out) path — confirmed by the flag-OFF eval matching v0.2.2 exactly.
+- The roll-back is one config flag, not a code revert.
+- Iterating on the worker prompt is much faster with the infrastructure already in place.
+
 ## [0.2.2] - 2026-05-25
 
 ### Changed

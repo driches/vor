@@ -79,4 +79,11 @@ export const DEFAULT_CONFIG: ReviewConfig = {
     cache: { enabled: true },
     persistence: { enabled: false },
   },
+
+  experimental: {
+    worker_delegation: {
+      enabled: false,
+      worker_model: 'claude-haiku-4-5',
+    },
+  },
 };

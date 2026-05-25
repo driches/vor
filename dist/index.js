@@ -47353,7 +47353,7 @@ var Budget = class {
     this.limits = limits;
   }
   limits;
-  state = { turns: 0, inputTokens: 0, outputTokens: 0 };
+  state = { turns: 0, perModel: /* @__PURE__ */ new Map() };
   /** Call at the start of every turn. Throws if max turns reached. */
   startTurn() {
     this.state.turns += 1;
@@ -47361,30 +47361,83 @@ var Budget = class {
       throw new BudgetError(`maxTurns exceeded (${this.state.turns} > ${this.limits.maxTurns})`);
     }
   }
-  /** Record token usage from a model response. */
-  addUsage(input, output) {
-    this.state.inputTokens += input;
-    this.state.outputTokens += output;
-    if (this.state.inputTokens > this.limits.maxInputTokens) {
+  /**
+   * Record token usage from a model response, scoped to the model that
+   * produced it (so cost can later be priced per-model). The cap check
+   * counts BILLABLE input (non-cached input + cache_creation) across all
+   * models, NOT cache reads — cache_read is billed at 0.1× and counting it
+   * would make the default cap fire on turn 1 of any cached run. See
+   * billableInputTokensForBudget in runner.ts for the asymmetry rationale.
+   */
+  addUsage(model, usage) {
+    let m2 = this.state.perModel.get(model);
+    if (m2 === void 0) {
+      m2 = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+      this.state.perModel.set(model, m2);
+    }
+    m2.inputTokens += usage.input_tokens;
+    m2.outputTokens += usage.output_tokens;
+    m2.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+    m2.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+    const billableIn = this.totalBillableInput();
+    if (billableIn > this.limits.maxInputTokens) {
       throw new BudgetError(
-        `maxInputTokens exceeded (${this.state.inputTokens} > ${this.limits.maxInputTokens})`
+        `maxInputTokens exceeded (${billableIn} > ${this.limits.maxInputTokens})`
       );
     }
-    if (this.state.outputTokens > this.limits.maxOutputTokens) {
+    const totalOut = this.totalOutput();
+    if (totalOut > this.limits.maxOutputTokens) {
       throw new BudgetError(
-        `maxOutputTokens exceeded (${this.state.outputTokens} > ${this.limits.maxOutputTokens})`
+        `maxOutputTokens exceeded (${totalOut} > ${this.limits.maxOutputTokens})`
       );
     }
   }
   /** True once we cross the warn threshold — runner should signal "wrap up". */
   shouldWrapUp() {
     const turnFrac = this.state.turns / this.limits.maxTurns;
-    const inFrac = this.state.inputTokens / this.limits.maxInputTokens;
-    const outFrac = this.state.outputTokens / this.limits.maxOutputTokens;
+    const inFrac = this.totalBillableInput() / this.limits.maxInputTokens;
+    const outFrac = this.totalOutput() / this.limits.maxOutputTokens;
     return turnFrac >= this.limits.warnFraction || inFrac >= this.limits.warnFraction || outFrac >= this.limits.warnFraction;
   }
   snapshot() {
-    return { ...this.state };
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheCreationTokens = 0;
+    let cacheReadTokens = 0;
+    for (const m2 of this.state.perModel.values()) {
+      inputTokens += m2.inputTokens;
+      outputTokens += m2.outputTokens;
+      cacheCreationTokens += m2.cacheCreationTokens;
+      cacheReadTokens += m2.cacheReadTokens;
+    }
+    return {
+      turns: this.state.turns,
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens,
+      cacheReadTokens
+    };
+  }
+  /** Per-model usage snapshot, for cost breakdown reporting. */
+  snapshotByModel() {
+    return Array.from(this.state.perModel.entries()).map(([model, usage]) => ({
+      model,
+      usage: { ...usage }
+    }));
+  }
+  totalBillableInput() {
+    let total = 0;
+    for (const m2 of this.state.perModel.values()) {
+      total += m2.inputTokens + m2.cacheCreationTokens;
+    }
+    return total;
+  }
+  totalOutput() {
+    let total = 0;
+    for (const m2 of this.state.perModel.values()) {
+      total += m2.outputTokens;
+    }
+    return total;
   }
 };
 
@@ -47479,6 +47532,16 @@ var MODEL_PRICING = {
 };
 function pricingForModel(model) {
   return MODEL_PRICING[model];
+}
+var SONNET_FALLBACK_PRICING = {
+  input: 3,
+  output: 15,
+  cache_creation: 3.75,
+  cache_read: 0.3
+};
+function costFromUsage(model, usage) {
+  const pricing = pricingForModel(model) ?? pricingForModel("claude-sonnet-4-6") ?? SONNET_FALLBACK_PRICING;
+  return (usage.inputTokens ?? 0) * pricing.input / 1e6 + (usage.outputTokens ?? 0) * pricing.output / 1e6 + (usage.cacheCreationTokens ?? 0) * pricing.cache_creation / 1e6 + (usage.cacheReadTokens ?? 0) * pricing.cache_read / 1e6;
 }
 
 // src/tools/tool-helper.ts
@@ -47808,6 +47871,25 @@ var CATEGORIES = [
   "duplication"
 ];
 
+// src/agent/run-context.ts
+function createRunContext() {
+  return { readRanges: /* @__PURE__ */ new Map() };
+}
+function recordHeadRead(ctx, path11, startLine, endLine) {
+  if (endLine < startLine) return;
+  let ranges = ctx.readRanges.get(path11);
+  if (ranges === void 0) {
+    ranges = [];
+    ctx.readRanges.set(path11, ranges);
+  }
+  ranges.push([startLine, endLine]);
+}
+function hasReadRange(ctx, path11, line) {
+  const ranges = ctx.readRanges.get(path11);
+  if (ranges === void 0) return false;
+  return ranges.some(([s2, e2]) => line >= s2 && line <= e2);
+}
+
 // src/agent/validate-comment.ts
 function validateInlineComment(input, ctx) {
   const file = ctx.changedFiles.get(input.file_path);
@@ -47889,6 +47971,16 @@ function validateInlineComment(input, ctx) {
       ok: false,
       reason: "duplicate of an already-posted comment",
       hint: `You already commented on '${input.file_path}':${input.line} with this title.`
+    };
+  }
+  if (ctx.runContext !== void 0 && (input.severity === "critical" || input.severity === "important") && !hasReadRange(ctx.runContext, input.file_path, input.line)) {
+    const win = 10;
+    const start = Math.max(1, input.line - win);
+    const end = input.line + win;
+    return {
+      ok: false,
+      reason: `you have not called read_file_at_ref on '${input.file_path}':${input.line} this run`,
+      hint: `Before posting a ${input.severity} finding you must read the target lines yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${start}, end_line: ${end} }) and try again.`
     };
   }
   return { ok: true };
@@ -47982,7 +48074,13 @@ function makePostInlineCommentTool(deps) {
           changedFiles,
           postedComments: deps.aggregator.acceptedComments,
           severityFloor: deps.config.severity.floor,
-          maxBodyChars: 600
+          maxBodyChars: 600,
+          // Read-before-post enforcement is opt-in: repos that enable worker
+          // delegation also accept the verification discipline (Sonnet must
+          // have read the target lines before posting critical/important).
+          // Repos without workers keep the v0.2.x validator semantics, so
+          // shipping v0.3.0 with the flag off is zero behavior change.
+          ...deps.config.experimental.worker_delegation.enabled ? { runContext: deps.runContext } : {}
         }
       );
       if (!validation.ok) {
@@ -48088,6 +48186,11 @@ function makeReadFileAtRefTool(deps) {
             hint: "Check list_changed_files for the exact paths in this PR."
           });
         }
+        if (args.ref === "head") {
+          const range = result.returned_range;
+          const [s2, e2] = range ?? [start, end];
+          recordHeadRead(deps.runContext, args.path, s2, e2);
+        }
         return jsonResult({
           ok: true,
           ...result,
@@ -48113,11 +48216,15 @@ function makeReadFileAtRefTool(deps) {
       const total = lines.length;
       const truncated = total > MAX_LINES_PER_CALL;
       const returned = truncated ? lines.slice(0, MAX_LINES_PER_CALL).join("\n") : content;
+      const returnedEnd = truncated ? MAX_LINES_PER_CALL : total;
+      if (args.ref === "head") {
+        recordHeadRead(deps.runContext, args.path, 1, returnedEnd);
+      }
       return jsonResult({
         ok: true,
         content: returned,
         total_lines: total,
-        returned_range: [1, truncated ? MAX_LINES_PER_CALL : total],
+        returned_range: [1, returnedEnd],
         truncated,
         ref: args.ref,
         ref_sha: sha,
@@ -48181,6 +48288,274 @@ function makeSkipFileTool(deps) {
   );
 }
 
+// src/tools/worker-check-usage-claim.ts
+var import_node_child_process2 = require("node:child_process");
+var GREP_RESULT_CAP = 30;
+var GREP_TIMEOUT_MS = 1e4;
+var READ_FILE_LINES_PER_CALL = 200;
+var TOP_FILES_TO_READ = 3;
+var verdictSchema = external_exports.object({
+  verdict: external_exports.enum(["confirmed", "refuted", "inconclusive"]),
+  call_sites: external_exports.array(
+    external_exports.object({
+      path: external_exports.string(),
+      line: external_exports.number().int().nonnegative(),
+      snippet: external_exports.string()
+    })
+  ).default([]),
+  confidence: external_exports.enum(["high", "medium", "low"]),
+  evidence: external_exports.string().min(1).max(800),
+  files_searched: external_exports.array(external_exports.string()).default([])
+});
+var WORKER_SYSTEM_PROMPT = `You are a verification worker assisting a senior reviewer.
+
+Your ONLY job is to read the provided search results and file content, then return a JSON verdict on a specific usage claim. You do NOT post comments, you do NOT make judgment calls about code quality, you do NOT propose fixes.
+
+You will receive:
+- A symbol name (function / class / variable)
+- A claim about it ('unused', 'single_caller', or 'pattern_violation')
+- Context \u2014 why the senior reviewer wants to know
+- Grep results from the repo (file:line:text matches)
+- File contents around the top matches
+
+You must return JSON matching this schema EXACTLY (no markdown fences, no prose before or after):
+
+{
+  "verdict": "confirmed" | "refuted" | "inconclusive",
+  "call_sites": [ { "path": "...", "line": N, "snippet": "..." }, ... ],   // The MOST relevant matches, max 5
+  "confidence": "high" | "medium" | "low",
+  "evidence": "1-2 sentence explanation citing the evidence you saw",
+  "files_searched": ["src/foo.ts", ...]                                    // Paths whose content you inspected
+}
+
+Verdict rules:
+- 'unused' claim: 'confirmed' if zero non-trivial call sites (tests, comments, the definition itself don't count); 'refuted' if real call sites exist; 'inconclusive' if grep was inconclusive.
+- 'single_caller' claim: 'confirmed' if exactly one non-trivial call site; otherwise 'refuted' (multiple) or 'inconclusive'.
+- 'pattern_violation' claim: 'confirmed' if the code clearly violates a documented pattern in the searched files; 'refuted' if it follows the pattern; 'inconclusive' if no pattern is documented.
+
+Confidence rules:
+- 'high': the evidence is unambiguous (e.g., zero matches for an 'unused' claim, or a clearly-documented opposing pattern).
+- 'medium': evidence supports a verdict but there are sources you couldn't inspect (e.g., the symbol is exported and may be used outside the repo).
+- 'low': inconclusive grep, partial reads, or unclear pattern. Default to 'low' if unsure \u2014 the senior reviewer will re-verify.`;
+function makeWorkerCheckUsageClaimTool(deps) {
+  return tool(
+    "worker_check_usage_claim",
+    "Delegate verification of a usage claim to a cheap worker (claude-haiku-4-5). Use this during verification (phase 5) instead of doing the grep + read yourself, when you want to check whether a symbol is unused, has a single caller, or violates a documented pattern. Returns a structured verdict + evidence as JSON.\n\nIMPORTANT: Worker output is a HINT, not evidence. For findings with severity critical or important you MUST still call read_file_at_ref on the target line range yourself before post_inline_comment \u2014 the validator will reject otherwise. For minor/nit findings, the worker output alone is acceptable evidence.",
+    {
+      symbol: external_exports.string().min(1).describe("The symbol being checked (function/class/variable/method name)."),
+      claim: external_exports.enum(["unused", "single_caller", "pattern_violation"]).describe("Which property of the symbol you want verified."),
+      path_glob: external_exports.string().optional().describe(
+        "Optional path glob (git-grep syntax) to scope the search, e.g. 'src/**/*.ts'. Omit to search the whole repo."
+      ),
+      context: external_exports.string().min(8).max(400).describe(
+        'Why you are checking this \u2014 gives the worker focus. Example: "PR removes the foo() helper; need to confirm no callers remain."'
+      )
+    },
+    async (args) => {
+      if (deps.worker === void 0) {
+        return jsonResult({
+          ok: false,
+          error: "worker delegation is not enabled in this run",
+          hint: "Set experimental.worker_delegation.enabled = true in .code-review.yml to use this tool."
+        });
+      }
+      const matches = await runGitGrep2(args.symbol, deps.workspaceDir, args.path_glob);
+      const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
+      const fileSnippets = [];
+      for (const path11 of topPaths) {
+        const head = deps.prContext.metadata.head_sha;
+        const result = await deps.fileReader.readRange(
+          { owner: deps.owner, repo: deps.repo, path: path11, ref: head },
+          1,
+          READ_FILE_LINES_PER_CALL
+        );
+        if (result !== null) {
+          fileSnippets.push({ path: path11, content: result.content });
+        }
+      }
+      const userPrompt = renderUserPrompt({
+        symbol: args.symbol,
+        claim: args.claim,
+        context: args.context,
+        matches,
+        fileSnippets
+      });
+      try {
+        const { parsed } = await deps.worker.invoke({
+          task: "check_usage",
+          systemPrompt: WORKER_SYSTEM_PROMPT,
+          userPrompt,
+          maxTokens: 1024,
+          responseSchema: verdictSchema
+        });
+        return jsonResult({
+          ok: true,
+          ...parsed,
+          // Reminder field — keeps the verification discipline visible even
+          // if the agent skims tool output.
+          reminder: "Worker output is a hint, not evidence. For critical/important findings, call read_file_at_ref on the target lines before posting."
+        });
+      } catch (err) {
+        return jsonResult({
+          ok: false,
+          error: `worker call failed: ${err.message}`,
+          hint: "Fall back to doing the grep + read yourself with grep_repo_at_ref and read_file_at_ref."
+        });
+      }
+    }
+  );
+}
+function uniquePaths(matches) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const m2 of matches) {
+    if (seen.has(m2.path)) continue;
+    seen.add(m2.path);
+    out.push(m2.path);
+  }
+  return out;
+}
+function renderUserPrompt(args) {
+  const lines = [];
+  lines.push(`## Task`);
+  lines.push(`Check the claim '${args.claim}' for symbol \`${args.symbol}\`.`);
+  lines.push("");
+  lines.push(`## Context from senior reviewer`);
+  lines.push(args.context);
+  lines.push("");
+  lines.push(`## Grep results (\`${args.symbol}\` across repo, capped at ${GREP_RESULT_CAP})`);
+  if (args.matches.length === 0) {
+    lines.push("_No matches._");
+  } else {
+    for (const m2 of args.matches) {
+      lines.push(`${m2.path}:${m2.line}: ${m2.text}`);
+    }
+  }
+  lines.push("");
+  if (args.fileSnippets.length > 0) {
+    lines.push(`## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`);
+    for (const snip of args.fileSnippets) {
+      lines.push(`### ${snip.path}`);
+      lines.push("```");
+      lines.push(snip.content);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+  lines.push("## Required output");
+  lines.push("Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence.");
+  return lines.join("\n");
+}
+async function runGitGrep2(pattern, cwd, pathGlob) {
+  const args = ["grep", "-n", "-E", "--no-color", "--", pattern];
+  if (pathGlob !== void 0) args.push(pathGlob);
+  return new Promise((resolve3) => {
+    const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd });
+    let stdout = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      resolve3([]);
+    }, GREP_TIMEOUT_MS);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.on("close", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      const matches = parseGrepOutput2(stdout);
+      resolve3(matches.slice(0, GREP_RESULT_CAP));
+    });
+    child2.on("error", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolve3([]);
+    });
+  });
+}
+function parseGrepOutput2(out) {
+  const lines = out.split("\n").filter((l2) => l2.length > 0);
+  const matches = [];
+  for (const line of lines) {
+    const m2 = line.match(/^([^:]+):(\d+):(.*)$/);
+    if (!m2) continue;
+    matches.push({
+      path: m2[1],
+      line: Number.parseInt(m2[2], 10),
+      text: m2[3]
+    });
+  }
+  return matches;
+}
+
+// src/agent/worker.ts
+var WorkerClient = class {
+  constructor(client, budget, model = "claude-haiku-4-5") {
+    this.client = client;
+    this.budget = budget;
+    this.model = model;
+  }
+  client;
+  budget;
+  model;
+  async invoke(inv) {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: inv.maxTokens,
+      // Workers do bounded structured analysis. Determinism > variety here —
+      // they should produce the same JSON for the same input.
+      temperature: 0,
+      system: inv.systemPrompt,
+      messages: [{ role: "user", content: inv.userPrompt }]
+    });
+    this.budget.addUsage(this.model, response.usage);
+    const textBlock = response.content.find(
+      (b2) => b2.type === "text"
+    );
+    if (textBlock === void 0) {
+      throw new Error(`Worker '${inv.task}' returned no text block`);
+    }
+    const rawText = textBlock.text;
+    const json = stripJsonFence(rawText);
+    let unvalidated;
+    try {
+      unvalidated = JSON.parse(json);
+    } catch (err) {
+      await logger.warn(
+        `Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`
+      );
+      throw new Error(
+        `Worker '${inv.task}' returned non-JSON: ${err.message}`
+      );
+    }
+    const validation = inv.responseSchema.safeParse(unvalidated);
+    if (!validation.success) {
+      await logger.warn(
+        `Worker '${inv.task}' returned JSON that failed schema validation: ${validation.error.message}`
+      );
+      throw new Error(
+        `Worker '${inv.task}' response failed schema: ${validation.error.message}`
+      );
+    }
+    return {
+      parsed: validation.data,
+      rawText,
+      usage: response.usage
+    };
+  }
+};
+function stripJsonFence(text) {
+  let s2 = text.trim();
+  if (s2.startsWith("```json")) s2 = s2.slice("```json".length);
+  else if (s2.startsWith("```")) s2 = s2.slice(3);
+  if (s2.endsWith("```")) s2 = s2.slice(0, -3);
+  return s2.trim();
+}
+
 // src/agent/runner.ts
 async function runAgent(input) {
   const budget = new Budget({
@@ -48189,23 +48564,24 @@ async function runAgent(input) {
     maxInputTokens: input.maxInputTokens,
     maxOutputTokens: input.maxOutputTokens
   });
-  const tools = buildToolDefinitions(input.deps);
+  const client = new sdk_default({ apiKey: input.apiKey });
+  const workerConfig = input.deps.config.experimental.worker_delegation;
+  const worker = workerConfig.enabled ? new WorkerClient(client, budget, workerConfig.worker_model) : void 0;
+  const fullDeps = { ...input.deps, ...worker !== void 0 ? { worker } : {} };
+  const tools = buildToolDefinitions(fullDeps);
   const anthropicTools = tools.map((t2, i2) => ({
     name: t2.name,
     description: t2.description,
     input_schema: t2.input_schema,
     ...i2 === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}
   }));
-  await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
-  const client = new sdk_default({ apiKey: input.apiKey });
+  await logger.info(
+    `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` + (worker !== void 0 ? `, worker=${workerConfig.worker_model}` : "")
+  );
   const messages = [
     { role: "user", content: input.userPrompt }
   ];
   let turns = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadTokens = 0;
-  let cacheCreationTokens = 0;
   let ended = "error";
   let lastError;
   try {
@@ -48236,15 +48612,8 @@ async function runAgent(input) {
         },
         input.abortController ? { signal: input.abortController.signal } : void 0
       );
-      inputTokens += response.usage.input_tokens;
-      outputTokens += response.usage.output_tokens;
-      cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
-      cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
       try {
-        budget.addUsage(
-          billableInputTokensForBudget(response.usage),
-          response.usage.output_tokens
-        );
+        budget.addUsage(input.model, response.usage);
       } catch (err) {
         lastError = err.message;
         ended = "budget_exceeded";
@@ -48317,37 +48686,43 @@ async function runAgent(input) {
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
-  const rawPricing = pricingForModel(input.model);
-  if (rawPricing === void 0) {
-    await logger.warn(
-      `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
-    );
+  const perModelCost = budget.snapshotByModel().map(({ model, usage }) => ({
+    model,
+    costUsd: costFromUsage(model, usage),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens
+  }));
+  for (const m2 of perModelCost) {
+    if (pricingForModel(m2.model) === void 0) {
+      await logger.warn(
+        `No pricing entry for model "${m2.model}" \u2014 cost computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
+      );
+    }
   }
-  const pricing = rawPricing ?? pricingForModel("claude-sonnet-4-6") ?? {
-    input: 3,
-    output: 15,
-    cache_creation: 3.75,
-    cache_read: 0.3
-  };
-  const inputCost = inputTokens * pricing.input / 1e6;
-  const outputCost = outputTokens * pricing.output / 1e6;
-  const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
-  const costUsd = inputCost + outputCost + cacheCost;
+  const costUsd = perModelCost.reduce((sum, m2) => sum + m2.costUsd, 0);
+  const totals = budget.snapshot();
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`
+    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`
   );
+  if (perModelCost.length > 1) {
+    for (const m2 of perModelCost) {
+      await logger.info(
+        `  ${m2.model}: $${m2.costUsd.toFixed(4)} (in=${m2.inputTokens}, cache_r=${m2.cacheReadTokens}, cache_c=${m2.cacheCreationTokens}, out=${m2.outputTokens})`
+      );
+    }
+  }
   if (lastError) await logger.warn(`Last error: ${lastError}`);
   return {
     ended,
     ...lastError !== void 0 ? { error: lastError } : {},
     turns,
-    inputTokens,
-    outputTokens,
-    costUsd
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    costUsd,
+    perModelCost
   };
-}
-function billableInputTokensForBudget(usage) {
-  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
 }
 function markLatestMessageForCaching(messages) {
   const userIndices = [];
@@ -48388,7 +48763,8 @@ function buildToolDefinitions(deps) {
     makeReadRepoContextFileTool(deps),
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
-    makeSkipFileTool(deps)
+    makeSkipFileTool(deps),
+    ...deps.worker !== void 0 ? [makeWorkerCheckUsageClaimTool(deps)] : []
   ];
   return mcpTools.map((mcp) => {
     const zodSchema = external_exports.object(mcp.inputSchema);
@@ -48420,6 +48796,9 @@ function buildSystemPrompt(input) {
   const sections = [BASE_PROMPT];
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
+  if (input.config.experimental.worker_delegation.enabled) {
+    sections.push(WORKER_DELEGATION_SECTION);
+  }
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push("### Repo-specific instructions");
     sections.push(input.config.prompt.additions.trim());
@@ -48432,6 +48811,25 @@ function buildSystemPrompt(input) {
   if (context) sections.push(context);
   return sections.join("\n\n");
 }
+var WORKER_DELEGATION_SECTION = `# Delegation: worker_check_usage_claim
+
+You have an additional tool, \`worker_check_usage_claim\`, that delegates verification work to a cheaper, faster model. Use it during phase 5 (verify) when you want to confirm a usage claim \u2014 "is X unused?", "does Y have one caller?", "does this break the pattern in Z?" \u2014 instead of running the grep + reads yourself.
+
+The worker returns a structured JSON verdict: \`{ verdict, call_sites, confidence, evidence, files_searched }\`. Treat it as a HINT, not as evidence.
+
+**Verification discipline (load-bearing):**
+- For findings with severity \`critical\` or \`important\`: you MUST call \`read_file_at_ref\` on the target line range yourself before \`post_inline_comment\`. The validator rejects critical/important posts on lines you haven't read in this run. Worker output does NOT count as a read.
+- For findings with severity \`minor\` or \`nit\`: worker output alone is acceptable evidence.
+
+**When to use the worker:**
+- You want to spot-check whether a removed helper has remaining callers.
+- You want to check whether a new function follows or breaks an existing pattern in the repo.
+- You want a fast triage of "is this symbol used anywhere meaningful?" before deciding to investigate further.
+
+**When NOT to use the worker:**
+- The grep can be done in a single \`grep_repo_at_ref\` call you'd inspect yourself anyway.
+- You already have a strong hypothesis and just need to read 20-50 lines around the target line \u2014 call \`read_file_at_ref\` directly.
+- You're past phase 5 and ready to post. Don't delegate at the last moment.`;
 var BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal
@@ -48641,6 +49039,12 @@ var DEFAULT_CONFIG = {
     },
     cache: { enabled: true },
     persistence: { enabled: false }
+  },
+  experimental: {
+    worker_delegation: {
+      enabled: false,
+      worker_model: "claude-haiku-4-5"
+    }
   }
 };
 
@@ -48662,6 +49066,12 @@ var securitySchema = external_exports.object({
   }),
   cache: external_exports.object({ enabled: external_exports.boolean() }),
   persistence: external_exports.object({ enabled: external_exports.boolean() })
+});
+var experimentalSchema = external_exports.object({
+  worker_delegation: external_exports.object({
+    enabled: external_exports.boolean(),
+    worker_model: external_exports.string().min(1)
+  })
 });
 var configSchema = external_exports.object({
   model: external_exports.string().min(1),
@@ -48699,7 +49109,8 @@ var configSchema = external_exports.object({
     max_input_tokens: external_exports.number().int().positive(),
     max_output_tokens: external_exports.number().int().positive()
   }),
-  security: securitySchema
+  security: securitySchema,
+  experimental: experimentalSchema
 }).strict();
 var partialConfigSchema = configSchema.deepPartial();
 
@@ -55016,7 +55427,8 @@ async function runOrchestrator(input) {
       fileReader,
       aggregator,
       config,
-      workspaceDir: input.workspace_dir
+      workspaceDir: input.workspace_dir,
+      runContext: createRunContext()
     },
     systemPrompt,
     userPrompt,

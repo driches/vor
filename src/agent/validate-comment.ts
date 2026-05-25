@@ -19,6 +19,7 @@ import type {
   Side,
 } from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
+import { hasReadRange, type RunContext } from './run-context.js';
 
 export interface PostInlineCommentInput {
   severity: Severity;
@@ -42,6 +43,14 @@ export interface ValidationContext {
   severityFloor: Severity;
   /** Hard cap on title.length + why_it_matters.length. */
   maxBodyChars: number;
+  /**
+   * Per-run state tracking which file-line ranges the agent has actually
+   * read via `read_file_at_ref`. Used to enforce "Sonnet must read the
+   * bytes" before posting a critical/important finding — the verification
+   * discipline that lets us trust workers for exploration without trusting
+   * them for final judgment.
+   */
+  runContext?: RunContext;
 }
 
 export type ValidationResult =
@@ -155,6 +164,29 @@ export function validateInlineComment(
       ok: false,
       reason: 'duplicate of an already-posted comment',
       hint: `You already commented on '${input.file_path}':${input.line} with this title.`,
+    };
+  }
+
+  // 10. Read-before-post: for severity ≥ Important, the agent must have
+  //     called read_file_at_ref on the target line at HEAD this run. Worker
+  //     output does NOT count — the model posting the finding must look at
+  //     the bytes itself. Only enforced when a runContext is supplied;
+  //     legacy callers (tests, dry-run code paths) that omit runContext are
+  //     unaffected.
+  if (
+    ctx.runContext !== undefined &&
+    (input.severity === 'critical' || input.severity === 'important') &&
+    !hasReadRange(ctx.runContext, input.file_path, input.line)
+  ) {
+    const win = 10;
+    const start = Math.max(1, input.line - win);
+    const end = input.line + win;
+    return {
+      ok: false,
+      reason: `you have not called read_file_at_ref on '${input.file_path}':${input.line} this run`,
+      hint:
+        `Before posting a ${input.severity} finding you must read the target lines ` +
+        `yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${start}, end_line: ${end} }) and try again.`,
     };
   }
 

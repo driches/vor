@@ -7,6 +7,7 @@ import type { FileReader } from '../github/file-reader.js';
 import type { PRContext, PRMetadata } from '../github/pr-context.js';
 import { ReviewAggregator } from '../output/aggregator.js';
 import type { ChangedFile } from '../types.js';
+import { createRunContext } from '../agent/run-context.js';
 import type { ToolDeps } from './types.js';
 
 export interface FakeDepsInput {
@@ -62,6 +63,7 @@ export function buildFakeDeps(input: FakeDepsInput = {}): ToolDeps {
     aggregator: new ReviewAggregator(),
     config,
     workspaceDir: input.workspaceDir ?? process.cwd(),
+    runContext: createRunContext(),
   };
 }
 

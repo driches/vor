@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChangedFile, PostedComment } from '../types.js';
+import { createRunContext, recordHeadRead } from './run-context.js';
 import {
   nearestPath,
   validateInlineComment,
@@ -199,5 +200,65 @@ describe('nearestPath', () => {
 
   it('returns exact match if present', () => {
     expect(nearestPath('foo.ts', ['foo.ts', 'bar.ts'])).toBe('foo.ts');
+  });
+});
+
+describe('validateInlineComment — read-before-post (worker-delegation discipline)', () => {
+  it('rejects a critical comment when target line has not been read in this run', () => {
+    const ctx = makeCtx({ runContext: createRunContext() });
+    const r = validateInlineComment(
+      makeInput({ severity: 'critical', suggestion: 'fixed code' }),
+      ctx,
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toContain('have not called read_file_at_ref');
+    expect(r.hint).toContain('read_file_at_ref');
+    expect(r.hint).toContain("'src/foo.ts'");
+  });
+
+  it('rejects an important comment when target line has not been read', () => {
+    const ctx = makeCtx({ runContext: createRunContext() });
+    const r = validateInlineComment(
+      makeInput({ severity: 'important', suggestion: 'fixed code' }),
+      ctx,
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toContain('have not called read_file_at_ref');
+  });
+
+  it('accepts a critical comment when target line falls inside a recorded read range', () => {
+    const runContext = createRunContext();
+    recordHeadRead(runContext, 'src/foo.ts', 5, 15);
+    const ctx = makeCtx({ runContext });
+    const r = validateInlineComment(
+      makeInput({ severity: 'critical', line: 11, suggestion: 'fixed' }),
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts minor and nit severities without a read (workers fine for low-stakes findings)', () => {
+    const ctx = makeCtx({ runContext: createRunContext(), severityFloor: 'nit' });
+    expect(
+      validateInlineComment(makeInput({ severity: 'minor' }), ctx).ok,
+    ).toBe(true);
+    expect(
+      validateInlineComment(makeInput({ severity: 'nit' }), ctx).ok,
+    ).toBe(true);
+  });
+
+  it('skips the check entirely when runContext is omitted (back-compat for callers that have not opted in)', () => {
+    // Legacy callers that don't pass runContext (because the worker
+    // delegation flag is off) should see v0.2.x validator behavior — no
+    // mandatory read-before-post.
+    const ctx = makeCtx();
+    delete (ctx as { runContext?: unknown }).runContext;
+    const r = validateInlineComment(
+      makeInput({ severity: 'critical', suggestion: 'fixed' }),
+      ctx,
+    );
+    expect(r.ok).toBe(true);
   });
 });

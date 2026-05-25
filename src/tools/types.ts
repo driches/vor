@@ -4,6 +4,8 @@
 import type { Octokit } from '@octokit/rest';
 import type { FileReader } from '../github/file-reader.js';
 import type { PRContext } from '../github/pr-context.js';
+import type { RunContext } from '../agent/run-context.js';
+import type { WorkerClient } from '../agent/worker.js';
 import type { ReviewAggregator } from '../output/aggregator.js';
 import type { ReviewConfig } from '../config/types.js';
 
@@ -18,6 +20,17 @@ export interface ToolDeps {
   config: ReviewConfig;
   /** Local checkout root (GITHUB_WORKSPACE in CI). Used for grep_repo_at_ref. */
   workspaceDir: string;
+  /**
+   * Per-run mutable state (read ranges for validator enforcement, etc.).
+   * Created fresh in runAgent per invocation; tool handlers may mutate it.
+   */
+  runContext: RunContext;
+  /**
+   * Optional Haiku worker client. Present only when
+   * `experimental.worker_delegation.enabled` is true; tool factories that
+   * need it should fail fast when it's missing.
+   */
+  worker?: WorkerClient;
 }
 
 /** Helper: build the text-content shape MCP tools return. */

@@ -46,6 +46,7 @@ interface Args {
   filter?: RegExp;
   modelOverride?: string;
   maxTurnsOverride?: number;
+  workerDelegation?: boolean;
 }
 
 async function main(): Promise<void> {
@@ -86,6 +87,9 @@ async function main(): Promise<void> {
 
     if (args.modelOverride) deps.config.model = args.modelOverride;
     if (args.maxTurnsOverride) deps.config.max_turns = args.maxTurnsOverride;
+    if (args.workerDelegation === true) {
+      deps.config.experimental.worker_delegation.enabled = true;
+    }
     modelName = deps.config.model;
 
     const contextFiles = await loadContextFilesForCase(deps, deps.config.context.include);
@@ -144,6 +148,10 @@ async function main(): Promise<void> {
           input_tokens: agentResult.inputTokens,
           output_tokens: agentResult.outputTokens,
           cost_usd: agentResult.costUsd,
+          // v0.3.0+: per-model breakdown for Sonnet/Haiku split when worker
+          // delegation is enabled. Single-model runs still write this field
+          // with one entry so downstream tooling can rely on it existing.
+          per_model_cost: agentResult.perModelCost,
           draft: deps.aggregator.snapshot(),
           kept_comments: filtered.kept,
           dropped_comments: filtered.dropped,
@@ -159,6 +167,11 @@ async function main(): Promise<void> {
       `  → ${filtered.kept.length} kept comment(s), ${filtered.dropped} dropped, ` +
         `ended=${agentResult.ended}, cost=$${agentResult.costUsd.toFixed(4)}`,
     );
+    if (agentResult.perModelCost.length > 1) {
+      for (const m of agentResult.perModelCost) {
+        log(`    ${m.model}: $${m.costUsd.toFixed(4)}`);
+      }
+    }
 
     // Load Codex normalized findings.
     const codexNormPath = resolve(caseDir, 'codex/normalized.json');
@@ -209,6 +222,7 @@ function parseArgs(argv: readonly string[]): Args {
     else if (a === '--filter') args.filter = new RegExp(argv[++i] ?? '');
     else if (a === '--model') args.modelOverride = argv[++i];
     else if (a === '--max-turns') args.maxTurnsOverride = Number.parseInt(argv[++i] ?? '0', 10);
+    else if (a === '--worker-delegation') args.workerDelegation = true;
     else if (a === '--help' || a === '-h') {
       console.log(USAGE);
       process.exit(0);

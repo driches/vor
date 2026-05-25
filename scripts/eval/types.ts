@@ -57,6 +57,20 @@ export interface RunRecord {
     turns: number;
     wall_ms: number;
     ended_reason: string;
+    /**
+     * Cost split by model. v0.3.0+ records per-model breakdown so eval
+     * reports can show the Sonnet/Haiku ratio when worker delegation is
+     * enabled. Sum of `costUsd` here equals `cost_usd` above (modulo float).
+     * Empty array on legacy runs that predate the field.
+     */
+    per_model_cost?: Array<{
+      model: string;
+      cost_usd: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_creation_input_tokens: number;
+      cache_read_input_tokens: number;
+    }>;
   };
   findings: PostedComment[];
 }

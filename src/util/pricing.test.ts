@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_PRICING, pricingForModel } from './pricing.js';
+import { costFromUsage, MODEL_PRICING, pricingForModel } from './pricing.js';
 
 describe('pricingForModel', () => {
   it('returns pricing for known Sonnet 4.6', () => {
@@ -55,5 +55,33 @@ describe('pricingForModel', () => {
       'claude-opus-4-7',
       'claude-sonnet-4-6',
     ]);
+  });
+});
+
+describe('costFromUsage', () => {
+  it('computes Sonnet cost using the table rates', () => {
+    const cost = costFromUsage('claude-sonnet-4-6', {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheCreationTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+    });
+    // 3 + 15 + 3.75 + 0.3 = 22.05
+    expect(cost).toBeCloseTo(22.05, 4);
+  });
+
+  it('computes Haiku cost at 1/3 the Sonnet input rate', () => {
+    const cost = costFromUsage('claude-haiku-4-5', { inputTokens: 1_000_000 });
+    expect(cost).toBeCloseTo(1, 4);
+  });
+
+  it('treats missing usage fields as zero', () => {
+    expect(costFromUsage('claude-sonnet-4-6', {})).toBe(0);
+    expect(costFromUsage('claude-sonnet-4-6', { inputTokens: 100 })).toBeGreaterThan(0);
+  });
+
+  it('falls back to Sonnet rates for unknown model (no NaN cost)', () => {
+    const cost = costFromUsage('claude-imaginary-99', { inputTokens: 1_000_000 });
+    expect(cost).toBeCloseTo(3, 4);
   });
 });

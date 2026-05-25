@@ -1,5 +1,6 @@
 import { tool } from './tool-helper.js';
 import { z } from 'zod';
+import { recordHeadRead } from '../agent/run-context.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const MAX_LINES_PER_CALL = 500;
@@ -49,6 +50,14 @@ export function makeReadFileAtRefTool(deps: ToolDeps) {
             hint: 'Check list_changed_files for the exact paths in this PR.',
           });
         }
+        if (args.ref === 'head') {
+          // Use the actual returned range (the reader may clip to file
+          // length). Falls back to the requested range if the reader didn't
+          // report one.
+          const range = (result as { returned_range?: [number, number] }).returned_range;
+          const [s, e] = range ?? [start, end];
+          recordHeadRead(deps.runContext, args.path, s, e);
+        }
         return jsonResult({
           ok: true,
           ...result,
@@ -75,11 +84,15 @@ export function makeReadFileAtRefTool(deps: ToolDeps) {
       const total = lines.length;
       const truncated = total > MAX_LINES_PER_CALL;
       const returned = truncated ? lines.slice(0, MAX_LINES_PER_CALL).join('\n') : content;
+      const returnedEnd = truncated ? MAX_LINES_PER_CALL : total;
+      if (args.ref === 'head') {
+        recordHeadRead(deps.runContext, args.path, 1, returnedEnd);
+      }
       return jsonResult({
         ok: true,
         content: returned,
         total_lines: total,
-        returned_range: [1, truncated ? MAX_LINES_PER_CALL : total],
+        returned_range: [1, returnedEnd],
         truncated,
         ref: args.ref,
         ref_sha: sha,
