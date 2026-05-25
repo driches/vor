@@ -47464,6 +47464,20 @@ var logger = {
   }
 };
 
+// src/util/pricing.ts
+var MODEL_PRICING = {
+  "claude-sonnet-4-6": { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  // Opus 4-7 and 4-1 share Opus-tier pricing today. Keep both keys so legacy
+  // configs still resolve to real pricing instead of falling through to the
+  // sonnet fallback.
+  "claude-opus-4-7": { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
+  "claude-opus-4-1": { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
+  "claude-haiku-4-5": { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 }
+};
+function pricingForModel(model) {
+  return MODEL_PRICING[model];
+}
+
 // src/tools/tool-helper.ts
 function tool(name, description, inputSchema, handler2) {
   return { name, description, inputSchema, handler: handler2 };
@@ -48290,9 +48304,15 @@ async function runAgent(input) {
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
-  const inputCost = inputTokens * 3 / 1e6;
-  const outputCost = outputTokens * 15 / 1e6;
-  const cacheCost = cacheCreationTokens * 3.75 / 1e6 + cacheReadTokens * 0.3 / 1e6;
+  const pricing = pricingForModel(input.model) ?? MODEL_PRICING["claude-sonnet-4-6"];
+  if (pricingForModel(input.model) === void 0) {
+    await logger.warn(
+      `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
+    );
+  }
+  const inputCost = inputTokens * pricing.input / 1e6;
+  const outputCost = outputTokens * pricing.output / 1e6;
+  const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
   const costUsd = inputCost + outputCost + cacheCost;
   await logger.info(
     `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`
@@ -48308,22 +48328,29 @@ async function runAgent(input) {
   };
 }
 function markLatestMessageForCaching(messages) {
-  for (const msg of messages) {
-    if (!Array.isArray(msg.content)) continue;
-    for (const block of msg.content) {
+  const userIndices = [];
+  for (let i2 = 0; i2 < messages.length; i2++) {
+    const msg = messages[i2];
+    if (msg.role === "user" && Array.isArray(msg.content)) userIndices.push(i2);
+  }
+  if (userIndices.length === 0) return;
+  const keep = new Set(userIndices.slice(-2));
+  for (const i2 of userIndices) {
+    if (keep.has(i2)) continue;
+    const content = messages[i2].content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
       if (block !== null && typeof block === "object" && "cache_control" in block) {
         delete block.cache_control;
       }
     }
   }
-  for (let i2 = messages.length - 1; i2 >= 0; i2--) {
-    const msg = messages[i2];
-    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
-    const lastBlock = msg.content[msg.content.length - 1];
-    if (lastBlock === void 0 || typeof lastBlock !== "object" || lastBlock === null) continue;
-    lastBlock.cache_control = { type: "ephemeral" };
-    return;
-  }
+  const latestIdx = userIndices[userIndices.length - 1];
+  const latestContent = messages[latestIdx].content;
+  if (!Array.isArray(latestContent) || latestContent.length === 0) return;
+  const lastBlock = latestContent[latestContent.length - 1];
+  if (lastBlock === void 0 || typeof lastBlock !== "object" || lastBlock === null) return;
+  lastBlock.cache_control = { type: "ephemeral" };
 }
 function buildToolDefinitions(deps) {
   const mcpTools = [
@@ -48526,7 +48553,7 @@ var import_yaml = __toESM(require_dist(), 1);
 // src/config/defaults.ts
 var DEFAULT_CONFIG = {
   model: "claude-haiku-4-5",
-  max_turns: 15,
+  max_turns: 40,
   exclude: {
     paths: [
       "**/*.lock",

@@ -7,7 +7,7 @@ import type { ReviewConfig } from './types.js';
  */
 export const DEFAULT_CONFIG: ReviewConfig = {
   model: 'claude-haiku-4-5',
-  max_turns: 15,
+  max_turns: 40,
 
   exclude: {
     paths: [

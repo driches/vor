@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
+import { pricingForModel, MODEL_PRICING } from '../util/pricing.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
 import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
 import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
@@ -218,10 +219,21 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  // Rough cost calculation (Sonnet 4.6 pricing as of 2026-05: $3/M input, $15/M output)
-  const inputCost = (inputTokens * 3) / 1_000_000;
-  const outputCost = (outputTokens * 15) / 1_000_000;
-  const cacheCost = (cacheCreationTokens * 3.75) / 1_000_000 + (cacheReadTokens * 0.3) / 1_000_000;
+  // Compute cost using the active model's pricing. If the model id isn't in
+  // our table (operator override to an experimental model), warn and fall
+  // back to Sonnet rates so cost_usd stays populated — we can't refuse here
+  // because the API spend has already happened.
+  const pricing = pricingForModel(input.model) ?? MODEL_PRICING['claude-sonnet-4-6']!;
+  if (pricingForModel(input.model) === undefined) {
+    await logger.warn(
+      `No pricing entry for model "${input.model}" — cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`,
+    );
+  }
+  const inputCost = (inputTokens * pricing.input) / 1_000_000;
+  const outputCost = (outputTokens * pricing.output) / 1_000_000;
+  const cacheCost =
+    (cacheCreationTokens * pricing.cache_creation) / 1_000_000 +
+    (cacheReadTokens * pricing.cache_read) / 1_000_000;
   const costUsd = inputCost + outputCost + cacheCost;
 
   await logger.info(
@@ -240,34 +252,49 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
 }
 
 /**
- * Slide a single ephemeral cache_control breakpoint onto the last content
- * block of the most recent user message in `messages`. Strips any existing
- * cache_control from prior message blocks first so we only ever spend one of
- * the API's 4 cache_control breakpoints on the message stream.
+ * Maintain ephemeral cache_control breakpoints on the two most recent user
+ * messages and strip any older ones. Two breakpoints (instead of one) keep
+ * a fallback cache anchor available for the prefix from the previous turn:
+ * Anthropic's cache lookup backtracks a bounded number of blocks from each
+ * breakpoint, so a high-fanout turn (e.g. many parallel tool calls) could
+ * otherwise push the previous cache boundary out of range when we move the
+ * single breakpoint to the new latest message.
  *
- * Why this matters: each turn re-sends the entire prior conversation
+ * Two message breakpoints + the system breakpoint + the last-tool breakpoint
+ * = 4 total, exactly at the API's per-request limit.
+ *
+ * Why we cache at all: each turn re-sends the entire prior conversation
  * (assistant turns + tool_results, which can include 100KB diffs and 500-line
- * file reads). Without a moving breakpoint, every turn re-bills that growing
- * prefix at the full $3/M input rate. With it, the prefix reads from cache
- * at $0.30/M and only the new turn's content is billed at full rate.
+ * file reads). Without breakpoints, every turn re-bills that growing prefix
+ * at the full input rate. With them, the prefix reads from cache at the
+ * cache_read rate and only the new turn's content is billed at full rate.
  */
 function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
-  for (const msg of messages) {
-    if (!Array.isArray(msg.content)) continue;
-    for (const block of msg.content) {
+  const userIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role === 'user' && Array.isArray(msg.content)) userIndices.push(i);
+  }
+  if (userIndices.length === 0) return;
+
+  const keep = new Set(userIndices.slice(-2));
+  for (const i of userIndices) {
+    if (keep.has(i)) continue;
+    const content = messages[i]!.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
       if (block !== null && typeof block === 'object' && 'cache_control' in block) {
         delete (block as { cache_control?: unknown }).cache_control;
       }
     }
   }
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]!;
-    if (msg.role !== 'user' || !Array.isArray(msg.content)) continue;
-    const lastBlock = msg.content[msg.content.length - 1];
-    if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) continue;
-    (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
-    return;
-  }
+
+  const latestIdx = userIndices[userIndices.length - 1]!;
+  const latestContent = messages[latestIdx]!.content;
+  if (!Array.isArray(latestContent) || latestContent.length === 0) return;
+  const lastBlock = latestContent[latestContent.length - 1];
+  if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) return;
+  (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
 }
 
 /**

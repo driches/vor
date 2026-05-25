@@ -23,6 +23,7 @@ import {
   type Confidence,
   CATEGORIES,
 } from '../../src/types.js';
+import { MODEL_PRICING } from '../../src/util/pricing.js';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
   'critical',
@@ -32,23 +33,8 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
 ]);
 const VALID_CATEGORIES: ReadonlySet<Category> = new Set(CATEGORIES);
 
-// Per-million-token pricing as of 2026-05. Source: Anthropic pricing page.
-// Used to compute eval-harness cost from the synthetic 100/50 in/out tokens-per-turn
-// recorded by the mocked SDK. The orchestrator's own cost_usd hardcodes Sonnet pricing
-// (see src/agent/runner.ts), so we can't reuse it for cross-model comparison.
-const MODEL_PRICING: Record<
-  string,
-  { input: number; output: number; cache_creation: number; cache_read: number }
-> = {
-  'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
-  // Opus 4-7 and 4-1 share Opus-tier pricing today. Keep both keys so
-  // configs/pipeline/opus-only.yml (4-7) and any legacy 4-1 configs both
-  // resolve to real pricing instead of falling through to the synthetic
-  // flat 0.01/turn estimate. See PR #10 comment 3294995644.
-  'claude-opus-4-7': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
-  'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
-  'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
-};
+// MODEL_PRICING lives in src/util/pricing.ts so the production runner and
+// this test-only harness share one source of truth. See PR #13.
 
 function computeCostUsd(cost: AdapterState['costAccum'], model: string): number {
   const pricing = MODEL_PRICING[model];

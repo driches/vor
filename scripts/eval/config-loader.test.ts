@@ -42,7 +42,7 @@ describe('loadPipelineConfig', () => {
     writeFileSync(path, 'model: claude-haiku-4-5');
     const cfg = loadPipelineConfig(path);
     expect(cfg.model).toBe('claude-haiku-4-5');
-    expect(cfg.max_turns).toBe(15); // from DEFAULT_CONFIG
+    expect(cfg.max_turns).toBe(40); // from DEFAULT_CONFIG
     expect(cfg.severity.floor).toBe('minor');
     rmSync(dir, { recursive: true });
   });

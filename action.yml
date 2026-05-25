@@ -19,9 +19,9 @@ inputs:
     required: false
     default: 'claude-haiku-4-5'
   max_turns:
-    description: 'Maximum agent turns per review. Larger PRs may need more; bump in `.code-review.yml` if reviews end with `ended: max_turns`.'
+    description: 'Maximum agent turns per review. Larger PRs may need more.'
     required: false
-    default: '15'
+    default: '40'
   config_path:
     description: 'Path to .code-review.yml in the consumer repo.'
     required: false
