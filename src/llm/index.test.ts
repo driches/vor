@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createProvider, inferProviderFromModel } from './index.js';
+import type { ProviderId } from './types.js';
 
 describe('inferProviderFromModel', () => {
   it('routes claude-* model ids to Anthropic', () => {
@@ -53,5 +54,18 @@ describe('createProvider', () => {
       providerHint: 'openai',
     });
     expect(provider.id).toBe('openai');
+  });
+
+  it('throws a clear error when a value outside the ProviderId union sneaks through at runtime', () => {
+    // Simulates an unvalidated env var (e.g. INPUT_PROVIDER=gemini) bypassing
+    // the TypeScript checks. The default branch in the switch must throw
+    // rather than fall through and return undefined.
+    expect(() =>
+      createProvider({
+        modelId: 'claude-test',
+        apiKey: 'sk-test',
+        providerHint: 'gemini' as unknown as ProviderId,
+      }),
+    ).toThrow(/Unknown provider "gemini"/);
   });
 });

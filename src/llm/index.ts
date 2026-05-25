@@ -49,5 +49,15 @@ export function createProvider(input: CreateProviderInput): LLMProvider {
       return new AnthropicProvider(input.apiKey);
     case 'openai':
       return new OpenAIProvider(input.apiKey);
+    default: {
+      // Exhaustiveness guard: TypeScript will flag this assignment if a new
+      // ProviderId is added without a corresponding case, and at runtime it
+      // throws cleanly for any string that bypasses the type system (e.g. a
+      // typo'd INPUT_PROVIDER env var that wasn't validated upstream).
+      const _exhaustive: never = id;
+      throw new Error(
+        `Unknown provider "${String(_exhaustive)}". Valid: anthropic | openai.`,
+      );
+    }
   }
 }

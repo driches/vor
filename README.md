@@ -86,8 +86,8 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 |---|---|
 | `review_id` | GitHub ID of the review that was created. |
 | `comment_count` | Number of inline comments posted. |
-| `ended` | `summary_posted` / `max_turns` / `budget_exceeded` / `aborted` / `error`. |
-| `cost_usd` | Total Anthropic API cost in USD. |
+| `ended` | `summary_posted` / `max_turns` / `budget_exceeded` / `aborted` / `error` / `skipped_draft` / `skipped_no_key_anthropic` / `skipped_no_key_openai`. |
+| `cost_usd` | Total LLM API cost in USD. |
 
 ## Per-repo config (`.code-review.yml`)
 

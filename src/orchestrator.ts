@@ -90,17 +90,21 @@ export interface OrchestratorOutput {
 }
 
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
-  // registerSecret + logger.setSecret are both no-ops on empty strings
-  // (registerSecret checks length >= 8; setSecret is harmless on ''), so we
-  // can register both keys unconditionally. The OpenAI key is empty in
-  // Anthropic-only setups (and vice versa) — registering the empty string
-  // is a noop, not a leak.
-  registerSecret(input.anthropic_api_key);
-  registerSecret(input.openai_api_key);
+  // Skip empty keys to avoid emitting empty `::add-mask::` lines in CI.
+  // `registerSecret` self-guards (length >= 8) but `logger.setSecret` does not
+  // — passing an empty string produces a visible `::add-mask::` workflow
+  // command in the GitHub Actions log. The OpenAI key is empty in
+  // Anthropic-only setups (and vice versa), so we gate both calls per key.
   registerSecret(input.github_token);
-  await logger.setSecret(input.anthropic_api_key);
-  await logger.setSecret(input.openai_api_key);
   await logger.setSecret(input.github_token);
+  if (input.anthropic_api_key) {
+    registerSecret(input.anthropic_api_key);
+    await logger.setSecret(input.anthropic_api_key);
+  }
+  if (input.openai_api_key) {
+    registerSecret(input.openai_api_key);
+    await logger.setSecret(input.openai_api_key);
+  }
 
   await logger.info(
     `Starting code review for ${input.owner}/${input.repo}#${input.pull_number}` +
