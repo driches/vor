@@ -197,11 +197,17 @@ describe('evalRun', () => {
     ).rejects.toThrow(/no pricing entry.*claude-sonet-4-6/);
   });
 
-  it('prices both claude-opus-4-7 and claude-opus-4-1 at Opus-tier (not the fallback)', async () => {
+  it('prices both claude-opus-4-7 and claude-opus-4-1 at real Opus rates (not the fallback)', async () => {
     // Regression for PR #10 Codex P1 3294995644. The opus-only.yml pipeline
     // config uses claude-opus-4-7; if MODEL_PRICING is missing that key,
-    // costs fall through to the synthetic `turns * 0.01` fallback and
-    // every Opus run reports a flat fake cost.
+    // costs would fall through to the synthetic `turns * 0.01` fallback and
+    // every Opus run would report a flat fake cost.
+    //
+    // PR #13 update: Opus 4.7 was repriced to the new lower Opus tier
+    // ($5/$25), distinct from Opus 4.1's legacy higher tier ($15/$75). The
+    // test now asserts each at its respective real rate AND verifies the
+    // expected 4.7 < 4.1 ordering — both signals that distinguish real
+    // pricing from the synthetic fallback.
     const minimalCase: LoadedCase = {
       case_id: 'opus-pricing',
       files: [{ path: 'src/empty.ts', content: '// empty\n' }],
@@ -224,13 +230,15 @@ describe('evalRun', () => {
         { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
       ],
     });
-    // The fallback is exactly `turns * 0.01` = $0.01 for a 1-turn script.
-    // Real Opus pricing on 100 in + 50 out tokens is:
-    //   100 * 15 / 1e6 + 50 * 75 / 1e6 = 0.0015 + 0.00375 = $0.00525
-    // — well under $0.01. Asserting <$0.01 distinguishes Opus pricing from
-    // the fallback.
-    expect(opus47.cost.cost_usd).toBeLessThan(0.01);
-    expect(opus47.cost.cost_usd).toBe(opus41.cost.cost_usd);
+    // Real Opus pricing on the script's hardcoded 100 in + 50 out tokens:
+    //   4.7 (new tier):  100 *  5 / 1e6 + 50 * 25 / 1e6 = $0.00175
+    //   4.1 (legacy):    100 * 15 / 1e6 + 50 * 75 / 1e6 = $0.00525
+    // The synthetic fallback would be `turns * 0.01` = $0.01. Both real
+    // prices sit well below that.
+    expect(opus47.cost.cost_usd).toBeCloseTo(0.00175, 6);
+    expect(opus41.cost.cost_usd).toBeCloseTo(0.00525, 6);
+    expect(opus47.cost.cost_usd).toBeLessThan(opus41.cost.cost_usd);
+    expect(opus41.cost.cost_usd).toBeLessThan(0.01);
   });
 
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {

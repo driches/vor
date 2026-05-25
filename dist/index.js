@@ -47464,6 +47464,23 @@ var logger = {
   }
 };
 
+// src/util/pricing.ts
+var MODEL_PRICING = {
+  "claude-sonnet-4-6": { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  // Opus 4.5, 4.6, and 4.7 share the lower-tier Opus pricing that Anthropic
+  // introduced starting with 4.5. Opus 4.1 retains the original higher Opus
+  // tier and is kept here so legacy configs still resolve to real pricing
+  // instead of falling through to the Sonnet fallback.
+  "claude-opus-4-7": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
+  "claude-opus-4-6": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
+  "claude-opus-4-5": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
+  "claude-opus-4-1": { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
+  "claude-haiku-4-5": { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 }
+};
+function pricingForModel(model) {
+  return MODEL_PRICING[model];
+}
+
 // src/tools/tool-helper.ts
 function tool(name, description, inputSchema, handler2) {
   return { name, description, inputSchema, handler: handler2 };
@@ -48173,10 +48190,11 @@ async function runAgent(input) {
     maxOutputTokens: input.maxOutputTokens
   });
   const tools = buildToolDefinitions(input.deps);
-  const anthropicTools = tools.map((t2) => ({
+  const anthropicTools = tools.map((t2, i2) => ({
     name: t2.name,
     description: t2.description,
-    input_schema: t2.input_schema
+    input_schema: t2.input_schema,
+    ...i2 === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}
   }));
   await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
   const client = new sdk_default({ apiKey: input.apiKey });
@@ -48198,6 +48216,7 @@ async function runAgent(input) {
       }
       budget.startTurn();
       turns = budget.snapshot().turns;
+      markLatestMessageForCaching(messages);
       const response = await client.messages.create(
         {
           model: input.model,
@@ -48215,7 +48234,10 @@ async function runAgent(input) {
       cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
       cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
       try {
-        budget.addUsage(response.usage.input_tokens, response.usage.output_tokens);
+        budget.addUsage(
+          billableInputTokensForBudget(response.usage),
+          response.usage.output_tokens
+        );
       } catch (err) {
         lastError = err.message;
         ended = "budget_exceeded";
@@ -48288,9 +48310,21 @@ async function runAgent(input) {
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
-  const inputCost = inputTokens * 3 / 1e6;
-  const outputCost = outputTokens * 15 / 1e6;
-  const cacheCost = cacheCreationTokens * 3.75 / 1e6 + cacheReadTokens * 0.3 / 1e6;
+  const rawPricing = pricingForModel(input.model);
+  if (rawPricing === void 0) {
+    await logger.warn(
+      `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
+    );
+  }
+  const pricing = rawPricing ?? pricingForModel("claude-sonnet-4-6") ?? {
+    input: 3,
+    output: 15,
+    cache_creation: 3.75,
+    cache_read: 0.3
+  };
+  const inputCost = inputTokens * pricing.input / 1e6;
+  const outputCost = outputTokens * pricing.output / 1e6;
+  const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
   const costUsd = inputCost + outputCost + cacheCost;
   await logger.info(
     `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`
@@ -48304,6 +48338,38 @@ async function runAgent(input) {
     outputTokens,
     costUsd
   };
+}
+function billableInputTokensForBudget(usage) {
+  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
+}
+function markLatestMessageForCaching(messages) {
+  const userIndices = [];
+  for (let i2 = 0; i2 < messages.length; i2++) {
+    const msg = messages[i2];
+    if (msg.role === "user" && Array.isArray(msg.content)) userIndices.push(i2);
+  }
+  if (userIndices.length === 0) return;
+  const keep = new Set(userIndices.slice(-2));
+  for (const i2 of userIndices) {
+    if (keep.has(i2)) continue;
+    const content = messages[i2].content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block !== null && typeof block === "object" && "cache_control" in block) {
+        delete block.cache_control;
+      }
+    }
+  }
+  if (userIndices.length >= 2) {
+    markLastBlockForCaching(messages[userIndices[userIndices.length - 2]]);
+  }
+  markLastBlockForCaching(messages[userIndices[userIndices.length - 1]]);
+}
+function markLastBlockForCaching(message) {
+  if (!Array.isArray(message.content) || message.content.length === 0) return;
+  const lastBlock = message.content[message.content.length - 1];
+  if (lastBlock === void 0 || typeof lastBlock !== "object" || lastBlock === null) return;
+  lastBlock.cache_control = { type: "ephemeral" };
 }
 function buildToolDefinitions(deps) {
   const mcpTools = [
