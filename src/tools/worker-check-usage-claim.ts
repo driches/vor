@@ -21,6 +21,7 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { tool } from './tool-helper.js';
+import { BudgetError } from '../util/errors.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const GREP_RESULT_CAP = 30;
@@ -160,6 +161,12 @@ export function makeWorkerCheckUsageClaimTool(deps: ToolDeps) {
             'Worker output is a hint, not evidence. For critical/important findings, call read_file_at_ref on the target lines before posting.',
         });
       } catch (err) {
+        // BudgetError must escape so the runner can flip to
+        // 'budget_exceeded' and stop the loop. Catching it here would let
+        // Sonnet keep making (potentially also over-budget) calls until the
+        // turn cap fires. Other worker errors are recoverable — Sonnet
+        // should fall back to doing the work itself.
+        if (err instanceof BudgetError) throw err;
         return jsonResult({
           ok: false,
           error: `worker call failed: ${(err as Error).message}`,

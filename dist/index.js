@@ -47973,15 +47973,23 @@ function validateInlineComment(input, ctx) {
       hint: `You already commented on '${input.file_path}':${input.line} with this title.`
     };
   }
-  if (ctx.runContext !== void 0 && (input.severity === "critical" || input.severity === "important") && !hasReadRange(ctx.runContext, input.file_path, input.line)) {
-    const win = 10;
-    const start = Math.max(1, input.line - win);
-    const end = input.line + win;
-    return {
-      ok: false,
-      reason: `you have not called read_file_at_ref on '${input.file_path}':${input.line} this run`,
-      hint: `Before posting a ${input.severity} finding you must read the target lines yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${start}, end_line: ${end} }) and try again.`
-    };
+  if (ctx.runContext !== void 0 && (input.severity === "critical" || input.severity === "important")) {
+    const linesToCheck = [input.line];
+    if (input.start_line !== void 0) linesToCheck.unshift(input.start_line);
+    const unread = linesToCheck.find(
+      (line) => !hasReadRange(ctx.runContext, input.file_path, line)
+    );
+    if (unread !== void 0) {
+      const span = input.start_line !== void 0 ? `lines ${input.start_line}-${input.line}` : `line ${input.line}`;
+      const win = 10;
+      const hintStart = Math.max(1, (input.start_line ?? input.line) - win);
+      const hintEnd = input.line + win;
+      return {
+        ok: false,
+        reason: `you have not called read_file_at_ref on '${input.file_path}' covering ${span} this run (unread: line ${unread})`,
+        hint: `Before posting a ${input.severity} finding you must read the target ${span} yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${hintStart}, end_line: ${hintEnd} }) and try again.`
+      };
+    }
   }
   return { ok: true };
 }
@@ -48396,6 +48404,7 @@ function makeWorkerCheckUsageClaimTool(deps) {
           reminder: "Worker output is a hint, not evidence. For critical/important findings, call read_file_at_ref on the target lines before posting."
         });
       } catch (err) {
+        if (err instanceof BudgetError) throw err;
         return jsonResult({
           ok: false,
           error: `worker call failed: ${err.message}`,
@@ -48660,6 +48669,7 @@ async function runAgent(input) {
             content: result
           });
         } catch (err) {
+          if (err instanceof BudgetError) throw err;
           toolResults.push({
             type: "tool_result",
             tool_use_id: u2.id,

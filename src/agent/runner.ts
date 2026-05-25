@@ -215,6 +215,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
             content: result,
           });
         } catch (err) {
+          // BudgetError must escape this catch so the outer try (line ~235)
+          // can flip `ended` to 'budget_exceeded' and stop the loop.
+          // Swallowing it here would let the loop keep dispatching tools
+          // until max_turns trips — masking the cap and over-spending.
+          // Other tool errors are recoverable: surface them to the agent as
+          // is_error tool_results so it can self-correct.
+          if (err instanceof BudgetError) throw err;
           toolResults.push({
             type: 'tool_result',
             tool_use_id: u.id,

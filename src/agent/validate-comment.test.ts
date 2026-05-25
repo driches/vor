@@ -261,4 +261,41 @@ describe('validateInlineComment — read-before-post (worker-delegation discipli
     );
     expect(r.ok).toBe(true);
   });
+
+  it('rejects a multi-line critical comment when start_line is unread (even if line is read)', () => {
+    // File reviewable_lines is [[10,15], [25,30]]; record only the end-line
+    // range so start_line falls outside.
+    const runContext = createRunContext();
+    recordHeadRead(runContext, 'src/foo.ts', 28, 30);
+    const ctx = makeCtx({ runContext });
+    const r = validateInlineComment(
+      makeInput({
+        severity: 'critical',
+        start_line: 26,
+        line: 28,
+        suggestion: 'fixed',
+      }),
+      ctx,
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toContain('lines 26-28');
+    expect(r.reason).toContain('unread: line 26');
+  });
+
+  it('accepts a multi-line critical comment when the whole span has been read', () => {
+    const runContext = createRunContext();
+    recordHeadRead(runContext, 'src/foo.ts', 25, 30);
+    const ctx = makeCtx({ runContext });
+    const r = validateInlineComment(
+      makeInput({
+        severity: 'critical',
+        start_line: 26,
+        line: 28,
+        suggestion: 'fixed',
+      }),
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+  });
 });

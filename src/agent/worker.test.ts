@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { Budget } from '../util/budget.js';
+import { BudgetError } from '../util/errors.js';
 import { WorkerClient } from './worker.js';
 
 interface FakeAnthropic {
@@ -146,6 +147,46 @@ describe('WorkerClient', () => {
         responseSchema: schema,
       }),
     ).rejects.toThrow(/schema/);
+  });
+
+  it('propagates BudgetError instead of masking it (so the runner can flip to budget_exceeded)', async () => {
+    // Budget with a tiny cap that the mocked response will blow past.
+    const tightBudget = new Budget({
+      maxTurns: 10,
+      warnFraction: 0.8,
+      maxInputTokens: 50,
+      maxOutputTokens: 50,
+    });
+    const fakeClient: FakeAnthropic = {
+      messages: {
+        create: vi.fn(async () =>
+          mockResponse([{ text: '{"verdict": "confirmed", "confidence": "high"}' }]),
+        ),
+      },
+    };
+    const schema = z.object({
+      verdict: z.enum(['confirmed', 'refuted']),
+      confidence: z.enum(['high', 'medium', 'low']),
+    });
+    const worker = new WorkerClient(
+      fakeClient as unknown as Anthropic,
+      tightBudget,
+      'claude-haiku-4-5',
+    );
+
+    // Mocked response has input_tokens=100 (> cap of 50) → addUsage throws.
+    // WorkerClient.invoke must let that BudgetError escape; if it caught
+    // and turned it into a normal return, the runner's outer try couldn't
+    // trip the budget gate from worker-induced overruns.
+    await expect(
+      worker.invoke({
+        task: 'test',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        maxTokens: 1024,
+        responseSchema: schema,
+      }),
+    ).rejects.toBeInstanceOf(BudgetError);
   });
 
   it('records usage against the shared budget under the worker model id', async () => {

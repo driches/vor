@@ -172,22 +172,33 @@ export function validateInlineComment(
   //     output does NOT count — the model posting the finding must look at
   //     the bytes itself. Only enforced when a runContext is supplied;
   //     legacy callers (tests, dry-run code paths) that omit runContext are
-  //     unaffected.
+  //     unaffected. For multi-line comments we check BOTH endpoints — a
+  //     partial read of just the end line is not enough to verify a range
+  //     claim, otherwise the rule would let `start_line=10, line=200`
+  //     through after only reading line 200.
   if (
     ctx.runContext !== undefined &&
-    (input.severity === 'critical' || input.severity === 'important') &&
-    !hasReadRange(ctx.runContext, input.file_path, input.line)
+    (input.severity === 'critical' || input.severity === 'important')
   ) {
-    const win = 10;
-    const start = Math.max(1, input.line - win);
-    const end = input.line + win;
-    return {
-      ok: false,
-      reason: `you have not called read_file_at_ref on '${input.file_path}':${input.line} this run`,
-      hint:
-        `Before posting a ${input.severity} finding you must read the target lines ` +
-        `yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${start}, end_line: ${end} }) and try again.`,
-    };
+    const linesToCheck: number[] = [input.line];
+    if (input.start_line !== undefined) linesToCheck.unshift(input.start_line);
+    const unread = linesToCheck.find(
+      (line) => !hasReadRange(ctx.runContext!, input.file_path, line),
+    );
+    if (unread !== undefined) {
+      const span =
+        input.start_line !== undefined ? `lines ${input.start_line}-${input.line}` : `line ${input.line}`;
+      const win = 10;
+      const hintStart = Math.max(1, (input.start_line ?? input.line) - win);
+      const hintEnd = input.line + win;
+      return {
+        ok: false,
+        reason: `you have not called read_file_at_ref on '${input.file_path}' covering ${span} this run (unread: line ${unread})`,
+        hint:
+          `Before posting a ${input.severity} finding you must read the target ${span} ` +
+          `yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${hintStart}, end_line: ${hintEnd} }) and try again.`,
+      };
+    }
   }
 
   return { ok: true };
