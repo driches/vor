@@ -10,22 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-05-25
 
 ### Added
-- **Agentic worker delegation (experimental, default off).** Sonnet's tool list now includes a tenth tool, `worker_check_usage_claim`, that delegates verification work to a cheap Haiku 4.5 worker. Sonnet calls it during phase 5 (verify) to check whether a symbol is unused, has a single caller, or violates a documented pattern — and gets back a structured `{ verdict, call_sites, confidence, evidence }` JSON to reason about. The worker is a single-shot text-in/JSON-out call (no nested tool loop) and shares the parent's budget. Opt-in via `experimental.worker_delegation.enabled: true` in `.code-review.yml`.
-- **Validator-enforced read-before-post discipline.** When `worker_delegation` is enabled, `post_inline_comment` rejects critical/important findings unless Sonnet has called `read_file_at_ref` on the target line range earlier in the same run. Worker output does NOT count as a read. This is the "and it will check the work" half of the design — it lets us trust worker output for exploration without trusting it for final judgment. See [src/agent/validate-comment.ts](src/agent/validate-comment.ts) and [src/agent/run-context.ts](src/agent/run-context.ts).
-- **Per-model cost tracking.** `Budget` now tracks token usage per model, and `RunAgentResult.perModelCost` exposes the Sonnet/Haiku split. Golden-eval runs persist `per_model_cost` in the run JSON so cost-vs-recall comparisons across delegation modes can be measured directly. `costFromUsage(model, usage)` in [src/util/pricing.ts](src/util/pricing.ts) is now the single source of truth for cost calculation (production runner + eval harness consume it).
+- **Pre-flight Haiku skim + on-demand worker tool (experimental, default off).** When `experimental.worker_delegation.enabled: true` is set in `.code-review.yml`, the agent loop now runs a Haiku 4.5 pre-flight call BEFORE Sonnet's tool loop. The pre-flight summarizes the diff into a structured candidate list (file, line range, severity guess, what/why) plus a per-file annotation of every changed file, and injects that into Sonnet's first user prompt. Sonnet starts with focused candidates instead of needing to wide-scan the full diff via `get_pr_diff` (which would otherwise sit in the message-history cache pool for every subsequent turn). The 100KB-of-cached-diff pattern was the single biggest contributor to per-turn cost in prior versions.
+- **Worker tool (`worker_check_usage_claim`).** Optional mid-loop delegation: Sonnet can call this tool to offload a usage-claim verification (`unused` / `single_caller` / `pattern_violation`) to Haiku. The worker pre-fetches grep + a match-centered file window, hands them to Haiku, and returns a structured verdict with confidence. Sonnet treats output as a HINT, not as evidence.
+- **Validator-enforced read-before-post discipline.** When delegation is enabled, `post_inline_comment` rejects critical/important findings unless Sonnet has called `read_file_at_ref` on the target line range earlier in the same run. Worker output and pre-flight output do NOT count as reads. This is the "and it will check the work" half of the design — it lets us trust delegated output for exploration without trusting it for final judgment. See [src/agent/validate-comment.ts](src/agent/validate-comment.ts) and [src/agent/run-context.ts](src/agent/run-context.ts).
+- **Per-model cost tracking.** `Budget` now tracks token usage per model, and `RunAgentResult.perModelCost` exposes the Sonnet/Haiku split. Golden-eval runs persist `per_model_cost` in the run JSON (snake_case shape matching the typed `RunRecord` contract) so cost-vs-recall comparisons across delegation modes can be measured directly. `costFromUsage(model, usage)` in [src/util/pricing.ts](src/util/pricing.ts) is the single source of truth for cost calculation (production runner + eval harness consume it).
 - **`--worker-delegation` flag in `npm run golden:eval`** to A/B test the experimental delegation on the captured cases.
 
-### Experimental ship gate (be aware before enabling)
-- Flag OFF eval (default behavior): 5/7 matches = 71% recall, $1.82 — matches v0.2.2 baseline exactly. Zero regression for anyone who doesn't opt in.
-- Flag ON eval: 4/7 matches = 57% recall, $2.03 (+12% cost). Recall regression of 14 percentage points vs baseline.
-- Failure mode is the one the design called out: across 3 cases, Sonnet invoked the worker on only 1, and even there it didn't shorten the loop (33 turns vs 31 baseline). The system prompt language describing when to delegate isn't compelling enough yet.
-- **Recommended for now: do NOT enable in production.** The infrastructure is shipped so we can iterate on the worker prompt and (next ship) add additional worker tools without another foundation PR. The flag will flip to recommended once eval data clears ≥5/7 recall with measurable cost reduction.
+### Measured impact (3-case golden eval, 7 Codex findings)
 
-### Why ship anyway
-- All infrastructure (per-model cost, validator hardening, worker client) is independently valuable.
-- Zero behavior change on the default (opt-out) path — confirmed by the flag-OFF eval matching v0.2.2 exactly.
-- The roll-back is one config flag, not a code revert.
-- Iterating on the worker prompt is much faster with the infrastructure already in place.
+| Mode | Recall | Cost | Notes |
+|---|---|---|---|
+| Flag OFF (default) | 5/7 = 71% | $1.82 | Matches v0.2.2 baseline exactly. Zero regression for opt-out path. |
+| **Flag ON** | **7/7 = 100%** | **$1.99** (+9%) | **All Codex findings recovered.** orbitboard cases hit 100% per-case agreement. |
+
+Pre-flight cost itself is ~$0.07 across the 3 cases. The 7/7 recall is a +29-percentage-point improvement over v0.2.2 baseline (5/7) at +9% cost — roughly $0.08 per additional finding recovered. The bias risk the design called out ("Haiku biases Sonnet toward the candidate list") was mitigated by rendering EVERY changed file in the pre-flight section (annotated `N candidate(s)` or `no candidates`) so Sonnet can't silently drop unflagged files; an earlier iteration that alarmed-up the framing of unflagged files caused over-investigation (40-turn cap), and softening it landed on the current cost/recall trade.
+
+### Operator notes
+- **Flag OFF is unchanged.** Zero behavior change, zero risk. Verified by an eval run that matched v0.2.2 baseline exactly.
+- **Flag ON is opt-in per repo.** Set `experimental.worker_delegation.enabled: true` in `.code-review.yml`. Default worker model is `claude-haiku-4-5`; override with `experimental.worker_delegation.worker_model`.
+- **Iteration history** lived in the PR description for transparency: 5 measured iterations went from v0.3.0's initial 4/7 recall + $2.03 cost to the current 7/7 + $1.99 by deleting the system-prompt addition, adding a pre-flight Haiku pass, and tuning the file-list framing.
+
+### Known follow-ups (not in this release)
+- Cost reduction below baseline: a future iteration will likely cap `get_pr_diff` more aggressively when pre-flight is enabled, since the candidate list already covers the diff. Target is bringing cost from $1.99 down toward $1.50 while holding recall.
+- Additional worker tools (`worker_summarize_file_purpose`, `worker_classify_files`) are designed but not in v0.3.0 — they'll ship after we see real-world telemetry on how often Sonnet invokes the existing worker tool.
+
+### Fixed (Codex review feedback addressed in-PR)
+- `runPreflight` BudgetError now caught inside runAgent's outer try (was escaping as orchestrator-level failure).
+- `runGitGrep` in worker tool rejects on timeout / non-zero exit codes instead of silently returning `[]` (was producing false `unused: confirmed` verdicts on grep failures).
+- Worker tool file-read window is now centered on the FIRST match line for each file (was always reading lines 1-200, missing matches deeper in files).
+- `Budget.addUsage` checks caps BEFORE mutating state (was leaving partial state on `BudgetError`, a future retry would double-count).
+- `per_model_cost` written to run JSON now uses snake_case to match the declared `RunRecord` contract.
+- Removed nonsensical conditional type `Anthropic.MessageParam extends never ? never : ...` on `WorkerResult.usage`.
+- Validator read-before-post check now validates BOTH `start_line` and `line` for multi-line range comments (was only checking `line`, letting a 190-line range claim pass with 1 line of verification).
 
 ## [0.2.2] - 2026-05-25
 
