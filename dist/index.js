@@ -48552,7 +48552,7 @@ var import_yaml = __toESM(require_dist(), 1);
 
 // src/config/defaults.ts
 var DEFAULT_CONFIG = {
-  model: "claude-haiku-4-5",
+  model: "claude-sonnet-4-6",
   max_turns: 40,
   exclude: {
     paths: [

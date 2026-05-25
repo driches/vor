@@ -15,9 +15,9 @@ inputs:
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Claude model ID. Defaults to claude-haiku-4-5 (lowest cost). Override with claude-sonnet-4-6 or claude-opus-4-7 for higher capability.'
+    description: 'Claude model ID. Defaults to claude-sonnet-4-6. Override with claude-haiku-4-5 for lower cost (accept lower recall) or claude-opus-4-7 for higher capability.'
     required: false
-    default: 'claude-haiku-4-5'
+    default: 'claude-sonnet-4-6'
   max_turns:
     description: 'Maximum agent turns per review. Larger PRs may need more.'
     required: false

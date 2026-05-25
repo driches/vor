@@ -2,11 +2,12 @@ import type { ReviewConfig } from './types.js';
 
 /**
  * Defaults applied when no .code-review.yml is present.
- * Haiku 4.5 is the cost-default; consumers wanting Sonnet/Opus opt in via
+ * Sonnet 4.6 is the recall-default; consumers wanting cheaper review (with
+ * lower recall, validated via `npm run golden:eval`) opt into Haiku 4.5 via
  * `model:` in their `.code-review.yml`. COMMENT-only (no auto-block), sticky reviews.
  */
 export const DEFAULT_CONFIG: ReviewConfig = {
-  model: 'claude-haiku-4-5',
+  model: 'claude-sonnet-4-6',
   max_turns: 40,
 
   exclude: {
