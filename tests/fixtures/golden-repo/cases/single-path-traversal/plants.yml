@@ -1,0 +1,4 @@
+plants:
+  - type: path-traversal
+    file: src/routes/files.ts
+    line: 7

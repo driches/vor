@@ -1,0 +1,5 @@
+plants:
+  - type: sql-injection
+    file: src/db/users.ts
+    line: 4
+    input_var: userId

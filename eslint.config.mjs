@@ -10,6 +10,11 @@ export default [
       '.claude/**',
       '**/*.config.ts',
       '**/*.config.mjs',
+      // Synthetic-bug eval fixtures. `before/` files intentionally declare
+      // variables/imports that become used only after a plant template
+      // mutates the file at test time, so ESLint's no-unused-vars rule
+      // fires on perfectly correct fixture authoring.
+      'tests/fixtures/golden-repo/cases/**/before/**',
     ],
   },
   {

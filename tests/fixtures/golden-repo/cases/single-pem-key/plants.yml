@@ -1,0 +1,4 @@
+plants:
+  - type: secret:pem-private-key
+    file: src/keys/signing.ts
+    line: 2

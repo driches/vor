@@ -1,0 +1,4 @@
+plants:
+  - type: secret:github-pat
+    file: src/ci/tokens.ts
+    line: 2
