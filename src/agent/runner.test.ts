@@ -157,14 +157,18 @@ describe('billableInputTokensForBudget', () => {
   });
 
   it('does NOT count cache_read_input_tokens (billed at 0.1× — would over-trip the budget cap)', () => {
-    // Pinning the asymmetry. A future "fix" that includes cache_read would
-    // make the default 500K cap fire on turn 1 of any cached run (real eval
-    // data showed cache_read ≈ 800K-1.5M per case). The helper's input type
-    // doesn't declare cache_read_input_tokens at all, so the only way to
-    // regress is to actually change the formula — at which point this test
-    // and the JSDoc both need explicit updates.
+    // Pinning the asymmetry. Real eval data shows cache_read ≈ 800K-1.5M per
+    // case; counting it would make the default 500K cap fire on turn 1 of
+    // any cached run. We inject a realistic cache_read value via `as unknown
+    // as` so the assertion actually exercises the exclusion: if a future
+    // refactor adds cache_read to the formula, this test fails loudly
+    // (would return 800_100 instead of 100).
     expect(
-      billableInputTokensForBudget({ input_tokens: 100, cache_creation_input_tokens: 0 }),
+      billableInputTokensForBudget({
+        input_tokens: 100,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 800_000,
+      } as unknown as { input_tokens: number; cache_creation_input_tokens?: number | null }),
     ).toBe(100);
   });
 
