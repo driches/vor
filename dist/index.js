@@ -47964,6 +47964,10 @@ function makePostInlineCommentTool(deps) {
           hint: "Swap them or omit start_line."
         });
       }
+      const rawSide = args.side;
+      const side = rawSide === "RIGHT" || rawSide === "LEFT" ? rawSide : "RIGHT";
+      const rawConfidence = args.confidence;
+      const confidence = rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low" ? rawConfidence : "high";
       const changedFiles = new Map(deps.prContext.files.map((f2) => [f2.path, f2]));
       const validation = validateInlineComment(
         {
@@ -47971,12 +47975,12 @@ function makePostInlineCommentTool(deps) {
           file_path: args.file_path,
           line: args.line,
           ...args.start_line !== void 0 ? { start_line: args.start_line } : {},
-          side: args.side,
+          side,
           category: args.category,
           title: args.title,
           why_it_matters: args.why_it_matters,
           ...args.suggestion !== void 0 ? { suggestion: args.suggestion } : {},
-          confidence: args.confidence
+          confidence
         },
         {
           changedFiles,
@@ -47998,12 +48002,12 @@ function makePostInlineCommentTool(deps) {
         file_path: args.file_path,
         line: args.line,
         ...args.start_line !== void 0 ? { start_line: args.start_line } : {},
-        side: args.side,
+        side,
         category: args.category,
         title: args.title,
         why_it_matters: args.why_it_matters,
         ...args.suggestion !== void 0 ? { suggestion: args.suggestion } : {},
-        confidence: args.confidence
+        confidence
       });
       return jsonResult({
         accepted: true,

@@ -7,7 +7,13 @@
 import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { validateInlineComment } from '../agent/validate-comment.js';
-import { CATEGORIES, type Category, type Severity, type Side } from '../types.js';
+import {
+  CATEGORIES,
+  type Category,
+  type Confidence,
+  type Severity,
+  type Side,
+} from '../types.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
@@ -76,6 +82,38 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
         });
       }
 
+      // The Zod schema above declares `side: ...default('RIGHT')` and
+      // `confidence: ...default('high')`, but the agent runner forwards raw
+      // tool input directly to this handler without running it through Zod,
+      // so those defaults never fire at runtime. Normalize here against an
+      // explicit allowlist rather than `??` alone so that an unexpected
+      // string (e.g. the agent sends 'left' lowercase) falls back to the
+      // safe default instead of being cast through to a malformed value.
+      //
+      // The `side` default in particular is load-bearing: the post-filter
+      // scanner-vs-AI dedup (src/scanners/dedup.ts) requires `ai.side ===
+      // c.side` to consider an overlap, and the scanner adapter hard-codes
+      // `side: 'RIGHT'`. If the agent omits `side` (which it usually does
+      // — RIGHT is the only sensible value for almost every comment) the
+      // AI's PostedComment lands in the aggregator with `side: undefined`,
+      // the dedup check fails on the side mismatch, and the scanner finding
+      // ships next to the AI's security comment as a duplicate. PR #12 and
+      // PR #16 smoke tests both reproduced this.
+      //
+      // TODO (follow-up): fix the runner to parse tool input through Zod
+      // before dispatching (src/agent/runner.ts ~line 194). That would
+      // also fix the same Zod-bypass bug class in grep-repo-at-ref
+      // (`case_sensitive` defaults silently flip to `-i` on every agent
+      // grep), get-pr-diff (`max_diff_lines`), and read-file-at-ref
+      // (`ref` falls back to base instead of head).
+      const rawSide = args.side;
+      const side: Side = rawSide === 'RIGHT' || rawSide === 'LEFT' ? rawSide : 'RIGHT';
+      const rawConfidence = args.confidence;
+      const confidence: Confidence =
+        rawConfidence === 'high' || rawConfidence === 'medium' || rawConfidence === 'low'
+          ? rawConfidence
+          : 'high';
+
       // Map raw schema input → validator input + PostedComment shape
       const changedFiles = new Map(deps.prContext.files.map((f) => [f.path, f]));
       const validation = validateInlineComment(
@@ -84,12 +122,12 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
           file_path: args.file_path,
           line: args.line,
           ...(args.start_line !== undefined ? { start_line: args.start_line } : {}),
-          side: args.side as Side,
+          side,
           category: args.category as Category,
           title: args.title,
           why_it_matters: args.why_it_matters,
           ...(args.suggestion !== undefined ? { suggestion: args.suggestion } : {}),
-          confidence: args.confidence,
+          confidence,
         },
         {
           changedFiles,
@@ -113,12 +151,12 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
         file_path: args.file_path,
         line: args.line,
         ...(args.start_line !== undefined ? { start_line: args.start_line } : {}),
-        side: args.side as Side,
+        side,
         category: args.category as Category,
         title: args.title,
         why_it_matters: args.why_it_matters,
         ...(args.suggestion !== undefined ? { suggestion: args.suggestion } : {}),
-        confidence: args.confidence,
+        confidence,
       });
       return jsonResult({
         accepted: true,

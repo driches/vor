@@ -95,4 +95,83 @@ describe('post_inline_comment tool', () => {
     expect(json.accepted).toBe(false);
     expect(json.reason).toContain('start_line');
   });
+
+  it('defaults `side` to RIGHT and `confidence` to high when omitted (PR #12 regression)', async () => {
+    // The Zod schema declares `.default('RIGHT')` for side and
+    // `.default('high')` for confidence, but the agent runner forwards raw
+    // tool input to the handler without running it through Zod. The
+    // handler must apply the schema defaults itself so the in-memory
+    // PostedComment carries concrete values. If `side` lands as undefined,
+    // the post-filter scanner-vs-AI dedup fails its `ai.side === c.side`
+    // check (the scanner adapter hard-codes 'RIGHT'), and a scanner finding
+    // co-located with an AI security comment ships as a duplicate. PR #12
+    // and PR #16 smoke tests both reproduced exactly this failure.
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'minor',
+      file_path: 'src/foo.ts',
+      line: 10,
+      category: 'readability',
+      title: 'A reasonably descriptive title',
+      why_it_matters: 'A short rationale that makes future readers care.',
+    });
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    expect(deps.aggregator.acceptedComments).toHaveLength(1);
+    const stored = deps.aggregator.acceptedComments[0]!;
+    expect(stored.side).toBe('RIGHT');
+    expect(stored.confidence).toBe('high');
+  });
+
+  it('normalizes an out-of-enum `side`/`confidence` (e.g. lowercase) to the schema default', async () => {
+    // Since Zod parsing is bypassed at the runner boundary, an LLM that
+    // emits `side: 'left'` (lowercase) or `confidence: 'maybe'` would
+    // otherwise be cast through `as Side`/`as Confidence` unchecked,
+    // landing a malformed value in the aggregator. The handler defends
+    // by allowlist: anything outside the enum collapses to the schema's
+    // documented default.
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'minor',
+      file_path: 'src/foo.ts',
+      line: 10,
+      side: 'left',
+      category: 'readability',
+      title: 'A reasonably descriptive title',
+      why_it_matters: 'A short rationale that makes future readers care.',
+      confidence: 'maybe',
+    } as unknown as Parameters<typeof callTool>[1]);
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    const stored = deps.aggregator.acceptedComments[0]!;
+    expect(stored.side).toBe('RIGHT');
+    expect(stored.confidence).toBe('high');
+  });
+
+  it('preserves valid `side: LEFT` and `confidence: medium` when explicitly provided', async () => {
+    // Pins the pass-through branch of the normalization allowlist: a valid
+    // enum value must survive unchanged. Without this assertion, a typo
+    // like `rawSide === 'left'` instead of `rawSide === 'LEFT'` in the
+    // handler would silently collapse every LEFT-side comment to RIGHT
+    // and the suite would still be green.
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'minor',
+      file_path: 'src/foo.ts',
+      line: 10,
+      side: 'LEFT',
+      category: 'readability',
+      title: 'A reasonably descriptive title',
+      why_it_matters: 'A short rationale that makes future readers care.',
+      confidence: 'medium',
+    });
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    const stored = deps.aggregator.acceptedComments[0]!;
+    expect(stored.side).toBe('LEFT');
+    expect(stored.confidence).toBe('medium');
+  });
 });
