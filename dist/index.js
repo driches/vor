@@ -48221,12 +48221,13 @@ async function runAgent(input) {
         {
           model: input.model,
           max_tokens: 8192,
-          // Low but non-zero temperature trims output variance between runs on
-          // the same diff (the previous default sampled wide enough that two
-          // back-to-back runs on the same PR head could surface entirely
-          // different findings). 0.1 keeps the model decisive without going
-          // fully greedy.
-          temperature: 0.1,
+          // Mid-range temperature: trims the wide sampling at the SDK default
+          // (1.0) that produced run-to-run variance on identical diffs, while
+          // staying high enough to preserve recall. v0.2.1 tried 0.1 and saw
+          // recall drop from 5/7 → 3/7 matches on the golden-eval set (one
+          // case missed entirely, another hit the turn cap on dead-end
+          // investigation). 0.5 restored 5/7 recall with cost unchanged.
+          temperature: 0.5,
           system: [
             { type: "text", text: input.systemPrompt, cache_control: { type: "ephemeral" } }
           ],
