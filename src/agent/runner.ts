@@ -134,17 +134,10 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
 
       try {
-        // Budget the "billable-at-full-rate" input tokens: non-cached input
-        // PLUS cache_creation. We deliberately exclude cache_read tokens —
-        // they're billed at 0.1× input rate (effectively free) and including
-        // them would make the default cap fire on the first turn of any
-        // cache-heavy run, regressing existing operator configs. This keeps
-        // the budget semantic aligned with what the run actually pays for at
-        // full rate, even after caching reshapes the per-turn token mix.
-        const billableInput =
-          response.usage.input_tokens +
-          (response.usage.cache_creation_input_tokens ?? 0);
-        budget.addUsage(billableInput, response.usage.output_tokens);
+        budget.addUsage(
+          billableInputTokensForBudget(response.usage),
+          response.usage.output_tokens,
+        );
       } catch (err) {
         lastError = (err as Error).message;
         ended = 'budget_exceeded';
@@ -273,6 +266,33 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     outputTokens,
     costUsd,
   };
+}
+
+/**
+ * Compute the input-token count that should count against the runner's
+ * `max_input_tokens` budget gate, given an Anthropic API response usage block.
+ *
+ * Includes:
+ *   - `input_tokens` (non-cached input — billed at full rate, 1×)
+ *   - `cache_creation_input_tokens` (billed at 1.25× input rate — full-cost
+ *     equivalent, so it should count against any "input budget" gate)
+ *
+ * Deliberately EXCLUDES `cache_read_input_tokens`. Cache reads are billed at
+ * 0.1× input rate (effectively free) and typically dominate the raw token
+ * count on cached runs (real eval data: cache_read ≈ 800K-1.5M per case vs
+ * input ≈ 400 per turn). Counting them would make the default 500K
+ * `max_input_tokens` cap fire on the first turn of any cache-heavy run,
+ * regressing every operator config sized against the pre-caching semantic.
+ *
+ * Exported so the unit tests can pin this contract — if the formula ever
+ * changes (e.g. someone "fixes" it to count all three), the test should fail
+ * visibly rather than silently shifting the budget threshold.
+ */
+export function billableInputTokensForBudget(usage: {
+  input_tokens: number;
+  cache_creation_input_tokens?: number | null;
+}): number {
+  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
 }
 
 /**
