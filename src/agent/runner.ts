@@ -1,17 +1,32 @@
 /**
- * Custom tool-use loop using @anthropic-ai/sdk directly.
+ * Provider-agnostic tool-use loop.
  *
- * Replaces the higher-level Claude Agent SDK because of upstream bugs with
- * in-process MCP servers (duplicate tool_use IDs, missing tool_results in
- * subsequent API requests). This gives us full control and visibility.
+ * The runner speaks only the canonical message/tool/response vocabulary
+ * defined in `src/llm/types.ts`. Vendor-specific shapes (cache_control,
+ * Responses-API `provider_state` replay, Anthropic vs OpenAI usage fields)
+ * live inside each `LLMProvider` adapter — this file knows none of it.
  *
- * The loop:
- *   1. Send messages + tools + system prompt to Claude
- *   2. Parse the assistant response for text and tool_use blocks
- *   3. For each tool_use, run the handler from our tool definition
- *   4. Append the tool_result blocks to the conversation
- *   5. Repeat until Claude stops calling tools, post_summary is called, or
- *      a limit is hit
+ * Loop:
+ *   1. Resolve the provider for the configured model (Anthropic / OpenAI)
+ *   2. Optional Anthropic-only pre-flight Haiku skim feeds Sonnet's first
+ *      user prompt with a structured candidate list (worker delegation flag).
+ *   3. Send messages + tools + system prompt via `provider.complete()`
+ *   4. Read canonical `text` and `tool_calls` from the response
+ *   5. Execute each tool_call and append a canonical `tool` message
+ *   6. Repeat until the model stops calling tools, `post_summary` is called,
+ *      or a limit (turns / tokens / abort) is hit
+ *
+ * Why we hand-rolled this loop (not the Claude Agent SDK): the SDK had
+ * upstream bugs with in-process MCP servers — duplicate `tool_use` IDs and
+ * missing tool_results in subsequent requests. Owning the loop also gives us
+ * full visibility into the canonical-message round trip per turn, which made
+ * the provider abstraction tractable.
+ *
+ * Note on `experimental.worker_delegation`: pre-flight Haiku + the worker
+ * tool both call `@anthropic-ai/sdk` directly (they're hardcoded to Haiku).
+ * Worker delegation is Anthropic-only — when the resolved provider is
+ * OpenAI, the worker is silently disabled with a warning rather than
+ * erroring the run.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -21,7 +36,12 @@ import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
 import { costFromUsage, pricingForModel } from '../util/pricing.js';
-import { markLatestMessageForCaching } from '../llm/anthropic-provider.js';
+import {
+  createProvider,
+  type CanonicalMessage,
+  type CanonicalTool,
+  type ProviderId,
+} from '../llm/index.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
 import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
 import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
@@ -44,7 +64,16 @@ export interface RunAgentInput {
   maxTurns: number;
   maxInputTokens: number;
   maxOutputTokens: number;
+  /** API key for the resolved provider (orchestrator picks anthropic vs openai). */
   apiKey: string;
+  /**
+   * Optional override for provider routing. Omit to let `createProvider()`
+   * infer from the model id (`claude-*` → anthropic, `gpt-*`/`o<digit>` →
+   * openai). Set when operator config wants to force a provider against the
+   * inferred default — e.g. routing a `claude-*` id through a compatibility
+   * shim, or pinning explicit provider selection in `.code-review.yml`.
+   */
+  providerHint?: ProviderId;
   abortController?: AbortController;
 }
 
@@ -71,12 +100,10 @@ export interface RunAgentResult {
   }>;
 }
 
-type AnthropicTool = Anthropic.Tool;
-
 interface ToolDefinition {
   name: string;
   description: string;
-  input_schema: Anthropic.Tool.InputSchema;
+  input_schema: CanonicalTool['input_schema'];
   handler: (args: Record<string, unknown>) => Promise<string>;
 }
 
@@ -88,33 +115,43 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     maxOutputTokens: input.maxOutputTokens,
   });
 
-  const client = new Anthropic({ apiKey: input.apiKey });
+  const provider = createProvider({
+    modelId: input.model,
+    apiKey: input.apiKey,
+    ...(input.providerHint !== undefined ? { providerHint: input.providerHint } : {}),
+  });
 
-  // Wire optional worker delegation. Sonnet's tool list gets a tenth tool
-  // (worker_check_usage_claim) only when the flag is on — opt-out repos
-  // keep the v0.2.x tool set and behavior verbatim.
+  // Wire optional worker delegation. ONLY available when the resolved
+  // provider is Anthropic — pre-flight Haiku and the worker tool both use
+  // `@anthropic-ai/sdk` directly (hardcoded to Haiku). OpenAI consumers
+  // get a warning and the worker is silently disabled for the run.
   const workerConfig = input.deps.config.experimental.worker_delegation;
-  const worker: WorkerClient | undefined = workerConfig.enabled
-    ? new WorkerClient(client, budget, workerConfig.worker_model)
-    : undefined;
+  let worker: WorkerClient | undefined;
+  if (workerConfig.enabled) {
+    if (provider.id !== 'anthropic') {
+      await logger.warn(
+        `experimental.worker_delegation.enabled is true but resolved provider is ${provider.id}. Worker delegation is Anthropic-only; disabling for this run.`,
+      );
+    } else {
+      const anthropicClient = new Anthropic({ apiKey: input.apiKey });
+      worker = new WorkerClient(anthropicClient, budget, workerConfig.worker_model);
+    }
+  }
 
   const fullDeps: ToolDeps = { ...input.deps, ...(worker !== undefined ? { worker } : {}) };
   const tools = buildToolDefinitions(fullDeps);
-  // Mark the LAST tool with cache_control: tools don't change across turns,
-  // so this breakpoint caches the full tool block (~2-3K tokens of schemas)
-  // at the ephemeral cache-read rate instead of re-billing the full input
-  // rate on every turn. With `system` already cached and `messages` cached
-  // separately below, we use 3 of the 4 cache_control breakpoints allowed
-  // per request.
-  const anthropicTools: AnthropicTool[] = tools.map((t, i) => ({
+
+  // Strip handlers for the provider call — adapters only need the schema
+  // surface. The handler lookup stays local to this file (the `tools.find`
+  // in the tool-execution branch below).
+  const canonicalTools: CanonicalTool[] = tools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,
-    ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
   }));
 
   await logger.info(
-    `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` +
+    `Agent ready: provider=${provider.id}, model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` +
       (worker !== undefined ? `, worker=${workerConfig.worker_model}` : ''),
   );
 
@@ -136,8 +173,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   let preflightBudgetExceeded = false;
   if (worker !== undefined) {
     try {
+      // Pre-flight needs its own Anthropic client. Constructing here keeps
+      // the dependency local to the conditional pre-flight branch (a one-shot
+      // — sharing the worker's client would couple two independent code
+      // paths for negligible savings).
+      const preflightClient = new Anthropic({ apiKey: input.apiKey });
       const analysis = await runPreflight({
-        client,
+        client: preflightClient,
         budget,
         model: workerConfig.worker_model,
         prContext: input.deps.prContext,
@@ -164,7 +206,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  const messages: Anthropic.MessageParam[] = [
+  const messages: CanonicalMessage[] = [
     { role: 'user', content: userPrompt },
   ];
 
@@ -182,105 +224,103 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       budget.startTurn();
       turns = budget.snapshot().turns;
 
-      // Slide a cache_control breakpoint forward onto the latest user message
-      // each turn. This caches the entire prior conversation prefix (assistant
-      // turns + tool results, which can hold 100KB diffs and 500-line file
-      // reads) so we don't re-bill it at full input rate on every turn.
-      markLatestMessageForCaching(messages);
-
-      const response = await client.messages.create(
-        {
-          model: input.model,
-          max_tokens: 8192,
-          // Mid-range temperature: trims the wide sampling at the SDK default
-          // (1.0) that produced run-to-run variance on identical diffs, while
-          // staying high enough to preserve recall. v0.2.1 tried 0.1 and saw
-          // recall drop from 5/7 → 3/7 matches on the golden-eval set (one
-          // case missed entirely, another hit the turn cap on dead-end
-          // investigation). 0.5 restored 5/7 recall with cost unchanged.
-          temperature: 0.5,
-          system: [
-            { type: 'text', text: input.systemPrompt, cache_control: { type: 'ephemeral' } },
-          ],
-          messages,
-          tools: anthropicTools,
-        },
-        input.abortController ? { signal: input.abortController.signal } : undefined,
-      );
+      const response = await provider.complete(messages, canonicalTools, {
+        model: input.model,
+        maxOutputTokens: 8192,
+        system: input.systemPrompt,
+        // Mid-range temperature: trims the wide sampling at the default (1.0)
+        // that produced run-to-run variance on identical diffs, while staying
+        // high enough to preserve recall. v0.2.1 tried 0.1 and saw recall
+        // drop from 5/7 → 3/7 matches on the golden-eval set (one case missed
+        // entirely, another hit the turn cap on dead-end investigation). 0.5
+        // restored 5/7 recall with cost unchanged. The OpenAI adapter ignores
+        // this for o-series reasoning models which reject the field.
+        temperature: 0.5,
+        ...(input.abortController ? { abortSignal: input.abortController.signal } : {}),
+      });
 
       try {
-        budget.addUsage(input.model, response.usage);
+        // PR #17's Budget owns the per-model accumulation + billable formula.
+        // Its `ModelUsage` interface uses the Anthropic-SDK snake_case names
+        // (`cache_creation_input_tokens`, `cache_read_input_tokens`) for JSON
+        // back-compat on persisted eval records. Translate the canonical
+        // shape (no `_input_` infix) at this boundary.
+        budget.addUsage(input.model, {
+          input_tokens: response.usage.input_tokens,
+          output_tokens: response.usage.output_tokens,
+          cache_creation_input_tokens: response.usage.cache_creation_tokens ?? 0,
+          cache_read_input_tokens: response.usage.cache_read_tokens ?? 0,
+        });
       } catch (err) {
         lastError = (err as Error).message;
         ended = 'budget_exceeded';
         break;
       }
 
-      // Log text blocks and tool_use blocks
-      const assistantBlocks = response.content;
-      const toolUseBlocks = assistantBlocks.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
-      );
-      const textBlocks = assistantBlocks.filter(
-        (b): b is Anthropic.TextBlock => b.type === 'text',
-      );
+      const toolCalls = response.tool_calls;
+      const text = response.text;
 
-      for (const t of textBlocks) {
-        if (t.text.trim().length > 0) {
-          await logger.info(`[turn ${turns}] (assistant): ${t.text.slice(0, 500)}`);
-        }
+      if (text.trim().length > 0) {
+        await logger.info(`[turn ${turns}] (assistant): ${text.slice(0, 500)}`);
       }
-      for (const u of toolUseBlocks) {
-        await logger.info(`[turn ${turns}] → ${u.name}`);
+      for (const call of toolCalls) {
+        await logger.info(`[turn ${turns}] → ${call.name}`);
       }
 
-      messages.push({ role: 'assistant', content: assistantBlocks });
+      const assistantMsg: CanonicalMessage = {
+        role: 'assistant',
+        // Always emit `text` — empty string round-trips fine through both
+        // adapters (Anthropic skips zero-length text blocks; OpenAI skips
+        // zero-length output_text items) and saves the caller from a
+        // conditional spread.
+        text,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+        ...(response.provider_state !== undefined
+          ? { provider_state: response.provider_state }
+          : {}),
+      };
+      messages.push(assistantMsg);
 
       // End conditions
-      if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) {
+      if (response.stop_reason === 'end_turn' || toolCalls.length === 0) {
         ended = input.deps.aggregator.hasSummary() ? 'summary_posted' : 'max_turns';
         break;
       }
 
-      // Execute tool_use blocks; collect tool_result blocks for the next user message
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const u of toolUseBlocks) {
-        const tool = tools.find((t) => t.name === u.name);
+      // Execute tool_calls; push each result as its own canonical `tool`
+      // message. The Anthropic adapter groups consecutive `tool` messages
+      // into one user-wrapped batch internally (the API requires it); the
+      // OpenAI Responses adapter emits them as separate `function_call_output`
+      // items. Either way, the runner just appends one tool message per call.
+      for (const call of toolCalls) {
+        const tool = tools.find((t) => t.name === call.name);
+        let result: string;
+        let isError = false;
         if (!tool) {
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: u.id,
-            is_error: true,
-            content: `Unknown tool: ${u.name}`,
-          });
-          continue;
+          result = `Unknown tool: ${call.name}`;
+          isError = true;
+        } else {
+          try {
+            result = await tool.handler(call.arguments);
+          } catch (err) {
+            // BudgetError must escape this catch so the outer try
+            // can flip `ended` to 'budget_exceeded' and stop the loop.
+            // Swallowing it here would let the loop keep dispatching tools
+            // until max_turns trips — masking the cap and over-spending.
+            // Other tool errors are recoverable: surface them to the agent as
+            // is_error tool_results so it can self-correct.
+            if (err instanceof BudgetError) throw err;
+            result = `Tool error: ${(err as Error).message}`;
+            isError = true;
+          }
         }
-        try {
-          const args = (u.input ?? {}) as Record<string, unknown>;
-          const result = await tool.handler(args);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: u.id,
-            content: result,
-          });
-        } catch (err) {
-          // BudgetError must escape this catch so the outer try (line ~235)
-          // can flip `ended` to 'budget_exceeded' and stop the loop.
-          // Swallowing it here would let the loop keep dispatching tools
-          // until max_turns trips — masking the cap and over-spending.
-          // Other tool errors are recoverable: surface them to the agent as
-          // is_error tool_results so it can self-correct.
-          if (err instanceof BudgetError) throw err;
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: u.id,
-            is_error: true,
-            content: `Tool error: ${(err as Error).message}`,
-          });
-        }
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: result,
+          ...(isError ? { is_error: true } : {}),
+        });
       }
-
-      messages.push({ role: 'user', content: toolResults });
 
       // Terminate after summary
       if (input.deps.aggregator.hasSummary()) {
@@ -355,8 +395,9 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
  * When `deps.worker` is present (worker_delegation flag enabled), an extra
  * `worker_check_usage_claim` tool joins the list. Tool order does not affect
  * Sonnet's choice but does affect the cache_control breakpoint placement —
- * the LAST tool gets the breakpoint, so we keep the worker tool at the end
- * so its addition doesn't bust the existing cache anchor.
+ * the LAST tool gets the breakpoint (inside the AnthropicProvider adapter),
+ * so we keep the worker tool at the end so its addition doesn't bust the
+ * existing cache anchor.
  */
 function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
   const mcpTools = [
@@ -380,7 +421,7 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     }) as Record<string, unknown>;
     // Strip $schema (API doesn't need it) and force `type: 'object'`.
     if ('$schema' in rawJson) delete rawJson['$schema'];
-    const inputSchema: Anthropic.Tool.InputSchema = {
+    const inputSchema: CanonicalTool['input_schema'] = {
       type: 'object',
       properties: (rawJson.properties as Record<string, unknown>) ?? {},
       ...(Array.isArray(rawJson.required) ? { required: rawJson.required as string[] } : {}),
