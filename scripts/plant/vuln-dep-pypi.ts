@@ -36,6 +36,8 @@ export const vulnDepPypiTemplate: PlantTemplate = {
     const trailingEmpty = lines.length > 0 && lines[lines.length - 1] === '';
     const bodyLines = trailingEmpty ? lines.slice(0, -1) : lines;
     let matchedIdx = -1;
+    let matchedOperator: string | undefined;
+    let matchedVersion: string | undefined;
     for (let i = 0; i < bodyLines.length; i++) {
       const m = bodyLines[i]!.match(REQUIREMENT_LINE);
       // pip is case-insensitive AND treats `-` / `_` / `.` as equivalent in
@@ -44,13 +46,26 @@ export const vulnDepPypiTemplate: PlantTemplate = {
       // etc., the same way pip's resolver would.
       if (m && normalizeName(m[1]!) === normalizeName(pkg)) {
         matchedIdx = i;
+        matchedOperator = m[2];
+        matchedVersion = m[3];
         break;
       }
     }
     const newRequirement = `${pkg}==${ver}`;
     if (matchedIdx >= 0) {
-      const existing = bodyLines[matchedIdx]!;
-      if (existing.trim() === newRequirement) {
+      // No-op detection: a pre-existing line that pins the SAME package at
+      // the SAME version (via the `==` operator) means rewriting it to
+      // `${pkg}==${ver}` produces a semantically identical lockfile state
+      // — the OSV scanner already saw this vulnerable pin in before/, so
+      // the truth entry would score as a TP credited to the planted bug
+      // when the finding was actually pre-existing. Compare the parsed
+      // (name, version) — not the raw line text — so casing
+      // (`Requests==2.5.0`), name normalization (`oauth-lib` vs
+      // `oauth_lib`), and whitespace (`requests == 2.5.0`) all
+      // canonicalize to the same no-op. Other operators (`===`, `>=`,
+      // `~=`) are real mutations because they change the resolved pin.
+      // See PR #19 Codex P2 3299774234.
+      if (matchedOperator === '==' && matchedVersion === ver) {
         throw new Error(
           `vuln-dep:pypi: ${pkg}==${ver} is already pinned in requirements.txt — ` +
             `plant would be a no-op and the truth entry would score as FN. ` +

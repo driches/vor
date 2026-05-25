@@ -66,6 +66,81 @@ describe('vulnDepPypiTemplate', () => {
     ).toThrow(/already pinned.*no-op/);
   });
 
+  it('detects no-op pins under PEP 503 name normalization (capitalization)', () => {
+    // Regression for PR #19 Codex P2 3299774234. Before the fix, the no-op
+    // guard compared raw line text to `${pkg}==${ver}`, so a capitalized
+    // existing line was rewritten in-place — same package, same version,
+    // only the casing changed. The OSV scanner sees an unchanged vulnerable
+    // pin in both before/ and after/, but the truth entry would credit the
+    // detection to the planted bug, inflating TP. Compare parsed (name,
+    // version) instead so the canonicalized no-op is caught.
+    const source = ['Requests==2.5.0', ''].join('\n');
+    expect(() =>
+      vulnDepPypiTemplate.apply(source, {
+        type: 'vuln-dep:pypi',
+        file: 'requirements.txt',
+        package: 'requests',
+        version: '2.5.0',
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('detects no-op pins under PEP 503 name normalization (separators)', () => {
+    // `oauth_lib` and `oauth-lib` are the same distribution per PEP 503.
+    const source = ['oauth-lib==2.5.0', ''].join('\n');
+    expect(() =>
+      vulnDepPypiTemplate.apply(source, {
+        type: 'vuln-dep:pypi',
+        file: 'requirements.txt',
+        package: 'oauth_lib',
+        version: '2.5.0',
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('detects no-op pins when the operator has surrounding whitespace', () => {
+    // pip accepts `requests == 2.5.0` (with spaces) as identical to the
+    // tight form. The regex parses both shapes identically, so the no-op
+    // comparison should catch this too.
+    const source = ['requests  ==  2.5.0', ''].join('\n');
+    expect(() =>
+      vulnDepPypiTemplate.apply(source, {
+        type: 'vuln-dep:pypi',
+        file: 'requirements.txt',
+        package: 'requests',
+        version: '2.5.0',
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('treats `===` (arbitrary-equality) operator as a real mutation, not a no-op', () => {
+    // PEP 440 `===` is a different operator — it skips PEP 440 version
+    // normalization. Rewriting `requests===2.5.0` as `requests==2.5.0` is
+    // a semantic change, so it should plant normally and emit a truth.
+    const source = ['requests===2.5.0', ''].join('\n');
+    const { mutated, truth } = vulnDepPypiTemplate.apply(source, {
+      type: 'vuln-dep:pypi',
+      file: 'requirements.txt',
+      package: 'requests',
+      version: '2.5.0',
+    });
+    expect(mutated.split('\n')[0]).toBe('requests==2.5.0');
+    expect(truth.bug_type).toBe('vuln-dep:pypi:requests@2.5.0');
+  });
+
+  it('treats `>=` range as a real mutation when planting the same version pin', () => {
+    // An existing `requests>=2.5.0` allows but doesn't pin 2.5.0; rewriting
+    // it as `requests==2.5.0` is a real lockfile-resolution change.
+    const source = ['requests>=2.5.0', ''].join('\n');
+    const { mutated } = vulnDepPypiTemplate.apply(source, {
+      type: 'vuln-dep:pypi',
+      file: 'requirements.txt',
+      package: 'requests',
+      version: '2.5.0',
+    });
+    expect(mutated.split('\n')[0]).toBe('requests==2.5.0');
+  });
+
   it('rejects a non-requirements.txt file', () => {
     expect(() =>
       vulnDepPypiTemplate.apply('', {
