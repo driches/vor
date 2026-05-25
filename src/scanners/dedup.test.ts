@@ -277,6 +277,36 @@ describe('dedupKeptScannerComments', () => {
     expect(out).toEqual([scanner, ai]);
   });
 
+  it('drops a secrets scanner finding on the SAME line as a sourceless AI security comment (PR #12 regression)', () => {
+    // Smoke-test PR #12 reproduction: agent posts category='security' on line
+    // 11 (sourceless — production AI comments do not set `source`), secrets
+    // scanner emits category='vulnerability' on the same line 11. Both
+    // shipped in production; the scanner finding should have been suppressed.
+    // Distance is 0 (same line), well inside the ±3 window. AI category is
+    // 'security' which is security-adjacent. Scanner is 'secrets' (not the
+    // protected dependency-cve), so suppression must fire.
+    const ai: PostedComment = {
+      severity: 'critical',
+      file_path: 'examples/smoke-test-bad-code.ts',
+      line: 11,
+      side: 'RIGHT',
+      category: 'security',
+      title: 'Hardcoded AWS access key ID',
+      why_it_matters:
+        'Committing an AKIA key in source code leaks credentials to anyone with repo access.',
+      confidence: 'high',
+    };
+    const scanner = makeScannerComment({
+      scanner: 'secrets',
+      file_path: 'examples/smoke-test-bad-code.ts',
+      line: 11,
+      category: 'vulnerability',
+      title: 'Possible AWS access key id in smoke-test-bad-code.ts',
+    });
+    const out = dedupKeptScannerComments([ai, scanner]);
+    expect(out).toEqual([ai]);
+  });
+
   it('treats a comment with no `source` as AI (backward compat) and dedups against it', () => {
     // `source` is optional on PostedComment; absence is treated as AI per the
     // type comment. A scanner finding overlapping a sourceless security

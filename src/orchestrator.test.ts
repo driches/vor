@@ -539,6 +539,164 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
 });
 
 // -----------------------------------------------------------------
+// Scenario 2a: SAME-LINE overlap (PR #12 regression).
+//
+// Reproduces the smoke-test PR #12 failure verbatim: the agent posts a
+// 'security' comment ON THE SAME LINE as the scanner-detected AWS key
+// (distance = 0, not 1). In production both shipped — two CRITICAL inline
+// comments on the same line of the same file, one labeled `security` (AI)
+// and one labeled `vulnerability · via secrets scan` (scanner). Dedup
+// should suppress the scanner finding here just as it does in the
+// distance-1 case (Scenario 2 above), but the smoke test proved it does not.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)', () => {
+  it('drops the secrets scanner finding when the AI security comment sits on the same line as a co-located unrelated AI finding', async () => {
+    // Faithful replay of smoke-test PR #12: a single file with TWO planted
+    // bugs (AWS key on line 11, SQL injection on line 20). The agent posts
+    // category='security' on BOTH lines. The secrets scanner produces one
+    // finding (line 11, category='vulnerability'). Production posted three
+    // comments — AI/security:11, AI/security:20, AND scanner/vulnerability:11
+    // — so the scanner finding was NOT dedup-suppressed against the
+    // co-located AI/security:11 comment. The expected behavior is two
+    // comments (the two AI findings); the scanner finding on line 11 should
+    // be suppressed because the AI's security-adjacent finding on the same
+    // line takes precedence.
+    const smokeDiff = [
+      'diff --git a/examples/smoke-test-bad-code.ts b/examples/smoke-test-bad-code.ts',
+      'index 0000000..1111111 100644',
+      '--- a/examples/smoke-test-bad-code.ts',
+      '+++ b/examples/smoke-test-bad-code.ts',
+      '@@ -0,0 +1,22 @@',
+      '+/**',
+      '+ * Smoke-test fixture for the code-review action.',
+      '+ */',
+      '+',
+      '+// Bug 1: hardcoded credential.',
+      '+',
+      '+',
+      '+',
+      '+',
+      '+',
+      `+export const AWS_KEY = '${PLANTED_AWS_KEY}';`,
+      '+',
+      '+interface User {',
+      '+  id: string;',
+      '+  name: string;',
+      '+}',
+      '+',
+      '+// Bug 2: SQL injection via template literal.',
+      '+export async function getUser(db: { query: (sql: string) => Promise<User[]> }, userId: string): Promise<User | null> {',
+      "+  const result = await db.query(`SELECT * FROM users WHERE id = '${userId}'`);",
+      '+  return result[0] ?? null;',
+      '+}',
+    ].join('\n');
+    octokitState.diff = `${smokeDiff}\n`;
+    octokitState.filesApi = [
+      { filename: 'examples/smoke-test-bad-code.ts', changes: 22, patch: smokeDiff },
+    ];
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    secrets:',
+        '      enabled: true',
+      ].join('\n'),
+    );
+
+    // CRITICAL: do NOT supply `side` in the AI tool input. The post-inline-
+    // comment schema has `side: z.enum(['RIGHT','LEFT']).default('RIGHT')`,
+    // but the agent runner forwards raw args to the handler without running
+    // them through Zod, so the default never applies. Real agent runs that
+    // omit `side` (most of them — RIGHT is the universal default) end up
+    // with `side: undefined` on the in-memory PostedComment. The scanner
+    // adapter hard-codes `side: 'RIGHT'`. The dedup overlap check then sees
+    // `undefined !== 'RIGHT'` and fails to suppress the scanner. This test
+    // replays PR #12's smoke-test scenario verbatim and pins the expected
+    // dedup behavior. With the broken normalization it goes red.
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_aws',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'examples/smoke-test-bad-code.ts',
+            line: 11,
+            category: 'security',
+            title: 'Hardcoded AWS access key ID',
+            why_it_matters:
+              'Committing an AKIA key in source leaks credentials to anyone with repo access; rotate immediately and load from a secret store.',
+            suggestion: "export const AWS_KEY = process.env.AWS_ACCESS_KEY_ID ?? '';",
+            confidence: 'high',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_sql',
+          name: 'post_inline_comment',
+          input: {
+            severity: 'critical',
+            file_path: 'examples/smoke-test-bad-code.ts',
+            line: 20,
+            category: 'security',
+            title: 'SQL injection via unsanitized template literal',
+            why_it_matters:
+              'Interpolating userId directly into the SQL string lets a caller alter the query — parameterize the value instead.',
+            suggestion:
+              "  const result = await db.query('SELECT * FROM users WHERE id = ?', [userId]);",
+            confidence: 'high',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_summary',
+          name: 'post_summary',
+          input: {
+            strengths: ['Clear and focused fixture.'],
+            assessment: 'request_changes',
+            assessment_reasoning: 'Two planted criticals detected.',
+          },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+
+    await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string; body: string; line: number }>;
+    };
+
+    // The scanner finding on line 11 must be suppressed by the co-located AI
+    // security comment. Two comments survive — the two AI findings.
+    const scannerComments = call.comments.filter((c) =>
+      c.body.includes('via secrets scan'),
+    );
+    expect(scannerComments).toHaveLength(0);
+    expect(call.comments).toHaveLength(2);
+    expect(call.comments.some((c) => c.body.includes('Hardcoded AWS access key ID'))).toBe(true);
+    expect(call.comments.some((c) => c.body.includes('SQL injection'))).toBe(true);
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 2b: Predicted-survivor dedup — an AI comment that won't ship MUST
 // NOT suppress an overlapping scanner finding.
 //
