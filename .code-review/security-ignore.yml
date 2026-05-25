@@ -120,3 +120,37 @@ entries:
   - file: .code-review/security-ignore.yml
     rule: "secret:aws-access-key-id"
     reason: "Self-reference: this file's reason strings mention AKIAIOSFODNN7EXAMPLE (canonical test marker) when documenting suppression entries for other fixtures"
+
+  # ---------------------------------------------------------------
+  # eval harness v1.1 — new plant templates and their tests.
+  # Each template emits a fixture-matching secret string as a DEFAULT_VALUE
+  # constant so its `apply()` produces a scanner-detectable mutation. The
+  # constant lives in source; suppress the per-file scanner hit on this repo.
+  # ---------------------------------------------------------------
+  - file: scripts/plant/github-pat.ts
+    rule: "secret:github-pat-classic"
+    reason: "DEFAULT_VALUE is the placeholder ghp_aaaa…aaaa (36 a's) — emitted into after/ at plant time, not a real PAT"
+  - file: scripts/plant/github-pat.test.ts
+    rule: "secret:github-pat-classic"
+    reason: "Positive fixtures for the github-pat plant template (default value + custom-value assertion)"
+  - file: scripts/plant/pem-private-key.ts
+    rule: "secret:private-key-pem"
+    reason: "PEM_HEADER/PEM_FOOTER constants are the BEGIN/END markers the template emits; body is EXAMPLE…EXAMPLE"
+  - file: scripts/plant/pem-private-key.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Positive fixtures + range-coverage assertions for the pem-private-key plant template"
+  - file: scripts/plant/plant-runner.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Regression test plants a PEM block then asserts no AWS-key line is spliced between the markers — assertion text contains the BEGIN marker string"
+
+  # ---------------------------------------------------------------
+  # eval harness v1.1 — vuln-dep:pypi fixtures pin vulnerable versions.
+  # The pin IS the planted bug; the OSV scanner correctly detects it. Match
+  # by CVE id so the suppression is precise (a different vulnerable pin in
+  # the same files would still surface), and the fix-version range stays
+  # whatever OSV reports — no manual drift.
+  # ---------------------------------------------------------------
+  - cve_id: "CVE-2023-30861"
+    reason: "Planted vulnerable flask@2.3.0 pin in tests/fixtures/golden-repo/cases/{single-vuln-dep-pypi,dependency-pair}/before/requirements.txt — fixture for the vuln-dep:pypi plant template"
+  - cve_id: "CVE-2025-71176"
+    reason: "Pre-existing pytest@8.0.0 pin in the same vuln-dep:pypi fixtures — collateral OSV hit on a non-target dependency in the fixture file"

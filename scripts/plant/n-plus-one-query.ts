@@ -3,10 +3,11 @@
  * Each iteration issues a separate DB roundtrip, so a 100-element `items`
  * array becomes 100 sequential calls instead of one batched query.
  *
- * Inserts a 3-line block; subsequent line numbers shift by 3. The truth
- * `line_range` covers the inner query line (where the actual N+1 lives) so
- * a finding anchored at the loop header or the inner query both score TP
- * via ±3 line-slack overlap.
+ * Inserts a 4-line block (`for` open, `await db.query(...)`, assignment,
+ * close brace); subsequent line numbers in the same file shift by 4. The
+ * truth `line_range` covers only the inner query line (where the actual
+ * N+1 lives) so a finding anchored at the loop header or the inner query
+ * both score TP via ±3 line-slack overlap.
  *
  * Pattern is self-contained — no `// PLANT_ANCHOR` marker needed because
  * a `for…of` loop with `await` in its body is a recognizable code shape

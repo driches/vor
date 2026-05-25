@@ -1,7 +1,8 @@
 /**
  * Plant a PEM-formatted private key block as a multi-line string literal.
- * Inserts a 4-line block at the requested line; subsequent line numbers
- * shift by 4.
+ * Inserts a 6-line block at the requested line (declaration + 4 PEM marker
+ * lines + closing backtick); subsequent line numbers in the same file shift
+ * by 6. The truth `line_range` covers only the 4 PEM marker lines.
  *
  * Truth `line_range` covers the entire block so a finding anywhere inside
  * the block (header, body, footer) matches via the ±3 line-slack overlap in
