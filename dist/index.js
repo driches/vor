@@ -48304,12 +48304,13 @@ async function runAgent(input) {
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
-  const pricing = pricingForModel(input.model) ?? MODEL_PRICING["claude-sonnet-4-6"];
-  if (pricingForModel(input.model) === void 0) {
+  const rawPricing = pricingForModel(input.model);
+  if (rawPricing === void 0) {
     await logger.warn(
       `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
     );
   }
+  const pricing = rawPricing ?? MODEL_PRICING["claude-sonnet-4-6"];
   const inputCost = inputTokens * pricing.input / 1e6;
   const outputCost = outputTokens * pricing.output / 1e6;
   const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
@@ -48345,10 +48346,14 @@ function markLatestMessageForCaching(messages) {
       }
     }
   }
-  const latestIdx = userIndices[userIndices.length - 1];
-  const latestContent = messages[latestIdx].content;
-  if (!Array.isArray(latestContent) || latestContent.length === 0) return;
-  const lastBlock = latestContent[latestContent.length - 1];
+  if (userIndices.length >= 2) {
+    markLastBlockForCaching(messages[userIndices[userIndices.length - 2]]);
+  }
+  markLastBlockForCaching(messages[userIndices[userIndices.length - 1]]);
+}
+function markLastBlockForCaching(message) {
+  if (!Array.isArray(message.content) || message.content.length === 0) return;
+  const lastBlock = message.content[message.content.length - 1];
   if (lastBlock === void 0 || typeof lastBlock !== "object" || lastBlock === null) return;
   lastBlock.cache_control = { type: "ephemeral" };
 }

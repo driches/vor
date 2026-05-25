@@ -223,12 +223,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // our table (operator override to an experimental model), warn and fall
   // back to Sonnet rates so cost_usd stays populated — we can't refuse here
   // because the API spend has already happened.
-  const pricing = pricingForModel(input.model) ?? MODEL_PRICING['claude-sonnet-4-6']!;
-  if (pricingForModel(input.model) === undefined) {
+  const rawPricing = pricingForModel(input.model);
+  if (rawPricing === undefined) {
     await logger.warn(
       `No pricing entry for model "${input.model}" — cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`,
     );
   }
+  const pricing = rawPricing ?? MODEL_PRICING['claude-sonnet-4-6']!;
   const inputCost = (inputTokens * pricing.input) / 1_000_000;
   const outputCost = (outputTokens * pricing.output) / 1_000_000;
   const cacheCost =
@@ -252,16 +253,28 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
 }
 
 /**
- * Maintain ephemeral cache_control breakpoints on the two most recent user
- * messages and strip any older ones. Two breakpoints (instead of one) keep
- * a fallback cache anchor available for the prefix from the previous turn:
- * Anthropic's cache lookup backtracks a bounded number of blocks from each
- * breakpoint, so a high-fanout turn (e.g. many parallel tool calls) could
- * otherwise push the previous cache boundary out of range when we move the
- * single breakpoint to the new latest message.
+ * Maintain ephemeral cache_control breakpoints on the two most recent
+ * array-content user messages and strip any older ones. Two breakpoints
+ * (instead of one) keep a fallback cache anchor available for the prefix
+ * from the previous turn: Anthropic's cache lookup backtracks a bounded
+ * number of blocks from each breakpoint, so a high-fanout turn (e.g. many
+ * parallel tool calls) could otherwise push the previous cache boundary out
+ * of range when we move the single breakpoint to the new latest message.
  *
  * Two message breakpoints + the system breakpoint + the last-tool breakpoint
  * = 4 total, exactly at the API's per-request limit.
+ *
+ * Breakpoint count per turn (turn 1 is the initial user prompt before any
+ * tool calls — that message has string content, not array, so it does not
+ * count toward `userIndices`):
+ *   - Turn 1: 0 message breakpoints (no array-content user messages yet).
+ *   - Turn 2: 1 message breakpoint (the first tool_results push).
+ *   - Turn 3+: 2 message breakpoints (latest + previous tool_results).
+ *
+ * We RE-mark the second-latest breakpoint explicitly each call rather than
+ * relying on the carry-forward of a previous turn's marking, so the function
+ * is obviously correct from a single-turn read without needing to trace
+ * cross-turn state. Exported so the unit tests can exercise edge cases.
  *
  * Why we cache at all: each turn re-sends the entire prior conversation
  * (assistant turns + tool_results, which can include 100KB diffs and 500-line
@@ -269,7 +282,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
  * at the full input rate. With them, the prefix reads from cache at the
  * cache_read rate and only the new turn's content is billed at full rate.
  */
-function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
+export function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
   const userIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
@@ -289,10 +302,15 @@ function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
     }
   }
 
-  const latestIdx = userIndices[userIndices.length - 1]!;
-  const latestContent = messages[latestIdx]!.content;
-  if (!Array.isArray(latestContent) || latestContent.length === 0) return;
-  const lastBlock = latestContent[latestContent.length - 1];
+  if (userIndices.length >= 2) {
+    markLastBlockForCaching(messages[userIndices[userIndices.length - 2]!]!);
+  }
+  markLastBlockForCaching(messages[userIndices[userIndices.length - 1]!]!);
+}
+
+function markLastBlockForCaching(message: Anthropic.MessageParam): void {
+  if (!Array.isArray(message.content) || message.content.length === 0) return;
+  const lastBlock = message.content[message.content.length - 1];
   if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) return;
   (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
 }
