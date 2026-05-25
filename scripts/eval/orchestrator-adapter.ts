@@ -51,11 +51,14 @@ function computeCostUsd(cost: AdapterState['costAccum'], model: string): number 
         `or fix the model name in your pipeline config.`,
     );
   }
+  // `cache_creation` / `cache_read` are optional on ModelPricing now that
+  // OpenAI rows landed (OpenAI cache writes are free). Guard with `?? 0` so
+  // a missing rate contributes nothing instead of NaN-poisoning the report.
   return (
     (cost.input_tokens * pricing.input) / 1_000_000 +
     (cost.output_tokens * pricing.output) / 1_000_000 +
-    (cost.cache_creation_input_tokens * pricing.cache_creation) / 1_000_000 +
-    (cost.cache_read_input_tokens * pricing.cache_read) / 1_000_000
+    (cost.cache_creation_input_tokens * (pricing.cache_creation ?? 0)) / 1_000_000 +
+    (cost.cache_read_input_tokens * (pricing.cache_read ?? 0)) / 1_000_000
   );
 }
 
