@@ -551,7 +551,7 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
 // -----------------------------------------------------------------
 
 describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)', () => {
-  it('drops the secrets scanner finding when the AI security comment sits on the same line as a co-located unrelated AI finding', async () => {
+  it('drops the secrets scanner finding when the AI security comment sits on the same line (PR #12 regression)', async () => {
     // Faithful replay of smoke-test PR #12: a single file with TWO planted
     // bugs (AWS key on line 11, SQL injection on line 20). The agent posts
     // category='security' on BOTH lines. The secrets scanner produces one
