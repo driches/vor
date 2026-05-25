@@ -146,22 +146,32 @@ entries:
   # ---------------------------------------------------------------
   # eval harness v1.1 — vuln-dep:pypi fixtures pin vulnerable versions.
   # The pin IS the planted bug; the OSV scanner correctly detects it.
-  # Use exact-version `package` entries (NOT bare cve_id, which would
-  # silence the CVE across the whole repo and create production FNs if
-  # real code ever pinned the same package). With version "2.3.0" the
-  # suppression only matches affected_version == 2.3.0 — a bump to a
-  # different vulnerable Flask version in the same file would still
-  # surface. Schema does not support combining file+package; if real
-  # production code ever pins flask==2.3.0 it would also be silenced,
-  # but that pin would be an obvious regression in its own right.
+  # Use file+rule entries (NOT bare cve_id OR package-only, both of
+  # which silence findings repo-wide — including production code that
+  # might later pin the same version). dependency-cve.ts:881 sets
+  # rule_id = "osv:${vuln.id}", so we list each OSV advisory id explicitly
+  # alongside the specific fixture file path. Path match is exact (per
+  # ignore-list.ts:260: "v1: exact path match only").
+  #
+  # Two OSV ids per Flask CVE (GHSA + PYSEC); pytest CVE-2025-71176 only
+  # surfaced as GHSA on PR #19's scan — if a PYSEC alias lands later,
+  # add it here.
   # ---------------------------------------------------------------
-  - package:
-      name: flask
-      ecosystem: PyPI
-      version: "2.3.0"
-    reason: "Planted flask@2.3.0 pin in tests/fixtures/golden-repo/cases/{single-vuln-dep-pypi,dependency-pair}/before/requirements.txt — exact-version match scopes to the planted fixture"
-  - package:
-      name: pytest
-      ecosystem: PyPI
-      version: "8.0.0"
-    reason: "Pre-existing pytest@8.0.0 pin in the same vuln-dep:pypi fixtures — exact-version match scopes to the fixture"
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:GHSA-m2qf-hxjv-5gpq"
+    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, vuln-dep:pypi fixture"
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:PYSEC-2023-62"
+    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, vuln-dep:pypi fixture"
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:GHSA-6w46-j5rx-g56g"
+    reason: "Pre-existing pytest@8.0.0 pin in vuln-dep:pypi fixture — OSV/GHSA finding for CVE-2025-71176"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:GHSA-m2qf-hxjv-5gpq"
+    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:PYSEC-2023-62"
+    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:GHSA-6w46-j5rx-g56g"
+    reason: "Pre-existing pytest@8.0.0 pin in dependency-pair multi-plant fixture — OSV/GHSA finding for CVE-2025-71176"
