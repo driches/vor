@@ -48483,7 +48483,11 @@ async function runGitGrep2(pattern, cwd, pathGlob) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      resolve3([]);
+      reject(
+        new Error(
+          `git grep timed out after ${GREP_TIMEOUT_MS}ms \u2014 verdict would be inconclusive, falling back`
+        )
+      );
     }, GREP_TIMEOUT_MS);
     child2.stdout.on("data", (b2) => {
       stdout += b2.toString("utf-8");
@@ -48796,24 +48800,40 @@ async function runAgent(input) {
     `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` + (worker !== void 0 ? `, worker=${workerConfig.worker_model}` : "")
   );
   let userPrompt = input.userPrompt;
+  let turns = 0;
+  let ended = "error";
+  let lastError;
+  let preflightBudgetExceeded = false;
   if (worker !== void 0) {
-    const analysis = await runPreflight({
-      client,
-      budget,
-      model: workerConfig.worker_model,
-      prContext: input.deps.prContext
-    });
-    if (analysis !== null) {
-      userPrompt = renderPreflightSection(analysis, input.deps.prContext.files) + "\n\n" + userPrompt;
+    try {
+      const analysis = await runPreflight({
+        client,
+        budget,
+        model: workerConfig.worker_model,
+        prContext: input.deps.prContext
+      });
+      if (analysis !== null) {
+        userPrompt = renderPreflightSection(analysis, input.deps.prContext.files) + "\n\n" + userPrompt;
+      }
+    } catch (err) {
+      if (err instanceof BudgetError) {
+        ended = "budget_exceeded";
+        lastError = err.message;
+        preflightBudgetExceeded = true;
+      } else {
+        await logger.warn(
+          `Pre-flight failed with non-budget error: ${err.message}. Continuing without pre-analysis.`
+        );
+      }
     }
   }
   const messages = [
     { role: "user", content: userPrompt }
   ];
-  let turns = 0;
-  let ended = "error";
-  let lastError;
   try {
+    if (preflightBudgetExceeded) {
+      throw new BudgetError(lastError ?? "Pre-flight exhausted budget");
+    }
     while (true) {
       if (input.abortController?.signal.aborted) {
         ended = "aborted";

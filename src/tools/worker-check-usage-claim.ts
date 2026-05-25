@@ -261,9 +261,17 @@ async function runGitGrep(
       if (resolved) return;
       resolved = true;
       child.kill('SIGKILL');
-      // Timeout: empty matches is the right fallback — the worker will
-      // mark its verdict inconclusive when there's no evidence to look at.
-      resolve([]);
+      // Reject on timeout instead of returning []. An empty match set
+      // would be indistinguishable from a real "no callers found" result,
+      // which the worker could convert into a confident-wrong 'confirmed'
+      // verdict for an 'unused' claim. Throwing lets the worker tool's
+      // outer catch produce an `ok: false, error: ...` tool_result so
+      // Sonnet knows to fall back to grep_repo_at_ref + read_file_at_ref.
+      reject(
+        new Error(
+          `git grep timed out after ${GREP_TIMEOUT_MS}ms — verdict would be inconclusive, falling back`,
+        ),
+      );
     }, GREP_TIMEOUT_MS);
 
     child.stdout.on('data', (b) => {

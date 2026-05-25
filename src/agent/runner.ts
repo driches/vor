@@ -125,18 +125,41 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // On failure, we log and continue with the original prompt — pre-flight
   // is an optimization, not a correctness gate.
   let userPrompt = input.userPrompt;
+  let turns = 0;
+  let ended: RunAgentResult['ended'] = 'error';
+  let lastError: string | undefined;
+  // Run preflight inside the same try that handles the main loop so a
+  // BudgetError thrown from the Haiku call (e.g. tight maxInputTokens cap,
+  // or a very large diff) lands in 'budget_exceeded' instead of escaping
+  // runAgent and turning into an orchestrator-level failure.
+  let preflightBudgetExceeded = false;
   if (worker !== undefined) {
-    const analysis = await runPreflight({
-      client,
-      budget,
-      model: workerConfig.worker_model,
-      prContext: input.deps.prContext,
-    });
-    if (analysis !== null) {
-      userPrompt =
-        renderPreflightSection(analysis, input.deps.prContext.files) +
-        '\n\n' +
-        userPrompt;
+    try {
+      const analysis = await runPreflight({
+        client,
+        budget,
+        model: workerConfig.worker_model,
+        prContext: input.deps.prContext,
+      });
+      if (analysis !== null) {
+        userPrompt =
+          renderPreflightSection(analysis, input.deps.prContext.files) +
+          '\n\n' +
+          userPrompt;
+      }
+    } catch (err) {
+      if (err instanceof BudgetError) {
+        ended = 'budget_exceeded';
+        lastError = err.message;
+        preflightBudgetExceeded = true;
+      } else {
+        // Any other error during preflight is non-fatal — preflight is an
+        // optimization, not a correctness gate. Log and continue with the
+        // unmodified user prompt; the main loop still runs normally.
+        await logger.warn(
+          `Pre-flight failed with non-budget error: ${(err as Error).message}. Continuing without pre-analysis.`,
+        );
+      }
     }
   }
 
@@ -144,11 +167,12 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     { role: 'user', content: userPrompt },
   ];
 
-  let turns = 0;
-  let ended: RunAgentResult['ended'] = 'error';
-  let lastError: string | undefined;
-
   try {
+    if (preflightBudgetExceeded) {
+      // Skip the main loop — the budget is already exhausted. Fall through
+      // to cost reporting below.
+      throw new BudgetError(lastError ?? 'Pre-flight exhausted budget');
+    }
     while (true) {
       if (input.abortController?.signal.aborted) {
         ended = 'aborted';
