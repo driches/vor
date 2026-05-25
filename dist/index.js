@@ -48221,6 +48221,12 @@ async function runAgent(input) {
         {
           model: input.model,
           max_tokens: 8192,
+          // Low but non-zero temperature trims output variance between runs on
+          // the same diff (the previous default sampled wide enough that two
+          // back-to-back runs on the same PR head could surface entirely
+          // different findings). 0.1 keeps the model decisive without going
+          // fully greedy.
+          temperature: 0.1,
           system: [
             { type: "text", text: input.systemPrompt, cache_control: { type: "ephemeral" } }
           ],
