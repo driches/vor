@@ -2,12 +2,12 @@
  * Plant a PEM-formatted private key block as a multi-line string literal.
  * Inserts a 6-line block at the requested line (declaration + 4 PEM marker
  * lines + closing backtick); subsequent line numbers in the same file shift
- * by 6. The truth `line_range` covers only the 4 PEM marker lines.
+ * by 6.
  *
- * Truth `line_range` covers the entire block so a finding anywhere inside
- * the block (header, body, footer) matches via the ±3 line-slack overlap in
- * scoring.ts. A scanner that anchors at the BEGIN header and an agent
- * comment near the END footer both score as TP.
+ * Truth `line_range` covers the 4 PEM marker lines only (header → footer,
+ * `[line+1, line+4]`), excluding the `const` declaration and closing
+ * backtick. With ±3 line-slack in scoring.ts, a finding anchored at the
+ * BEGIN header and one near the END footer both score as TP.
  *
  * The body is the textbook 64-char-per-line marker `EXAMPLE...EXAMPLE` so
  * push-protection doesn't treat it as a real key.

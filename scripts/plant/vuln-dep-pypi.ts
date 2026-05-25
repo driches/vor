@@ -14,7 +14,13 @@
  */
 import type { PlantTemplate } from './types.js';
 
-const REQUIREMENT_LINE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*([<>=!~]=?|===)\s*([^\s#]+)/;
+// Operator alternation order matters: `[<>=!~]=?` is greedy and would
+// consume `==` from a `===` operator before the `===` branch ever ran,
+// so `requests===2.5.0` would parse with operator=`==` and version=`=2.5.0`.
+// Behavior was incidentally correct (version didn't match the requested
+// `2.5.0` → no-op skipped) but the regex intent was wrong. List `===`
+// first so it's tried before the greedy branch.
+const REQUIREMENT_LINE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(===|[<>=!~]=?)\s*([^\s#]+)/;
 
 export const vulnDepPypiTemplate: PlantTemplate = {
   type: 'vuln-dep:pypi',
