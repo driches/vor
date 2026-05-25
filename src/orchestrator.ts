@@ -16,6 +16,7 @@ import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
 import { dismissPriorAgentReviews } from './github/prior-reviews.js';
 import { postReview } from './github/review-poster.js';
+import { inferProviderFromModel, type ProviderId } from './llm/index.js';
 import { ReviewAggregator } from './output/aggregator.js';
 import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
@@ -63,8 +64,16 @@ export interface OrchestratorInput {
   repo: string;
   pull_number: number;
   anthropic_api_key: string;
+  /** OpenAI API key. Empty string when not configured (fork-PR / Claude-only setups). */
+  openai_api_key: string;
   github_token: string;
   model_override?: string;
+  /**
+   * Explicit provider routing override sourced from action.yml's `provider`
+   * input (env var `INPUT_PROVIDER`). Flat to match `model_override` — each
+   * has independent provenance from the action inputs.
+   */
+  provider_override?: ProviderId;
   max_turns_override?: number;
   config_path: string;
   dry_run: boolean;
@@ -81,9 +90,16 @@ export interface OrchestratorOutput {
 }
 
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
+  // registerSecret + logger.setSecret are both no-ops on empty strings
+  // (registerSecret checks length >= 8; setSecret is harmless on ''), so we
+  // can register both keys unconditionally. The OpenAI key is empty in
+  // Anthropic-only setups (and vice versa) — registering the empty string
+  // is a noop, not a leak.
   registerSecret(input.anthropic_api_key);
+  registerSecret(input.openai_api_key);
   registerSecret(input.github_token);
   await logger.setSecret(input.anthropic_api_key);
+  await logger.setSecret(input.openai_api_key);
   await logger.setSecret(input.github_token);
 
   await logger.info(
@@ -120,9 +136,39 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   const config = await loadConfig(input, fileReader, prContext.metadata.head_sha);
   if (input.model_override) config.model = input.model_override;
   if (input.max_turns_override) config.max_turns = input.max_turns_override;
+  if (input.provider_override) config.provider = input.provider_override;
+
+  // Resolve the provider AFTER config is finalized so we know which API key
+  // matters. Precedence: input.provider_override > config.provider > inferred
+  // from model id. inferProviderFromModel throws on an unknown model prefix —
+  // that surfaces as an orchestrator failure, which is the right loud signal.
+  const resolvedProvider: ProviderId =
+    input.provider_override ?? config.provider ?? inferProviderFromModel(config.model);
+  const apiKey =
+    resolvedProvider === 'anthropic' ? input.anthropic_api_key : input.openai_api_key;
+
+  // Fork-PR safety: a PR opened from a fork doesn't see the upstream secrets,
+  // so the resolved-provider's API key is empty. Exit cleanly (no failure)
+  // with a notice so reviewers see why no review appeared. Mirrors the
+  // 'skipped_draft' shape above; informative `ended` suffix lets telemetry
+  // distinguish the two missing-key paths.
+  if (!apiKey) {
+    await logger.notice(
+      `No API key set for provider ${resolvedProvider} (model ${config.model}). ` +
+        `Skipping review (this is expected on PRs from forks unless you have ` +
+        `configured pull_request_target with explicit security review).`,
+    );
+    return {
+      comment_count: 0,
+      ended: `skipped_no_key_${resolvedProvider}`,
+      turns: 0,
+      cost_usd: 0,
+      dry_run: input.dry_run,
+    };
+  }
 
   await logger.info(
-    `Config: model=${config.model}, max_turns=${config.max_turns}, ` +
+    `Config: model=${config.model}, provider=${resolvedProvider}, max_turns=${config.max_turns}, ` +
       `severity_floor=${config.severity.floor}, sticky=${config.review.sticky}, ` +
       `event=${config.review.event}`,
   );
@@ -222,7 +268,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     maxTurns: config.max_turns,
     maxInputTokens: config.budget.max_input_tokens,
     maxOutputTokens: config.budget.max_output_tokens,
-    apiKey: input.anthropic_api_key,
+    apiKey,
+    // Always pass the resolved provider — same string we already computed
+    // above. Skips one redundant inferProviderFromModel() call inside the
+    // runner and pins routing even for model ids that match no known prefix
+    // (where the runner's inference would throw).
+    providerHint: resolvedProvider,
   });
   const scannerPromise = runScanners(scanners, scannerDeps);
 

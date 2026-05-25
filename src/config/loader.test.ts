@@ -135,3 +135,28 @@ security:
     expect(result.success).toBe(true);
   });
 });
+
+describe('provider field', () => {
+  it('accepts provider: anthropic', () => {
+    const result = partialConfigSchema.safeParse({ provider: 'anthropic' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts provider: openai', () => {
+    const cfg = loadConfigFromString('provider: openai\nmodel: gpt-4.1');
+    expect(cfg.provider).toBe('openai');
+    expect(cfg.model).toBe('gpt-4.1');
+  });
+
+  it('rejects an unknown provider value (and falls back to defaults via loader)', () => {
+    // Schema-level: explicit assertion that an unknown enum value is rejected.
+    const schemaResult = partialConfigSchema.safeParse({ provider: 'gemini' });
+    expect(schemaResult.success).toBe(false);
+
+    // Loader-level: the safe loader degrades to defaults on validation failure
+    // (defaults have provider unset, since omission means infer-from-model).
+    const cfg = loadConfigFromString('provider: gemini');
+    expect(cfg.provider).toBeUndefined();
+    expect(cfg.model).toBe(DEFAULT_CONFIG.model);
+  });
+});

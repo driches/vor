@@ -1,5 +1,5 @@
-name: 'Claude Code Review'
-description: 'AI code review + parallel vulnerability scanning for GitHub PRs — inline comments via Claude'
+name: 'AI Code Review'
+description: 'AI code review + parallel vulnerability scanning for GitHub PRs — Claude or OpenAI, inline comments'
 author: 'driches'
 
 branding:
@@ -8,14 +8,20 @@ branding:
 
 inputs:
   anthropic_api_key:
-    description: 'Anthropic API key. Required.'
+    description: 'Anthropic API key. Required when using a Claude model (the default).'
     required: true
+  openai_api_key:
+    description: 'OpenAI API key. Required when using a GPT or o-series model.'
+    required: false
+  provider:
+    description: 'LLM provider override (anthropic | openai). Inferred from `model` when omitted.'
+    required: false
   github_token:
     description: 'GitHub token with pull-requests:write. Defaults to the workflow token.'
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Claude model ID. Defaults to claude-sonnet-4-6. Override with claude-haiku-4-5 for lower cost (accept lower recall) or claude-opus-4-7 for higher capability.'
+    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-4.1, gpt-4o-mini, o4-mini, …). Default claude-sonnet-4-6.'
     required: false
     default: 'claude-sonnet-4-6'
   max_turns:
@@ -62,8 +68,10 @@ runs:
       run: node ${{ github.action_path }}/dist/index.js
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
         INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PROVIDER: ${{ inputs.provider }}
         INPUT_MAX_TURNS: ${{ inputs.max_turns }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         INPUT_DRY_RUN: ${{ inputs.dry_run }}

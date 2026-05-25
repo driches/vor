@@ -4,26 +4,30 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import type { ProviderId } from './llm/types.js';
 import { runOrchestrator } from './orchestrator.js';
 import { logger } from './util/logger.js';
 
 async function main(): Promise<void> {
   const anthropic_api_key = process.env.ANTHROPIC_API_KEY?.trim() ?? '';
+  const openai_api_key = process.env.OPENAI_API_KEY?.trim() ?? '';
   const github_token = process.env.GITHUB_TOKEN?.trim() ?? '';
   const dry_run = (process.env.INPUT_DRY_RUN ?? 'false').toLowerCase() === 'true';
   const model_override = process.env.INPUT_MODEL?.trim() || undefined;
+  // The cast is safe: the orchestrator passes provider_override into the
+  // config schema's `provider` enum (or into createProvider's switch), both
+  // of which reject anything that isn't 'anthropic' | 'openai'. Treating the
+  // env var as opaque here keeps the validation in one place.
+  const provider_override = (process.env.INPUT_PROVIDER?.trim() || undefined) as
+    | ProviderId
+    | undefined;
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
   const config_path = process.env.INPUT_CONFIG_PATH?.trim() || '.code-review.yml';
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
 
-  // Fork-PR safety: no key → exit 0 with a clear message.
-  if (!anthropic_api_key) {
-    await logger.notice(
-      'ANTHROPIC_API_KEY is not set. Skipping review (this is expected on PRs from forks ' +
-        'unless you have configured pull_request_target with explicit security review).',
-    );
-    return;
-  }
+  // Fork-PR safety lives in the orchestrator now (it has to wait until config
+  // is loaded so it knows which provider's key matters). github_token still
+  // gets checked early — it's needed regardless of provider.
   if (!github_token) {
     await logger.error('GITHUB_TOKEN is not set. Cannot fetch PR or post review.');
     process.exitCode = 1;
@@ -70,8 +74,10 @@ async function main(): Promise<void> {
       repo,
       pull_number,
       anthropic_api_key,
+      openai_api_key,
       github_token,
       ...(model_override !== undefined ? { model_override } : {}),
+      ...(provider_override !== undefined ? { provider_override } : {}),
       ...(max_turns_override !== undefined ? { max_turns_override } : {}),
       config_path,
       dry_run,

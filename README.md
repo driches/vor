@@ -70,9 +70,11 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `anthropic_api_key` | yes | — | Anthropic API key. Store as a repo secret. |
+| `anthropic_api_key` | yes | — | Anthropic API key. Store as a repo secret. Required for the default Claude models; can be a placeholder if you only run OpenAI models. |
+| `openai_api_key` | no | — | OpenAI API key. Required when `model` is a GPT or o-series id (e.g. `gpt-4.1`, `gpt-4o-mini`, `o4-mini`). |
+| `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted (`claude-*` → anthropic, `gpt-*`/`o<digit>*` → openai). |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Claude model ID. Override per-repo with `claude-haiku-4-5` for lower cost or `claude-opus-4-7` for higher capability. |
+| `model` | no | `claude-sonnet-4-6` | Model ID. Claude options: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI options: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
 | `config_path` | no | `.code-review.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
@@ -92,7 +94,9 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 All fields optional. Defaults are sensible.
 
 ```yaml
-model: claude-sonnet-4-6  # or claude-haiku-4-5 for lower cost / claude-opus-4-7 for higher capability
+model: claude-sonnet-4-6  # Claude: claude-sonnet-4-6 | claude-haiku-4-5 | claude-opus-4-7
+                          # OpenAI: gpt-4.1 | gpt-4o-mini | o4-mini | …
+# provider: openai        # optional — only needed when `model` doesn't match a known prefix
 max_turns: 40
 
 exclude:

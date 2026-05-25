@@ -286,6 +286,11 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       repo: 'eval',
       pull_number: 1,
       anthropic_api_key: input.anthropicApiKey,
+      // Task 5 added openai_api_key to OrchestratorInput. The eval harness
+      // only runs Anthropic models today; Task 6 will migrate this to pick
+      // the right key based on input.config.provider/model. Empty string is
+      // the noop-safe value for the unused-provider slot.
+      openai_api_key: '',
       github_token: 'gh-test',
       config_path: '.code-review.yml',
       dry_run: false,
