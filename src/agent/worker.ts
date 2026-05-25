@@ -35,7 +35,7 @@ export interface WorkerInvocation<Schema extends z.ZodTypeAny> {
 export interface WorkerResult<T> {
   parsed: T;
   rawText: string;
-  usage: Anthropic.MessageParam extends never ? never : Anthropic.Message['usage'];
+  usage: Anthropic.Message['usage'];
 }
 
 export class WorkerClient {

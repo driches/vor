@@ -151,7 +151,17 @@ async function main(): Promise<void> {
           // v0.3.0+: per-model breakdown for Sonnet/Haiku split when worker
           // delegation is enabled. Single-model runs still write this field
           // with one entry so downstream tooling can rely on it existing.
-          per_model_cost: agentResult.perModelCost,
+          // Translate from runner's camelCase to the snake_case shape
+          // declared by RunRecord in scripts/eval/types.ts — the typed
+          // contract downstream readers use.
+          per_model_cost: agentResult.perModelCost.map((m) => ({
+            model: m.model,
+            cost_usd: m.costUsd,
+            input_tokens: m.inputTokens,
+            output_tokens: m.outputTokens,
+            cache_creation_input_tokens: m.cacheCreationTokens,
+            cache_read_input_tokens: m.cacheReadTokens,
+          })),
           draft: deps.aggregator.snapshot(),
           kept_comments: filtered.kept,
           dropped_comments: filtered.dropped,

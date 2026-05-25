@@ -32,6 +32,7 @@ import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js'
 import { makeSkipFileTool } from '../tools/skip-file.js';
 import { makeWorkerCheckUsageClaimTool } from '../tools/worker-check-usage-claim.js';
 import type { ToolDeps } from '../tools/types.js';
+import { renderPreflightSection, runPreflight } from './preflight.js';
 import { WorkerClient } from './worker.js';
 
 export interface RunAgentInput {
@@ -116,8 +117,31 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       (worker !== undefined ? `, worker=${workerConfig.worker_model}` : ''),
   );
 
+  // Pre-flight Haiku skim: when worker delegation is enabled, summarize the
+  // diff into a structured candidate list BEFORE Sonnet's loop starts. The
+  // big win is that Sonnet's initial user prompt now carries the focused
+  // candidate list instead of needing to wide-scan the full diff through
+  // get_pr_diff (which would then sit in the cache pool for every turn).
+  // On failure, we log and continue with the original prompt — pre-flight
+  // is an optimization, not a correctness gate.
+  let userPrompt = input.userPrompt;
+  if (worker !== undefined) {
+    const analysis = await runPreflight({
+      client,
+      budget,
+      model: workerConfig.worker_model,
+      prContext: input.deps.prContext,
+    });
+    if (analysis !== null) {
+      userPrompt =
+        renderPreflightSection(analysis, input.deps.prContext.files) +
+        '\n\n' +
+        userPrompt;
+    }
+  }
+
   const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: input.userPrompt },
+    { role: 'user', content: userPrompt },
   ];
 
   let turns = 0;

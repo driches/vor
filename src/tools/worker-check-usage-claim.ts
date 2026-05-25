@@ -124,11 +124,23 @@ export function makeWorkerCheckUsageClaimTool(deps: ToolDeps) {
       const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
       const fileSnippets: Array<{ path: string; content: string }> = [];
       for (const path of topPaths) {
+        // Center the read window on the FIRST match line for this file.
+        // If the symbol's match is at line 350, reading lines 1-200 gives
+        // the worker file header content instead of the relevant code —
+        // worker returns 'inconclusive' or wrong verdict. Pick a window
+        // around the match so the worker sees actual usage.
+        const firstMatch = matches.find((m) => m.path === path);
+        const matchLine = firstMatch?.line ?? 1;
+        const readStart = Math.max(
+          1,
+          matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2),
+        );
+        const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
           { owner: deps.owner, repo: deps.repo, path, ref: head },
-          1,
-          READ_FILE_LINES_PER_CALL,
+          readStart,
+          readEnd,
         );
         if (result !== null) {
           fileSnippets.push({ path, content: result.content });
@@ -240,32 +252,49 @@ async function runGitGrep(
   const args = ['grep', '-n', '-E', '--no-color', '--', pattern];
   if (pathGlob !== undefined) args.push(pathGlob);
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd });
     let stdout = '';
+    let stderr = '';
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
       child.kill('SIGKILL');
+      // Timeout: empty matches is the right fallback — the worker will
+      // mark its verdict inconclusive when there's no evidence to look at.
       resolve([]);
     }, GREP_TIMEOUT_MS);
 
     child.stdout.on('data', (b) => {
       stdout += b.toString('utf-8');
     });
-    child.on('close', () => {
+    child.stderr.on('data', (b) => {
+      stderr += b.toString('utf-8');
+    });
+    child.on('close', (code) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      // git grep exits 0 = matches, 1 = no matches (not an error), anything
+      // else = real error (bad regex, missing pathspec, repo not found).
+      // The pre-v0.3.1 code resolved [] on every close code, so a misconfig
+      // (e.g. bad workspaceDir or invalid regex) silently became "no
+      // matches", which the worker would interpret as "symbol is unused"
+      // and return a confident-wrong verdict. Reject instead so the
+      // caller surfaces the error.
+      if (code !== 0 && code !== 1) {
+        reject(new Error(`git grep exited ${code}: ${stderr.trim()}`));
+        return;
+      }
       const matches = parseGrepOutput(stdout);
       resolve(matches.slice(0, GREP_RESULT_CAP));
     });
-    child.on('error', () => {
+    child.on('error', (err) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      resolve([]);
+      reject(err);
     });
   });
 }

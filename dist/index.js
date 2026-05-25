@@ -47368,29 +47368,38 @@ var Budget = class {
    * models, NOT cache reads — cache_read is billed at 0.1× and counting it
    * would make the default cap fire on turn 1 of any cached run. See
    * billableInputTokensForBudget in runner.ts for the asymmetry rationale.
+   *
+   * Checks run BEFORE the mutation so a thrown BudgetError leaves state
+   * untouched. Preserves the invariant "throw iff cap exceeded, otherwise
+   * state is consistent" — a future retry path that catches the error
+   * would otherwise double-count whatever was committed before the throw.
    */
   addUsage(model, usage) {
+    const inDelta = usage.input_tokens;
+    const outDelta = usage.output_tokens;
+    const creationDelta = usage.cache_creation_input_tokens ?? 0;
+    const readDelta = usage.cache_read_input_tokens ?? 0;
+    const proposedBillable = this.totalBillableInput() + inDelta + creationDelta;
+    if (proposedBillable > this.limits.maxInputTokens) {
+      throw new BudgetError(
+        `maxInputTokens exceeded (${proposedBillable} > ${this.limits.maxInputTokens})`
+      );
+    }
+    const proposedOut = this.totalOutput() + outDelta;
+    if (proposedOut > this.limits.maxOutputTokens) {
+      throw new BudgetError(
+        `maxOutputTokens exceeded (${proposedOut} > ${this.limits.maxOutputTokens})`
+      );
+    }
     let m2 = this.state.perModel.get(model);
     if (m2 === void 0) {
       m2 = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
       this.state.perModel.set(model, m2);
     }
-    m2.inputTokens += usage.input_tokens;
-    m2.outputTokens += usage.output_tokens;
-    m2.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
-    m2.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-    const billableIn = this.totalBillableInput();
-    if (billableIn > this.limits.maxInputTokens) {
-      throw new BudgetError(
-        `maxInputTokens exceeded (${billableIn} > ${this.limits.maxInputTokens})`
-      );
-    }
-    const totalOut = this.totalOutput();
-    if (totalOut > this.limits.maxOutputTokens) {
-      throw new BudgetError(
-        `maxOutputTokens exceeded (${totalOut} > ${this.limits.maxOutputTokens})`
-      );
-    }
+    m2.inputTokens += inDelta;
+    m2.outputTokens += outDelta;
+    m2.cacheCreationTokens += creationDelta;
+    m2.cacheReadTokens += readDelta;
   }
   /** True once we cross the warn threshold — runner should signal "wrap up". */
   shouldWrapUp() {
@@ -48371,11 +48380,18 @@ function makeWorkerCheckUsageClaimTool(deps) {
       const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
       const fileSnippets = [];
       for (const path11 of topPaths) {
+        const firstMatch = matches.find((m2) => m2.path === path11);
+        const matchLine = firstMatch?.line ?? 1;
+        const readStart = Math.max(
+          1,
+          matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2)
+        );
+        const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
           { owner: deps.owner, repo: deps.repo, path: path11, ref: head },
-          1,
-          READ_FILE_LINES_PER_CALL
+          readStart,
+          readEnd
         );
         if (result !== null) {
           fileSnippets.push({ path: path11, content: result.content });
@@ -48458,9 +48474,10 @@ function renderUserPrompt(args) {
 async function runGitGrep2(pattern, cwd, pathGlob) {
   const args = ["grep", "-n", "-E", "--no-color", "--", pattern];
   if (pathGlob !== void 0) args.push(pathGlob);
-  return new Promise((resolve3) => {
+  return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd });
     let stdout = "";
+    let stderr = "";
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -48471,18 +48488,25 @@ async function runGitGrep2(pattern, cwd, pathGlob) {
     child2.stdout.on("data", (b2) => {
       stdout += b2.toString("utf-8");
     });
-    child2.on("close", () => {
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code !== 0 && code !== 1) {
+        reject(new Error(`git grep exited ${code}: ${stderr.trim()}`));
+        return;
+      }
       const matches = parseGrepOutput2(stdout);
       resolve3(matches.slice(0, GREP_RESULT_CAP));
     });
-    child2.on("error", () => {
+    child2.on("error", (err) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      resolve3([]);
+      reject(err);
     });
   });
 }
@@ -48499,6 +48523,190 @@ function parseGrepOutput2(out) {
     });
   }
   return matches;
+}
+
+// src/agent/preflight.ts
+var candidateSchema = external_exports.object({
+  file: external_exports.string(),
+  line_range: external_exports.string().describe("e.g. '42-58' or '42'"),
+  severity_guess: external_exports.enum(["critical", "important", "minor", "nit"]),
+  category: external_exports.string(),
+  what: external_exports.string().min(1).max(240),
+  why: external_exports.string().min(1).max(360)
+});
+var preflightSchema = external_exports.object({
+  candidates: external_exports.array(candidateSchema).max(20),
+  low_risk_files: external_exports.array(external_exports.string()).default([]),
+  global_observations: external_exports.array(external_exports.string().max(200)).default([])
+});
+var PREFLIGHT_SYSTEM = `You are a fast-scan analyst preparing a pull request for a senior reviewer.
+
+Your job: read the diff and file list, then return a structured JSON list of EVERY plausibly-flaggable concern. The senior reviewer is the one who decides what to post \u2014 your job is to give them a focused starting list so they don't have to wide-scan the diff themselves.
+
+Be GENEROUS in candidates but TIGHT in language. The reviewer prefers a list of 8 candidates they triage in 3 turns over a perfect list of 3 they have to mine themselves.
+
+Severity guidance:
+- critical: data loss, auth bypass, RCE, crash on common path, secret leak, race with user impact
+- important: error handling missing on a likely-failing external call, N+1, breaking change to an internal contract, missing test coverage on core logic
+- minor: naming that obscures intent (with a concrete suggestion), missing JSDoc on exported API, inconsistent pattern usage
+- nit: style preferences when there's no documented convention
+
+Categories (free-text but prefer): bug | security | performance | error-handling | test-gap | readability | docs | architecture | vulnerability
+
+OUTPUT REQUIREMENTS (no exceptions):
+- Return ONLY JSON matching this schema. No markdown fences. No prose before or after.
+- Use this exact shape:
+{
+  "candidates": [
+    {
+      "file": "path/relative/to/repo.ts",
+      "line_range": "42-58",   // OR a single line like "42"
+      "severity_guess": "important",
+      "category": "error-handling",
+      "what": "1-sentence headline",
+      "why": "1-2 sentence reasoning"
+    }
+  ],
+  "low_risk_files": ["paths the reviewer can skip without reading"],
+  "global_observations": ["Cross-cutting observations the senior reviewer should know"]
+}
+
+Constraints:
+- At most 20 candidates. If you'd flag more, return the top 20 by severity.
+- File paths must match exactly the paths in the diff.
+- Line ranges must fall within the changed hunks of that file.
+- If the diff is small and benign, returning {"candidates": [], ...} is correct.`;
+async function runPreflight(input) {
+  const fileSummary = input.prContext.files.map(
+    (f2) => `- ${f2.path} (${f2.status}, +${f2.additions}/-${f2.deletions}${f2.is_generated ? ", generated" : ""}${f2.is_binary ? ", binary" : ""})`
+  ).join("\n");
+  const userPrompt = [
+    `## PR metadata`,
+    `Title: ${input.prContext.metadata.title}`,
+    input.prContext.metadata.body.trim().length > 0 ? `Body: ${input.prContext.metadata.body.slice(0, 1e3)}` : "Body: (empty)",
+    "",
+    `## Changed files (${input.prContext.files.length})`,
+    fileSummary,
+    "",
+    `## Unified diff`,
+    "```diff",
+    input.prContext.diff,
+    "```",
+    "",
+    "Return ONLY the JSON described in your instructions."
+  ].join("\n");
+  let response;
+  try {
+    response = await input.client.messages.create({
+      model: input.model,
+      max_tokens: 2048,
+      temperature: 0,
+      system: PREFLIGHT_SYSTEM,
+      messages: [{ role: "user", content: userPrompt }]
+    });
+  } catch (err) {
+    await logger.warn(
+      `Pre-flight call failed: ${err.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  try {
+    input.budget.addUsage(input.model, response.usage);
+  } catch (err) {
+    throw err;
+  }
+  const textBlock = response.content.find(
+    (b2) => b2.type === "text"
+  );
+  if (textBlock === void 0) {
+    await logger.warn("Pre-flight returned no text block. Continuing without pre-analysis.");
+    return null;
+  }
+  const rawText = textBlock.text;
+  const json = stripJsonFence(rawText);
+  let unvalidated;
+  try {
+    unvalidated = JSON.parse(json);
+  } catch (err) {
+    await logger.warn(
+      `Pre-flight produced non-JSON output: ${err.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  const validation = preflightSchema.safeParse(unvalidated);
+  if (!validation.success) {
+    await logger.warn(
+      `Pre-flight JSON failed schema validation: ${validation.error.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  await logger.info(
+    `Pre-flight: ${validation.data.candidates.length} candidate(s), ${validation.data.low_risk_files.length} low-risk file(s), ${validation.data.global_observations.length} global observation(s)`
+  );
+  return validation.data;
+}
+function renderPreflightSection(analysis, changedFiles) {
+  const lines = [];
+  lines.push("## Pre-analysis (advisory \u2014 verify independently before posting)");
+  lines.push("");
+  lines.push(
+    'A faster model has scanned the diff. Its candidates appear below the file list. Treat them as a STARTING LIST, not as findings to post verbatim, and do NOT treat absence-from-the-list as "nothing to flag here" \u2014 pre-analysis routinely misses real findings.'
+  );
+  lines.push("");
+  const filesByCandidate = /* @__PURE__ */ new Map();
+  for (const c2 of analysis.candidates) {
+    const existing = filesByCandidate.get(c2.file) ?? [];
+    existing.push(c2);
+    filesByCandidate.set(c2.file, existing);
+  }
+  const lowRiskSet = new Set(analysis.low_risk_files);
+  lines.push(`### Files in this PR (${changedFiles.length})`);
+  lines.push(
+    'Files marked "no candidates" still need a quick scan \u2014 pre-analysis catches roughly 70% of real findings. A 1-2 turn scan is usually enough; only go deep if you spot something concrete.'
+  );
+  lines.push("");
+  for (const f2 of changedFiles) {
+    const flagged = filesByCandidate.get(f2.path);
+    const lowRisk = lowRiskSet.has(f2.path);
+    let annotation;
+    if (flagged !== void 0 && flagged.length > 0) {
+      annotation = `${flagged.length} candidate(s)`;
+    } else if (lowRisk) {
+      annotation = "low-risk";
+    } else {
+      annotation = "no candidates";
+    }
+    lines.push(`- \`${f2.path}\` (${f2.status}, +${f2.additions}/-${f2.deletions}) \u2014 ${annotation}`);
+  }
+  lines.push("");
+  if (analysis.candidates.length === 0) {
+    lines.push("**No candidates flagged across any file.** Investigate the diff yourself \u2014 the pre-analysis may have missed everything.");
+  } else {
+    lines.push(`### ${analysis.candidates.length} candidate(s) (advisory)`);
+    lines.push("");
+    for (let i2 = 0; i2 < analysis.candidates.length; i2++) {
+      const c2 = analysis.candidates[i2];
+      lines.push(
+        `${i2 + 1}. **${c2.file}:${c2.line_range}** \u2014 ${c2.severity_guess.toUpperCase()} (${c2.category})`
+      );
+      lines.push(`   What: ${c2.what}`);
+      lines.push(`   Why: ${c2.why}`);
+    }
+    lines.push("");
+  }
+  if (analysis.global_observations.length > 0) {
+    lines.push(`### Global observations`);
+    for (const o2 of analysis.global_observations) lines.push(`- ${o2}`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+function stripJsonFence(text) {
+  let s2 = text.trim();
+  if (s2.startsWith("```json")) s2 = s2.slice("```json".length);
+  else if (s2.startsWith("```")) s2 = s2.slice(3);
+  if (s2.endsWith("```")) s2 = s2.slice(0, -3);
+  return s2.trim();
 }
 
 // src/agent/worker.ts
@@ -48529,7 +48737,7 @@ var WorkerClient = class {
       throw new Error(`Worker '${inv.task}' returned no text block`);
     }
     const rawText = textBlock.text;
-    const json = stripJsonFence(rawText);
+    const json = stripJsonFence2(rawText);
     let unvalidated;
     try {
       unvalidated = JSON.parse(json);
@@ -48557,7 +48765,7 @@ var WorkerClient = class {
     };
   }
 };
-function stripJsonFence(text) {
+function stripJsonFence2(text) {
   let s2 = text.trim();
   if (s2.startsWith("```json")) s2 = s2.slice("```json".length);
   else if (s2.startsWith("```")) s2 = s2.slice(3);
@@ -48587,8 +48795,20 @@ async function runAgent(input) {
   await logger.info(
     `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` + (worker !== void 0 ? `, worker=${workerConfig.worker_model}` : "")
   );
+  let userPrompt = input.userPrompt;
+  if (worker !== void 0) {
+    const analysis = await runPreflight({
+      client,
+      budget,
+      model: workerConfig.worker_model,
+      prContext: input.deps.prContext
+    });
+    if (analysis !== null) {
+      userPrompt = renderPreflightSection(analysis, input.deps.prContext.files) + "\n\n" + userPrompt;
+    }
+  }
   const messages = [
-    { role: "user", content: input.userPrompt }
+    { role: "user", content: userPrompt }
   ];
   let turns = 0;
   let ended = "error";
@@ -48806,9 +49026,6 @@ function buildSystemPrompt(input) {
   const sections = [BASE_PROMPT];
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
-  if (input.config.experimental.worker_delegation.enabled) {
-    sections.push(WORKER_DELEGATION_SECTION);
-  }
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push("### Repo-specific instructions");
     sections.push(input.config.prompt.additions.trim());
@@ -48821,25 +49038,6 @@ function buildSystemPrompt(input) {
   if (context) sections.push(context);
   return sections.join("\n\n");
 }
-var WORKER_DELEGATION_SECTION = `# Delegation: worker_check_usage_claim
-
-You have an additional tool, \`worker_check_usage_claim\`, that delegates verification work to a cheaper, faster model. Use it during phase 5 (verify) when you want to confirm a usage claim \u2014 "is X unused?", "does Y have one caller?", "does this break the pattern in Z?" \u2014 instead of running the grep + reads yourself.
-
-The worker returns a structured JSON verdict: \`{ verdict, call_sites, confidence, evidence, files_searched }\`. Treat it as a HINT, not as evidence.
-
-**Verification discipline (load-bearing):**
-- For findings with severity \`critical\` or \`important\`: you MUST call \`read_file_at_ref\` on the target line range yourself before \`post_inline_comment\`. The validator rejects critical/important posts on lines you haven't read in this run. Worker output does NOT count as a read.
-- For findings with severity \`minor\` or \`nit\`: worker output alone is acceptable evidence.
-
-**When to use the worker:**
-- You want to spot-check whether a removed helper has remaining callers.
-- You want to check whether a new function follows or breaks an existing pattern in the repo.
-- You want a fast triage of "is this symbol used anywhere meaningful?" before deciding to investigate further.
-
-**When NOT to use the worker:**
-- The grep can be done in a single \`grep_repo_at_ref\` call you'd inspect yourself anyway.
-- You already have a strong hypothesis and just need to read 20-50 lines around the target line \u2014 call \`read_file_at_ref\` directly.
-- You're past phase 5 and ready to post. Don't delegate at the last moment.`;
 var BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal

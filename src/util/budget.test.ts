@@ -133,4 +133,17 @@ describe('Budget', () => {
     expect(snap.inputTokens).toBe(130);
     expect(snap.outputTokens).toBe(70);
   });
+
+  it('leaves state unchanged when addUsage throws BudgetError (no partial mutation)', () => {
+    const b = new Budget(limits);
+    b.addUsage(SONNET, { input_tokens: 500, output_tokens: 200 });
+    const before = b.snapshot();
+    // 500 + 600 = 1100 > cap of 1000 — should throw and leave state alone.
+    expect(() =>
+      b.addUsage(SONNET, { input_tokens: 600, output_tokens: 0 }),
+    ).toThrowError(BudgetError);
+    const after = b.snapshot();
+    expect(after.inputTokens).toBe(before.inputTokens);
+    expect(after.outputTokens).toBe(before.outputTokens);
+  });
 });

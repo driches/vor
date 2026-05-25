@@ -65,30 +65,40 @@ export class Budget {
    * models, NOT cache reads — cache_read is billed at 0.1× and counting it
    * would make the default cap fire on turn 1 of any cached run. See
    * billableInputTokensForBudget in runner.ts for the asymmetry rationale.
+   *
+   * Checks run BEFORE the mutation so a thrown BudgetError leaves state
+   * untouched. Preserves the invariant "throw iff cap exceeded, otherwise
+   * state is consistent" — a future retry path that catches the error
+   * would otherwise double-count whatever was committed before the throw.
    */
   addUsage(model: string, usage: ModelUsage): void {
+    const inDelta = usage.input_tokens;
+    const outDelta = usage.output_tokens;
+    const creationDelta = usage.cache_creation_input_tokens ?? 0;
+    const readDelta = usage.cache_read_input_tokens ?? 0;
+
+    const proposedBillable = this.totalBillableInput() + inDelta + creationDelta;
+    if (proposedBillable > this.limits.maxInputTokens) {
+      throw new BudgetError(
+        `maxInputTokens exceeded (${proposedBillable} > ${this.limits.maxInputTokens})`,
+      );
+    }
+    const proposedOut = this.totalOutput() + outDelta;
+    if (proposedOut > this.limits.maxOutputTokens) {
+      throw new BudgetError(
+        `maxOutputTokens exceeded (${proposedOut} > ${this.limits.maxOutputTokens})`,
+      );
+    }
+
     let m = this.state.perModel.get(model);
     if (m === undefined) {
       m = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
       this.state.perModel.set(model, m);
     }
-    m.inputTokens += usage.input_tokens;
-    m.outputTokens += usage.output_tokens;
-    m.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
-    m.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-
-    const billableIn = this.totalBillableInput();
-    if (billableIn > this.limits.maxInputTokens) {
-      throw new BudgetError(
-        `maxInputTokens exceeded (${billableIn} > ${this.limits.maxInputTokens})`,
-      );
-    }
-    const totalOut = this.totalOutput();
-    if (totalOut > this.limits.maxOutputTokens) {
-      throw new BudgetError(
-        `maxOutputTokens exceeded (${totalOut} > ${this.limits.maxOutputTokens})`,
-      );
-    }
+    m.inputTokens += inDelta;
+    m.outputTokens += outDelta;
+    m.cacheCreationTokens += creationDelta;
+    m.cacheReadTokens += readDelta;
   }
 
   /** True once we cross the warn threshold — runner should signal "wrap up". */

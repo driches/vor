@@ -176,6 +176,18 @@ export function validateInlineComment(
   //     partial read of just the end line is not enough to verify a range
   //     claim, otherwise the rule would let `start_line=10, line=200`
   //     through after only reading line 200.
+  //
+  //     Known gap (intentional): we only check endpoints, not every line in
+  //     the [start_line, line] interval. For `start_line=10, line=200`, the
+  //     check passes if 1-10 and 195-200 were read in two separate calls
+  //     even though 11-194 was never seen. Full-interval coverage would
+  //     require either (a) collapsing overlapping ranges (expensive over a
+  //     long run) or (b) forcing a single read that spans the whole
+  //     comment, which over-constrains the agent for legitimate wide-range
+  //     comments. The endpoint check catches the common "worker said
+  //     something, here's my comment with arbitrary range" failure mode
+  //     while keeping the gate cheap. If wider coverage becomes important,
+  //     promote to full-interval; the function signature can stay.
   if (
     ctx.runContext !== undefined &&
     (input.severity === 'critical' || input.severity === 'important')

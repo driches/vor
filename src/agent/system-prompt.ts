@@ -27,10 +27,6 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
 
-  if (input.config.experimental.worker_delegation.enabled) {
-    sections.push(WORKER_DELEGATION_SECTION);
-  }
-
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push('### Repo-specific instructions');
     sections.push(input.config.prompt.additions.trim());
@@ -46,25 +42,6 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   return sections.join('\n\n');
 }
 
-const WORKER_DELEGATION_SECTION = `# Delegation: worker_check_usage_claim
-
-You have an additional tool, \`worker_check_usage_claim\`, that delegates verification work to a cheaper, faster model. Use it during phase 5 (verify) when you want to confirm a usage claim — "is X unused?", "does Y have one caller?", "does this break the pattern in Z?" — instead of running the grep + reads yourself.
-
-The worker returns a structured JSON verdict: \`{ verdict, call_sites, confidence, evidence, files_searched }\`. Treat it as a HINT, not as evidence.
-
-**Verification discipline (load-bearing):**
-- For findings with severity \`critical\` or \`important\`: you MUST call \`read_file_at_ref\` on the target line range yourself before \`post_inline_comment\`. The validator rejects critical/important posts on lines you haven't read in this run. Worker output does NOT count as a read.
-- For findings with severity \`minor\` or \`nit\`: worker output alone is acceptable evidence.
-
-**When to use the worker:**
-- You want to spot-check whether a removed helper has remaining callers.
-- You want to check whether a new function follows or breaks an existing pattern in the repo.
-- You want a fast triage of "is this symbol used anywhere meaningful?" before deciding to investigate further.
-
-**When NOT to use the worker:**
-- The grep can be done in a single \`grep_repo_at_ref\` call you'd inspect yourself anyway.
-- You already have a strong hypothesis and just need to read 20-50 lines around the target line — call \`read_file_at_ref\` directly.
-- You're past phase 5 and ready to post. Don't delegate at the last moment.`;
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
