@@ -20,10 +20,13 @@ export interface ModelPricing {
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
-  // Opus 4-7 and 4-1 share Opus-tier pricing today. Keep both keys so legacy
-  // configs still resolve to real pricing instead of falling through to the
-  // sonnet fallback.
-  'claude-opus-4-7': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
+  // Opus 4.5, 4.6, and 4.7 share the lower-tier Opus pricing that Anthropic
+  // introduced starting with 4.5. Opus 4.1 retains the original higher Opus
+  // tier and is kept here so legacy configs still resolve to real pricing
+  // instead of falling through to the Sonnet fallback.
+  'claude-opus-4-7': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
+  'claude-opus-4-6': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
+  'claude-opus-4-5': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
   'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
   'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
 };

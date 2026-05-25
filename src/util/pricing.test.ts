@@ -20,12 +20,24 @@ describe('pricingForModel', () => {
     expect(p!.cache_read).toBe(0.1);
   });
 
-  it('returns pricing for Opus 4-7 and 4-1 at same rates', () => {
+  it('prices Opus 4.5, 4.6, and 4.7 at the new lower Opus tier ($5/$25)', () => {
     const p47 = pricingForModel('claude-opus-4-7');
+    const p46 = pricingForModel('claude-opus-4-6');
+    const p45 = pricingForModel('claude-opus-4-5');
+    expect(p47).toEqual(p46);
+    expect(p47).toEqual(p45);
+    expect(p47!.input).toBe(5);
+    expect(p47!.output).toBe(25);
+    expect(p47!.cache_creation).toBe(6.25);
+    expect(p47!.cache_read).toBe(0.5);
+  });
+
+  it('keeps Opus 4.1 at the legacy higher Opus tier ($15/$75)', () => {
     const p41 = pricingForModel('claude-opus-4-1');
-    expect(p47).toEqual(p41);
-    expect(p47!.input).toBe(15);
-    expect(p47!.output).toBe(75);
+    expect(p41!.input).toBe(15);
+    expect(p41!.output).toBe(75);
+    expect(p41!.cache_creation).toBe(18.75);
+    expect(p41!.cache_read).toBe(1.5);
   });
 
   it('returns undefined for unknown model id (lets the runner fall back, the eval throw)', () => {
@@ -38,6 +50,8 @@ describe('pricingForModel', () => {
     expect(Object.keys(MODEL_PRICING).sort()).toEqual([
       'claude-haiku-4-5',
       'claude-opus-4-1',
+      'claude-opus-4-5',
+      'claude-opus-4-6',
       'claude-opus-4-7',
       'claude-sonnet-4-6',
     ]);
