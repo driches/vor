@@ -14,8 +14,11 @@
  *     gate without instantiating the class (the class method takes
  *     `CanonicalUsage` instead — both exist intentionally).
  *
- * The conversion helpers (`canonicalMessagesToAnthropic`, etc.) are
- * module-private but exported under `__internal` for unit testing.
+ * The conversion helpers (canonicalMessagesToAnthropic, canonicalToolsToAnthropic,
+ * anthropicResponseToCanonical) are exported as named exports so the unit tests
+ * can pin their behavior directly. They are not part of the cross-module API
+ * contract — only the AnthropicProvider class is intended for callers outside
+ * src/llm/.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -140,6 +143,8 @@ export function canonicalMessagesToAnthropic(
         tool_use_id: t.tool_call_id,
         content: t.content,
       };
+      // Strict equality: Anthropic treats presence-of-field as the error signal,
+      // so omit the field entirely on false/undefined to avoid false positives.
       if (t.is_error === true) block.is_error = true;
       toolBlocks.push(block);
       i++;
