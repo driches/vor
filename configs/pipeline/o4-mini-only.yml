@@ -1,0 +1,13 @@
+# OpenAI reasoning model. max_turns reduced because o-series tends to spend
+# fewer turns per investigation (more thinking up-front) but at higher per-
+# turn cost. Eval should compare F1 / cost-per-TP vs gpt-4.1 and Claude
+# Sonnet 4.6.
+model: o4-mini
+max_turns: 30
+severity:
+  floor: minor
+  max_comments_per_file: 5
+  max_comments_total: 30
+budget:
+  max_input_tokens: 500000
+  max_output_tokens: 50000

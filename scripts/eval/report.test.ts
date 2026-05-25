@@ -15,6 +15,7 @@ function score(over: Partial<ScoreResult> & { config_name: string }): ScoreResul
     outcomes: [],
     unaligned: [],
     cost: {
+      provider: 'anthropic',
       input_tokens: 100,
       output_tokens: 50,
       cache_read_input_tokens: 0,

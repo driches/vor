@@ -14,25 +14,31 @@ import { loadPipelineConfig } from './config-loader.js';
 // come entirely from the production scanner path (secrets / dependency-cve),
 // which is exactly what we want when the goal is "does the harness wire up
 // end-to-end without mocking the agent's inferences?".
+// Canonical-shape script (Task 6 of OpenAI provider work migrated the
+// adapter off the Anthropic-SDK-shaped `AgentTurnResponse` to the
+// provider-agnostic `CompleteResponse`).
 const SILENT_AGENT_SCRIPT = [
   {
-    content: [
+    text: '',
+    tool_calls: [
       {
-        type: 'tool_use' as const,
         id: 't1',
         name: 'post_summary',
-        input: {
+        arguments: {
           strengths: [],
           assessment: 'comment',
           assessment_reasoning: 'AI did not post inline comments in this test',
         },
       },
     ],
-    stop_reason: 'tool_use' as const,
+    stop_reason: 'tool_calls' as const,
+    usage: { input_tokens: 100, output_tokens: 50 },
   },
   {
-    content: [{ type: 'text' as const, text: 'done' }],
+    text: 'done',
+    tool_calls: [],
     stop_reason: 'end_turn' as const,
+    usage: { input_tokens: 100, output_tokens: 50 },
   },
 ];
 
@@ -78,7 +84,7 @@ describe('eval harness end-to-end', () => {
     const run = await evalRun({
       case: c,
       config: cfg,
-      anthropicApiKey: 'sk-ant-test',
+      apiKey: 'sk-ant-test',
       agentScript: SILENT_AGENT_SCRIPT,
     });
 
@@ -122,7 +128,7 @@ describe('eval harness end-to-end', () => {
     const run = await evalRun({
       case: c,
       config: cfg,
-      anthropicApiKey: 'sk-ant-test',
+      apiKey: 'sk-ant-test',
       agentScript: SILENT_AGENT_SCRIPT,
     });
 
@@ -164,7 +170,7 @@ describe('eval harness end-to-end', () => {
     const run = await evalRun({
       case: c,
       config: cfg,
-      anthropicApiKey: 'sk-ant-test',
+      apiKey: 'sk-ant-test',
       agentScript: SILENT_AGENT_SCRIPT,
     });
 

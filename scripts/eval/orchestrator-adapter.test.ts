@@ -8,6 +8,7 @@ import {
 import type { LoadedCase } from './case-loader.js';
 import { DEFAULT_CONFIG } from '../../src/config/defaults.js';
 import type { ReviewConfig } from '../../src/config/types.js';
+import type { CompleteResponse } from '../../src/llm/types.js';
 
 const fakeCase: LoadedCase = {
   case_id: 'unit',
@@ -29,33 +30,65 @@ const fakeCase: LoadedCase = {
   ],
 };
 
+/**
+ * Canonical responses the FakeProvider emits in a typical eval scenario:
+ *   - Turn 1: model calls post_summary so the runner exits via `summary_posted`.
+ *   - Turn 2: scripted but rarely reached — the runner stops after the summary
+ *     post; we include it to be defensive against future runner refactors
+ *     that keep iterating after a summary.
+ * Every turn carries identical 100/50 token usage so the cost tests below
+ * have a stable per-turn budget to multiply against per-model pricing.
+ */
+function summaryScript(): CompleteResponse[] {
+  return [
+    {
+      text: '',
+      tool_calls: [
+        {
+          id: 't1',
+          name: 'post_summary',
+          arguments: {
+            strengths: [],
+            assessment: 'comment',
+            assessment_reasoning: 'No AI findings in unit test',
+          },
+        },
+      ],
+      stop_reason: 'tool_calls',
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+    {
+      text: 'done',
+      tool_calls: [],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+  ];
+}
+
+/**
+ * Single-turn end_turn-only script for tests that exit the loop immediately
+ * (no post_summary). Useful for the pricing-comparison tests where we just
+ * want one turn of token usage to flow through computeCostUsd.
+ */
+function endTurnScript(): CompleteResponse[] {
+  return [
+    {
+      text: 'done',
+      tool_calls: [],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+  ];
+}
+
 describe('evalRun', () => {
   it('invokes the orchestrator with the case content and captures findings + cost', async () => {
     const result = await evalRun({
       case: fakeCase,
       config: DEFAULT_CONFIG,
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        {
-          content: [
-            {
-              type: 'tool_use',
-              id: 't1',
-              name: 'post_summary',
-              input: {
-                strengths: [],
-                assessment: 'comment',
-                assessment_reasoning: 'No AI findings in unit test',
-              },
-            },
-          ],
-          stop_reason: 'tool_use',
-        },
-        {
-          content: [{ type: 'text', text: 'done' }],
-          stop_reason: 'end_turn',
-        },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: summaryScript(),
     });
 
     // The secrets scanner should pick up the AWS key (it's in the case content
@@ -65,6 +98,9 @@ describe('evalRun', () => {
     expect(result.cost.turns).toBe(1);
     expect(result.cost.wall_ms).toBeGreaterThan(0);
     expect(result.cost.ended_reason).toBe('summary_posted');
+    // Cost record now carries provider id; DEFAULT_CONFIG uses an Anthropic
+    // model so the resolved provider must be 'anthropic'.
+    expect(result.cost.provider).toBe('anthropic');
   });
 
   it('preserves the scanner-emitted category and severity (no hardcoded security/minor)', async () => {
@@ -76,28 +112,8 @@ describe('evalRun', () => {
     const result = await evalRun({
       case: fakeCase,
       config: DEFAULT_CONFIG,
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        {
-          content: [
-            {
-              type: 'tool_use',
-              id: 't1',
-              name: 'post_summary',
-              input: {
-                strengths: [],
-                assessment: 'comment',
-                assessment_reasoning: 'No AI findings in unit test',
-              },
-            },
-          ],
-          stop_reason: 'tool_use',
-        },
-        {
-          content: [{ type: 'text', text: 'end' }],
-          stop_reason: 'end_turn',
-        },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: summaryScript(),
     });
 
     // The secrets scanner emits the AWS-key finding as
@@ -130,18 +146,14 @@ describe('evalRun', () => {
     const sonnetResult = await evalRun({
       case: minimalCase,
       config: { ...DEFAULT_CONFIG, model: 'claude-sonnet-4-6' },
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
     });
     const haikuResult = await evalRun({
       case: minimalCase,
       config: { ...DEFAULT_CONFIG, model: 'claude-haiku-4-5' },
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
     });
     expect(sonnetResult.cost.cost_usd).toBeGreaterThan(haikuResult.cost.cost_usd);
   });
@@ -154,7 +166,7 @@ describe('evalRun', () => {
     // API/infra failures look like real model regressions in the report.
     //
     // We force a throw by handing the agent script an EMPTY array: the
-    // mocked SDK throws `agentScript exhausted` on the first turn,
+    // FakeProvider throws `agentScript exhausted` on the first turn,
     // simulating an unexpected runtime failure deep in the orchestrator.
     const minimalCase: LoadedCase = {
       case_id: 'propagation',
@@ -166,8 +178,8 @@ describe('evalRun', () => {
       evalRun({
         case: minimalCase,
         config: DEFAULT_CONFIG,
-        anthropicApiKey: 'sk-ant-test',
-        agentScript: [], // empty → SDK mock will throw on the first turn
+        apiKey: 'sk-ant-test',
+        agentScript: [], // empty → FakeProvider will throw on the first turn
       }),
     ).rejects.toThrow(/agentScript exhausted/);
   });
@@ -189,10 +201,8 @@ describe('evalRun', () => {
       evalRun({
         case: minimalCase,
         config: { ...DEFAULT_CONFIG, model: 'claude-sonet-4-6' as unknown as string }, // typo
-        anthropicApiKey: 'sk-ant-test',
-        agentScript: [
-          { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-        ],
+        apiKey: 'sk-ant-test',
+        agentScript: endTurnScript(),
       }),
     ).rejects.toThrow(/no pricing entry.*claude-sonet-4-6/);
   });
@@ -217,18 +227,14 @@ describe('evalRun', () => {
     const opus47 = await evalRun({
       case: minimalCase,
       config: { ...DEFAULT_CONFIG, model: 'claude-opus-4-7' },
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
     });
     const opus41 = await evalRun({
       case: minimalCase,
       config: { ...DEFAULT_CONFIG, model: 'claude-opus-4-1' },
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
     });
     // Real Opus pricing on the script's hardcoded 100 in + 50 out tokens:
     //   4.7 (new tier):  100 *  5 / 1e6 + 50 * 25 / 1e6 = $0.00175
@@ -239,6 +245,29 @@ describe('evalRun', () => {
     expect(opus41.cost.cost_usd).toBeCloseTo(0.00525, 6);
     expect(opus47.cost.cost_usd).toBeLessThan(opus41.cost.cost_usd);
     expect(opus41.cost.cost_usd).toBeLessThan(0.01);
+  });
+
+  it('routes OpenAI models through the providerFactory and stamps provider=openai on cost', async () => {
+    // Task 6 regression: the harness is now provider-agnostic. When the
+    // configured model resolves to OpenAI, the adapter must pick that
+    // provider id (no Anthropic SDK touched) and stamp the same id on the
+    // cost record so report rendering can differentiate vendors.
+    const minimalCase: LoadedCase = {
+      case_id: 'openai-routing',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const result = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'gpt-4.1' },
+      apiKey: 'sk-openai-test',
+      agentScript: endTurnScript(),
+    });
+    expect(result.cost.provider).toBe('openai');
+    // Cost must use OpenAI pricing, not the Anthropic Sonnet fallback.
+    // GPT-4.1 input is $2/M and output is $8/M → 100 * 2 / 1e6 + 50 * 8 / 1e6 = $0.0006.
+    expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
   });
 
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {
@@ -254,19 +283,15 @@ describe('evalRun', () => {
     const first = evalRun({
       case: minimalCase,
       config: DEFAULT_CONFIG,
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
     });
     await expect(
       evalRun({
         case: minimalCase,
         config: DEFAULT_CONFIG,
-        anthropicApiKey: 'sk-ant-test',
-        agentScript: [
-          { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
-        ],
+        apiKey: 'sk-ant-test',
+        agentScript: endTurnScript(),
       }),
     ).rejects.toThrow(/concurrent invocations/);
     await first; // drain the first one
@@ -291,28 +316,8 @@ describe('evalRun', () => {
     const result = await evalRun({
       case: unchangedCase,
       config: DEFAULT_CONFIG,
-      anthropicApiKey: 'sk-ant-test',
-      agentScript: [
-        {
-          content: [
-            {
-              type: 'tool_use',
-              id: 't1',
-              name: 'post_summary',
-              input: {
-                strengths: [],
-                assessment: 'comment',
-                assessment_reasoning: 'No changes',
-              },
-            },
-          ],
-          stop_reason: 'tool_use',
-        },
-        {
-          content: [{ type: 'text', text: 'end' }],
-          stop_reason: 'end_turn',
-        },
-      ],
+      apiKey: 'sk-ant-test',
+      agentScript: summaryScript(),
     });
     // The AWS key was already in before/. No diff entry → no findings.
     expect(result.findings.filter((f) => f.file_path === 'src/foo.ts')).toHaveLength(0);

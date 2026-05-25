@@ -8,15 +8,28 @@ permissions:
   contents: read
   pull-requests: write
 
-# Cancel in-progress runs for the same PR when a new commit lands.
-concurrency:
-  group: self-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    # Matrix on model. Both jobs build the bundle from this PR's source so we
+    # dogfood the actual code under review across both providers and can
+    # compare their reviews on the same PR.
+    #
+    # fail-fast: false so an OpenAI key outage doesn't cancel the Claude run
+    # (and vice versa). Each provider's review is independently useful.
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ['claude-sonnet-4-6', 'gpt-4.1']
+    # Cancel in-progress runs for the same (PR, model) pair when a new commit
+    # lands. Job-scoped because `matrix.model` is only defined here — a
+    # top-level concurrency.group can't reference matrix context. Per-model
+    # keying means the Claude and OpenAI jobs cancel independently: a new
+    # commit cancels both copies, but they don't cancel each other.
+    concurrency:
+      group: self-review-${{ github.event.pull_request.number }}-${{ matrix.model }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
         with:
@@ -33,6 +46,14 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      # Pass BOTH API keys every time. The orchestrator picks which one to
+      # use based on the resolved provider for the configured model, and
+      # the unused key just stays empty/unread. If a repo hasn't set
+      # OPENAI_API_KEY (or ANTHROPIC_API_KEY) the corresponding matrix job
+      # gracefully skips via the `skipped_no_key_<provider>` path inside
+      # runOrchestrator — no hard failure required.
       - uses: ./
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ matrix.model }}

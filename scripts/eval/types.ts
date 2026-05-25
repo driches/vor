@@ -11,6 +11,7 @@
  */
 import type { PostedComment, Severity, Category } from '../../src/types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
+import type { ProviderId } from '../../src/llm/types.js';
 
 /**
  * One entry in a case's `plants.yml` — what the case author wants planted.
@@ -49,9 +50,17 @@ export interface RunRecord {
   timestamp: string;
   config_resolved: ReviewConfig;
   cost: {
+    /**
+     * Which provider produced this run. Required for cross-provider eval
+     * comparisons (cost-per-TP varies across vendors). On-disk records
+     * written before this field existed should default to 'anthropic' at
+     * the read site — see `report.ts` consumer.
+     */
+    provider: ProviderId;
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens: number;
+    /** Anthropic-only; always 0 for OpenAI (cache writes are free there). */
     cache_creation_input_tokens: number;
     cost_usd: number;
     turns: number;

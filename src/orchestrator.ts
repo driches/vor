@@ -16,7 +16,7 @@ import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
 import { dismissPriorAgentReviews } from './github/prior-reviews.js';
 import { postReview } from './github/review-poster.js';
-import { inferProviderFromModel, type ProviderId } from './llm/index.js';
+import { inferProviderFromModel, type LLMProvider, type ProviderId } from './llm/index.js';
 import { ReviewAggregator } from './output/aggregator.js';
 import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
@@ -78,6 +78,18 @@ export interface OrchestratorInput {
   config_path: string;
   dry_run: boolean;
   workspace_dir: string;
+  /**
+   * Optional override forwarded to `runAgent`. Production omits this and the
+   * runner uses the real `createProvider`. The eval harness
+   * (`scripts/eval/orchestrator-adapter.ts`) passes a stub here so it can
+   * script per-turn provider responses without mocking `@anthropic-ai/sdk`
+   * or `openai` at module scope. See `RunAgentInput.providerFactory`.
+   */
+  providerFactory?: (input: {
+    modelId: string;
+    apiKey: string;
+    providerHint?: ProviderId;
+  }) => LLMProvider;
 }
 
 export interface OrchestratorOutput {
@@ -278,6 +290,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     // runner and pins routing even for model ids that match no known prefix
     // (where the runner's inference would throw).
     providerHint: resolvedProvider,
+    // Forward an optional providerFactory override. Production callers omit
+    // this; the eval harness injects a scripted FakeProvider here.
+    ...(input.providerFactory !== undefined
+      ? { providerFactory: input.providerFactory }
+      : {}),
   });
   const scannerPromise = runScanners(scanners, scannerDeps);
 

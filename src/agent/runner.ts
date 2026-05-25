@@ -40,6 +40,7 @@ import {
   createProvider,
   type CanonicalMessage,
   type CanonicalTool,
+  type LLMProvider,
   type ProviderId,
 } from '../llm/index.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
@@ -96,6 +97,17 @@ export interface RunAgentInput {
    */
   temperature?: number;
   abortController?: AbortController;
+  /**
+   * Optional override for provider instantiation. Production omits this and
+   * `createProvider` is used. Test harnesses (e.g. `scripts/eval/orchestrator-adapter.ts`)
+   * inject a scripted `FakeProvider` here instead of mocking the underlying
+   * vendor SDK at module scope — same shape works for any provider.
+   */
+  providerFactory?: (input: {
+    modelId: string;
+    apiKey: string;
+    providerHint?: ProviderId;
+  }) => LLMProvider;
 }
 
 export interface RunAgentResult {
@@ -136,7 +148,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     maxOutputTokens: input.maxOutputTokens,
   });
 
-  const provider = createProvider({
+  const provider = (input.providerFactory ?? createProvider)({
     modelId: input.model,
     apiKey: input.apiKey,
     ...(input.providerHint !== undefined ? { providerHint: input.providerHint } : {}),
