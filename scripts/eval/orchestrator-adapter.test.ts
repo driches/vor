@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   evalRun,
+  FakeProvider,
   reconstructFinding,
   serializeConfigAsYaml,
   synthesizeDiff,
@@ -268,6 +269,26 @@ describe('evalRun', () => {
     // Cost must use OpenAI pricing, not the Anthropic Sonnet fallback.
     // GPT-4.1 input is $2/M and output is $8/M → 100 * 2 / 1e6 + 50 * 8 / 1e6 = $0.0006.
     expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
+  });
+
+  it('FakeProvider.billableInputTokensForBudget dispatches per provider id', () => {
+    // Today's eval scripts use zero cache tokens so the Anthropic and OpenAI
+    // formulas happen to converge — but the runner's budget gate must see
+    // the same shape production would. Pin the divergence on a non-zero
+    // cache payload so a future "simplify" refactor that collapses the two
+    // branches fails here.
+    const anth = new FakeProvider('anthropic', []);
+    const oai = new FakeProvider('openai', []);
+    const usage = {
+      input_tokens: 1000,
+      output_tokens: 50,
+      cache_creation_tokens: 200,
+      cache_read_tokens: 600,
+    };
+    // Anthropic: input + cache_creation = 1200
+    expect(anth.billableInputTokensForBudget(usage)).toBe(1200);
+    // OpenAI: input - cache_read = 400
+    expect(oai.billableInputTokensForBudget(usage)).toBe(400);
   });
 
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {

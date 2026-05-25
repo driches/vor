@@ -51,10 +51,16 @@ export interface RunRecord {
   config_resolved: ReviewConfig;
   cost: {
     /**
-     * Which provider produced this run. Required for cross-provider eval
-     * comparisons (cost-per-TP varies across vendors). On-disk records
-     * written before this field existed should default to 'anthropic' at
-     * the read site — see `report.ts` consumer.
+     * Provider that produced this cost record. Marks which billing model
+     * the other fields were computed against (Anthropic includes
+     * `cache_creation_input_tokens`; OpenAI sets that to 0 and stamps
+     * cached_tokens-as-subset into `cache_read_input_tokens`).
+     *
+     * No reader of this field exists today. If a future reader is added
+     * (e.g. for cross-provider reporting), historical JSON records written
+     * before this field existed will have `provider === undefined` —
+     * coalesce to `'anthropic'` at the parse site, since all pre-OpenAI
+     * runs were Claude.
      */
     provider: ProviderId;
     input_tokens: number;

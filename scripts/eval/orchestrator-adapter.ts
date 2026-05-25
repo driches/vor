@@ -156,14 +156,19 @@ export class FakeProvider implements LLMProvider {
     return next;
   }
   /**
-   * Anthropic-shape default (input + cache_creation, exclude cache_read).
-   * Matches `AnthropicProvider.billableInputTokensForBudget` so the runner's
-   * budget gate behaves identically regardless of which provider id the
-   * eval is scripted for — the harness's scripts use simulated usage, not
-   * real cached tokens, and the bigger budget number is the safer default.
+   * Dispatches on `this.id` so the runner's budget gate sees the same
+   * formula production would. See `AnthropicProvider.billableInputTokensForBudget`
+   * (input + cache_creation) and `OpenAIProvider.billableInputTokensForBudget`
+   * (input - cache_read). Today's scripts use zero cache tokens so the
+   * formulas converge, but any future OpenAI eval with non-zero
+   * `cache_read_tokens` would otherwise compute against the wrong shape.
    */
   billableInputTokensForBudget(usage: CanonicalUsage): number {
-    return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
+    if (this.id === 'anthropic') {
+      return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
+    }
+    // openai
+    return usage.input_tokens - (usage.cache_read_tokens ?? 0);
   }
 }
 
