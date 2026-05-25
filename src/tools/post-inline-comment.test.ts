@@ -149,4 +149,29 @@ describe('post_inline_comment tool', () => {
     expect(stored.side).toBe('RIGHT');
     expect(stored.confidence).toBe('high');
   });
+
+  it('preserves valid `side: LEFT` and `confidence: medium` when explicitly provided', async () => {
+    // Pins the pass-through branch of the normalization allowlist: a valid
+    // enum value must survive unchanged. Without this assertion, a typo
+    // like `rawSide === 'left'` instead of `rawSide === 'LEFT'` in the
+    // handler would silently collapse every LEFT-side comment to RIGHT
+    // and the suite would still be green.
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'minor',
+      file_path: 'src/foo.ts',
+      line: 10,
+      side: 'LEFT',
+      category: 'readability',
+      title: 'A reasonably descriptive title',
+      why_it_matters: 'A short rationale that makes future readers care.',
+      confidence: 'medium',
+    });
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    const stored = deps.aggregator.acceptedComments[0]!;
+    expect(stored.side).toBe('LEFT');
+    expect(stored.confidence).toBe('medium');
+  });
 });
