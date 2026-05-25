@@ -48234,7 +48234,8 @@ async function runAgent(input) {
       cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
       cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
       try {
-        budget.addUsage(response.usage.input_tokens, response.usage.output_tokens);
+        const billableInput = response.usage.input_tokens + (response.usage.cache_creation_input_tokens ?? 0);
+        budget.addUsage(billableInput, response.usage.output_tokens);
       } catch (err) {
         lastError = err.message;
         ended = "budget_exceeded";

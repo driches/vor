@@ -134,7 +134,17 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
 
       try {
-        budget.addUsage(response.usage.input_tokens, response.usage.output_tokens);
+        // Budget the "billable-at-full-rate" input tokens: non-cached input
+        // PLUS cache_creation. We deliberately exclude cache_read tokens —
+        // they're billed at 0.1× input rate (effectively free) and including
+        // them would make the default cap fire on the first turn of any
+        // cache-heavy run, regressing existing operator configs. This keeps
+        // the budget semantic aligned with what the run actually pays for at
+        // full rate, even after caching reshapes the per-turn token mix.
+        const billableInput =
+          response.usage.input_tokens +
+          (response.usage.cache_creation_input_tokens ?? 0);
+        budget.addUsage(billableInput, response.usage.output_tokens);
       } catch (err) {
         lastError = (err as Error).message;
         ended = 'budget_exceeded';
