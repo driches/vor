@@ -26,6 +26,7 @@
  */
 
 import OpenAI from 'openai';
+import { logger } from '../util/logger.js';
 import type {
   CanonicalMessage,
   CanonicalTool,
@@ -78,7 +79,7 @@ export class OpenAIProvider implements LLMProvider {
       signal: opts.abortSignal,
     });
 
-    return responsesResponseToCanonical(response);
+    return await responsesResponseToCanonical(response);
   }
 
   /**
@@ -122,6 +123,45 @@ export function supportsTemperature(model: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * Recognize a provider_state payload that came from OpenAIProvider — i.e. an
+ * array where every item has a string `type` field naming one of the
+ * Responses API output item types. Defends against splatting payloads
+ * stashed by a different provider (or by a test) into the Responses API
+ * input, which would 400 or silently corrupt the turn.
+ *
+ * Empty array is treated as valid: an empty `output` means the prior turn
+ * legitimately produced no content (rare but possible).
+ *
+ * The type list covers the documented Responses output item types. `message`,
+ * `function_call`, and `reasoning` are the ones we actually see today; the
+ * rest are forward-compat for OpenAI's tool ecosystem so adding a new
+ * server-side tool doesn't immediately reject the splat path.
+ */
+function isOpenAIResponseOutput(arr: unknown[]): boolean {
+  return arr.every((item): boolean => {
+    if (item === null || typeof item !== 'object') return false;
+    const t = (item as { type?: unknown }).type;
+    if (typeof t !== 'string') return false;
+    return (
+      t === 'message' ||
+      t === 'function_call' ||
+      t === 'reasoning' ||
+      t === 'function_call_output' ||
+      t === 'refusal' ||
+      t === 'web_search_call' ||
+      t === 'file_search_call' ||
+      t === 'computer_call' ||
+      t === 'image_generation_call' ||
+      t === 'code_interpreter_call' ||
+      t === 'local_shell_call' ||
+      t === 'mcp_call' ||
+      t === 'mcp_list_tools' ||
+      t === 'mcp_approval_request'
+    );
+  });
+}
+
+/**
  * Translate canonical messages into the Responses API `input[]` array.
  *
  *  - `user` (string content) → a `message` input item with one `input_text`
@@ -142,9 +182,10 @@ export function supportsTemperature(model: string): boolean {
  *    item per tool message and never collapse them.
  *
  * Defensive note on provider_state: if some future code path stashes a
- * non-array into provider_state, we fall back to the no-provider-state
- * branch rather than crashing. The current code only writes arrays here,
- * but treating the field as opaque is the safer contract.
+ * non-array, or an array shaped for a different provider (e.g. Anthropic
+ * content blocks), we fall back to the no-provider-state branch rather than
+ * splatting items the Responses API can't parse. The validation runs through
+ * `isOpenAIResponseOutput` — see that helper for the exact predicate.
  */
 export function canonicalMessagesToResponsesInput(
   messages: CanonicalMessage[],
@@ -163,7 +204,14 @@ export function canonicalMessagesToResponsesInput(
 
     if (msg.role === 'assistant') {
       // Replay path: previous turn's response.output[] verbatim.
-      if (Array.isArray(msg.provider_state)) {
+      // The shape check defends against a future Anthropic adapter (or a test)
+      // stashing a non-OpenAI payload into provider_state — without it we'd
+      // forward those items as Responses API input and 400 (or worse, corrupt
+      // the turn silently).
+      if (
+        Array.isArray(msg.provider_state) &&
+        isOpenAIResponseOutput(msg.provider_state)
+      ) {
         for (const item of msg.provider_state as OpenAI.Responses.ResponseInputItem[]) {
           out.push(item);
         }
@@ -171,12 +219,14 @@ export function canonicalMessagesToResponsesInput(
       }
 
       // Synthesized/seed assistant message — derive items from text + tool_calls.
+      // EasyInputMessage.content accepts a plain string for assistant role;
+      // output_text is reserved for actual API RESPONSES, not request input.
       if (msg.text !== undefined && msg.text.length > 0) {
         out.push({
           type: 'message',
           role: 'assistant',
-          content: [{ type: 'output_text', text: msg.text, annotations: [] }],
-        } as unknown as OpenAI.Responses.ResponseInputItem);
+          content: msg.text,
+        });
       }
       if (msg.tool_calls !== undefined) {
         for (const call of msg.tool_calls) {
@@ -238,7 +288,7 @@ export function canonicalToolsToResponses(
  *    refused turn is more useful to the runner than mapping it to `other`).
  *  - `function_call` items → push to canonical `tool_calls`, JSON-parsing
  *    the `arguments` string. If the parse throws (model produced malformed
- *    JSON, which happens), emit a `console.warn` for visibility AND surface
+ *    JSON, which happens), emit a `logger.warn` for visibility AND surface
  *    an empty-args call so the runner can attempt recovery (the parameter-
  *    less call may still succeed for tools with optional args; otherwise
  *    the tool's own validation will return a clean error the model can fix).
@@ -269,9 +319,9 @@ export function canonicalToolsToResponses(
  * `canonicalMessagesToResponsesInput` provider_state branch). Anthropic's
  * adapter leaves this undefined; OpenAI is the only consumer.
  */
-export function responsesResponseToCanonical(
+export async function responsesResponseToCanonical(
   response: OpenAI.Responses.Response,
-): CompleteResponse {
+): Promise<CompleteResponse> {
   let text = '';
   const tool_calls: CanonicalToolCall[] = [];
   let refused = false;
@@ -295,7 +345,7 @@ export function responsesResponseToCanonical(
       try {
         args = JSON.parse(item.arguments) as Record<string, unknown>;
       } catch {
-        console.warn(
+        await logger.warn(
           `[openai-provider] model=${response.model} produced malformed JSON for tool=${item.name} call_id=${item.call_id}; surfacing as empty-args call`,
         );
         args = {};

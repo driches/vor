@@ -28,6 +28,7 @@ import {
   supportsTemperature,
 } from './openai-provider.js';
 import type { CanonicalMessage, CanonicalTool } from './types.js';
+import { logger } from '../util/logger.js';
 
 // ---------------------------------------------------------------------------
 // Model-shape predicates
@@ -78,16 +79,22 @@ describe('canonicalMessagesToResponsesInput', () => {
     ]);
   });
 
-  it('converts an assistant text-only message (no provider_state) into an output_text message', () => {
+  it('converts an assistant text-only message (no provider_state) into a string-content message', () => {
+    // EasyInputMessage.content accepts a plain string for assistant role.
+    // We deliberately do NOT emit `output_text` blocks here — those are only
+    // valid in API RESPONSES, not request input. (Real assistant turns come
+    // back from the API with provider_state set; this branch is for
+    // synthesized/seed fixtures only.)
     const result = canonicalMessagesToResponsesInput([
       { role: 'assistant', text: 'Got it.' },
     ]);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'output_text', text: 'Got it.' }],
-    });
+    expect(result).toEqual([
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'Got it.',
+      },
+    ]);
   });
 
   it('skips an empty/undefined text block entirely (no zero-length output_text)', () => {
@@ -123,9 +130,13 @@ describe('canonicalMessagesToResponsesInput', () => {
         ],
       },
     ]);
-    // 1 output_text message + 2 function_call items.
+    // 1 string-content message + 2 function_call items.
     expect(result).toHaveLength(3);
-    expect(result[0]).toMatchObject({ type: 'message', role: 'assistant' });
+    expect(result[0]).toEqual({
+      type: 'message',
+      role: 'assistant',
+      content: 'Pulling the diff now.',
+    });
     expect(result[1]).toEqual({
       type: 'function_call',
       call_id: 't1',
@@ -166,12 +177,65 @@ describe('canonicalMessagesToResponsesInput', () => {
         provider_state: { not: 'an array' },
       },
     ]);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'output_text', text: 'hello' }],
-    });
+    expect(result).toEqual([
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'hello',
+      },
+    ]);
+  });
+
+  it('rejects the splat path when provider_state items are NOT OpenAI-shaped (cross-provider defense)', () => {
+    // Simulates a future Anthropic-style payload (no `type: 'message' |
+    // 'function_call' | ...` discriminator) being stashed into provider_state.
+    // We must NOT forward those items as Responses API input — they would 400
+    // or silently corrupt the turn. The synthesized branch fires instead.
+    const anthropicShapedPayload: unknown[] = [
+      { role: 'foo', content: 'bar' },
+      { id: 'block_1', text: 'looks like Anthropic' },
+    ];
+    const result = canonicalMessagesToResponsesInput([
+      {
+        role: 'assistant',
+        text: 'falls back to synthesized',
+        provider_state: anthropicShapedPayload,
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'falls back to synthesized',
+      },
+    ]);
+  });
+
+  it('accepts an empty-array provider_state and emits NOTHING for the turn (text is NOT synthesized)', () => {
+    // Empty `output` from the prior turn is rare but legal — the model
+    // produced no content. The splat path is taken (Array.isArray AND
+    // isOpenAIResponseOutput both pass on []) and the assistant turn
+    // contributes zero items. text/tool_calls on the same canonical
+    // message are still IGNORED per the provider_state-is-authoritative
+    // contract.
+    const result = canonicalMessagesToResponsesInput([
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        text: 'IGNORED — provider_state is authoritative even when empty',
+        tool_calls: [{ id: 'IGNORED', name: 'IGNORED', arguments: {} }],
+        provider_state: [],
+      },
+      { role: 'user', content: 'still here?' },
+    ]);
+    // 2 user messages, 0 contributions from the assistant turn.
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ type: 'message', role: 'user' });
+    expect(result[1]).toMatchObject({ type: 'message', role: 'user' });
+    // No assistant-shape items at all.
+    for (const item of result) {
+      expect(item).not.toMatchObject({ role: 'assistant' });
+    }
   });
 
   it('converts a tool message into a function_call_output input item', () => {
@@ -311,14 +375,18 @@ function fakeResponse(overrides: Partial<OpenAI.Responses.Response>): OpenAI.Res
 describe('responsesResponseToCanonical', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // logger.warn (not console.warn) — the provider routes warnings through
+    // the project logger (which adds @actions/core CI annotations + secret
+    // redaction). Spying here lets us assert the warning was emitted without
+    // touching real CI output.
+    warnSpy = vi.spyOn(logger, 'warn').mockResolvedValue(undefined);
   });
   afterEach(() => {
     warnSpy.mockRestore();
   });
 
-  it('extracts text from an output_text message and reports end_turn', () => {
-    const result = responsesResponseToCanonical(
+  it('extracts text from an output_text message and reports end_turn', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -337,8 +405,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('end_turn');
   });
 
-  it('concatenates multiple output_text blocks in order', () => {
-    const result = responsesResponseToCanonical(
+  it('concatenates multiple output_text blocks in order', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -357,8 +425,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.text).toBe('one two');
   });
 
-  it('extracts function_call items into tool_calls and maps stop_reason → tool_calls', () => {
-    const result = responsesResponseToCanonical(
+  it('extracts function_call items into tool_calls and maps stop_reason → tool_calls', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -378,8 +446,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('tool_calls');
   });
 
-  it('populates both text and tool_calls when both are present', () => {
-    const result = responsesResponseToCanonical(
+  it('populates both text and tool_calls when both are present', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -399,8 +467,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('tool_calls');
   });
 
-  it('treats refusal as [refused]-prefixed text and forces stop_reason end_turn', () => {
-    const result = responsesResponseToCanonical(
+  it('treats refusal as [refused]-prefixed text and forces stop_reason end_turn', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -418,8 +486,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('end_turn');
   });
 
-  it('does NOT surface reasoning items in canonical text', () => {
-    const result = responsesResponseToCanonical(
+  it('does NOT surface reasoning items in canonical text', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -444,8 +512,8 @@ describe('responsesResponseToCanonical', () => {
     expect((result.provider_state as unknown[])[0]).toMatchObject({ type: 'reasoning' });
   });
 
-  it('surfaces a tool_call with empty args and emits console.warn on malformed JSON', () => {
-    const result = responsesResponseToCanonical(
+  it('surfaces a tool_call with empty args and emits logger.warn on malformed JSON', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         model: 'gpt-4.1',
         output: [
@@ -469,8 +537,8 @@ describe('responsesResponseToCanonical', () => {
     expect(warnMessage).toContain('broken_tool');
   });
 
-  it('maps incomplete + max_output_tokens to stop_reason max_tokens', () => {
-    const result = responsesResponseToCanonical(
+  it('maps incomplete + max_output_tokens to stop_reason max_tokens', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         status: 'incomplete',
         incomplete_details: { reason: 'max_output_tokens' },
@@ -479,8 +547,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('max_tokens');
   });
 
-  it('maps incomplete + content_filter (or any other reason) to stop_reason other', () => {
-    const result = responsesResponseToCanonical(
+  it('maps incomplete + content_filter (or any other reason) to stop_reason other', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         status: 'incomplete',
         incomplete_details: { reason: 'content_filter' },
@@ -489,15 +557,15 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('other');
   });
 
-  it('maps non-completed, non-incomplete statuses (e.g. failed/in_progress) to stop_reason other', () => {
-    const result = responsesResponseToCanonical(
+  it('maps non-completed, non-incomplete statuses (e.g. failed/in_progress) to stop_reason other', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({ status: 'failed' } as unknown as Partial<OpenAI.Responses.Response>),
     );
     expect(result.stop_reason).toBe('other');
   });
 
-  it('maps usage input_tokens / output_tokens and leaves cache fields undefined when 0', () => {
-    const result = responsesResponseToCanonical(
+  it('maps usage input_tokens / output_tokens and leaves cache fields undefined when 0', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 100,
@@ -515,8 +583,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.usage.cache_creation_tokens).toBeUndefined();
   });
 
-  it('surfaces cache_read_tokens (from input_tokens_details.cached_tokens) when > 0', () => {
-    const result = responsesResponseToCanonical(
+  it('surfaces cache_read_tokens (from input_tokens_details.cached_tokens) when > 0', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 1000,
@@ -530,8 +598,8 @@ describe('responsesResponseToCanonical', () => {
     expect(result.usage.cache_read_tokens).toBe(600);
   });
 
-  it('surfaces reasoning_tokens (from output_tokens_details.reasoning_tokens) when > 0', () => {
-    const result = responsesResponseToCanonical(
+  it('surfaces reasoning_tokens (from output_tokens_details.reasoning_tokens) when > 0', async () => {
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 100,
@@ -548,12 +616,12 @@ describe('responsesResponseToCanonical', () => {
     expect(result.usage.cache_creation_tokens).toBeUndefined();
   });
 
-  it('sets provider_state to the full response.output array (for replay)', () => {
+  it('sets provider_state to the full response.output array (for replay)', async () => {
     const output: unknown[] = [
       { type: 'reasoning', id: 'r1', summary: [], encrypted_content: 'X' },
       { type: 'function_call', call_id: 't1', name: 'x', arguments: '{}' },
     ];
-    const result = responsesResponseToCanonical(
+    const result = await responsesResponseToCanonical(
       fakeResponse({
         output: output as unknown as OpenAI.Responses.Response['output'],
       }),
