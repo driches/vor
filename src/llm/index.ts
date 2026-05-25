@@ -1,12 +1,12 @@
 /**
  * Provider router. Callers go through `createProvider()` and receive an
- * `LLMProvider`; they never instantiate vendor adapters directly. Until
- * Tasks 2 and 3 land, the concrete adapters throw — this keeps the
- * canonical surface usable for tests + downstream typing today without
- * forcing the implementation order.
+ * `LLMProvider`; they never instantiate vendor adapters directly. Both
+ * Anthropic and OpenAI adapters are implemented; runner wiring (Task 4)
+ * is the next step.
  */
 
 import { AnthropicProvider } from './anthropic-provider.js';
+import { OpenAIProvider } from './openai-provider.js';
 import type { LLMProvider, ProviderId } from './types.js';
 
 export * from './types.js';
@@ -40,7 +40,7 @@ export interface CreateProviderInput {
 
 /**
  * Factory. Uses `providerHint` when supplied (config has the final say),
- * otherwise infers from the model id. Concrete adapters land in Tasks 2-3.
+ * otherwise infers from the model id.
  */
 export function createProvider(input: CreateProviderInput): LLMProvider {
   const id = input.providerHint ?? inferProviderFromModel(input.modelId);
@@ -48,6 +48,6 @@ export function createProvider(input: CreateProviderInput): LLMProvider {
     case 'anthropic':
       return new AnthropicProvider(input.apiKey);
     case 'openai':
-      throw new Error('OpenAIProvider not yet implemented — Task 3');
+      return new OpenAIProvider(input.apiKey);
   }
 }

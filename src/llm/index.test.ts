@@ -35,16 +35,23 @@ describe('createProvider', () => {
     expect(typeof provider.billableInputTokensForBudget).toBe('function');
   });
 
-  it('throws a Task-3 placeholder for OpenAI models until the adapter lands', () => {
-    expect(() => createProvider({ modelId: 'gpt-4.1', apiKey: 'k' })).toThrow(
-      /not yet implemented.*Task 3/,
-    );
+  it('returns an OpenAIProvider instance for gpt-* and o-series model ids', () => {
+    const gpt = createProvider({ modelId: 'gpt-4.1', apiKey: 'sk-test' });
+    expect(gpt.id).toBe('openai');
+    expect(typeof gpt.complete).toBe('function');
+    expect(typeof gpt.billableInputTokensForBudget).toBe('function');
+
+    const oSeries = createProvider({ modelId: 'o4-mini', apiKey: 'sk-test' });
+    expect(oSeries.id).toBe('openai');
   });
 
   it('honors providerHint over model-id inference', () => {
-    // claude-* normally infers anthropic; the hint overrides → openai → Task 3 stub
-    expect(() =>
-      createProvider({ modelId: 'claude-sonnet-4-6', apiKey: 'k', providerHint: 'openai' }),
-    ).toThrow(/Task 3/);
+    // claude-* normally infers anthropic; the hint overrides → openai adapter
+    const provider = createProvider({
+      modelId: 'claude-sonnet-4-6',
+      apiKey: 'sk-test',
+      providerHint: 'openai',
+    });
+    expect(provider.id).toBe('openai');
   });
 });
