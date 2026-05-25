@@ -85,7 +85,10 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
       // The Zod schema above declares `side: ...default('RIGHT')` and
       // `confidence: ...default('high')`, but the agent runner forwards raw
       // tool input directly to this handler without running it through Zod,
-      // so those defaults never fire at runtime. Apply them here explicitly.
+      // so those defaults never fire at runtime. Normalize here against an
+      // explicit allowlist rather than `??` alone so that an unexpected
+      // string (e.g. the agent sends 'left' lowercase) falls back to the
+      // safe default instead of being cast through to a malformed value.
       //
       // The `side` default in particular is load-bearing: the post-filter
       // scanner-vs-AI dedup (src/scanners/dedup.ts) requires `ai.side ===
@@ -96,8 +99,20 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
       // the dedup check fails on the side mismatch, and the scanner finding
       // ships next to the AI's security comment as a duplicate. PR #12 and
       // PR #16 smoke tests both reproduced this.
-      const side: Side = (args.side ?? 'RIGHT') as Side;
-      const confidence: Confidence = (args.confidence ?? 'high') as Confidence;
+      //
+      // TODO (follow-up): fix the runner to parse tool input through Zod
+      // before dispatching (src/agent/runner.ts ~line 194). That would
+      // also fix the same Zod-bypass bug class in grep-repo-at-ref
+      // (`case_sensitive` defaults silently flip to `-i` on every agent
+      // grep), get-pr-diff (`max_diff_lines`), and read-file-at-ref
+      // (`ref` falls back to base instead of head).
+      const rawSide = args.side;
+      const side: Side = rawSide === 'RIGHT' || rawSide === 'LEFT' ? rawSide : 'RIGHT';
+      const rawConfidence = args.confidence;
+      const confidence: Confidence =
+        rawConfidence === 'high' || rawConfidence === 'medium' || rawConfidence === 'low'
+          ? rawConfidence
+          : 'high';
 
       // Map raw schema input → validator input + PostedComment shape
       const changedFiles = new Map(deps.prContext.files.map((f) => [f.path, f]));

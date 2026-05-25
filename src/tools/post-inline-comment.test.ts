@@ -123,4 +123,30 @@ describe('post_inline_comment tool', () => {
     expect(stored.side).toBe('RIGHT');
     expect(stored.confidence).toBe('high');
   });
+
+  it('normalizes an out-of-enum `side`/`confidence` (e.g. lowercase) to the schema default', async () => {
+    // Since Zod parsing is bypassed at the runner boundary, an LLM that
+    // emits `side: 'left'` (lowercase) or `confidence: 'maybe'` would
+    // otherwise be cast through `as Side`/`as Confidence` unchecked,
+    // landing a malformed value in the aggregator. The handler defends
+    // by allowlist: anything outside the enum collapses to the schema's
+    // documented default.
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'minor',
+      file_path: 'src/foo.ts',
+      line: 10,
+      side: 'left',
+      category: 'readability',
+      title: 'A reasonably descriptive title',
+      why_it_matters: 'A short rationale that makes future readers care.',
+      confidence: 'maybe',
+    } as unknown as Parameters<typeof callTool>[1]);
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    const stored = deps.aggregator.acceptedComments[0]!;
+    expect(stored.side).toBe('RIGHT');
+    expect(stored.confidence).toBe('high');
+  });
 });

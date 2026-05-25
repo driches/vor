@@ -47964,8 +47964,10 @@ function makePostInlineCommentTool(deps) {
           hint: "Swap them or omit start_line."
         });
       }
-      const side = args.side ?? "RIGHT";
-      const confidence = args.confidence ?? "high";
+      const rawSide = args.side;
+      const side = rawSide === "RIGHT" || rawSide === "LEFT" ? rawSide : "RIGHT";
+      const rawConfidence = args.confidence;
+      const confidence = rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low" ? rawConfidence : "high";
       const changedFiles = new Map(deps.prContext.files.map((f2) => [f2.path, f2]));
       const validation = validateInlineComment(
         {
