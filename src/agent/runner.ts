@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
-import { pricingForModel, MODEL_PRICING } from '../util/pricing.js';
+import { pricingForModel } from '../util/pricing.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
 import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
 import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
@@ -223,13 +223,26 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // our table (operator override to an experimental model), warn and fall
   // back to Sonnet rates so cost_usd stays populated — we can't refuse here
   // because the API spend has already happened.
+  //
+  // Three-level resolution avoids a NaN-cost failure mode if the pricing
+  // table is ever pruned of the Sonnet fallback key during a future update:
+  // try the active model → try the Sonnet key by name → fall through to
+  // inline Sonnet rates (last-resort, kept in sync by hand). If we lose
+  // BOTH the active-model lookup and the Sonnet table entry, the inline
+  // rates keep cost_usd in the right order of magnitude rather than logging
+  // $NaN and silently corrupting downstream budget alerts.
   const rawPricing = pricingForModel(input.model);
   if (rawPricing === undefined) {
     await logger.warn(
       `No pricing entry for model "${input.model}" — cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`,
     );
   }
-  const pricing = rawPricing ?? MODEL_PRICING['claude-sonnet-4-6']!;
+  const pricing = rawPricing ?? pricingForModel('claude-sonnet-4-6') ?? {
+    input: 3,
+    output: 15,
+    cache_creation: 3.75,
+    cache_read: 0.3,
+  };
   const inputCost = (inputTokens * pricing.input) / 1_000_000;
   const outputCost = (outputTokens * pricing.output) / 1_000_000;
   const cacheCost =

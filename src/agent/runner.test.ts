@@ -78,6 +78,25 @@ describe('markLatestMessageForCaching', () => {
     expect(hasCache(last)).toBe(true);
   });
 
+  it('marks only the last block of EACH kept message when both have multi-block content', () => {
+    const prevFirst = toolResult('p1', 'prev first');
+    const prevLast = toolResult('p2', 'prev last');
+    const curFirst = toolResult('c1', 'cur first');
+    const curLast = toolResult('c2', 'cur last');
+    const messages: Anthropic.MessageParam[] = [
+      { role: 'user', content: 'initial' },
+      assistant([{ type: 'text', text: 'prev turn' }]),
+      userResults([prevFirst, prevLast]),
+      assistant([{ type: 'text', text: 'cur turn' }]),
+      userResults([curFirst, curLast]),
+    ];
+    markLatestMessageForCaching(messages);
+    expect(hasCache(prevFirst)).toBe(false);
+    expect(hasCache(prevLast)).toBe(true);
+    expect(hasCache(curFirst)).toBe(false);
+    expect(hasCache(curLast)).toBe(true);
+  });
+
   it('strips cache_control from out-of-window (older than latest two) user messages', () => {
     const tr1 = { ...toolResult('t1', 'first'), cache_control: { type: 'ephemeral' as const } };
     const tr2 = toolResult('t2', 'second');

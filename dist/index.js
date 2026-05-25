@@ -48313,7 +48313,12 @@ async function runAgent(input) {
       `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
     );
   }
-  const pricing = rawPricing ?? MODEL_PRICING["claude-sonnet-4-6"];
+  const pricing = rawPricing ?? pricingForModel("claude-sonnet-4-6") ?? {
+    input: 3,
+    output: 15,
+    cache_creation: 3.75,
+    cache_read: 0.3
+  };
   const inputCost = inputTokens * pricing.input / 1e6;
   const outputCost = outputTokens * pricing.output / 1e6;
   const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
