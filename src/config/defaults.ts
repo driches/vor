@@ -2,11 +2,12 @@ import type { ReviewConfig } from './types.js';
 
 /**
  * Defaults applied when no .code-review.yml is present.
- * Per the plan: Sonnet 4.6, COMMENT-only (no auto-block), sticky reviews.
+ * Haiku 4.5 is the cost-default; consumers wanting Sonnet/Opus opt in via
+ * `model:` in their `.code-review.yml`. COMMENT-only (no auto-block), sticky reviews.
  */
 export const DEFAULT_CONFIG: ReviewConfig = {
-  model: 'claude-sonnet-4-6',
-  max_turns: 40,
+  model: 'claude-haiku-4-5',
+  max_turns: 15,
 
   exclude: {
     paths: [

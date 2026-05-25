@@ -15,13 +15,13 @@ inputs:
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Claude model ID. Defaults to claude-sonnet-4-6.'
+    description: 'Claude model ID. Defaults to claude-haiku-4-5 (lowest cost). Override with claude-sonnet-4-6 or claude-opus-4-7 for higher capability.'
     required: false
-    default: 'claude-sonnet-4-6'
+    default: 'claude-haiku-4-5'
   max_turns:
-    description: 'Maximum agent turns per review.'
+    description: 'Maximum agent turns per review. Larger PRs may need more; bump in `.code-review.yml` if reviews end with `ended: max_turns`.'
     required: false
-    default: '40'
+    default: '15'
   config_path:
     description: 'Path to .code-review.yml in the consumer repo.'
     required: false

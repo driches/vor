@@ -72,8 +72,8 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 |---|---|---|---|
 | `anthropic_api_key` | yes | — | Anthropic API key. Store as a repo secret. |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Claude model ID. Override per-repo via config. |
-| `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
+| `model` | no | `claude-haiku-4-5` | Claude model ID. Override per-repo with `claude-sonnet-4-6` or `claude-opus-4-7` for higher capability. |
+| `max_turns` | no | `15` | Max agent turns. Bump per-repo if reviews end with `ended: max_turns`. |
 | `config_path` | no | `.code-review.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
@@ -92,8 +92,8 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 All fields optional. Defaults are sensible.
 
 ```yaml
-model: claude-sonnet-4-6
-max_turns: 40
+model: claude-haiku-4-5  # opt up to claude-sonnet-4-6 or claude-opus-4-7 for higher capability
+max_turns: 15
 
 exclude:
   paths:

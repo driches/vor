@@ -48173,10 +48173,11 @@ async function runAgent(input) {
     maxOutputTokens: input.maxOutputTokens
   });
   const tools = buildToolDefinitions(input.deps);
-  const anthropicTools = tools.map((t2) => ({
+  const anthropicTools = tools.map((t2, i2) => ({
     name: t2.name,
     description: t2.description,
-    input_schema: t2.input_schema
+    input_schema: t2.input_schema,
+    ...i2 === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}
   }));
   await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
   const client = new sdk_default({ apiKey: input.apiKey });
@@ -48198,6 +48199,7 @@ async function runAgent(input) {
       }
       budget.startTurn();
       turns = budget.snapshot().turns;
+      markLatestMessageForCaching(messages);
       const response = await client.messages.create(
         {
           model: input.model,
@@ -48304,6 +48306,24 @@ async function runAgent(input) {
     outputTokens,
     costUsd
   };
+}
+function markLatestMessageForCaching(messages) {
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block !== null && typeof block === "object" && "cache_control" in block) {
+        delete block.cache_control;
+      }
+    }
+  }
+  for (let i2 = messages.length - 1; i2 >= 0; i2--) {
+    const msg = messages[i2];
+    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+    const lastBlock = msg.content[msg.content.length - 1];
+    if (lastBlock === void 0 || typeof lastBlock !== "object" || lastBlock === null) continue;
+    lastBlock.cache_control = { type: "ephemeral" };
+    return;
+  }
 }
 function buildToolDefinitions(deps) {
   const mcpTools = [
@@ -48505,8 +48525,8 @@ var import_yaml = __toESM(require_dist(), 1);
 
 // src/config/defaults.ts
 var DEFAULT_CONFIG = {
-  model: "claude-sonnet-4-6",
-  max_turns: 40,
+  model: "claude-haiku-4-5",
+  max_turns: 15,
   exclude: {
     paths: [
       "**/*.lock",

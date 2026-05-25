@@ -70,10 +70,17 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   });
 
   const tools = buildToolDefinitions(input.deps);
-  const anthropicTools: AnthropicTool[] = tools.map((t) => ({
+  // Mark the LAST tool with cache_control: tools don't change across turns,
+  // so this breakpoint caches the full tool block (~2-3K tokens of schemas)
+  // at the ephemeral cache-read rate instead of re-billing the full input
+  // rate on every turn. With `system` already cached and `messages` cached
+  // separately below, we use 3 of the 4 cache_control breakpoints allowed
+  // per request.
+  const anthropicTools: AnthropicTool[] = tools.map((t, i) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,
+    ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
   }));
 
   await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
@@ -100,6 +107,12 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       }
       budget.startTurn();
       turns = budget.snapshot().turns;
+
+      // Slide a cache_control breakpoint forward onto the latest user message
+      // each turn. This caches the entire prior conversation prefix (assistant
+      // turns + tool results, which can hold 100KB diffs and 500-line file
+      // reads) so we don't re-bill it at full input rate on every turn.
+      markLatestMessageForCaching(messages);
 
       const response = await client.messages.create(
         {
@@ -224,6 +237,37 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     outputTokens,
     costUsd,
   };
+}
+
+/**
+ * Slide a single ephemeral cache_control breakpoint onto the last content
+ * block of the most recent user message in `messages`. Strips any existing
+ * cache_control from prior message blocks first so we only ever spend one of
+ * the API's 4 cache_control breakpoints on the message stream.
+ *
+ * Why this matters: each turn re-sends the entire prior conversation
+ * (assistant turns + tool_results, which can include 100KB diffs and 500-line
+ * file reads). Without a moving breakpoint, every turn re-bills that growing
+ * prefix at the full $3/M input rate. With it, the prefix reads from cache
+ * at $0.30/M and only the new turn's content is billed at full rate.
+ */
+function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block !== null && typeof block === 'object' && 'cache_control' in block) {
+        delete (block as { cache_control?: unknown }).cache_control;
+      }
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!;
+    if (msg.role !== 'user' || !Array.isArray(msg.content)) continue;
+    const lastBlock = msg.content[msg.content.length - 1];
+    if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) continue;
+    (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
+    return;
+  }
 }
 
 /**
