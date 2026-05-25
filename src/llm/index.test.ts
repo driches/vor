@@ -28,10 +28,11 @@ describe('inferProviderFromModel', () => {
 });
 
 describe('createProvider', () => {
-  it('throws a Task-2 placeholder for Anthropic models until the adapter lands', () => {
-    expect(() => createProvider({ modelId: 'claude-sonnet-4-6', apiKey: 'k' })).toThrow(
-      /not yet implemented.*Task 2/,
-    );
+  it('returns an AnthropicProvider instance for claude-* model ids', () => {
+    const provider = createProvider({ modelId: 'claude-sonnet-4-6', apiKey: 'sk-test' });
+    expect(provider.id).toBe('anthropic');
+    expect(typeof provider.complete).toBe('function');
+    expect(typeof provider.billableInputTokensForBudget).toBe('function');
   });
 
   it('throws a Task-3 placeholder for OpenAI models until the adapter lands', () => {

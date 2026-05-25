@@ -21,6 +21,7 @@ import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
 import { costFromUsage, pricingForModel } from '../util/pricing.js';
+import { markLatestMessageForCaching } from '../llm/anthropic-provider.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
 import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
 import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
@@ -345,96 +346,6 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     costUsd,
     perModelCost,
   };
-}
-
-/**
- * Compute the input-token count that should count against the runner's
- * `max_input_tokens` budget gate, given an Anthropic API response usage block.
- *
- * Includes:
- *   - `input_tokens` (non-cached input — billed at full rate, 1×)
- *   - `cache_creation_input_tokens` (billed at 1.25× input rate — full-cost
- *     equivalent, so it should count against any "input budget" gate)
- *
- * Deliberately EXCLUDES `cache_read_input_tokens`. Cache reads are billed at
- * 0.1× input rate (effectively free) and typically dominate the raw token
- * count on cached runs (real eval data: cache_read ≈ 800K-1.5M per case vs
- * input ≈ 400 per turn). Counting them would make the default 500K
- * `max_input_tokens` cap fire on the first turn of any cache-heavy run,
- * regressing every operator config sized against the pre-caching semantic.
- *
- * Exported so the unit tests can pin this contract — if the formula ever
- * changes (e.g. someone "fixes" it to count all three), the test should fail
- * visibly rather than silently shifting the budget threshold.
- */
-export function billableInputTokensForBudget(usage: {
-  input_tokens: number;
-  cache_creation_input_tokens?: number | null;
-}): number {
-  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
-}
-
-/**
- * Maintain ephemeral cache_control breakpoints on the two most recent
- * array-content user messages and strip any older ones. Two breakpoints
- * (instead of one) keep a fallback cache anchor available for the prefix
- * from the previous turn: Anthropic's cache lookup backtracks a bounded
- * number of blocks from each breakpoint, so a high-fanout turn (e.g. many
- * parallel tool calls) could otherwise push the previous cache boundary out
- * of range when we move the single breakpoint to the new latest message.
- *
- * Two message breakpoints + the system breakpoint + the last-tool breakpoint
- * = 4 total, exactly at the API's per-request limit.
- *
- * Breakpoint count per turn (turn 1 is the initial user prompt before any
- * tool calls — that message has string content, not array, so it does not
- * count toward `userIndices`):
- *   - Turn 1: 0 message breakpoints (no array-content user messages yet).
- *   - Turn 2: 1 message breakpoint (the first tool_results push).
- *   - Turn 3+: 2 message breakpoints (latest + previous tool_results).
- *
- * We RE-mark the second-latest breakpoint explicitly each call rather than
- * relying on the carry-forward of a previous turn's marking, so the function
- * is obviously correct from a single-turn read without needing to trace
- * cross-turn state. Exported so the unit tests can exercise edge cases.
- *
- * Why we cache at all: each turn re-sends the entire prior conversation
- * (assistant turns + tool_results, which can include 100KB diffs and 500-line
- * file reads). Without breakpoints, every turn re-bills that growing prefix
- * at the full input rate. With them, the prefix reads from cache at the
- * cache_read rate and only the new turn's content is billed at full rate.
- */
-export function markLatestMessageForCaching(messages: Anthropic.MessageParam[]): void {
-  const userIndices: number[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    if (msg.role === 'user' && Array.isArray(msg.content)) userIndices.push(i);
-  }
-  if (userIndices.length === 0) return;
-
-  const keep = new Set(userIndices.slice(-2));
-  for (const i of userIndices) {
-    if (keep.has(i)) continue;
-    const content = messages[i]!.content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block !== null && typeof block === 'object' && 'cache_control' in block) {
-        delete (block as { cache_control?: unknown }).cache_control;
-      }
-    }
-  }
-
-  if (userIndices.length >= 2) {
-    markLastBlockForCaching(messages[userIndices[userIndices.length - 2]!]!);
-  }
-  markLastBlockForCaching(messages[userIndices[userIndices.length - 1]!]!);
-}
-
-function markLastBlockForCaching(message: Anthropic.MessageParam): void {
-  if (!Array.isArray(message.content) || message.content.length === 0) return;
-  const lastBlock = message.content[message.content.length - 1];
-  if (lastBlock === undefined || typeof lastBlock !== 'object' || lastBlock === null) return;
-  (lastBlock as { cache_control?: { type: 'ephemeral' } }).cache_control = { type: 'ephemeral' };
 }
 
 /**

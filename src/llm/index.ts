@@ -6,6 +6,7 @@
  * forcing the implementation order.
  */
 
+import { AnthropicProvider } from './anthropic-provider.js';
 import type { LLMProvider, ProviderId } from './types.js';
 
 export * from './types.js';
@@ -45,7 +46,7 @@ export function createProvider(input: CreateProviderInput): LLMProvider {
   const id = input.providerHint ?? inferProviderFromModel(input.modelId);
   switch (id) {
     case 'anthropic':
-      throw new Error('AnthropicProvider not yet implemented — Task 2');
+      return new AnthropicProvider(input.apiKey);
     case 'openai':
       throw new Error('OpenAIProvider not yet implemented — Task 3');
   }
