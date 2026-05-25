@@ -19,6 +19,7 @@ import type {
   Side,
 } from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
+import { hasReadRange, type RunContext } from './run-context.js';
 
 export interface PostInlineCommentInput {
   severity: Severity;
@@ -42,6 +43,14 @@ export interface ValidationContext {
   severityFloor: Severity;
   /** Hard cap on title.length + why_it_matters.length. */
   maxBodyChars: number;
+  /**
+   * Per-run state tracking which file-line ranges the agent has actually
+   * read via `read_file_at_ref`. Used to enforce "Sonnet must read the
+   * bytes" before posting a critical/important finding — the verification
+   * discipline that lets us trust workers for exploration without trusting
+   * them for final judgment.
+   */
+  runContext?: RunContext;
 }
 
 export type ValidationResult =
@@ -156,6 +165,52 @@ export function validateInlineComment(
       reason: 'duplicate of an already-posted comment',
       hint: `You already commented on '${input.file_path}':${input.line} with this title.`,
     };
+  }
+
+  // 10. Read-before-post: for severity ≥ Important, the agent must have
+  //     called read_file_at_ref on the target line at HEAD this run. Worker
+  //     output does NOT count — the model posting the finding must look at
+  //     the bytes itself. Only enforced when a runContext is supplied;
+  //     legacy callers (tests, dry-run code paths) that omit runContext are
+  //     unaffected. For multi-line comments we check BOTH endpoints — a
+  //     partial read of just the end line is not enough to verify a range
+  //     claim, otherwise the rule would let `start_line=10, line=200`
+  //     through after only reading line 200.
+  //
+  //     Known gap (intentional): we only check endpoints, not every line in
+  //     the [start_line, line] interval. For `start_line=10, line=200`, the
+  //     check passes if 1-10 and 195-200 were read in two separate calls
+  //     even though 11-194 was never seen. Full-interval coverage would
+  //     require either (a) collapsing overlapping ranges (expensive over a
+  //     long run) or (b) forcing a single read that spans the whole
+  //     comment, which over-constrains the agent for legitimate wide-range
+  //     comments. The endpoint check catches the common "worker said
+  //     something, here's my comment with arbitrary range" failure mode
+  //     while keeping the gate cheap. If wider coverage becomes important,
+  //     promote to full-interval; the function signature can stay.
+  if (
+    ctx.runContext !== undefined &&
+    (input.severity === 'critical' || input.severity === 'important')
+  ) {
+    const linesToCheck: number[] = [input.line];
+    if (input.start_line !== undefined) linesToCheck.unshift(input.start_line);
+    const unread = linesToCheck.find(
+      (line) => !hasReadRange(ctx.runContext!, input.file_path, line),
+    );
+    if (unread !== undefined) {
+      const span =
+        input.start_line !== undefined ? `lines ${input.start_line}-${input.line}` : `line ${input.line}`;
+      const win = 10;
+      const hintStart = Math.max(1, (input.start_line ?? input.line) - win);
+      const hintEnd = input.line + win;
+      return {
+        ok: false,
+        reason: `you have not called read_file_at_ref on '${input.file_path}' covering ${span} this run (unread: line ${unread})`,
+        hint:
+          `Before posting a ${input.severity} finding you must read the target ${span} ` +
+          `yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${hintStart}, end_line: ${hintEnd} }) and try again.`,
+      };
+    }
   }
 
   return { ok: true };

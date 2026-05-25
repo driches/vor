@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
-import { pricingForModel } from '../util/pricing.js';
+import { costFromUsage, pricingForModel } from '../util/pricing.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
 import { makeGetPrMetadataTool } from '../tools/get-pr-metadata.js';
 import { makeGrepRepoAtRefTool } from '../tools/grep-repo-at-ref.js';
@@ -30,7 +30,10 @@ import { makePostSummaryTool } from '../tools/post-summary.js';
 import { makeReadFileAtRefTool } from '../tools/read-file-at-ref.js';
 import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js';
 import { makeSkipFileTool } from '../tools/skip-file.js';
+import { makeWorkerCheckUsageClaimTool } from '../tools/worker-check-usage-claim.js';
 import type { ToolDeps } from '../tools/types.js';
+import { renderPreflightSection, runPreflight } from './preflight.js';
+import { WorkerClient } from './worker.js';
 
 export interface RunAgentInput {
   deps: ToolDeps;
@@ -51,6 +54,20 @@ export interface RunAgentResult {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /**
+   * Cost breakdown per model used during this run. With worker delegation
+   * enabled, the parent Sonnet driver and any Haiku worker calls accumulate
+   * separately so downstream reporting can show the Sonnet/Haiku split. Sum
+   * equals `costUsd` (modulo float).
+   */
+  perModelCost: Array<{
+    model: string;
+    costUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+  }>;
 }
 
 type AnthropicTool = Anthropic.Tool;
@@ -70,7 +87,18 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     maxOutputTokens: input.maxOutputTokens,
   });
 
-  const tools = buildToolDefinitions(input.deps);
+  const client = new Anthropic({ apiKey: input.apiKey });
+
+  // Wire optional worker delegation. Sonnet's tool list gets a tenth tool
+  // (worker_check_usage_claim) only when the flag is on — opt-out repos
+  // keep the v0.2.x tool set and behavior verbatim.
+  const workerConfig = input.deps.config.experimental.worker_delegation;
+  const worker: WorkerClient | undefined = workerConfig.enabled
+    ? new WorkerClient(client, budget, workerConfig.worker_model)
+    : undefined;
+
+  const fullDeps: ToolDeps = { ...input.deps, ...(worker !== undefined ? { worker } : {}) };
+  const tools = buildToolDefinitions(fullDeps);
   // Mark the LAST tool with cache_control: tools don't change across turns,
   // so this breakpoint caches the full tool block (~2-3K tokens of schemas)
   // at the ephemeral cache-read rate instead of re-billing the full input
@@ -84,23 +112,67 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
   }));
 
-  await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
+  await logger.info(
+    `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` +
+      (worker !== undefined ? `, worker=${workerConfig.worker_model}` : ''),
+  );
 
-  const client = new Anthropic({ apiKey: input.apiKey });
-
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: input.userPrompt },
-  ];
-
+  // Pre-flight Haiku skim: when worker delegation is enabled, summarize the
+  // diff into a structured candidate list BEFORE Sonnet's loop starts. The
+  // big win is that Sonnet's initial user prompt now carries the focused
+  // candidate list instead of needing to wide-scan the full diff through
+  // get_pr_diff (which would then sit in the cache pool for every turn).
+  // On failure, we log and continue with the original prompt — pre-flight
+  // is an optimization, not a correctness gate.
+  let userPrompt = input.userPrompt;
   let turns = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadTokens = 0;
-  let cacheCreationTokens = 0;
   let ended: RunAgentResult['ended'] = 'error';
   let lastError: string | undefined;
+  // Run preflight inside the same try that handles the main loop so a
+  // BudgetError thrown from the Haiku call (e.g. tight maxInputTokens cap,
+  // or a very large diff) lands in 'budget_exceeded' instead of escaping
+  // runAgent and turning into an orchestrator-level failure.
+  let preflightBudgetExceeded = false;
+  if (worker !== undefined) {
+    try {
+      const analysis = await runPreflight({
+        client,
+        budget,
+        model: workerConfig.worker_model,
+        prContext: input.deps.prContext,
+      });
+      if (analysis !== null) {
+        userPrompt =
+          renderPreflightSection(analysis, input.deps.prContext.files) +
+          '\n\n' +
+          userPrompt;
+      }
+    } catch (err) {
+      if (err instanceof BudgetError) {
+        ended = 'budget_exceeded';
+        lastError = err.message;
+        preflightBudgetExceeded = true;
+      } else {
+        // Any other error during preflight is non-fatal — preflight is an
+        // optimization, not a correctness gate. Log and continue with the
+        // unmodified user prompt; the main loop still runs normally.
+        await logger.warn(
+          `Pre-flight failed with non-budget error: ${(err as Error).message}. Continuing without pre-analysis.`,
+        );
+      }
+    }
+  }
+
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: userPrompt },
+  ];
 
   try {
+    if (preflightBudgetExceeded) {
+      // Skip the main loop — the budget is already exhausted. Fall through
+      // to cost reporting below.
+      throw new BudgetError(lastError ?? 'Pre-flight exhausted budget');
+    }
     while (true) {
       if (input.abortController?.signal.aborted) {
         ended = 'aborted';
@@ -135,16 +207,8 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         input.abortController ? { signal: input.abortController.signal } : undefined,
       );
 
-      inputTokens += response.usage.input_tokens;
-      outputTokens += response.usage.output_tokens;
-      cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
-      cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
-
       try {
-        budget.addUsage(
-          billableInputTokensForBudget(response.usage),
-          response.usage.output_tokens,
-        );
+        budget.addUsage(input.model, response.usage);
       } catch (err) {
         lastError = (err as Error).message;
         ended = 'budget_exceeded';
@@ -199,6 +263,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
             content: result,
           });
         } catch (err) {
+          // BudgetError must escape this catch so the outer try (line ~235)
+          // can flip `ended` to 'budget_exceeded' and stop the loop.
+          // Swallowing it here would let the loop keep dispatching tools
+          // until max_turns trips — masking the cap and over-spending.
+          // Other tool errors are recoverable: surface them to the agent as
+          // is_error tool_results so it can self-correct.
+          if (err instanceof BudgetError) throw err;
           toolResults.push({
             type: 'tool_result',
             tool_use_id: u.id,
@@ -229,49 +300,50 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  // Compute cost using the active model's pricing. If the model id isn't in
-  // our table (operator override to an experimental model), warn and fall
-  // back to Sonnet rates so cost_usd stays populated — we can't refuse here
-  // because the API spend has already happened.
-  //
-  // Three-level resolution avoids a NaN-cost failure mode if the pricing
-  // table is ever pruned of the Sonnet fallback key during a future update:
-  // try the active model → try the Sonnet key by name → fall through to
-  // inline Sonnet rates (last-resort, kept in sync by hand). If we lose
-  // BOTH the active-model lookup and the Sonnet table entry, the inline
-  // rates keep cost_usd in the right order of magnitude rather than logging
-  // $NaN and silently corrupting downstream budget alerts.
-  const rawPricing = pricingForModel(input.model);
-  if (rawPricing === undefined) {
-    await logger.warn(
-      `No pricing entry for model "${input.model}" — cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`,
-    );
+  // Compute cost per model. Models the pricing table doesn't recognize
+  // (operator overrides, experimental aliases) fall back to Sonnet rates
+  // inside costFromUsage — cost_usd stays populated rather than failing
+  // hard, because the API spend has already happened.
+  const perModelCost = budget.snapshotByModel().map(({ model, usage }) => ({
+    model,
+    costUsd: costFromUsage(model, usage),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+  }));
+
+  for (const m of perModelCost) {
+    if (pricingForModel(m.model) === undefined) {
+      await logger.warn(
+        `No pricing entry for model "${m.model}" — cost computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`,
+      );
+    }
   }
-  const pricing = rawPricing ?? pricingForModel('claude-sonnet-4-6') ?? {
-    input: 3,
-    output: 15,
-    cache_creation: 3.75,
-    cache_read: 0.3,
-  };
-  const inputCost = (inputTokens * pricing.input) / 1_000_000;
-  const outputCost = (outputTokens * pricing.output) / 1_000_000;
-  const cacheCost =
-    (cacheCreationTokens * pricing.cache_creation) / 1_000_000 +
-    (cacheReadTokens * pricing.cache_read) / 1_000_000;
-  const costUsd = inputCost + outputCost + cacheCost;
+
+  const costUsd = perModelCost.reduce((sum, m) => sum + m.costUsd, 0);
+  const totals = budget.snapshot();
 
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`,
+    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`,
   );
+  if (perModelCost.length > 1) {
+    for (const m of perModelCost) {
+      await logger.info(
+        `  ${m.model}: $${m.costUsd.toFixed(4)} (in=${m.inputTokens}, cache_r=${m.cacheReadTokens}, cache_c=${m.cacheCreationTokens}, out=${m.outputTokens})`,
+      );
+    }
+  }
   if (lastError) await logger.warn(`Last error: ${lastError}`);
 
   return {
     ended,
     ...(lastError !== undefined ? { error: lastError } : {}),
     turns,
-    inputTokens,
-    outputTokens,
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
     costUsd,
+    perModelCost,
   };
 }
 
@@ -368,6 +440,12 @@ function markLastBlockForCaching(message: Anthropic.MessageParam): void {
 /**
  * Bridge MCP tool definitions (from the tools/ modules) into our internal
  * shape with JSON Schema + a plain handler that returns a string.
+ *
+ * When `deps.worker` is present (worker_delegation flag enabled), an extra
+ * `worker_check_usage_claim` tool joins the list. Tool order does not affect
+ * Sonnet's choice but does affect the cache_control breakpoint placement —
+ * the LAST tool gets the breakpoint, so we keep the worker tool at the end
+ * so its addition doesn't bust the existing cache anchor.
  */
 function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
   const mcpTools = [
@@ -380,6 +458,7 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
+    ...(deps.worker !== undefined ? [makeWorkerCheckUsageClaimTool(deps)] : []),
   ];
 
   return mcpTools.map((mcp) => {

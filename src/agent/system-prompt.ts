@@ -42,6 +42,7 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   return sections.join('\n\n');
 }
 
+
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal

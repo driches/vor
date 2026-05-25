@@ -40,3 +40,44 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 export function pricingForModel(model: string): ModelPricing | undefined {
   return MODEL_PRICING[model];
 }
+
+/**
+ * Sonnet 4.6 rates, used as a last-resort fallback for cost calculation when
+ * the active model is unknown to the pricing table. Kept inline so a future
+ * accidental delete of the Sonnet key in MODEL_PRICING still produces a
+ * sensibly-scaled cost number instead of `NaN`.
+ */
+const SONNET_FALLBACK_PRICING: ModelPricing = {
+  input: 3,
+  output: 15,
+  cache_creation: 3.75,
+  cache_read: 0.3,
+};
+
+/**
+ * Compute the dollar cost for a single API response usage block. Centralizes
+ * the formula so the production runner, the eval harness, and any future
+ * per-model reporting use one source of truth — drift here used to be a real
+ * bug (runner hardcoded Sonnet rates while operators ran other models).
+ *
+ * Three-level fallback: active model → Sonnet table entry → inline Sonnet
+ * constants. The active-model miss path is silent here; callers that want a
+ * warning should check `pricingForModel(model) === undefined` themselves.
+ */
+export function costFromUsage(
+  model: string,
+  usage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+  },
+): number {
+  const pricing = pricingForModel(model) ?? pricingForModel('claude-sonnet-4-6') ?? SONNET_FALLBACK_PRICING;
+  return (
+    ((usage.inputTokens ?? 0) * pricing.input) / 1_000_000 +
+    ((usage.outputTokens ?? 0) * pricing.output) / 1_000_000 +
+    ((usage.cacheCreationTokens ?? 0) * pricing.cache_creation) / 1_000_000 +
+    ((usage.cacheReadTokens ?? 0) * pricing.cache_read) / 1_000_000
+  );
+}

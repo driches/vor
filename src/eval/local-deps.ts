@@ -30,6 +30,7 @@ import { parseUnifiedDiff } from '../github/diff-parser.js';
 import type { FileReadRef, FileReader } from '../github/file-reader.js';
 import type { PRContext, PRMetadata } from '../github/pr-context.js';
 import { ReviewAggregator } from '../output/aggregator.js';
+import { createRunContext } from '../agent/run-context.js';
 import type { RepoContextEntry } from '../agent/system-prompt.js';
 import type { ToolDeps } from '../tools/types.js';
 import type { ChangedFile } from '../types.js';
@@ -94,6 +95,7 @@ export async function buildLocalDeps(input: BuildLocalDepsInput): Promise<BuildL
     aggregator: new ReviewAggregator(),
     config,
     workspaceDir: resolve(caseDir, 'repo'),
+    runContext: createRunContext(),
   };
 
   return { deps, meta, configSource };

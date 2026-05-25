@@ -134,6 +134,14 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
           postedComments: deps.aggregator.acceptedComments,
           severityFloor: deps.config.severity.floor,
           maxBodyChars: 600,
+          // Read-before-post enforcement is opt-in: repos that enable worker
+          // delegation also accept the verification discipline (Sonnet must
+          // have read the target lines before posting critical/important).
+          // Repos without workers keep the v0.2.x validator semantics, so
+          // shipping v0.3.0 with the flag off is zero behavior change.
+          ...(deps.config.experimental.worker_delegation.enabled
+            ? { runContext: deps.runContext }
+            : {}),
         },
       );
 

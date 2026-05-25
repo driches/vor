@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runAgent } from './agent/runner.js';
+import { createRunContext } from './agent/run-context.js';
 import { buildSystemPrompt, type RepoContextEntry } from './agent/system-prompt.js';
 import { buildUserPrompt } from './agent/user-prompt.js';
 import { loadConfigFromString } from './config/loader.js';
@@ -213,6 +214,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       aggregator,
       config,
       workspaceDir: input.workspace_dir,
+      runContext: createRunContext(),
     },
     systemPrompt,
     userPrompt,

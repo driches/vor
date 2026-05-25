@@ -21,6 +21,13 @@ const securitySchema = z.object({
   persistence: z.object({ enabled: z.boolean() }),
 });
 
+const experimentalSchema = z.object({
+  worker_delegation: z.object({
+    enabled: z.boolean(),
+    worker_model: z.string().min(1),
+  }),
+});
+
 /**
  * Zod schema for `.code-review.yml`. All fields optional; missing values are
  * merged from DEFAULT_CONFIG by the loader.
@@ -71,6 +78,8 @@ export const configSchema = z
     }),
 
     security: securitySchema,
+
+    experimental: experimentalSchema,
   })
   .strict();
 

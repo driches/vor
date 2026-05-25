@@ -47353,7 +47353,7 @@ var Budget = class {
     this.limits = limits;
   }
   limits;
-  state = { turns: 0, inputTokens: 0, outputTokens: 0 };
+  state = { turns: 0, perModel: /* @__PURE__ */ new Map() };
   /** Call at the start of every turn. Throws if max turns reached. */
   startTurn() {
     this.state.turns += 1;
@@ -47361,30 +47361,92 @@ var Budget = class {
       throw new BudgetError(`maxTurns exceeded (${this.state.turns} > ${this.limits.maxTurns})`);
     }
   }
-  /** Record token usage from a model response. */
-  addUsage(input, output) {
-    this.state.inputTokens += input;
-    this.state.outputTokens += output;
-    if (this.state.inputTokens > this.limits.maxInputTokens) {
+  /**
+   * Record token usage from a model response, scoped to the model that
+   * produced it (so cost can later be priced per-model). The cap check
+   * counts BILLABLE input (non-cached input + cache_creation) across all
+   * models, NOT cache reads — cache_read is billed at 0.1× and counting it
+   * would make the default cap fire on turn 1 of any cached run. See
+   * billableInputTokensForBudget in runner.ts for the asymmetry rationale.
+   *
+   * Checks run BEFORE the mutation so a thrown BudgetError leaves state
+   * untouched. Preserves the invariant "throw iff cap exceeded, otherwise
+   * state is consistent" — a future retry path that catches the error
+   * would otherwise double-count whatever was committed before the throw.
+   */
+  addUsage(model, usage) {
+    const inDelta = usage.input_tokens;
+    const outDelta = usage.output_tokens;
+    const creationDelta = usage.cache_creation_input_tokens ?? 0;
+    const readDelta = usage.cache_read_input_tokens ?? 0;
+    const proposedBillable = this.totalBillableInput() + inDelta + creationDelta;
+    if (proposedBillable > this.limits.maxInputTokens) {
       throw new BudgetError(
-        `maxInputTokens exceeded (${this.state.inputTokens} > ${this.limits.maxInputTokens})`
+        `maxInputTokens exceeded (${proposedBillable} > ${this.limits.maxInputTokens})`
       );
     }
-    if (this.state.outputTokens > this.limits.maxOutputTokens) {
+    const proposedOut = this.totalOutput() + outDelta;
+    if (proposedOut > this.limits.maxOutputTokens) {
       throw new BudgetError(
-        `maxOutputTokens exceeded (${this.state.outputTokens} > ${this.limits.maxOutputTokens})`
+        `maxOutputTokens exceeded (${proposedOut} > ${this.limits.maxOutputTokens})`
       );
     }
+    let m2 = this.state.perModel.get(model);
+    if (m2 === void 0) {
+      m2 = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+      this.state.perModel.set(model, m2);
+    }
+    m2.inputTokens += inDelta;
+    m2.outputTokens += outDelta;
+    m2.cacheCreationTokens += creationDelta;
+    m2.cacheReadTokens += readDelta;
   }
   /** True once we cross the warn threshold — runner should signal "wrap up". */
   shouldWrapUp() {
     const turnFrac = this.state.turns / this.limits.maxTurns;
-    const inFrac = this.state.inputTokens / this.limits.maxInputTokens;
-    const outFrac = this.state.outputTokens / this.limits.maxOutputTokens;
+    const inFrac = this.totalBillableInput() / this.limits.maxInputTokens;
+    const outFrac = this.totalOutput() / this.limits.maxOutputTokens;
     return turnFrac >= this.limits.warnFraction || inFrac >= this.limits.warnFraction || outFrac >= this.limits.warnFraction;
   }
   snapshot() {
-    return { ...this.state };
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheCreationTokens = 0;
+    let cacheReadTokens = 0;
+    for (const m2 of this.state.perModel.values()) {
+      inputTokens += m2.inputTokens;
+      outputTokens += m2.outputTokens;
+      cacheCreationTokens += m2.cacheCreationTokens;
+      cacheReadTokens += m2.cacheReadTokens;
+    }
+    return {
+      turns: this.state.turns,
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens,
+      cacheReadTokens
+    };
+  }
+  /** Per-model usage snapshot, for cost breakdown reporting. */
+  snapshotByModel() {
+    return Array.from(this.state.perModel.entries()).map(([model, usage]) => ({
+      model,
+      usage: { ...usage }
+    }));
+  }
+  totalBillableInput() {
+    let total = 0;
+    for (const m2 of this.state.perModel.values()) {
+      total += m2.inputTokens + m2.cacheCreationTokens;
+    }
+    return total;
+  }
+  totalOutput() {
+    let total = 0;
+    for (const m2 of this.state.perModel.values()) {
+      total += m2.outputTokens;
+    }
+    return total;
   }
 };
 
@@ -47479,6 +47541,16 @@ var MODEL_PRICING = {
 };
 function pricingForModel(model) {
   return MODEL_PRICING[model];
+}
+var SONNET_FALLBACK_PRICING = {
+  input: 3,
+  output: 15,
+  cache_creation: 3.75,
+  cache_read: 0.3
+};
+function costFromUsage(model, usage) {
+  const pricing = pricingForModel(model) ?? pricingForModel("claude-sonnet-4-6") ?? SONNET_FALLBACK_PRICING;
+  return (usage.inputTokens ?? 0) * pricing.input / 1e6 + (usage.outputTokens ?? 0) * pricing.output / 1e6 + (usage.cacheCreationTokens ?? 0) * pricing.cache_creation / 1e6 + (usage.cacheReadTokens ?? 0) * pricing.cache_read / 1e6;
 }
 
 // src/tools/tool-helper.ts
@@ -47808,6 +47880,25 @@ var CATEGORIES = [
   "duplication"
 ];
 
+// src/agent/run-context.ts
+function createRunContext() {
+  return { readRanges: /* @__PURE__ */ new Map() };
+}
+function recordHeadRead(ctx, path11, startLine, endLine) {
+  if (endLine < startLine) return;
+  let ranges = ctx.readRanges.get(path11);
+  if (ranges === void 0) {
+    ranges = [];
+    ctx.readRanges.set(path11, ranges);
+  }
+  ranges.push([startLine, endLine]);
+}
+function hasReadRange(ctx, path11, line) {
+  const ranges = ctx.readRanges.get(path11);
+  if (ranges === void 0) return false;
+  return ranges.some(([s2, e2]) => line >= s2 && line <= e2);
+}
+
 // src/agent/validate-comment.ts
 function validateInlineComment(input, ctx) {
   const file = ctx.changedFiles.get(input.file_path);
@@ -47890,6 +47981,24 @@ function validateInlineComment(input, ctx) {
       reason: "duplicate of an already-posted comment",
       hint: `You already commented on '${input.file_path}':${input.line} with this title.`
     };
+  }
+  if (ctx.runContext !== void 0 && (input.severity === "critical" || input.severity === "important")) {
+    const linesToCheck = [input.line];
+    if (input.start_line !== void 0) linesToCheck.unshift(input.start_line);
+    const unread = linesToCheck.find(
+      (line) => !hasReadRange(ctx.runContext, input.file_path, line)
+    );
+    if (unread !== void 0) {
+      const span = input.start_line !== void 0 ? `lines ${input.start_line}-${input.line}` : `line ${input.line}`;
+      const win = 10;
+      const hintStart = Math.max(1, (input.start_line ?? input.line) - win);
+      const hintEnd = input.line + win;
+      return {
+        ok: false,
+        reason: `you have not called read_file_at_ref on '${input.file_path}' covering ${span} this run (unread: line ${unread})`,
+        hint: `Before posting a ${input.severity} finding you must read the target ${span} yourself (worker output does NOT count). Call read_file_at_ref({ path: '${input.file_path}', ref: 'head', start_line: ${hintStart}, end_line: ${hintEnd} }) and try again.`
+      };
+    }
   }
   return { ok: true };
 }
@@ -47986,7 +48095,13 @@ function makePostInlineCommentTool(deps) {
           changedFiles,
           postedComments: deps.aggregator.acceptedComments,
           severityFloor: deps.config.severity.floor,
-          maxBodyChars: 600
+          maxBodyChars: 600,
+          // Read-before-post enforcement is opt-in: repos that enable worker
+          // delegation also accept the verification discipline (Sonnet must
+          // have read the target lines before posting critical/important).
+          // Repos without workers keep the v0.2.x validator semantics, so
+          // shipping v0.3.0 with the flag off is zero behavior change.
+          ...deps.config.experimental.worker_delegation.enabled ? { runContext: deps.runContext } : {}
         }
       );
       if (!validation.ok) {
@@ -48092,6 +48207,11 @@ function makeReadFileAtRefTool(deps) {
             hint: "Check list_changed_files for the exact paths in this PR."
           });
         }
+        if (args.ref === "head") {
+          const range = result.returned_range;
+          const [s2, e2] = range ?? [start, end];
+          recordHeadRead(deps.runContext, args.path, s2, e2);
+        }
         return jsonResult({
           ok: true,
           ...result,
@@ -48117,11 +48237,15 @@ function makeReadFileAtRefTool(deps) {
       const total = lines.length;
       const truncated = total > MAX_LINES_PER_CALL;
       const returned = truncated ? lines.slice(0, MAX_LINES_PER_CALL).join("\n") : content;
+      const returnedEnd = truncated ? MAX_LINES_PER_CALL : total;
+      if (args.ref === "head") {
+        recordHeadRead(deps.runContext, args.path, 1, returnedEnd);
+      }
       return jsonResult({
         ok: true,
         content: returned,
         total_lines: total,
-        returned_range: [1, truncated ? MAX_LINES_PER_CALL : total],
+        returned_range: [1, returnedEnd],
         truncated,
         ref: args.ref,
         ref_sha: sha,
@@ -48185,6 +48309,478 @@ function makeSkipFileTool(deps) {
   );
 }
 
+// src/tools/worker-check-usage-claim.ts
+var import_node_child_process2 = require("node:child_process");
+var GREP_RESULT_CAP = 30;
+var GREP_TIMEOUT_MS = 1e4;
+var READ_FILE_LINES_PER_CALL = 200;
+var TOP_FILES_TO_READ = 3;
+var verdictSchema = external_exports.object({
+  verdict: external_exports.enum(["confirmed", "refuted", "inconclusive"]),
+  call_sites: external_exports.array(
+    external_exports.object({
+      path: external_exports.string(),
+      line: external_exports.number().int().nonnegative(),
+      snippet: external_exports.string()
+    })
+  ).default([]),
+  confidence: external_exports.enum(["high", "medium", "low"]),
+  evidence: external_exports.string().min(1).max(800),
+  files_searched: external_exports.array(external_exports.string()).default([])
+});
+var WORKER_SYSTEM_PROMPT = `You are a verification worker assisting a senior reviewer.
+
+Your ONLY job is to read the provided search results and file content, then return a JSON verdict on a specific usage claim. You do NOT post comments, you do NOT make judgment calls about code quality, you do NOT propose fixes.
+
+You will receive:
+- A symbol name (function / class / variable)
+- A claim about it ('unused', 'single_caller', or 'pattern_violation')
+- Context \u2014 why the senior reviewer wants to know
+- Grep results from the repo (file:line:text matches)
+- File contents around the top matches
+
+You must return JSON matching this schema EXACTLY (no markdown fences, no prose before or after):
+
+{
+  "verdict": "confirmed" | "refuted" | "inconclusive",
+  "call_sites": [ { "path": "...", "line": N, "snippet": "..." }, ... ],   // The MOST relevant matches, max 5
+  "confidence": "high" | "medium" | "low",
+  "evidence": "1-2 sentence explanation citing the evidence you saw",
+  "files_searched": ["src/foo.ts", ...]                                    // Paths whose content you inspected
+}
+
+Verdict rules:
+- 'unused' claim: 'confirmed' if zero non-trivial call sites (tests, comments, the definition itself don't count); 'refuted' if real call sites exist; 'inconclusive' if grep was inconclusive.
+- 'single_caller' claim: 'confirmed' if exactly one non-trivial call site; otherwise 'refuted' (multiple) or 'inconclusive'.
+- 'pattern_violation' claim: 'confirmed' if the code clearly violates a documented pattern in the searched files; 'refuted' if it follows the pattern; 'inconclusive' if no pattern is documented.
+
+Confidence rules:
+- 'high': the evidence is unambiguous (e.g., zero matches for an 'unused' claim, or a clearly-documented opposing pattern).
+- 'medium': evidence supports a verdict but there are sources you couldn't inspect (e.g., the symbol is exported and may be used outside the repo).
+- 'low': inconclusive grep, partial reads, or unclear pattern. Default to 'low' if unsure \u2014 the senior reviewer will re-verify.`;
+function makeWorkerCheckUsageClaimTool(deps) {
+  return tool(
+    "worker_check_usage_claim",
+    "Delegate verification of a usage claim to a cheap worker (claude-haiku-4-5). Use this during verification (phase 5) instead of doing the grep + read yourself, when you want to check whether a symbol is unused, has a single caller, or violates a documented pattern. Returns a structured verdict + evidence as JSON.\n\nIMPORTANT: Worker output is a HINT, not evidence. For findings with severity critical or important you MUST still call read_file_at_ref on the target line range yourself before post_inline_comment \u2014 the validator will reject otherwise. For minor/nit findings, the worker output alone is acceptable evidence.",
+    {
+      symbol: external_exports.string().min(1).describe("The symbol being checked (function/class/variable/method name)."),
+      claim: external_exports.enum(["unused", "single_caller", "pattern_violation"]).describe("Which property of the symbol you want verified."),
+      path_glob: external_exports.string().optional().describe(
+        "Optional path glob (git-grep syntax) to scope the search, e.g. 'src/**/*.ts'. Omit to search the whole repo."
+      ),
+      context: external_exports.string().min(8).max(400).describe(
+        'Why you are checking this \u2014 gives the worker focus. Example: "PR removes the foo() helper; need to confirm no callers remain."'
+      )
+    },
+    async (args) => {
+      if (deps.worker === void 0) {
+        return jsonResult({
+          ok: false,
+          error: "worker delegation is not enabled in this run",
+          hint: "Set experimental.worker_delegation.enabled = true in .code-review.yml to use this tool."
+        });
+      }
+      const matches = await runGitGrep2(args.symbol, deps.workspaceDir, args.path_glob);
+      const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
+      const fileSnippets = [];
+      for (const path11 of topPaths) {
+        const firstMatch = matches.find((m2) => m2.path === path11);
+        const matchLine = firstMatch?.line ?? 1;
+        const readStart = Math.max(
+          1,
+          matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2)
+        );
+        const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
+        const head = deps.prContext.metadata.head_sha;
+        const result = await deps.fileReader.readRange(
+          { owner: deps.owner, repo: deps.repo, path: path11, ref: head },
+          readStart,
+          readEnd
+        );
+        if (result !== null) {
+          fileSnippets.push({ path: path11, content: result.content });
+        }
+      }
+      const userPrompt = renderUserPrompt({
+        symbol: args.symbol,
+        claim: args.claim,
+        context: args.context,
+        matches,
+        fileSnippets
+      });
+      try {
+        const { parsed } = await deps.worker.invoke({
+          task: "check_usage",
+          systemPrompt: WORKER_SYSTEM_PROMPT,
+          userPrompt,
+          maxTokens: 1024,
+          responseSchema: verdictSchema
+        });
+        return jsonResult({
+          ok: true,
+          ...parsed,
+          // Reminder field — keeps the verification discipline visible even
+          // if the agent skims tool output.
+          reminder: "Worker output is a hint, not evidence. For critical/important findings, call read_file_at_ref on the target lines before posting."
+        });
+      } catch (err) {
+        if (err instanceof BudgetError) throw err;
+        return jsonResult({
+          ok: false,
+          error: `worker call failed: ${err.message}`,
+          hint: "Fall back to doing the grep + read yourself with grep_repo_at_ref and read_file_at_ref."
+        });
+      }
+    }
+  );
+}
+function uniquePaths(matches) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const m2 of matches) {
+    if (seen.has(m2.path)) continue;
+    seen.add(m2.path);
+    out.push(m2.path);
+  }
+  return out;
+}
+function renderUserPrompt(args) {
+  const lines = [];
+  lines.push(`## Task`);
+  lines.push(`Check the claim '${args.claim}' for symbol \`${args.symbol}\`.`);
+  lines.push("");
+  lines.push(`## Context from senior reviewer`);
+  lines.push(args.context);
+  lines.push("");
+  lines.push(`## Grep results (\`${args.symbol}\` across repo, capped at ${GREP_RESULT_CAP})`);
+  if (args.matches.length === 0) {
+    lines.push("_No matches._");
+  } else {
+    for (const m2 of args.matches) {
+      lines.push(`${m2.path}:${m2.line}: ${m2.text}`);
+    }
+  }
+  lines.push("");
+  if (args.fileSnippets.length > 0) {
+    lines.push(`## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`);
+    for (const snip of args.fileSnippets) {
+      lines.push(`### ${snip.path}`);
+      lines.push("```");
+      lines.push(snip.content);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+  lines.push("## Required output");
+  lines.push("Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence.");
+  return lines.join("\n");
+}
+async function runGitGrep2(pattern, cwd, pathGlob) {
+  const args = ["grep", "-n", "-E", "--no-color", "--", pattern];
+  if (pathGlob !== void 0) args.push(pathGlob);
+  return new Promise((resolve3, reject) => {
+    const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd });
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      reject(
+        new Error(
+          `git grep timed out after ${GREP_TIMEOUT_MS}ms \u2014 verdict would be inconclusive, falling back`
+        )
+      );
+    }, GREP_TIMEOUT_MS);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    child2.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      if (code !== 0 && code !== 1) {
+        reject(new Error(`git grep exited ${code}: ${stderr.trim()}`));
+        return;
+      }
+      const matches = parseGrepOutput2(stdout);
+      resolve3(matches.slice(0, GREP_RESULT_CAP));
+    });
+    child2.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+function parseGrepOutput2(out) {
+  const lines = out.split("\n").filter((l2) => l2.length > 0);
+  const matches = [];
+  for (const line of lines) {
+    const m2 = line.match(/^([^:]+):(\d+):(.*)$/);
+    if (!m2) continue;
+    matches.push({
+      path: m2[1],
+      line: Number.parseInt(m2[2], 10),
+      text: m2[3]
+    });
+  }
+  return matches;
+}
+
+// src/agent/preflight.ts
+var candidateSchema = external_exports.object({
+  file: external_exports.string(),
+  line_range: external_exports.string().describe("e.g. '42-58' or '42'"),
+  severity_guess: external_exports.enum(["critical", "important", "minor", "nit"]),
+  category: external_exports.string(),
+  what: external_exports.string().min(1).max(240),
+  why: external_exports.string().min(1).max(360)
+});
+var preflightSchema = external_exports.object({
+  candidates: external_exports.array(candidateSchema).max(20),
+  low_risk_files: external_exports.array(external_exports.string()).default([]),
+  global_observations: external_exports.array(external_exports.string().max(200)).default([])
+});
+var PREFLIGHT_SYSTEM = `You are a fast-scan analyst preparing a pull request for a senior reviewer.
+
+Your job: read the diff and file list, then return a structured JSON list of EVERY plausibly-flaggable concern. The senior reviewer is the one who decides what to post \u2014 your job is to give them a focused starting list so they don't have to wide-scan the diff themselves.
+
+Be GENEROUS in candidates but TIGHT in language. The reviewer prefers a list of 8 candidates they triage in 3 turns over a perfect list of 3 they have to mine themselves.
+
+Severity guidance:
+- critical: data loss, auth bypass, RCE, crash on common path, secret leak, race with user impact
+- important: error handling missing on a likely-failing external call, N+1, breaking change to an internal contract, missing test coverage on core logic
+- minor: naming that obscures intent (with a concrete suggestion), missing JSDoc on exported API, inconsistent pattern usage
+- nit: style preferences when there's no documented convention
+
+Categories (free-text but prefer): bug | security | performance | error-handling | test-gap | readability | docs | architecture | vulnerability
+
+OUTPUT REQUIREMENTS (no exceptions):
+- Return ONLY JSON matching this schema. No markdown fences. No prose before or after.
+- Use this exact shape:
+{
+  "candidates": [
+    {
+      "file": "path/relative/to/repo.ts",
+      "line_range": "42-58",   // OR a single line like "42"
+      "severity_guess": "important",
+      "category": "error-handling",
+      "what": "1-sentence headline",
+      "why": "1-2 sentence reasoning"
+    }
+  ],
+  "low_risk_files": ["paths the reviewer can skip without reading"],
+  "global_observations": ["Cross-cutting observations the senior reviewer should know"]
+}
+
+Constraints:
+- At most 20 candidates. If you'd flag more, return the top 20 by severity.
+- File paths must match exactly the paths in the diff.
+- Line ranges must fall within the changed hunks of that file.
+- If the diff is small and benign, returning {"candidates": [], ...} is correct.`;
+async function runPreflight(input) {
+  const fileSummary = input.prContext.files.map(
+    (f2) => `- ${f2.path} (${f2.status}, +${f2.additions}/-${f2.deletions}${f2.is_generated ? ", generated" : ""}${f2.is_binary ? ", binary" : ""})`
+  ).join("\n");
+  const userPrompt = [
+    `## PR metadata`,
+    `Title: ${input.prContext.metadata.title}`,
+    input.prContext.metadata.body.trim().length > 0 ? `Body: ${input.prContext.metadata.body.slice(0, 1e3)}` : "Body: (empty)",
+    "",
+    `## Changed files (${input.prContext.files.length})`,
+    fileSummary,
+    "",
+    `## Unified diff`,
+    "```diff",
+    input.prContext.diff,
+    "```",
+    "",
+    "Return ONLY the JSON described in your instructions."
+  ].join("\n");
+  let response;
+  try {
+    response = await input.client.messages.create({
+      model: input.model,
+      max_tokens: 2048,
+      temperature: 0,
+      system: PREFLIGHT_SYSTEM,
+      messages: [{ role: "user", content: userPrompt }]
+    });
+  } catch (err) {
+    await logger.warn(
+      `Pre-flight call failed: ${err.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  try {
+    input.budget.addUsage(input.model, response.usage);
+  } catch (err) {
+    throw err;
+  }
+  const textBlock = response.content.find(
+    (b2) => b2.type === "text"
+  );
+  if (textBlock === void 0) {
+    await logger.warn("Pre-flight returned no text block. Continuing without pre-analysis.");
+    return null;
+  }
+  const rawText = textBlock.text;
+  const json = stripJsonFence(rawText);
+  let unvalidated;
+  try {
+    unvalidated = JSON.parse(json);
+  } catch (err) {
+    await logger.warn(
+      `Pre-flight produced non-JSON output: ${err.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  const validation = preflightSchema.safeParse(unvalidated);
+  if (!validation.success) {
+    await logger.warn(
+      `Pre-flight JSON failed schema validation: ${validation.error.message}. Continuing without pre-analysis.`
+    );
+    return null;
+  }
+  await logger.info(
+    `Pre-flight: ${validation.data.candidates.length} candidate(s), ${validation.data.low_risk_files.length} low-risk file(s), ${validation.data.global_observations.length} global observation(s)`
+  );
+  return validation.data;
+}
+function renderPreflightSection(analysis, changedFiles) {
+  const lines = [];
+  lines.push("## Pre-analysis (advisory \u2014 verify independently before posting)");
+  lines.push("");
+  lines.push(
+    'A faster model has scanned the diff. Its candidates appear below the file list. Treat them as a STARTING LIST, not as findings to post verbatim, and do NOT treat absence-from-the-list as "nothing to flag here" \u2014 pre-analysis routinely misses real findings.'
+  );
+  lines.push("");
+  const filesByCandidate = /* @__PURE__ */ new Map();
+  for (const c2 of analysis.candidates) {
+    const existing = filesByCandidate.get(c2.file) ?? [];
+    existing.push(c2);
+    filesByCandidate.set(c2.file, existing);
+  }
+  const lowRiskSet = new Set(analysis.low_risk_files);
+  lines.push(`### Files in this PR (${changedFiles.length})`);
+  lines.push(
+    'Files marked "no candidates" still need a quick scan \u2014 pre-analysis catches roughly 70% of real findings. A 1-2 turn scan is usually enough; only go deep if you spot something concrete.'
+  );
+  lines.push("");
+  for (const f2 of changedFiles) {
+    const flagged = filesByCandidate.get(f2.path);
+    const lowRisk = lowRiskSet.has(f2.path);
+    let annotation;
+    if (flagged !== void 0 && flagged.length > 0) {
+      annotation = `${flagged.length} candidate(s)`;
+    } else if (lowRisk) {
+      annotation = "low-risk";
+    } else {
+      annotation = "no candidates";
+    }
+    lines.push(`- \`${f2.path}\` (${f2.status}, +${f2.additions}/-${f2.deletions}) \u2014 ${annotation}`);
+  }
+  lines.push("");
+  if (analysis.candidates.length === 0) {
+    lines.push("**No candidates flagged across any file.** Investigate the diff yourself \u2014 the pre-analysis may have missed everything.");
+  } else {
+    lines.push(`### ${analysis.candidates.length} candidate(s) (advisory)`);
+    lines.push("");
+    for (let i2 = 0; i2 < analysis.candidates.length; i2++) {
+      const c2 = analysis.candidates[i2];
+      lines.push(
+        `${i2 + 1}. **${c2.file}:${c2.line_range}** \u2014 ${c2.severity_guess.toUpperCase()} (${c2.category})`
+      );
+      lines.push(`   What: ${c2.what}`);
+      lines.push(`   Why: ${c2.why}`);
+    }
+    lines.push("");
+  }
+  if (analysis.global_observations.length > 0) {
+    lines.push(`### Global observations`);
+    for (const o2 of analysis.global_observations) lines.push(`- ${o2}`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+function stripJsonFence(text) {
+  let s2 = text.trim();
+  if (s2.startsWith("```json")) s2 = s2.slice("```json".length);
+  else if (s2.startsWith("```")) s2 = s2.slice(3);
+  if (s2.endsWith("```")) s2 = s2.slice(0, -3);
+  return s2.trim();
+}
+
+// src/agent/worker.ts
+var WorkerClient = class {
+  constructor(client, budget, model = "claude-haiku-4-5") {
+    this.client = client;
+    this.budget = budget;
+    this.model = model;
+  }
+  client;
+  budget;
+  model;
+  async invoke(inv) {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: inv.maxTokens,
+      // Workers do bounded structured analysis. Determinism > variety here —
+      // they should produce the same JSON for the same input.
+      temperature: 0,
+      system: inv.systemPrompt,
+      messages: [{ role: "user", content: inv.userPrompt }]
+    });
+    this.budget.addUsage(this.model, response.usage);
+    const textBlock = response.content.find(
+      (b2) => b2.type === "text"
+    );
+    if (textBlock === void 0) {
+      throw new Error(`Worker '${inv.task}' returned no text block`);
+    }
+    const rawText = textBlock.text;
+    const json = stripJsonFence2(rawText);
+    let unvalidated;
+    try {
+      unvalidated = JSON.parse(json);
+    } catch (err) {
+      await logger.warn(
+        `Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`
+      );
+      throw new Error(
+        `Worker '${inv.task}' returned non-JSON: ${err.message}`
+      );
+    }
+    const validation = inv.responseSchema.safeParse(unvalidated);
+    if (!validation.success) {
+      await logger.warn(
+        `Worker '${inv.task}' returned JSON that failed schema validation: ${validation.error.message}`
+      );
+      throw new Error(
+        `Worker '${inv.task}' response failed schema: ${validation.error.message}`
+      );
+    }
+    return {
+      parsed: validation.data,
+      rawText,
+      usage: response.usage
+    };
+  }
+};
+function stripJsonFence2(text) {
+  let s2 = text.trim();
+  if (s2.startsWith("```json")) s2 = s2.slice("```json".length);
+  else if (s2.startsWith("```")) s2 = s2.slice(3);
+  if (s2.endsWith("```")) s2 = s2.slice(0, -3);
+  return s2.trim();
+}
+
 // src/agent/runner.ts
 async function runAgent(input) {
   const budget = new Budget({
@@ -48193,26 +48789,55 @@ async function runAgent(input) {
     maxInputTokens: input.maxInputTokens,
     maxOutputTokens: input.maxOutputTokens
   });
-  const tools = buildToolDefinitions(input.deps);
+  const client = new sdk_default({ apiKey: input.apiKey });
+  const workerConfig = input.deps.config.experimental.worker_delegation;
+  const worker = workerConfig.enabled ? new WorkerClient(client, budget, workerConfig.worker_model) : void 0;
+  const fullDeps = { ...input.deps, ...worker !== void 0 ? { worker } : {} };
+  const tools = buildToolDefinitions(fullDeps);
   const anthropicTools = tools.map((t2, i2) => ({
     name: t2.name,
     description: t2.description,
     input_schema: t2.input_schema,
     ...i2 === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}
   }));
-  await logger.info(`Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}`);
-  const client = new sdk_default({ apiKey: input.apiKey });
-  const messages = [
-    { role: "user", content: input.userPrompt }
-  ];
+  await logger.info(
+    `Agent ready: model=${input.model}, tools=${tools.length}, max_turns=${input.maxTurns}` + (worker !== void 0 ? `, worker=${workerConfig.worker_model}` : "")
+  );
+  let userPrompt = input.userPrompt;
   let turns = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadTokens = 0;
-  let cacheCreationTokens = 0;
   let ended = "error";
   let lastError;
+  let preflightBudgetExceeded = false;
+  if (worker !== void 0) {
+    try {
+      const analysis = await runPreflight({
+        client,
+        budget,
+        model: workerConfig.worker_model,
+        prContext: input.deps.prContext
+      });
+      if (analysis !== null) {
+        userPrompt = renderPreflightSection(analysis, input.deps.prContext.files) + "\n\n" + userPrompt;
+      }
+    } catch (err) {
+      if (err instanceof BudgetError) {
+        ended = "budget_exceeded";
+        lastError = err.message;
+        preflightBudgetExceeded = true;
+      } else {
+        await logger.warn(
+          `Pre-flight failed with non-budget error: ${err.message}. Continuing without pre-analysis.`
+        );
+      }
+    }
+  }
+  const messages = [
+    { role: "user", content: userPrompt }
+  ];
   try {
+    if (preflightBudgetExceeded) {
+      throw new BudgetError(lastError ?? "Pre-flight exhausted budget");
+    }
     while (true) {
       if (input.abortController?.signal.aborted) {
         ended = "aborted";
@@ -48240,15 +48865,8 @@ async function runAgent(input) {
         },
         input.abortController ? { signal: input.abortController.signal } : void 0
       );
-      inputTokens += response.usage.input_tokens;
-      outputTokens += response.usage.output_tokens;
-      cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
-      cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
       try {
-        budget.addUsage(
-          billableInputTokensForBudget(response.usage),
-          response.usage.output_tokens
-        );
+        budget.addUsage(input.model, response.usage);
       } catch (err) {
         lastError = err.message;
         ended = "budget_exceeded";
@@ -48295,6 +48913,7 @@ async function runAgent(input) {
             content: result
           });
         } catch (err) {
+          if (err instanceof BudgetError) throw err;
           toolResults.push({
             type: "tool_result",
             tool_use_id: u2.id,
@@ -48321,37 +48940,43 @@ async function runAgent(input) {
       throw new AgentError(`Agent run failed: ${lastError}`, { cause: err });
     }
   }
-  const rawPricing = pricingForModel(input.model);
-  if (rawPricing === void 0) {
-    await logger.warn(
-      `No pricing entry for model "${input.model}" \u2014 cost_usd computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
-    );
+  const perModelCost = budget.snapshotByModel().map(({ model, usage }) => ({
+    model,
+    costUsd: costFromUsage(model, usage),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens
+  }));
+  for (const m2 of perModelCost) {
+    if (pricingForModel(m2.model) === void 0) {
+      await logger.warn(
+        `No pricing entry for model "${m2.model}" \u2014 cost computed with Sonnet rates as a fallback. Update src/util/pricing.ts to include this model.`
+      );
+    }
   }
-  const pricing = rawPricing ?? pricingForModel("claude-sonnet-4-6") ?? {
-    input: 3,
-    output: 15,
-    cache_creation: 3.75,
-    cache_read: 0.3
-  };
-  const inputCost = inputTokens * pricing.input / 1e6;
-  const outputCost = outputTokens * pricing.output / 1e6;
-  const cacheCost = cacheCreationTokens * pricing.cache_creation / 1e6 + cacheReadTokens * pricing.cache_read / 1e6;
-  const costUsd = inputCost + outputCost + cacheCost;
+  const costUsd = perModelCost.reduce((sum, m2) => sum + m2.costUsd, 0);
+  const totals = budget.snapshot();
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${inputTokens} (cache_r=${cacheReadTokens}, cache_c=${cacheCreationTokens}), out=${outputTokens}, cost=$${costUsd.toFixed(4)}`
+    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`
   );
+  if (perModelCost.length > 1) {
+    for (const m2 of perModelCost) {
+      await logger.info(
+        `  ${m2.model}: $${m2.costUsd.toFixed(4)} (in=${m2.inputTokens}, cache_r=${m2.cacheReadTokens}, cache_c=${m2.cacheCreationTokens}, out=${m2.outputTokens})`
+      );
+    }
+  }
   if (lastError) await logger.warn(`Last error: ${lastError}`);
   return {
     ended,
     ...lastError !== void 0 ? { error: lastError } : {},
     turns,
-    inputTokens,
-    outputTokens,
-    costUsd
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    costUsd,
+    perModelCost
   };
-}
-function billableInputTokensForBudget(usage) {
-  return usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
 }
 function markLatestMessageForCaching(messages) {
   const userIndices = [];
@@ -48392,7 +49017,8 @@ function buildToolDefinitions(deps) {
     makeReadRepoContextFileTool(deps),
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
-    makeSkipFileTool(deps)
+    makeSkipFileTool(deps),
+    ...deps.worker !== void 0 ? [makeWorkerCheckUsageClaimTool(deps)] : []
   ];
   return mcpTools.map((mcp) => {
     const zodSchema = external_exports.object(mcp.inputSchema);
@@ -48645,6 +49271,12 @@ var DEFAULT_CONFIG = {
     },
     cache: { enabled: true },
     persistence: { enabled: false }
+  },
+  experimental: {
+    worker_delegation: {
+      enabled: false,
+      worker_model: "claude-haiku-4-5"
+    }
   }
 };
 
@@ -48666,6 +49298,12 @@ var securitySchema = external_exports.object({
   }),
   cache: external_exports.object({ enabled: external_exports.boolean() }),
   persistence: external_exports.object({ enabled: external_exports.boolean() })
+});
+var experimentalSchema = external_exports.object({
+  worker_delegation: external_exports.object({
+    enabled: external_exports.boolean(),
+    worker_model: external_exports.string().min(1)
+  })
 });
 var configSchema = external_exports.object({
   model: external_exports.string().min(1),
@@ -48703,7 +49341,8 @@ var configSchema = external_exports.object({
     max_input_tokens: external_exports.number().int().positive(),
     max_output_tokens: external_exports.number().int().positive()
   }),
-  security: securitySchema
+  security: securitySchema,
+  experimental: experimentalSchema
 }).strict();
 var partialConfigSchema = configSchema.deepPartial();
 
@@ -55020,7 +55659,8 @@ async function runOrchestrator(input) {
       fileReader,
       aggregator,
       config,
-      workspaceDir: input.workspace_dir
+      workspaceDir: input.workspace_dir,
+      runContext: createRunContext()
     },
     systemPrompt,
     userPrompt,

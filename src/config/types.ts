@@ -45,6 +45,29 @@ export interface ReviewConfig {
   };
 
   security: SecurityConfig;
+
+  /**
+   * Opt-in feature flags. Default-disabled features land here so they ship
+   * without changing behavior for anyone who hasn't opted in.
+   */
+  experimental: ExperimentalConfig;
+}
+
+export interface ExperimentalConfig {
+  /**
+   * Lets the main agent delegate verification work (is `foo` unused? does
+   * `bar` have one caller?) to a cheap Haiku worker via the
+   * `worker_check_usage_claim` tool. Sonnet still verifies the bytes itself
+   * before posting critical/important findings (validator-enforced). Default
+   * off — opt in per repo via `.code-review.yml`.
+   */
+  worker_delegation: WorkerDelegationConfig;
+}
+
+export interface WorkerDelegationConfig {
+  enabled: boolean;
+  /** Model id used for worker calls. Defaults to claude-haiku-4-5. */
+  worker_model: string;
 }
 
 export interface ScannerConfig {
