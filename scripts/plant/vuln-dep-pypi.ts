@@ -67,11 +67,15 @@ export const vulnDepPypiTemplate: PlantTemplate = {
       // when the finding was actually pre-existing. Compare the parsed
       // (name, version) — not the raw line text — so casing
       // (`Requests==2.5.0`), name normalization (`oauth-lib` vs
-      // `oauth_lib`), and whitespace (`requests == 2.5.0`) all
-      // canonicalize to the same no-op. Other operators (`===`, `>=`,
-      // `~=`) are real mutations because they change the resolved pin.
-      // See PR #19 Codex P2 3299774234.
-      if (matchedOperator === '==' && matchedVersion === ver) {
+      // `oauth_lib`), whitespace (`requests == 2.5.0`), and PEP 440
+      // release-segment equivalence (`2.5` == `2.5.0`) all canonicalize
+      // to the same no-op. Other operators (`===`, `>=`, `~=`) are real
+      // mutations because they change the resolved pin.
+      // See PR #19 Codex P2 3299774234 + 3299840874.
+      if (
+        matchedOperator === '==' &&
+        canonicalizeVersion(matchedVersion!) === canonicalizeVersion(ver)
+      ) {
         throw new Error(
           `vuln-dep:pypi: ${pkg}==${ver} is already pinned in requirements.txt — ` +
             `plant would be a no-op and the truth entry would score as FN. ` +
@@ -111,4 +115,36 @@ export const vulnDepPypiTemplate: PlantTemplate = {
 
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, '-');
+}
+
+/**
+ * Canonicalize a PEP 440 version for `==` equivalence comparison.
+ *
+ * PEP 440 zero-pads release segments under `==` matching, so `2.5`, `2.5.0`,
+ * and `2.5.0.0` all pin the same release. The no-op guard must treat these
+ * as equivalent, or a fixture pre-pinned at `requests==2.5` would not be
+ * caught when a plant requests `requests==2.5.0` — the template would
+ * rewrite a semantically identical pin and credit the OSV finding to the
+ * "planted" bug, inflating TP. See PR #19 Codex P2 3299840874.
+ *
+ * Scope: handles the common case (trailing `.0` segments). Does NOT
+ * canonicalize:
+ *   - Pre-release tag forms (`a1` vs `alpha1` vs `A1`)
+ *   - Post/dev/local segments
+ *   - Epoch prefixes (`1!2.5`)
+ * These are rare in eval fixtures; treating them as distinct strings is a
+ * safer failure mode than under-canonicalizing.
+ */
+function canonicalizeVersion(v: string): string {
+  // Match a leading dot-separated numeric release prefix and preserve any
+  // non-numeric tail (pre/post/dev/local labels) unchanged.
+  const m = v.match(/^(\d+(?:\.\d+)*)(.*)$/);
+  if (!m) return v;
+  const segments = m[1]!.split('.').map((s) => parseInt(s, 10));
+  // Strip trailing zeros from the release sequence, but keep at least one
+  // segment so `0.0` and `0.0.0` canonicalize to `0` (not the empty string).
+  while (segments.length > 1 && segments[segments.length - 1] === 0) {
+    segments.pop();
+  }
+  return segments.join('.') + m[2]!;
 }

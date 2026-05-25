@@ -113,6 +113,51 @@ describe('vulnDepPypiTemplate', () => {
     ).toThrow(/already pinned.*no-op/);
   });
 
+  it('detects no-op pins under PEP 440 release-segment equivalence (existing 2.5 vs planted 2.5.0)', () => {
+    // Regression for PR #19 Codex P2 3299840874. PEP 440 zero-pads release
+    // segments under `==`, so `requests==2.5` already pins requests at
+    // 2.5.0. Planting `requests==2.5.0` over it is semantically a no-op
+    // (same resolved version); without canonicalization the template would
+    // rewrite the line, the OSV scanner would still see requests@2.5.0 in
+    // after/, and the truth would inflate TP for a pre-existing vuln.
+    const source = ['requests==2.5', ''].join('\n');
+    expect(() =>
+      vulnDepPypiTemplate.apply(source, {
+        type: 'vuln-dep:pypi',
+        file: 'requirements.txt',
+        package: 'requests',
+        version: '2.5.0',
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('detects no-op pins under PEP 440 release-segment equivalence (existing 2.5.0.0 vs planted 2.5)', () => {
+    // Symmetric case: extra trailing .0 on the existing side.
+    const source = ['requests==2.5.0.0', ''].join('\n');
+    expect(() =>
+      vulnDepPypiTemplate.apply(source, {
+        type: 'vuln-dep:pypi',
+        file: 'requirements.txt',
+        package: 'requests',
+        version: '2.5',
+      }),
+    ).toThrow(/already pinned.*no-op/);
+  });
+
+  it('does NOT treat semantically distinct PEP 440 versions as equivalent (2.5.1 vs 2.5)', () => {
+    // Sanity: canonicalization must not over-match. `2.5.1` strips no
+    // trailing zeros, so it stays distinct from `2.5` (which canonicalizes
+    // to `2.5`). The plant proceeds normally.
+    const source = ['requests==2.5.1', ''].join('\n');
+    const { mutated } = vulnDepPypiTemplate.apply(source, {
+      type: 'vuln-dep:pypi',
+      file: 'requirements.txt',
+      package: 'requests',
+      version: '2.5',
+    });
+    expect(mutated.split('\n')[0]).toBe('requests==2.5');
+  });
+
   it('treats `===` (arbitrary-equality) operator as a real mutation, not a no-op', () => {
     // PEP 440 `===` is a different operator — it skips PEP 440 version
     // normalization. Rewriting `requests===2.5.0` as `requests==2.5.0` is
