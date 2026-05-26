@@ -56319,9 +56319,13 @@ var knipLinter = {
         if (!changedFile.added_lines.has(issue2.line)) continue;
         findings.push(buildExportFinding(changedFile.path, issue2, "type"));
       }
-      for (const issue2 of entry.duplicates ?? []) {
-        if (!changedFile.added_lines.has(issue2.line)) continue;
-        findings.push(buildDuplicateFinding(changedFile.path, issue2));
+      for (const duplicateGroup of entry.duplicates ?? []) {
+        for (const issue2 of duplicateGroup) {
+          const line = issue2.line;
+          if (line === void 0) continue;
+          if (!changedFile.added_lines.has(line)) continue;
+          findings.push(buildDuplicateFinding(changedFile.path, { ...issue2, line }));
+        }
       }
     }
     if (!usedModernFormat) {
@@ -56348,8 +56352,10 @@ var knipLinter = {
         const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
         if (changedFile === void 0) continue;
         for (const issue2 of issues) {
-          if (!changedFile.added_lines.has(issue2.line)) continue;
-          findings.push(buildDuplicateFinding(changedFile.path, issue2));
+          const line = issue2.line;
+          if (line === void 0) continue;
+          if (!changedFile.added_lines.has(line)) continue;
+          findings.push(buildDuplicateFinding(changedFile.path, { ...issue2, line }));
         }
       }
     }

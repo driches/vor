@@ -62,7 +62,14 @@ interface KnipFileIssues {
   file: string;
   exports?: KnipExportIssue[];
   types?: KnipExportIssue[];
-  duplicates?: KnipDuplicateIssue[];
+  // Per knip's JSON reporter source
+  // (packages/knip/src/reporters/json.ts), duplicates is
+  // `Array<Array<JSONReportItem>>` — an OUTER array of duplicate-groups,
+  // where each inner array is the set of symbols that share the
+  // duplication. Pre-fix this interface was `KnipDuplicateIssue[]`, so
+  // the parsing loop accessed `issue.line` on what was actually the
+  // inner array — every duplicate finding silently dropped.
+  duplicates?: KnipDuplicateIssue[][];
 }
 
 interface KnipExportIssue {
@@ -75,7 +82,10 @@ interface KnipExportIssue {
 
 interface KnipDuplicateIssue {
   name: string;
-  line: number;
+  // Optional in knip's schema — JSONReportItem.line is nullable. The
+  // parsing loop skips entries without a line since we can't pin them
+  // to a PR-added line.
+  line?: number;
   col?: number;
 }
 
@@ -160,9 +170,18 @@ export const knipLinter: LinterModule = {
         if (!changedFile.added_lines.has(issue.line)) continue;
         findings.push(buildExportFinding(changedFile.path, issue, 'type'));
       }
-      for (const issue of entry.duplicates ?? []) {
-        if (!changedFile.added_lines.has(issue.line)) continue;
-        findings.push(buildDuplicateFinding(changedFile.path, issue));
+      // duplicates is nested: each outer element is a group of duplicated
+      // symbols, and we flag every member of the group that falls on a
+      // PR-added line. JSONReportItem.line is optional in knip's schema
+      // (some duplicate categories don't carry a source location), so
+      // skip when missing rather than emit a finding pinned to NaN/0.
+      for (const duplicateGroup of entry.duplicates ?? []) {
+        for (const issue of duplicateGroup) {
+          const line = issue.line;
+          if (line === undefined) continue;
+          if (!changedFile.added_lines.has(line)) continue;
+          findings.push(buildDuplicateFinding(changedFile.path, { ...issue, line }));
+        }
       }
     }
 
@@ -195,8 +214,10 @@ export const knipLinter: LinterModule = {
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const issue of issues) {
-        if (!changedFile.added_lines.has(issue.line)) continue;
-        findings.push(buildDuplicateFinding(changedFile.path, issue));
+        const line = issue.line;
+        if (line === undefined) continue;
+        if (!changedFile.added_lines.has(line)) continue;
+        findings.push(buildDuplicateFinding(changedFile.path, { ...issue, line }));
       }
     }
     } // end if (!usedModernFormat)
@@ -336,7 +357,11 @@ function buildExportFinding(
 
 function buildDuplicateFinding(
   filePath: string,
-  issue: KnipDuplicateIssue,
+  // Callers (both modern and legacy paths) MUST have guarded `issue.line`
+  // before calling this — knip's schema allows it to be undefined for
+  // some duplicate categories, but a finding without a line can't be
+  // pinned to a PR-added line. Narrow here to enforce that invariant.
+  issue: KnipDuplicateIssue & { line: number },
 ): ScanFinding {
   const ruleId = 'duplicate-export';
   const severity: Severity = 'important';
