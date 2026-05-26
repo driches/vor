@@ -160,9 +160,16 @@ function runCli(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     // DEP0190 — see eslint.ts for the full rationale.
+    //
+    // Note: `--no-cache` was previously set here to force a full re-scan
+    // every run. Removed: ruff's cache is keyed by file content hash, so
+    // re-using it across runs is safe and saves 10-30s on large Python
+    // repos (the cache lives in ~/.cache/ruff or the project-local
+    // .ruff_cache; LINTER_ENV_ALLOWLIST passes HOME/USERPROFILE so ruff
+    // can find it).
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
-      ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
+      ['check', '--output-format=json', '--exit-zero', ...files],
       bin.needsShell,
     );
     const spawnOptions = {

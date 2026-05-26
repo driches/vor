@@ -55509,6 +55509,16 @@ var LINTER_ENV_ALLOWLIST = [
   // boundary for the visibility of Pro coverage. Acceptable because (a)
   // the linter is the legitimate consumer of this token, and (b) the
   // alternative (silent coverage degradation) is worse for the operator.
+  //
+  // SECURITY WARNING for `pull_request_target` workflows: secrets are
+  // exposed to PR code in that trigger mode, and a malicious PR can add
+  // a `semgrep` binary earlier on PATH (or shadow `node_modules/.bin/semgrep`
+  // via package.json) before this action runs. That attacker-controlled
+  // binary would inherit SEMGREP_APP_TOKEN from the env we pass and could
+  // exfiltrate it. Mitigations: (1) don't run this action on
+  // `pull_request_target` against untrusted forks, (2) future bundled-
+  // binary mode will resolve semgrep from a pinned location instead of
+  // PATH, eliminating the shadow vector for this token specifically.
   "SEMGREP_APP_TOKEN"
 ];
 function buildLinterEnv() {
@@ -55837,7 +55847,7 @@ function runCli2(bin, files, deps) {
   return new Promise((resolve3, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
-      ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
+      ["check", "--output-format=json", "--exit-zero", ...files],
       bin.needsShell
     );
     const spawnOptions = {
