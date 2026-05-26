@@ -150,7 +150,7 @@ export const semgrepLinter: LinterModule = {
     const findings: ScanFinding[] = [];
     for (const result of output.results ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, result.path);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      const changedFile = targetFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
       findings.push(buildFinding(changedFile.path, result, changedFile));

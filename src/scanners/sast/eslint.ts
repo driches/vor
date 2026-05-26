@@ -103,7 +103,7 @@ export const eslintLinter: LinterModule = {
     const findings: ScanFinding[] = [];
     for (const fileResult of results) {
       const relPath = normalizeToolPath(deps.workspaceDir, fileResult.filePath);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      const changedFile = targetFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;

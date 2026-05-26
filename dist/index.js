@@ -55598,7 +55598,7 @@ var eslintLinter = {
     const findings = [];
     for (const fileResult of results) {
       const relPath = normalizeToolPath(deps.workspaceDir, fileResult.filePath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
@@ -55783,7 +55783,7 @@ var ruffLinter = {
     const findings = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filename);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;
       if (message.code === null) continue;
@@ -55952,7 +55952,7 @@ var dartLinter = {
       const parsed = parseDartLine(line);
       if (parsed === null) continue;
       const relPath = normalizeToolPath(deps.workspaceDir, parsed.filePath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(parsed.line)) continue;
       findings.push(buildFinding4(changedFile.path, parsed));
@@ -56136,7 +56136,7 @@ var actionlintLinter = {
     const findings = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filepath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(message.line)) continue;
       findings.push(buildFinding5(changedFile.path, message));
@@ -56517,7 +56517,7 @@ var semgrepLinter = {
     const findings = [];
     for (const result of output.results ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, result.path);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
       findings.push(buildFinding6(changedFile.path, result, changedFile));

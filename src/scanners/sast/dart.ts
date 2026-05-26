@@ -93,7 +93,7 @@ export const dartLinter: LinterModule = {
       const parsed = parseDartLine(line);
       if (parsed === null) continue;
       const relPath = normalizeToolPath(deps.workspaceDir, parsed.filePath);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      const changedFile = targetFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(parsed.line)) continue;
       findings.push(buildFinding(changedFile.path, parsed));

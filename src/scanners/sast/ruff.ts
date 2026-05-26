@@ -108,7 +108,7 @@ export const ruffLinter: LinterModule = {
     const findings: ScanFinding[] = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filename);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      const changedFile = targetFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;
       if (message.code === null) continue;
