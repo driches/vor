@@ -33,8 +33,11 @@ In any of your repos, add `.github/workflows/code-review.yml`:
 ```yaml
 name: Code Review
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
 
 permissions:
   contents: read
@@ -49,9 +52,25 @@ jobs:
       - uses: driches/code-review@v0
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ inputs.pr_number }}
 ```
 
-That's it. Open a PR and a sticky review appears within a few minutes. On each push, the prior review is dismissed and a fresh one is posted against the new HEAD.
+Trigger a review by hand: **Actions → Code Review → Run workflow → enter PR number**. A sticky review appears within a few minutes; re-run to refresh against the new HEAD.
+
+### Why manual-only?
+
+The action refuses to run on `pull_request` / `pull_request_target` events by default. The auto-trigger pattern produces tight iteration loops (every push reviews, every review can be acted on, every action push re-reviews) that we found generated more noise than signal in practice. Manual invocation gives you control over when to spend tokens.
+
+If you've explicitly decided the auto-trigger economics work for your repo, opt in:
+
+```yaml
+- uses: driches/code-review@v0
+  with:
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    allow_auto_trigger: 'true'
+```
+
+…and use `on: pull_request:` as you would expect.
 
 ## What you get
 
