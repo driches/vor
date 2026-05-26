@@ -67978,7 +67978,9 @@ async function runOrchestrator(input) {
   await logger.info(
     `Starting code review for ${input.owner}/${input.repo}#${input.pull_number}` + (input.dry_run ? " (DRY RUN)" : "")
   );
-  const octokit = createOctokit({ auth: input.github_token });
+  const octokit = (input.octokitFactory ?? createOctokit)({
+    auth: input.github_token
+  });
   const prContext = await fetchPRContext(octokit, {
     owner: input.owner,
     repo: input.repo,
