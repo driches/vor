@@ -55500,7 +55500,16 @@ var LINTER_ENV_ALLOWLIST = [
   "FLUTTER_ROOT",
   "FLUTTER_HOME",
   "PUB_CACHE",
-  "PUB_HOSTED_URL"
+  "PUB_HOSTED_URL",
+  // Semgrep authentication. Operators using Semgrep Pro authenticate via
+  // SEMGREP_APP_TOKEN to access proprietary rule packs, organization
+  // policies, and managed configs. Stripping it from the spawn env
+  // silently degrades them to the free `--config=auto` ruleset with no
+  // warning. This IS a credential — we're trading the env-allowlist
+  // boundary for the visibility of Pro coverage. Acceptable because (a)
+  // the linter is the legitimate consumer of this token, and (b) the
+  // alternative (silent coverage degradation) is worse for the operator.
+  "SEMGREP_APP_TOKEN"
 ];
 function buildLinterEnv() {
   const out = {};
