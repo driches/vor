@@ -332,6 +332,83 @@ describe('runAgent', () => {
     expect(result.turns).toBe(1);
   });
 
+  it('treats OpenAI input_tokens minus cache_read as the billable portion (Codex P1 #3300602652)', async () => {
+    // OpenAI reports input_tokens INCLUDING cached_tokens (cached is a subset
+    // of input). Without subtracting cache_read at the Budget boundary, a
+    // cache-heavy OpenAI run would trip max_input_tokens early — the bug
+    // Codex flagged on commit 766d3aac.
+    //
+    // Construct a single turn where the raw input is over the cap but the
+    // billable portion (input - cache_read) is well under it. The run must
+    // complete successfully.
+    const provider = new FakeProvider(
+      [
+        makeResponse({
+          text: 'fine',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 800_000, // raw input includes cached tokens
+            output_tokens: 50,
+            cache_read_tokens: 600_000, // 600K cached → billable = 200K
+          },
+        }),
+      ],
+      'openai',
+    );
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent({
+      ...baseInput(),
+      model: 'gpt-4.1',
+      maxInputTokens: 500_000, // billable 200K < cap, raw 800K > cap
+    });
+
+    expect(result.ended).not.toBe('budget_exceeded');
+    expect(result.ended).toBe('max_turns');
+    // perModelCost reports input_tokens as the full-rate portion only
+    // (consistent semantics across providers); cache_read shows the
+    // discounted portion separately.
+    expect(result.perModelCost).toHaveLength(1);
+    expect(result.perModelCost[0]!.inputTokens).toBe(200_000);
+    expect(result.perModelCost[0]!.cacheReadTokens).toBe(600_000);
+    // gpt-4.1: input $2/M + cache_read $0.5/M
+    //   = 200_000 * 2/1M + 600_000 * 0.5/1M + 50 * 8/1M
+    //   = $0.4 + $0.3 + $0.0004 = $0.7004
+    // Critical: this should NOT include 800_000 * $2/M = $1.60 of double-counted input.
+    expect(result.costUsd).toBeCloseTo(0.7004, 4);
+  });
+
+  it('keeps Anthropic billable formula unchanged (input + cache_creation, cache_read excluded)', async () => {
+    // Regression guard for the same fix as above — make sure adding the
+    // OpenAI branch didn't perturb the Anthropic path. Anthropic reports
+    // input_tokens EXCLUDING cache_read, so the runner must NOT subtract
+    // it again.
+    const provider = new FakeProvider(
+      [
+        makeResponse({
+          text: 'fine',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 200_000, // already excludes cache_read
+            output_tokens: 50,
+            cache_creation_tokens: 100_000,
+            cache_read_tokens: 600_000,
+          },
+        }),
+      ],
+      'anthropic',
+    );
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent({ ...baseInput(), maxInputTokens: 500_000 });
+
+    // billable = 200K + 100K cache_creation = 300K < 500K cap → completes.
+    expect(result.ended).not.toBe('budget_exceeded');
+    expect(result.perModelCost[0]!.inputTokens).toBe(200_000);
+    expect(result.perModelCost[0]!.cacheCreationTokens).toBe(100_000);
+    expect(result.perModelCost[0]!.cacheReadTokens).toBe(600_000);
+  });
+
   it('exits with `aborted` when the abortController is fired before the first turn', async () => {
     const provider = new FakeProvider([makeResponse()]);
     vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
