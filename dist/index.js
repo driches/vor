@@ -56322,11 +56322,12 @@ var knipLinter = {
           findings.push(buildExportFinding(changedFile.path, issue2, "type"));
         }
       }
-      for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
+      for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
         const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
         if (changedFile === void 0) continue;
-        for (const issue2 of issues) {
+        const flat = entries.length > 0 && Array.isArray(entries[0]) ? entries.flat() : entries;
+        for (const issue2 of flat) {
           const line = issue2.line;
           if (line === void 0) continue;
           if (!changedFile.added_lines.has(line)) continue;

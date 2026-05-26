@@ -54,7 +54,12 @@ interface KnipOutput {
   // Legacy flat-map shape — kept as a fallback for older knip versions.
   exports?: Record<string, KnipExportIssue[]>;
   types?: Record<string, KnipExportIssue[]>;
-  duplicates?: Record<string, KnipDuplicateIssue[]>;
+  // Old knip's duplicates may have been flat OR nested groups (same
+  // group semantics as the modern `issues[].duplicates`). Accept both
+  // shapes via a union and detect at runtime in the parsing loop —
+  // assuming one or the other would silently drop findings against the
+  // wrong version.
+  duplicates?: Record<string, KnipDuplicateIssue[] | KnipDuplicateIssue[][]>;
 }
 
 interface KnipFileIssues {
@@ -195,36 +200,45 @@ export const knipLinter: LinterModule = {
     // skipping otherwise prevents double-emission on knip v5+ which
     // populates both shapes simultaneously.
     if (!usedModernFormat) {
-    for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
-      if (changedFile === undefined) continue;
-      for (const issue of issues) {
-        if (!changedFile.added_lines.has(issue.line)) continue;
-        findings.push(buildExportFinding(changedFile.path, issue, 'export'));
+      for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        if (changedFile === undefined) continue;
+        for (const issue of issues) {
+          if (!changedFile.added_lines.has(issue.line)) continue;
+          findings.push(buildExportFinding(changedFile.path, issue, 'export'));
+        }
+      }
+      for (const [filePath, issues] of Object.entries(output.types ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        if (changedFile === undefined) continue;
+        for (const issue of issues) {
+          if (!changedFile.added_lines.has(issue.line)) continue;
+          findings.push(buildExportFinding(changedFile.path, issue, 'type'));
+        }
+      }
+      for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        if (changedFile === undefined) continue;
+        // Each value may be either a flat array of KnipDuplicateIssue or
+        // a nested array of groups, depending on the knip version. We
+        // detect at runtime: if the first element is itself an array, the
+        // value is grouped; otherwise it's flat. Normalize into a single
+        // flat iteration so the rest of the loop is shape-independent.
+        const flat: KnipDuplicateIssue[] =
+          entries.length > 0 && Array.isArray(entries[0])
+            ? (entries as KnipDuplicateIssue[][]).flat()
+            : (entries as KnipDuplicateIssue[]);
+        for (const issue of flat) {
+          const line = issue.line;
+          if (line === undefined) continue;
+          if (!changedFile.added_lines.has(line)) continue;
+          findings.push(buildDuplicateFinding(changedFile.path, { ...issue, line }));
+        }
       }
     }
-    for (const [filePath, issues] of Object.entries(output.types ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
-      if (changedFile === undefined) continue;
-      for (const issue of issues) {
-        if (!changedFile.added_lines.has(issue.line)) continue;
-        findings.push(buildExportFinding(changedFile.path, issue, 'type'));
-      }
-    }
-    for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
-      if (changedFile === undefined) continue;
-      for (const issue of issues) {
-        const line = issue.line;
-        if (line === undefined) continue;
-        if (!changedFile.added_lines.has(line)) continue;
-        findings.push(buildDuplicateFinding(changedFile.path, { ...issue, line }));
-      }
-    }
-    } // end if (!usedModernFormat)
 
     // knip runs whole-project analysis — no targetFiles in argv. We use
     // `targetFiles` only to filter the OUTPUT to PR-changed lines. So
