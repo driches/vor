@@ -56198,6 +56198,23 @@ var knipLinter = {
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
     const findings = [];
+    for (const entry of output.issues ?? []) {
+      const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
+      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      if (changedFile === void 0) continue;
+      for (const issue2 of entry.exports ?? []) {
+        if (!changedFile.added_lines.has(issue2.line)) continue;
+        findings.push(buildExportFinding(changedFile.path, issue2, "export"));
+      }
+      for (const issue2 of entry.types ?? []) {
+        if (!changedFile.added_lines.has(issue2.line)) continue;
+        findings.push(buildExportFinding(changedFile.path, issue2, "type"));
+      }
+      for (const issue2 of entry.duplicates ?? []) {
+        if (!changedFile.added_lines.has(issue2.line)) continue;
+        findings.push(buildDuplicateFinding(changedFile.path, issue2));
+      }
+    }
     for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
       const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);

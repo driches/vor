@@ -42,11 +42,26 @@ const TARGET_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
  * Subset of knip's JSON shape we actually read. The real schema is much
  * richer (issues by category, severity ranks, etc.); we depend only on
  * fields needed to attribute a finding to a line.
+ *
+ * Modern knip (`--reporter json`) emits:
+ *   { files: [...], issues: [{ file, exports: [...], types: [...], duplicates: [...], ... }, ...] }
+ * Each `issues[]` entry is one file. We pull exports/types/duplicates per
+ * entry. Older knip versions used flat top-level maps (kept as a fallback
+ * in case CI is on a pinned older version).
  */
 interface KnipOutput {
+  issues?: KnipFileIssues[];
+  // Legacy flat-map shape — kept as a fallback for older knip versions.
   exports?: Record<string, KnipExportIssue[]>;
   types?: Record<string, KnipExportIssue[]>;
   duplicates?: Record<string, KnipDuplicateIssue[]>;
+}
+
+interface KnipFileIssues {
+  file: string;
+  exports?: KnipExportIssue[];
+  types?: KnipExportIssue[];
+  duplicates?: KnipDuplicateIssue[];
 }
 
 interface KnipExportIssue {
@@ -99,8 +114,30 @@ export const knipLinter: LinterModule = {
 
     const findings: ScanFinding[] = [];
 
-    // Unused exports — the big category. For each file knip flagged,
-    // emit one finding per unused export, filtered to PR-added lines.
+    // Modern format — `issues[]` array of per-file objects. Each entry has
+    // a `file` field plus exports/types/duplicates arrays.
+    for (const entry of output.issues ?? []) {
+      const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
+      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      if (changedFile === undefined) continue;
+      for (const issue of entry.exports ?? []) {
+        if (!changedFile.added_lines.has(issue.line)) continue;
+        findings.push(buildExportFinding(changedFile.path, issue, 'export'));
+      }
+      for (const issue of entry.types ?? []) {
+        if (!changedFile.added_lines.has(issue.line)) continue;
+        findings.push(buildExportFinding(changedFile.path, issue, 'type'));
+      }
+      for (const issue of entry.duplicates ?? []) {
+        if (!changedFile.added_lines.has(issue.line)) continue;
+        findings.push(buildDuplicateFinding(changedFile.path, issue));
+      }
+    }
+
+    // Legacy fallback — older knip versions used flat top-level maps
+    // (`exports`/`types`/`duplicates` at the root, keyed by file path).
+    // Most current installs won't hit these loops, but keeping them costs
+    // nothing and protects pinned-version CI environments.
     for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
       const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
@@ -110,7 +147,6 @@ export const knipLinter: LinterModule = {
         findings.push(buildExportFinding(changedFile.path, issue, 'export'));
       }
     }
-    // Unused types — same shape as exports.
     for (const [filePath, issues] of Object.entries(output.types ?? {})) {
       const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
@@ -120,8 +156,6 @@ export const knipLinter: LinterModule = {
         findings.push(buildExportFinding(changedFile.path, issue, 'type'));
       }
     }
-    // Duplicate exports — usually a sign the new code is overriding or
-    // shadowing something. Worth flagging.
     for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
       const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
