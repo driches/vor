@@ -21,6 +21,7 @@ vi.mock('@anthropic-ai/sdk', () => {
 // Import AFTER vi.mock so the module picks up the fake.
 import {
   AnthropicProvider,
+  SAFE_NON_STREAMING_MAX_TOKENS,
   anthropicResponseToCanonical,
   canonicalMessagesToAnthropic,
   canonicalToolsToAnthropic,
@@ -777,6 +778,54 @@ describe('AnthropicProvider', () => {
       const trBlocks4 = (sentMessages[4] as unknown as { content: Block[] }).content;
       expect(hasCache(trBlocks2[trBlocks2.length - 1])).toBe(true);
       expect(hasCache(trBlocks4[trBlocks4.length - 1])).toBe(true);
+    });
+
+    it('caps max_tokens at SAFE_NON_STREAMING_MAX_TOKENS (8192) when caller requests more (CI regression after d116f2b)', async () => {
+      // Anthropic SDK rejects non-streaming requests with max_tokens > 8192
+      // ("Streaming is strongly recommended for operations that may take
+      // longer than 10 minutes"). The runner's `input.maxOutputTokens` comes
+      // from `budget.max_output_tokens` (default 50K) — a turn-cumulative
+      // ceiling, not a per-request one. Cap here so a higher operator config
+      // doesn't 400 every call.
+      createSpy.mockResolvedValueOnce({
+        id: 'msg_test',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+      const provider = new AnthropicProvider('sk-test');
+      await provider.complete([{ role: 'user', content: 'go' }], [], {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 50_000,
+        system: 's',
+      });
+      const body = createSpy.mock.calls[0]![0];
+      expect(body.max_tokens).toBe(SAFE_NON_STREAMING_MAX_TOKENS);
+      expect(body.max_tokens).toBe(8192);
+    });
+
+    it('forwards max_tokens unchanged when caller requests at or below the cap', async () => {
+      createSpy.mockResolvedValueOnce({
+        id: 'msg_test',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+      const provider = new AnthropicProvider('sk-test');
+      await provider.complete([{ role: 'user', content: 'go' }], [], {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 4096,
+        system: 's',
+      });
+      expect(createSpy.mock.calls[0]![0].max_tokens).toBe(4096);
     });
   });
 });

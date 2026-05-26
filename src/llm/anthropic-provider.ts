@@ -29,6 +29,18 @@ import type {
   StopReason,
 } from './types.js';
 
+/**
+ * Anthropic SDK's hard ceiling on `max_tokens` when NOT using streaming.
+ * Above this, `messages.create` throws "Streaming is strongly recommended
+ * for operations that may take longer than 10 minutes." (the SDK's
+ * 10-minute non-streaming timeout). Sonnet 4.6's per-request max is also
+ * 8192 today, so this doubles as the model-side ceiling.
+ *
+ * Exported so tests can pin the cap behavior; bump in lockstep with the
+ * SDK if Anthropic raises the threshold.
+ */
+export const SAFE_NON_STREAMING_MAX_TOKENS = 8192;
+
 export class AnthropicProvider implements LLMProvider {
   readonly id = 'anthropic' as const;
   private client: Anthropic;
@@ -52,7 +64,16 @@ export class AnthropicProvider implements LLMProvider {
     const response = await this.client.messages.create(
       {
         model: opts.model,
-        max_tokens: opts.maxOutputTokens,
+        // Anthropic's SDK rejects non-streaming requests with max_tokens
+        // above SAFE_NON_STREAMING_MAX_TOKENS (current threshold: 8192) —
+        // the rationale is that responses at that size can take longer
+        // than the SDK's 10-minute non-streaming timeout. Cap here so a
+        // higher operator-configured `budget.max_output_tokens` (which the
+        // Budget tracker still uses unmodified — that's a turn-cumulative
+        // ceiling, not a per-request one) doesn't 400 on every call. PR
+        // #20 CI fix after the maxOutputTokens forwarding fix in d116f2b.
+        // OpenAI's Responses API doesn't have this limit; only Anthropic.
+        max_tokens: Math.min(opts.maxOutputTokens, SAFE_NON_STREAMING_MAX_TOKENS),
         temperature: opts.temperature ?? 0.5,
         system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
         messages: anthropicMessages,
