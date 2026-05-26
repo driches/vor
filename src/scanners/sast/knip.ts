@@ -101,9 +101,14 @@ export const knipLinter: LinterModule = {
       (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
     );
   },
-  async run(deps: ScannerDeps, _targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
-    // `_targetFiles` is unused: knip runs whole-project (no per-file argv),
-    // and the per-file filter is applied via `deps.changedFiles` below.
+  async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
+    // knip runs whole-project (no per-file argv), but we still consult
+    // `targetFiles` (not `deps.changedFiles`) when filtering output below.
+    // The orchestrator pre-filters out removed entries, so reading via
+    // the parameter keeps that contract intact even though it's benign
+    // today (removed files have empty added_lines so they couldn't
+    // produce a finding anyway). Future orchestrator-side filtering
+    // changes will flow through automatically.
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
 
@@ -170,7 +175,7 @@ export const knipLinter: LinterModule = {
     const usedModernFormat = output.issues !== undefined;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
-      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      const changedFile = targetFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const issue of entry.exports ?? []) {
         if (!changedFile.added_lines.has(issue.line)) continue;
@@ -203,7 +208,7 @@ export const knipLinter: LinterModule = {
     if (!usedModernFormat) {
       for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        const changedFile = targetFiles.find((f) => f.path === relPath);
         if (changedFile === undefined) continue;
         for (const issue of issues) {
           if (!changedFile.added_lines.has(issue.line)) continue;
@@ -212,7 +217,7 @@ export const knipLinter: LinterModule = {
       }
       for (const [filePath, issues] of Object.entries(output.types ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        const changedFile = targetFiles.find((f) => f.path === relPath);
         if (changedFile === undefined) continue;
         for (const issue of issues) {
           if (!changedFile.added_lines.has(issue.line)) continue;
@@ -221,7 +226,7 @@ export const knipLinter: LinterModule = {
       }
       for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+        const changedFile = targetFiles.find((f) => f.path === relPath);
         if (changedFile === undefined) continue;
         // Each value may be either a flat array of KnipDuplicateIssue or
         // a nested array of groups, depending on the knip version. We

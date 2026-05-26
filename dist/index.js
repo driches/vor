@@ -56258,7 +56258,7 @@ var knipLinter = {
       (f2) => TARGET_EXTENSIONS3.test(f2.path) && !f2.is_binary && !f2.is_generated
     );
   },
-  async run(deps, _targetFiles) {
+  async run(deps, targetFiles) {
     const errors = [];
     const bin = locateBin2(deps.workspaceDir);
     let rawOutput;
@@ -56287,7 +56287,7 @@ var knipLinter = {
     const usedModernFormat = output.issues !== void 0;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      const changedFile = targetFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       for (const issue2 of entry.exports ?? []) {
         if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56309,7 +56309,7 @@ var knipLinter = {
     if (!usedModernFormat) {
       for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        const changedFile = targetFiles.find((f2) => f2.path === relPath);
         if (changedFile === void 0) continue;
         for (const issue2 of issues) {
           if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56318,7 +56318,7 @@ var knipLinter = {
       }
       for (const [filePath, issues] of Object.entries(output.types ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        const changedFile = targetFiles.find((f2) => f2.path === relPath);
         if (changedFile === void 0) continue;
         for (const issue2 of issues) {
           if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56327,7 +56327,7 @@ var knipLinter = {
       }
       for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        const changedFile = targetFiles.find((f2) => f2.path === relPath);
         if (changedFile === void 0) continue;
         const flat = entries.length > 0 && Array.isArray(entries[0]) ? entries.flat() : entries;
         for (const issue2 of flat) {
