@@ -158,6 +158,7 @@ export const knipLinter: LinterModule = {
       return { findings: [], errors, filesExamined: 0 };
     }
 
+    const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
     const findings: ScanFinding[] = [];
 
     // Modern format — `issues[]` array of per-file objects. Each entry has
@@ -175,7 +176,7 @@ export const knipLinter: LinterModule = {
     const usedModernFormat = output.issues !== undefined;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
-      const changedFile = targetFiles.find((f) => f.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === undefined) continue;
       for (const issue of entry.exports ?? []) {
         if (!changedFile.added_lines.has(issue.line)) continue;
@@ -208,7 +209,7 @@ export const knipLinter: LinterModule = {
     if (!usedModernFormat) {
       for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f) => f.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === undefined) continue;
         for (const issue of issues) {
           if (!changedFile.added_lines.has(issue.line)) continue;
@@ -217,7 +218,7 @@ export const knipLinter: LinterModule = {
       }
       for (const [filePath, issues] of Object.entries(output.types ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f) => f.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === undefined) continue;
         for (const issue of issues) {
           if (!changedFile.added_lines.has(issue.line)) continue;
@@ -226,7 +227,7 @@ export const knipLinter: LinterModule = {
       }
       for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f) => f.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === undefined) continue;
         // Each value may be either a flat array of KnipDuplicateIssue or
         // a nested array of groups, depending on the knip version. We
@@ -325,8 +326,13 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
         reject(new Error(`knip killed by signal ${signal ?? 'unknown'}`));
         return;
       }
-      // Knip exits non-zero when it has findings. 1 = findings, >1 = config/runtime error.
-      if (code > 1) {
+      // knip exit codes (verified via knip/src/cli.ts):
+      //   0 = no issues
+      //   1 = issues in dev files
+      //   2 = issues in production files (NORMAL — not a runtime error)
+      //   >2 = config/runtime error
+      // All of 0/1/2 produce parseable JSON; only >2 should reject.
+      if (code > 2) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

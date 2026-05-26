@@ -89,7 +89,13 @@ export const actionlintLinter: LinterModule = {
 
     let messages: ActionlintError[];
     try {
-      messages = JSON.parse(rawOutput) as ActionlintError[];
+      // actionlint is Go, and Go's `json.Marshal` serializes a nil slice
+      // as `null` rather than `[]`. So a clean workflow run exits 0 with
+      // stdout `null`. `JSON.parse("null")` succeeds but returns null,
+      // which would fail Array.isArray and push a spurious parse error
+      // for every clean run. Coalesce to empty array.
+      const parsed = JSON.parse(rawOutput) as ActionlintError[] | null;
+      messages = parsed ?? [];
       if (!Array.isArray(messages)) throw new Error('non-array output');
     } catch (err) {
       errors.push({
@@ -99,10 +105,11 @@ export const actionlintLinter: LinterModule = {
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
 
+    const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
     const findings: ScanFinding[] = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filepath);
-      const changedFile = targetFiles.find((f) => f.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(message.line)) continue;
       findings.push(buildFinding(changedFile.path, message));

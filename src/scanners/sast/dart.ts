@@ -88,12 +88,13 @@ export const dartLinter: LinterModule = {
       return { findings: [], errors, filesExamined: 0 };
     }
 
+    const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
     const findings: ScanFinding[] = [];
     for (const line of rawOutput.split('\n')) {
       const parsed = parseDartLine(line);
       if (parsed === null) continue;
       const relPath = normalizeToolPath(deps.workspaceDir, parsed.filePath);
-      const changedFile = targetFiles.find((f) => f.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(parsed.line)) continue;
       findings.push(buildFinding(changedFile.path, parsed));

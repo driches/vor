@@ -55595,10 +55595,11 @@ var eslintLinter = {
       });
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     for (const fileResult of results) {
       const relPath = normalizeToolPath(deps.workspaceDir, fileResult.filePath);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
@@ -55780,10 +55781,11 @@ var ruffLinter = {
       });
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filename);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;
       if (message.code === null) continue;
@@ -55947,12 +55949,13 @@ var dartLinter = {
       errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     for (const line of rawOutput.split("\n")) {
       const parsed = parseDartLine(line);
       if (parsed === null) continue;
       const relPath = normalizeToolPath(deps.workspaceDir, parsed.filePath);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(parsed.line)) continue;
       findings.push(buildFinding4(changedFile.path, parsed));
@@ -56124,7 +56127,8 @@ var actionlintLinter = {
     }
     let messages;
     try {
-      messages = JSON.parse(rawOutput);
+      const parsed = JSON.parse(rawOutput);
+      messages = parsed ?? [];
       if (!Array.isArray(messages)) throw new Error("non-array output");
     } catch (err) {
       errors.push({
@@ -56133,10 +56137,11 @@ var actionlintLinter = {
       });
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     for (const message of messages) {
       const relPath = normalizeToolPath(deps.workspaceDir, message.filepath);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(message.line)) continue;
       findings.push(buildFinding5(changedFile.path, message));
@@ -56283,11 +56288,12 @@ var knipLinter = {
       });
       return { findings: [], errors, filesExamined: 0 };
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     const usedModernFormat = output.issues !== void 0;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       for (const issue2 of entry.exports ?? []) {
         if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56309,7 +56315,7 @@ var knipLinter = {
     if (!usedModernFormat) {
       for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f2) => f2.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === void 0) continue;
         for (const issue2 of issues) {
           if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56318,7 +56324,7 @@ var knipLinter = {
       }
       for (const [filePath, issues] of Object.entries(output.types ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f2) => f2.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === void 0) continue;
         for (const issue2 of issues) {
           if (!changedFile.added_lines.has(issue2.line)) continue;
@@ -56327,7 +56333,7 @@ var knipLinter = {
       }
       for (const [filePath, entries] of Object.entries(output.duplicates ?? {})) {
         const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-        const changedFile = targetFiles.find((f2) => f2.path === relPath);
+        const changedFile = filesByPath.get(relPath);
         if (changedFile === void 0) continue;
         const flat = entries.length > 0 && Array.isArray(entries[0]) ? entries.flat() : entries;
         for (const issue2 of flat) {
@@ -56390,7 +56396,7 @@ function runCli5(bin, deps) {
         reject(new Error(`knip killed by signal ${signal ?? "unknown"}`));
         return;
       }
-      if (code > 1) {
+      if (code > 2) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
@@ -56514,10 +56520,11 @@ var semgrepLinter = {
         fatal: false
       });
     }
+    const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const findings = [];
     for (const result of output.results ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, result.path);
-      const changedFile = targetFiles.find((f2) => f2.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
       findings.push(buildFinding6(changedFile.path, result, changedFile));

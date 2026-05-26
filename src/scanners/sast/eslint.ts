@@ -100,10 +100,11 @@ export const eslintLinter: LinterModule = {
       return { findings: [], errors, filesExamined: targetFiles.length };
     }
 
+    const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
     const findings: ScanFinding[] = [];
     for (const fileResult of results) {
       const relPath = normalizeToolPath(deps.workspaceDir, fileResult.filePath);
-      const changedFile = targetFiles.find((f) => f.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === undefined) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;

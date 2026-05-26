@@ -147,10 +147,11 @@ export const semgrepLinter: LinterModule = {
       });
     }
 
+    const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
     const findings: ScanFinding[] = [];
     for (const result of output.results ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, result.path);
-      const changedFile = targetFiles.find((f) => f.path === relPath);
+      const changedFile = filesByPath.get(relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
       findings.push(buildFinding(changedFile.path, result, changedFile));
