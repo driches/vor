@@ -271,6 +271,46 @@ describe('evalRun', () => {
     expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
   });
 
+  it('does not double-charge cached tokens for cache-heavy OpenAI scripts (Codex P2 #3300723609)', async () => {
+    // OpenAI reports `input_tokens` INCLUDING cached_tokens as a subset
+    // (charged at the discounted cache_read rate). Without provider-aware
+    // normalization in the cost accumulator, computeCostUsd would bill
+    // both `input_tokens * input_rate` and `cache_read * cache_read_rate`
+    // — counting the cached portion twice. This test pins the fix that
+    // applies `inputTokensFullRate(usage)` when stashing into costAccum.
+    const minimalCase: LoadedCase = {
+      case_id: 'openai-cache-heavy',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const cacheHeavyScript: CompleteResponse[] = [
+      {
+        text: 'done',
+        tool_calls: [],
+        stop_reason: 'end_turn',
+        // OpenAI shape: input_tokens (1000) includes cache_read_tokens (600)
+        // as a subset. Full-rate portion is 400. Expected gpt-4.1 cost:
+        //   400 * $2/M + 50 * $8/M + 600 * $0.5/M = $0.0008 + $0.0004 + $0.0003 = $0.0015.
+        // Without the fix, the harness would compute 1000 * $2/M (full-rate
+        // on the full 1000, INCLUDING the cached portion) + 50 * $8/M +
+        // 600 * $0.5/M = $0.0027 — almost 2× higher, mis-ranking configs.
+        usage: { input_tokens: 1000, output_tokens: 50, cache_read_tokens: 600 },
+      },
+    ];
+    const result = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'gpt-4.1' },
+      apiKey: 'sk-openai-test',
+      agentScript: cacheHeavyScript,
+    });
+    expect(result.cost.cost_usd).toBeCloseTo(0.0015, 6);
+    // Persisted record stores the full-rate input portion (matches the
+    // runner's perModelCost semantics — input_tokens means "full-rate input").
+    expect(result.cost.input_tokens).toBe(400);
+    expect(result.cost.cache_read_input_tokens).toBe(600);
+  });
+
   it('FakeProvider.inputTokensFullRate dispatches per provider id', () => {
     // Today's eval scripts use zero cache tokens so the Anthropic and OpenAI
     // formulas happen to converge — but the runner's budget gate must see

@@ -146,10 +146,16 @@ export class FakeProvider implements LLMProvider {
     if (!next) {
       throw new Error('agentScript exhausted — test did not script enough turns');
     }
-    // Mirror the per-turn token accumulation the old SDK mock did so the
-    // downstream cost computation reads the same shape.
+    // Mirror the per-turn token accumulation the old SDK mock did, with the
+    // same provider-aware input normalization the runner applies via
+    // `inputTokensFullRate`. Without this, an OpenAI script with non-zero
+    // cache_read_tokens would double-charge the cached portion in
+    // `computeCostUsd` (which bills `input_tokens * input_rate +
+    // cache_read_input_tokens * cache_read_rate`), mis-ranking configs by
+    // cost on cache-heavy runs. Codex P2 #3300723609 — same shape as the
+    // runner bug fixed in cb3c820, just in the eval accumulator this time.
     state.costAccum.turns += 1;
-    state.costAccum.input_tokens += next.usage.input_tokens;
+    state.costAccum.input_tokens += this.inputTokensFullRate(next.usage);
     state.costAccum.output_tokens += next.usage.output_tokens;
     state.costAccum.cache_read_input_tokens += next.usage.cache_read_tokens ?? 0;
     state.costAccum.cache_creation_input_tokens += next.usage.cache_creation_tokens ?? 0;
