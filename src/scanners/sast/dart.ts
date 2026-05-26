@@ -22,7 +22,7 @@
 import { spawn } from 'node:child_process';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'dart';
 const TIMEOUT_MS = 90_000;
@@ -120,7 +120,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       ['analyze', '--format=machine', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env },
+        env: buildLinterEnv(),
       },
     );
     let stdout = '';

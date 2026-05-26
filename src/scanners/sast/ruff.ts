@@ -22,7 +22,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'ruff';
 const TIMEOUT_MS = 60_000;
@@ -125,7 +125,7 @@ function runCli(
       ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env },
+        env: buildLinterEnv(),
       },
     );
     let stdout = '';

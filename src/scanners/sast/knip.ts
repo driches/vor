@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'knip';
 const TIMEOUT_MS = 120_000;
@@ -147,7 +147,7 @@ function runCli(bin: string, deps: ScannerDeps): Promise<string> {
     // The filter to PR-added lines happens in the orchestrator above.
     const child = spawn(bin, ['--reporter', 'json'], {
       cwd: deps.workspaceDir,
-      env: { ...process.env },
+      env: buildLinterEnv(),
     });
     let stdout = '';
     let stderr = '';

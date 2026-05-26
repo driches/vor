@@ -24,7 +24,7 @@
 import { spawn } from 'node:child_process';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'semgrep';
 const TIMEOUT_MS = 180_000;
@@ -160,7 +160,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       ],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env },
+        env: buildLinterEnv(),
       },
     );
     let stdout = '';

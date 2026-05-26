@@ -82,6 +82,65 @@ export function normalizeToolPath(workspaceDir: string, toolPath: string): strin
   return normalized.split(path.sep).join('/');
 }
 
+/**
+ * Build the env to pass to spawned linter processes.
+ *
+ * Security note (Codex PR #21 P1): some of our linters (eslint, ruff,
+ * knip) resolve their binary from inside the workspace (e.g.
+ * `node_modules/.bin/eslint`). On untrusted PRs that workspace is
+ * attacker-controlled — a malicious contributor can add a script at the
+ * lookup path and we'll execute it. The full fix would be "never run
+ * binaries from the checkout", but for eslint specifically that's the
+ * canonical install location (and `npx eslint` has the identical risk),
+ * so refusing it would break the action for most TS/JS repos.
+ *
+ * Defense-in-depth instead: pass an env *allowlist* rather than the full
+ * inherited process.env. A malicious binary can still run arbitrary
+ * code on the runner (file reads, outbound HTTP, etc.), but it doesn't
+ * get GITHUB_TOKEN, ANTHROPIC_API_KEY, ACTIONS_* internals, or any
+ * INPUT_* values for free via the environment.
+ *
+ * Operators on `pull_request_target` (where secrets are exposed to PR
+ * code) should treat this action like any other code-execution-on-PR
+ * tool and pin the workflow accordingly. Bundled-binary mode (TODO) is
+ * the better long-term fix.
+ */
+const LINTER_ENV_ALLOWLIST: readonly string[] = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'TERM',
+  'TZ',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'CI',
+  'NODE_ENV',
+  'NODE_PATH',
+  'NODE_OPTIONS',
+  'VIRTUAL_ENV',
+  'PYTHONPATH',
+  'NPM_CONFIG_PREFIX',
+  'NPM_CONFIG_CACHE',
+  'FORCE_COLOR',
+  'NO_COLOR',
+];
+
+export function buildLinterEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const key of LINTER_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
 export interface LinterModule {
   /**
    * Stable identifier used as a prefix in rule_ids and fingerprints (so

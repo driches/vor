@@ -55423,6 +55423,40 @@ function normalizeToolPath(workspaceDir, toolPath) {
   const normalized = import_node_path6.default.isAbsolute(toolPath) ? import_node_path6.default.relative(workspaceDir, toolPath) : import_node_path6.default.normalize(toolPath);
   return normalized.split(import_node_path6.default.sep).join("/");
 }
+var LINTER_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  "TERM",
+  "TZ",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "CI",
+  "NODE_ENV",
+  "NODE_PATH",
+  "NODE_OPTIONS",
+  "VIRTUAL_ENV",
+  "PYTHONPATH",
+  "NPM_CONFIG_PREFIX",
+  "NPM_CONFIG_CACHE",
+  "FORCE_COLOR",
+  "NO_COLOR"
+];
+function buildLinterEnv() {
+  const out = {};
+  for (const key of LINTER_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== void 0) out[key] = value;
+  }
+  return out;
+}
 
 // src/scanners/sast/eslint.ts
 var ID = "eslint";
@@ -55480,13 +55514,11 @@ function runCli(bin, files, deps) {
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
       {
         cwd: deps.workspaceDir,
-        // Inherit full env. Earlier versions stripped to just PATH for
-        // blast-radius reasons, but that broke linters that read HOME
-        // (config cache), NODE_ENV/CI (plugin behavior), and repo-set
-        // vars that configure the lint behavior itself. Hardening
-        // sensitive vars (GITHUB_TOKEN, secrets) belongs at the action
-        // boundary, not here.
-        env: { ...process.env }
+        // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
+        // for the rationale. Stripping secrets out of the spawned
+        // process limits exfiltration even when a malicious workspace
+        // binary runs.
+        env: buildLinterEnv()
       }
     );
     let stdout = "";
@@ -55647,7 +55679,7 @@ function runCli2(bin, files, deps) {
       ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env }
+        env: buildLinterEnv()
       }
     );
     let stdout = "";
@@ -55808,7 +55840,7 @@ function runCli3(files, deps) {
       ["analyze", "--format=machine", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env }
+        env: buildLinterEnv()
       }
     );
     let stdout = "";
@@ -55946,7 +55978,7 @@ function runCli4(files, deps) {
       ["-no-color", "-format", "{{json .}}", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env }
+        env: buildLinterEnv()
       }
     );
     let stdout = "";
@@ -56109,7 +56141,7 @@ function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process7.spawn)(bin, ["--reporter", "json"], {
       cwd: deps.workspaceDir,
-      env: { ...process.env }
+      env: buildLinterEnv()
     });
     let stdout = "";
     let stderr = "";
@@ -56279,7 +56311,7 @@ function runCli6(files, deps) {
       ],
       {
         cwd: deps.workspaceDir,
-        env: { ...process.env }
+        env: buildLinterEnv()
       }
     );
     let stdout = "";

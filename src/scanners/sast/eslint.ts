@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'eslint';
 const TIMEOUT_MS = 60_000;
@@ -92,13 +92,11 @@ function runCli(bin: string, files: string[], deps: ScannerDeps): Promise<string
       ['--format', 'json', '--no-error-on-unmatched-pattern', ...files],
       {
         cwd: deps.workspaceDir,
-        // Inherit full env. Earlier versions stripped to just PATH for
-        // blast-radius reasons, but that broke linters that read HOME
-        // (config cache), NODE_ENV/CI (plugin behavior), and repo-set
-        // vars that configure the lint behavior itself. Hardening
-        // sensitive vars (GITHUB_TOKEN, secrets) belongs at the action
-        // boundary, not here.
-        env: { ...process.env },
+        // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
+        // for the rationale. Stripping secrets out of the spawned
+        // process limits exfiltration even when a malicious workspace
+        // binary runs.
+        env: buildLinterEnv(),
       },
     );
     let stdout = '';
