@@ -8,7 +8,9 @@
  * scanner error.
  *
  * Severity mapping: ESLint `severity: 2` (error) → 'important',
- * `severity: 1` (warning) → 'minor'. Rule-specific tuning is a v2.
+ * `severity: 1` (warning) → 'minor', `severity: 0` (off — appears in
+ * output for `--report-unused-disable-directives` and disabled-rule
+ * messages) → 'nit'. Rule-specific tuning is a v2.
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -18,6 +20,7 @@ import {
   buildLinterEnv,
   filterShellSafePaths,
   findWorkspaceBinary,
+  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -139,6 +142,7 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
     // corruption when a multi-byte sequence straddles a chunk boundary.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -148,6 +152,15 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
+      if (resolved) return;
+      stdoutSize += b.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error(`eslint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {
@@ -194,7 +207,12 @@ function buildFinding(
   message: EslintMessage,
   changedFile: { added_lines: ReadonlySet<number> },
 ): ScanFinding {
-  const severity: Severity = message.severity === 2 ? 'important' : 'minor';
+  // Tri-state mapping. Pre-fix the comparison was binary (=== 2 ? ... : 'minor')
+  // which silently demoted severity:0 messages (typically from
+  // --report-unused-disable-directives) to 'minor' findings — a false
+  // positive vector that erodes review-noise trust.
+  const severity: Severity =
+    message.severity === 2 ? 'important' : message.severity === 1 ? 'minor' : 'nit';
   const category: Category = categorize(message.ruleId ?? 'unknown');
   const confidence: Confidence = 'high';
   const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;

@@ -27,6 +27,7 @@ import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
   filterShellSafePaths,
+  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -125,9 +126,12 @@ export const semgrepLinter: LinterModule = {
         message: `semgrep output parse failed: ${(err as Error).message}`,
         fatal: false,
       });
-      // Even on parse failure semgrep was invoked and made the
-      // --config=auto network call, so count the egress.
-      return { findings: [], errors, filesExamined: targetFiles.length, networkCalls: 1 };
+      // Don't count a network call on parse failure: a non-JSON output
+      // could just as easily mean the binary errored before reaching the
+      // network (version-mismatch banner, missing-config message, etc.).
+      // For air-gapped operators auditing egress with this metric,
+      // undercounting an uncertain case is safer than overcounting.
+      return { findings: [], errors, filesExamined: targetFiles.length };
     }
 
     // Surface semgrep's own errors[] — partial-scan failures (a file
@@ -207,6 +211,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // pattern was O(n²) AND risked UTF-8 corruption on chunk boundaries.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -216,6 +221,19 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
+      if (resolved) return;
+      stdoutSize += b.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        // Cap exceeded — kill the child rather than risk OOM on the
+        // runner. semgrep's `--config=auto` on a huge monorepo CAN
+        // legitimately produce this much output; operators hitting
+        // this should switch to a curated `--config=<path>` ruleset.
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error(`semgrep stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {

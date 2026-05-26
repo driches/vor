@@ -28,6 +28,7 @@ import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
   findWorkspaceBinary,
+  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -122,7 +123,13 @@ export const knipLinter: LinterModule = {
     const findings: ScanFinding[] = [];
 
     // Modern format — `issues[]` array of per-file objects. Each entry has
-    // a `file` field plus exports/types/duplicates arrays.
+    // a `file` field plus exports/types/duplicates arrays. If knip emitted
+    // any modern-format issues, we trust that as the canonical source and
+    // skip the legacy flat-map loops below — pre-fix, knip v5+ that
+    // populated BOTH shapes in one blob caused every finding to be
+    // emitted twice (same fingerprint, but the per-file cap and comment
+    // count doubled).
+    const usedModernFormat = (output.issues?.length ?? 0) > 0;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
@@ -143,8 +150,10 @@ export const knipLinter: LinterModule = {
 
     // Legacy fallback — older knip versions used flat top-level maps
     // (`exports`/`types`/`duplicates` at the root, keyed by file path).
-    // Most current installs won't hit these loops, but keeping them costs
-    // nothing and protects pinned-version CI environments.
+    // Only run when the modern `issues[]` array was empty/absent;
+    // skipping otherwise prevents double-emission on knip v5+ which
+    // populates both shapes simultaneously.
+    if (!usedModernFormat) {
     for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
       const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
@@ -172,6 +181,7 @@ export const knipLinter: LinterModule = {
         findings.push(buildDuplicateFinding(changedFile.path, issue));
       }
     }
+    } // end if (!usedModernFormat)
 
     // knip runs whole-project analysis — no targetFiles in argv. We use
     // `targetFiles` only to filter the OUTPUT to PR-changed lines. So
@@ -218,6 +228,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     // analysis output can be MBs on monorepos.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -227,6 +238,15 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
+      if (resolved) return;
+      stdoutSize += b.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error(`knip stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {

@@ -241,6 +241,22 @@ export function isShellSafePath(p: string): boolean {
 }
 
 /**
+ * Maximum bytes of stdout we'll accumulate from any single linter process.
+ *
+ * Semgrep on a large monorepo with `--config=auto` can emit tens of MB of
+ * JSON. Knip's whole-project analysis on a monorepo is similarly chunky.
+ * Without a cap, a runaway linter (legitimately huge output, or a tool bug
+ * that streams forever) could OOM the action process and kill the entire
+ * review run. 50 MB is well above any realistic monorepo's clean output
+ * but small enough to bound runner memory headroom predictably.
+ *
+ * Caller pattern (matches every linter's runCli): track cumulative size in
+ * a closure variable; when adding a chunk would push past the cap, kill
+ * the child, reject the promise, and stop pushing chunks.
+ */
+export const MAX_LINTER_STDOUT_BYTES = 50 * 1024 * 1024;
+
+/**
  * Filter a path list and return entries safe to pass to spawn's argv.
  *
  * Two threat classes the PR-filename attack surface produces:

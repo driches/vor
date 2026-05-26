@@ -25,6 +25,7 @@ import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
   filterShellSafePaths,
+  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -151,6 +152,9 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    // dart analyze emits findings on stderr, so cap that channel rather
+    // than stdout. The semantics are otherwise identical.
+    let stderrSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -163,6 +167,15 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {
+      if (resolved) return;
+      stderrSize += b.length;
+      if (stderrSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error(`dart analyze output exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stderrChunks.push(b);
     });
     deps.signal.addEventListener(

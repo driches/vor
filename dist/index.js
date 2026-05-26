@@ -55503,6 +55503,7 @@ var SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
 function isShellSafePath(p2) {
   return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
 }
+var MAX_LINTER_STDOUT_BYTES = 50 * 1024 * 1024;
 function filterShellSafePaths(paths, needsShell) {
   const safe = [];
   const dropped = [];
@@ -55629,6 +55630,7 @@ function runCli(bin, files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55637,6 +55639,15 @@ function runCli(bin, files, deps) {
       reject(new Error(`eslint timed out after ${TIMEOUT_MS2}ms`));
     }, TIMEOUT_MS2);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`eslint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -55677,7 +55688,7 @@ function runCli(bin, files, deps) {
   });
 }
 function buildFinding2(filePath, message, changedFile) {
-  const severity = message.severity === 2 ? "important" : "minor";
+  const severity = message.severity === 2 ? "important" : message.severity === 1 ? "minor" : "nit";
   const category = categorize(message.ruleId ?? "unknown");
   const confidence = "high";
   const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
@@ -55807,6 +55818,7 @@ function runCli2(bin, files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55815,6 +55827,15 @@ function runCli2(bin, files, deps) {
       reject(new Error(`ruff timed out after ${TIMEOUT_MS3}ms`));
     }, TIMEOUT_MS3);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`ruff stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -55985,6 +56006,7 @@ function runCli3(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stderrSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55996,6 +56018,15 @@ function runCli3(files, deps) {
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
+      if (resolved) return;
+      stderrSize += b2.length;
+      if (stderrSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`dart analyze output exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
@@ -56141,6 +56172,7 @@ function runCli4(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56149,6 +56181,15 @@ function runCli4(files, deps) {
       reject(new Error(`actionlint timed out after ${TIMEOUT_MS5}ms`));
     }, TIMEOUT_MS5);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`actionlint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56264,6 +56305,7 @@ var knipLinter = {
       return { findings: [], errors, filesExamined: 0 };
     }
     const findings = [];
+    const usedModernFormat = (output.issues?.length ?? 0) > 0;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
       const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
@@ -56281,31 +56323,33 @@ var knipLinter = {
         findings.push(buildDuplicateFinding(changedFile.path, issue2));
       }
     }
-    for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
-      if (changedFile === void 0) continue;
-      for (const issue2 of issues) {
-        if (!changedFile.added_lines.has(issue2.line)) continue;
-        findings.push(buildExportFinding(changedFile.path, issue2, "export"));
+    if (!usedModernFormat) {
+      for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        if (changedFile === void 0) continue;
+        for (const issue2 of issues) {
+          if (!changedFile.added_lines.has(issue2.line)) continue;
+          findings.push(buildExportFinding(changedFile.path, issue2, "export"));
+        }
       }
-    }
-    for (const [filePath, issues] of Object.entries(output.types ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
-      if (changedFile === void 0) continue;
-      for (const issue2 of issues) {
-        if (!changedFile.added_lines.has(issue2.line)) continue;
-        findings.push(buildExportFinding(changedFile.path, issue2, "type"));
+      for (const [filePath, issues] of Object.entries(output.types ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        if (changedFile === void 0) continue;
+        for (const issue2 of issues) {
+          if (!changedFile.added_lines.has(issue2.line)) continue;
+          findings.push(buildExportFinding(changedFile.path, issue2, "type"));
+        }
       }
-    }
-    for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
-      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
-      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
-      if (changedFile === void 0) continue;
-      for (const issue2 of issues) {
-        if (!changedFile.added_lines.has(issue2.line)) continue;
-        findings.push(buildDuplicateFinding(changedFile.path, issue2));
+      for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
+        const relPath = normalizeToolPath(deps.workspaceDir, filePath);
+        const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+        if (changedFile === void 0) continue;
+        for (const issue2 of issues) {
+          if (!changedFile.added_lines.has(issue2.line)) continue;
+          findings.push(buildDuplicateFinding(changedFile.path, issue2));
+        }
       }
     }
     return { findings, errors, filesExamined: 0 };
@@ -56328,6 +56372,7 @@ function runCli5(bin, deps) {
     });
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56336,6 +56381,15 @@ function runCli5(bin, deps) {
       reject(new Error(`knip timed out after ${TIMEOUT_MS6}ms`));
     }, TIMEOUT_MS6);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`knip stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56470,7 +56524,7 @@ var semgrepLinter = {
         message: `semgrep output parse failed: ${err.message}`,
         fatal: false
       });
-      return { findings: [], errors, filesExamined: targetFiles.length, networkCalls: 1 };
+      return { findings: [], errors, filesExamined: targetFiles.length };
     }
     for (const semgrepErr of output.errors ?? []) {
       const message = semgrepErr.message ?? semgrepErr.short_msg ?? semgrepErr.type ?? "unknown error";
@@ -56522,6 +56576,7 @@ function runCli6(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56530,6 +56585,15 @@ function runCli6(files, deps) {
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS7}ms`));
     }, TIMEOUT_MS7);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`semgrep stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
