@@ -55563,7 +55563,7 @@ var eslintLinter = {
       import_node_path7.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint")
     ]);
     if (bin === null) {
-      logger.debug(
+      await logger.debug(
         `eslint: skipped \u2014 no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`
       );
       return { findings: [], errors: [], filesExamined: 0 };

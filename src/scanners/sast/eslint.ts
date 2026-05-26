@@ -63,7 +63,14 @@ export const eslintLinter: LinterModule = {
       // no-op'd. The other linters log via their ENOENT catch when the
       // binary isn't on PATH; ESLint bails before spawn, so emit a debug
       // line here so the missing-binary case is visible in CI logs.
-      logger.debug(
+      //
+      // MUST `await` — `logger.debug` returns a Promise (it dynamically
+      // imports @actions/core under the hood). Fire-and-forget leaves a
+      // dangling promise that keeps vitest workers alive past test
+      // completion, causing the full suite to hang on CI (45-min runner
+      // timeout). Verified: this exact pattern broke CI between commits
+      // 4f3824f (green) and aad218b (hang) when this line was unawaited.
+      await logger.debug(
         `eslint: skipped — no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`,
       );
       return { findings: [], errors: [], filesExamined: 0 };
