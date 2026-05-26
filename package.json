@@ -1,6 +1,6 @@
 {
   "name": "@driches/code-review",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "AI code review GitHub Action — inline comments via Claude Agent SDK",
   "license": "MIT",
   "author": "Doug Riches",

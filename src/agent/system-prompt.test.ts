@@ -63,4 +63,46 @@ describe('buildSystemPrompt', () => {
     expect(p.length).toBeLessThan(15_000);
     expect(p).toMatch(/omitted due to size cap/);
   });
+
+  it('emits the static-analysis section when sast is enabled (default config)', () => {
+    const p = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'r',
+      contextFiles: [],
+    });
+    // The default config has sast.enabled = true; Sonnet should know
+    // what static tools cover, expressed as POSITIVE focus areas not
+    // a "don't do X" directive. The earlier directive version regressed
+    // recall (Sonnet wrapped up too fast). The toned-down version frames
+    // it as "here's where your judgment adds the most value".
+    expect(p).toContain('Static analysis runs in parallel');
+    expect(p).toContain('ESLint');
+    expect(p).toContain('Semgrep');
+    expect(p).toContain('Where your judgment adds the most value');
+    expect(p).toContain('Semantic correctness');
+    // Investigate-freely framing is the anti-regression belt — Sonnet
+    // should not interpret this section as permission to skim.
+    expect(p).toMatch(/investigate freely/i);
+    // Static tools may be missing from a workspace; Sonnet must still
+    // flag obvious lint-style bugs as a safety net.
+    expect(p).toMatch(/safety net|safety-net/i);
+  });
+
+  it('omits the static-analysis section when sast is disabled', () => {
+    const p = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        security: {
+          ...DEFAULT_CONFIG.security,
+          scanners: {
+            ...DEFAULT_CONFIG.security.scanners,
+            sast: { enabled: false },
+          },
+        },
+      },
+      repoName: 'r',
+      contextFiles: [],
+    });
+    expect(p).not.toContain('Static analysis runs in parallel');
+  });
 });

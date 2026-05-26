@@ -27,6 +27,20 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
 
+  // Tell the agent what static analysis is covering for it, so it
+  // doesn't waste turns redoing that work. Gate on BOTH switches:
+  //   - security.enabled: master switch for the whole scanner pipeline.
+  //     When false, no scanner — including sast — runs.
+  //   - security.scanners.sast.enabled: per-scanner switch.
+  // Telling the model "linters are covering this" when the pipeline is
+  // disabled would suppress real findings the model would otherwise catch.
+  if (
+    input.config.security.enabled &&
+    input.config.security.scanners.sast.enabled
+  ) {
+    sections.push(STATIC_ANALYSIS_SECTION);
+  }
+
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push('### Repo-specific instructions');
     sections.push(input.config.prompt.additions.trim());
@@ -41,6 +55,41 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
 
   return sections.join('\n\n');
 }
+
+/**
+ * Tells Sonnet what static analysis already covers, so it can de-prioritize
+ * those checks and focus its turns on semantic / design issues.
+ *
+ * Framing notes (these reflect lessons from earlier iterations):
+ *   - Explicit list of what static covers AND what's still Sonnet's job.
+ *     Iter 7 ("just be faster") regressed recall because Sonnet skimped
+ *     on everything, including semantic work. This section is permissive
+ *     about lint stuff but DIRECTIVE about semantic stuff.
+ *   - Acknowledges scanners may not be installed in every workspace
+ *     (each linter quietly no-ops without its binary). Sonnet should
+ *     still flag obvious lint-style issues as a safety net — just not
+ *     deep-dive on them.
+ *   - Does NOT tell Sonnet to skip verification. Sonnet still reads the
+ *     bytes before posting critical/important findings. The cost win
+ *     comes from reducing investigative breadth, not verification depth.
+ */
+const STATIC_ANALYSIS_SECTION = `# Static analysis runs in parallel
+
+This repo runs language-appropriate static tools alongside your review (you don't see their output, but they post findings independently): ESLint and knip for TS/JS, ruff for Python, dart analyze for Dart/Flutter, actionlint for GitHub Actions workflows, and Semgrep with the auto-detected ruleset for cross-language security and bug patterns. They handle the deterministic stuff well — type errors, unused exports, common security anti-patterns, lint violations.
+
+**Where your judgment adds the most value** (these are things linters can't express):
+
+- **Semantic correctness** — does this code actually do what its name claims? Is the business logic right?
+- **Design coherence** — does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
+- **Architectural concerns** — tight coupling, circular dependencies waiting to happen, bypassing an existing layer.
+- **Concurrency** — race conditions, missing locks, ordering assumptions, unhandled cancellation.
+- **Public API changes** — breaking a contract used by multiple callers, removing a field someone depends on.
+- **Missing tests on new core logic** — where would a regression silently slip through?
+- **Edge cases linters can't model** — null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc.
+
+Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
+
+**Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
 
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
