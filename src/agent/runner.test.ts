@@ -341,6 +341,26 @@ describe('runAgent', () => {
     expect(result.turns).toBe(1);
   });
 
+  it('reports `output_truncated` (not `max_turns`) when the response stops with max_tokens (PR #20 self-review #3300818622)', async () => {
+    // `stop_reason: 'max_tokens'` means the response was truncated mid-output.
+    // Operationally distinct from `max_turns`: the fix is to bump
+    // budget.max_output_tokens, not max_turns. Pinning this distinction
+    // gives telemetry a way to route operators to the right knob.
+    const provider = new FakeProvider([
+      makeResponse({
+        text: 'partial respo',
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 100, output_tokens: 8192 },
+      }),
+    ]);
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent(baseInput());
+
+    expect(result.ended).toBe('output_truncated');
+    expect(result.turns).toBe(1);
+  });
+
   it('treats OpenAI input_tokens minus cache_read as the billable portion (Codex P1 #3300602652)', async () => {
     // OpenAI reports input_tokens INCLUDING cached_tokens (cached is a subset
     // of input). Without subtracting cache_read at the Budget boundary, a

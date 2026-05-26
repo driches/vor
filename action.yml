@@ -48,7 +48,7 @@ outputs:
     description: 'Number of inline comments posted.'
     value: ${{ steps.run.outputs.comment_count }}
   ended:
-    description: 'How the review ended (summary_posted | max_turns | budget_exceeded | aborted | error | skipped_draft | skipped_no_key_anthropic | skipped_no_key_openai).'
+    description: 'How the review ended (summary_posted | max_turns | output_truncated | budget_exceeded | aborted | error | skipped_draft | skipped_no_key_anthropic | skipped_no_key_openai).'
     value: ${{ steps.run.outputs.ended }}
   cost_usd:
     description: 'Total API cost in USD.'

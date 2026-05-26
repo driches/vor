@@ -60,6 +60,8 @@ describe('pricingForModel', () => {
       'gpt-4o',
       'gpt-4o-mini',
       'o1',
+      'o1-mini',
+      'o1-preview',
       'o3',
       'o3-mini',
       'o4-mini',
@@ -123,6 +125,24 @@ describe('pricingForModel', () => {
 
   it('prices o1 at $15/$60 with $7.5 cache read', () => {
     const p = pricingForModel('o1');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(15);
+    expect(p!.output).toBe(60);
+    expect(p!.cache_read).toBe(7.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o1-mini at $3/$12 with $1.5 cache read', () => {
+    const p = pricingForModel('o1-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(3);
+    expect(p!.output).toBe(12);
+    expect(p!.cache_read).toBe(1.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o1-preview at $15/$60 with $7.5 cache read (same tier as o1)', () => {
+    const p = pricingForModel('o1-preview');
     expect(p).toBeDefined();
     expect(p!.input).toBe(15);
     expect(p!.output).toBe(60);

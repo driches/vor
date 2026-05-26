@@ -86,7 +86,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 |---|---|
 | `review_id` | GitHub ID of the review that was created. |
 | `comment_count` | Number of inline comments posted. |
-| `ended` | `summary_posted` / `max_turns` / `budget_exceeded` / `aborted` / `error` / `skipped_draft` / `skipped_no_key_anthropic` / `skipped_no_key_openai`. |
+| `ended` | `summary_posted` / `max_turns` / `output_truncated` / `budget_exceeded` / `aborted` / `error` / `skipped_draft` / `skipped_no_key_anthropic` / `skipped_no_key_openai`. `output_truncated` means the response hit the per-request output token cap mid-stream — bump `budget.max_output_tokens` rather than `max_turns`. |
 | `cost_usd` | Total LLM API cost in USD. |
 
 ## Per-repo config (`.code-review.yml`)

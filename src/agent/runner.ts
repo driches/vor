@@ -111,7 +111,21 @@ export interface RunAgentInput {
 }
 
 export interface RunAgentResult {
-  ended: 'summary_posted' | 'max_turns' | 'budget_exceeded' | 'aborted' | 'error';
+  ended:
+    | 'summary_posted'
+    | 'max_turns'
+    /**
+     * Provider hit the per-request output cap (canonical `stop_reason ===
+     * 'max_tokens'`) before the agent finished. Operationally distinct from
+     * `'max_turns'`: the fix is to bump `budget.max_output_tokens` (and, for
+     * Anthropic, switch the adapter to streaming — see
+     * `SAFE_NON_STREAMING_MAX_TOKENS`), not to bump `max_turns`. PR #20
+     * self-review IMPORTANT #3300818622.
+     */
+    | 'output_truncated'
+    | 'budget_exceeded'
+    | 'aborted'
+    | 'error';
   error?: string;
   turns: number;
   inputTokens: number;
@@ -327,7 +341,17 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       };
       messages.push(assistantMsg);
 
-      // End conditions
+      // End conditions. `max_tokens` is operationally distinct from
+      // `max_turns`: it means the response was truncated mid-output, so
+      // even if the aggregator has a summary, that summary may be partial
+      // and shouldn't be claimed as a clean `'summary_posted'`. Pin it as
+      // `'output_truncated'` so telemetry can distinguish "bump turn cap"
+      // from "bump output-token cap". PR #20 self-review IMPORTANT
+      // #3300818622.
+      if (response.stop_reason === 'max_tokens') {
+        ended = 'output_truncated';
+        break;
+      }
       if (response.stop_reason === 'end_turn' || toolCalls.length === 0) {
         ended = input.deps.aggregator.hasSummary() ? 'summary_posted' : 'max_turns';
         break;
