@@ -148,6 +148,31 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
   'CURL_CA_BUNDLE',
   'REQUESTS_CA_BUNDLE',
   'NODE_EXTRA_CA_CERTS',
+  // Windows essentials (Codex PR #21 P1). On Windows, both the bare-name
+  // PATH lookup (e.g. `spawn('knip')`) and the .cmd-shim shell route
+  // (`shell: true`) need these to function:
+  //   - PATHEXT: lists which extensions Node/cmd.exe try when resolving
+  //     an extensionless command. Without it, `spawn('ruff')` ENOENTs
+  //     because Windows can't find `ruff.exe`/`ruff.cmd`.
+  //   - SystemRoot, COMSPEC, windir: cmd.exe needs these to load its
+  //     own DLLs and locate itself. Stripping them breaks every shell:true
+  //     spawn on Windows.
+  //   - USERPROFILE, APPDATA, LOCALAPPDATA: npm and Python tools look
+  //     here for user-scoped config (.npmrc, ruff cache). Missing them
+  //     causes silent fall-through to defaults that may not match the
+  //     repo's expected configuration.
+  //   - ProgramFiles*: some tools (semgrep on Windows) probe these for
+  //     auxiliary binary lookups.
+  'PATHEXT',
+  'SystemRoot',
+  'COMSPEC',
+  'windir',
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
 ];
 
 export function buildLinterEnv(): NodeJS.ProcessEnv {
