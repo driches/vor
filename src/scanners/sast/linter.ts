@@ -241,6 +241,28 @@ export function isShellSafePath(p: string): boolean {
 }
 
 /**
+ * Quote an executable path for shell-mode spawn when needed.
+ *
+ * With `shell: true`, Node passes the command and its argv to cmd.exe (on
+ * Windows) or `/bin/sh -c` (on Unix) as a single command-line string. If
+ * the executable path contains a space (e.g. `C:\Users\My User\repo\node_modules\.bin\eslint.cmd`),
+ * the shell splits on the space and tries to execute the first token,
+ * failing the spawn. Wrap the path in double quotes for shell mode so the
+ * shell treats it as one token. With `shell: false`, Node passes argv
+ * directly to execve without shell parsing, so no quoting is needed.
+ *
+ * Workspace paths are produced by `findWorkspaceBinary`, which only
+ * returns paths that `existsSync` confirmed — so the path is well-formed
+ * and won't contain a literal `"` (Windows filenames can't contain that
+ * character; Unix filenames technically can but the wrapped path would
+ * still work as long as the inner quote isn't escaped by something
+ * earlier in the chain).
+ */
+export function shellQuoteBinary(bin: ResolvedBinary): string {
+  return bin.needsShell ? `"${bin.path}"` : bin.path;
+}
+
+/**
  * Filter a path list and return entries safe to pass to spawn's argv.
  *
  * Two threat classes the PR-filename attack surface produces:

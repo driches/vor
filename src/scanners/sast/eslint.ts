@@ -21,6 +21,7 @@ import {
   filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
+  shellQuoteBinary,
   type LinterModule,
   type LinterRun,
   type ResolvedBinary,
@@ -118,7 +119,7 @@ export const eslintLinter: LinterModule = {
 function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      bin.path,
+      shellQuoteBinary(bin),
       ['--format', 'json', '--no-error-on-unmatched-pattern', ...files],
       {
         cwd: deps.workspaceDir,

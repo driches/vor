@@ -29,6 +29,7 @@ import {
   buildLinterEnv,
   findWorkspaceBinary,
   normalizeToolPath,
+  shellQuoteBinary,
   type LinterModule,
   type LinterRun,
   type ResolvedBinary,
@@ -275,7 +276,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     // it across the whole repo (knip's analysis IS whole-project — you
     // can't reliably detect unused exports from a partial file list).
     // The filter to PR-added lines happens in the orchestrator above.
-    const child = spawn(bin.path, ['--reporter', 'json'], {
+    const child = spawn(shellQuoteBinary(bin), ['--reporter', 'json'], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv(),
       shell: bin.needsShell,

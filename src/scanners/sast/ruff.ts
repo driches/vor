@@ -26,6 +26,7 @@ import {
   filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
+  shellQuoteBinary,
   type LinterModule,
   type LinterRun,
   type ResolvedBinary,
@@ -144,7 +145,7 @@ function runCli(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      bin.path,
+      shellQuoteBinary(bin),
       ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
       {
         cwd: deps.workspaceDir,

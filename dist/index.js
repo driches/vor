@@ -55503,6 +55503,9 @@ var SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
 function isShellSafePath(p2) {
   return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
 }
+function shellQuoteBinary(bin) {
+  return bin.needsShell ? `"${bin.path}"` : bin.path;
+}
 function filterShellSafePaths(paths, needsShell) {
   const safe = [];
   const dropped = [];
@@ -55609,7 +55612,7 @@ var eslintLinter = {
 function runCli(bin, files, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process3.spawn)(
-      bin.path,
+      shellQuoteBinary(bin),
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
       {
         cwd: deps.workspaceDir,
@@ -55801,7 +55804,7 @@ function locateBin(workspaceDir) {
 function runCli2(bin, files, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process4.spawn)(
-      bin.path,
+      shellQuoteBinary(bin),
       ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
       {
         cwd: deps.workspaceDir,
@@ -56348,7 +56351,7 @@ function locateBin2(workspaceDir) {
 }
 function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process7.spawn)(bin.path, ["--reporter", "json"], {
+    const child2 = (0, import_node_child_process7.spawn)(shellQuoteBinary(bin), ["--reporter", "json"], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv(),
       shell: bin.needsShell
