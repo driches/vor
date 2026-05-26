@@ -35,7 +35,21 @@ const PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|c
 
 interface SemgrepOutput {
   results: SemgrepResult[];
-  errors?: unknown[];
+  errors?: SemgrepError[];
+}
+
+/**
+ * Subset of semgrep's per-error JSON shape. semgrep emits these in
+ * `output.errors` when individual files fail to parse, rules fail to
+ * download, etc. — the run can still produce findings on the files that
+ * succeeded, but operators should see the partial-failure signal.
+ */
+interface SemgrepError {
+  message?: string;
+  type?: string;
+  level?: string;
+  path?: string;
+  short_msg?: string;
 }
 
 interface SemgrepResult {
@@ -87,7 +101,23 @@ export const semgrepLinter: LinterModule = {
         message: `semgrep output parse failed: ${(err as Error).message}`,
         fatal: false,
       });
-      return { findings: [], errors, filesExamined: targetFiles.length };
+      // Even on parse failure semgrep was invoked and made the
+      // --config=auto network call, so count the egress.
+      return { findings: [], errors, filesExamined: targetFiles.length, networkCalls: 1 };
+    }
+
+    // Surface semgrep's own errors[] — partial-scan failures (a file
+    // fails to parse, a rule fails to download) leave `results` healthy
+    // but reduce coverage. Pre-fix, operators saw a "successful" run
+    // with no signal that some files were skipped. Emit each as a
+    // non-fatal ScanError so they show up in the run summary.
+    for (const semgrepErr of output.errors ?? []) {
+      const message = semgrepErr.message ?? semgrepErr.short_msg ?? semgrepErr.type ?? 'unknown error';
+      const pathSuffix = semgrepErr.path !== undefined ? ` (${semgrepErr.path})` : '';
+      errors.push({
+        message: `semgrep partial: ${message}${pathSuffix}`,
+        fatal: false,
+      });
     }
 
     const findings: ScanFinding[] = [];
@@ -99,7 +129,15 @@ export const semgrepLinter: LinterModule = {
       findings.push(buildFinding(changedFile.path, result, changedFile));
     }
 
-    return { findings, errors, filesExamined: targetFiles.length };
+    // Successful invocation — semgrep made its --config=auto network
+    // call to fetch rules. Reported to the orchestrator for egress
+    // accounting.
+    return {
+      findings,
+      errors,
+      filesExamined: targetFiles.length,
+      networkCalls: 1,
+    };
   },
 };
 

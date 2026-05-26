@@ -91,7 +91,7 @@ export const ruffLinter: LinterModule = {
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;
       if (message.code === null) continue;
-      findings.push(buildFinding(changedFile.path, message));
+      findings.push(buildFinding(changedFile.path, message, changedFile));
     }
 
     return { findings, errors, filesExamined: targetFiles.length };
@@ -175,24 +175,34 @@ function runCli(
   });
 }
 
-function buildFinding(filePath: string, message: RuffMessage): ScanFinding {
+function buildFinding(
+  filePath: string,
+  message: RuffMessage,
+  changedFile: { added_lines: ReadonlySet<number> },
+): ScanFinding {
   const code = message.code ?? 'unknown';
   const severity: Severity = severityFromCode(code);
   const category: Category = categorize(code);
   const confidence: Confidence = 'high';
-  const line = message.location.row;
+  const startLine = message.location.row;
   const endLine = message.end_location?.row;
-  const fingerprint = `${ID}:${code}:${filePath}:${line}`;
+  // Anchor on the START line. Only attach a multi-line range when BOTH
+  // endpoints are reviewable — same fix as eslint and semgrep. Pre-fix,
+  // a violation starting on an added line but extending into context
+  // lines would be silently dropped by the validator.
+  const useRange =
+    endLine !== undefined &&
+    endLine > startLine &&
+    changedFile.added_lines.has(endLine);
+  const fingerprint = `${ID}:${code}:${filePath}:${startLine}`;
   const title = renderTitle(code, message.message);
   const description = renderDescription(code, message.message);
   return {
     scanner: 'sast',
     rule_id: `${ID}/${code}`,
     file_path: filePath,
-    line,
-    ...(endLine !== undefined && endLine > line
-      ? { start_line: line, line: endLine }
-      : {}),
+    line: useRange ? endLine : startLine,
+    ...(useRange ? { start_line: startLine } : {}),
     severity,
     category,
     title,

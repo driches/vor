@@ -100,6 +100,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
   const findings: ScanFinding[] = [];
   const errors: ScanError[] = [];
   let filesExamined = 0;
+  let networkCalls = 0;
   for (let i = 0; i < runs.length; i++) {
     const r = runs[i]!;
     const linterId = applicable[i]!.id;
@@ -107,6 +108,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
       findings.push(...r.value.findings);
       errors.push(...r.value.errors);
       filesExamined += r.value.filesExamined;
+      networkCalls += r.value.networkCalls ?? 0;
     } else {
       // A linter module that throws is a contract violation — they're
       // supposed to surface errors via the errors array. We still keep
@@ -119,14 +121,6 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     }
   }
 
-  // semgrep --config=auto pulls its ruleset from semgrep.dev on every
-  // invocation. Count it under network_calls so cost/security telemetry
-  // and air-gapped/strict-egress operators see the egress accurately —
-  // network_calls is documented as "best-effort logical network ops"
-  // (see ScannerMetrics doc) so we count linter invocations that
-  // actually go out to a registry. Other linters are local-only.
-  const networkCalls = applicable.some((l) => l.id === 'semgrep') ? 1 : 0;
-
   return {
     scanner: SCANNER_ID,
     findings,
@@ -134,6 +128,11 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,
+      // Sum of per-linter networkCalls (set by each module ONLY when it
+      // actually invoked the network — see LinterRun.networkCalls in
+      // linter.ts). Avoids inflating the metric when a linter was
+      // applicable but its binary wasn't installed and the module exited
+      // early.
       network_calls: networkCalls,
       cache_hits: 0,
     },

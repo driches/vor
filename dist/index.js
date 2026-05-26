@@ -55625,7 +55625,7 @@ var ruffLinter = {
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;
       if (message.code === null) continue;
-      findings.push(buildFinding3(changedFile.path, message));
+      findings.push(buildFinding3(changedFile.path, message, changedFile));
     }
     return { findings, errors, filesExamined: targetFiles.length };
   }
@@ -55690,22 +55690,23 @@ function runCli2(bin, files, deps) {
     });
   });
 }
-function buildFinding3(filePath, message) {
+function buildFinding3(filePath, message, changedFile) {
   const code = message.code ?? "unknown";
   const severity = severityFromCode(code);
   const category = categorize2(code);
   const confidence = "high";
-  const line = message.location.row;
+  const startLine = message.location.row;
   const endLine = message.end_location?.row;
-  const fingerprint = `${ID2}:${code}:${filePath}:${line}`;
+  const useRange = endLine !== void 0 && endLine > startLine && changedFile.added_lines.has(endLine);
+  const fingerprint = `${ID2}:${code}:${filePath}:${startLine}`;
   const title = renderTitle2(code, message.message);
   const description = renderDescription2(code, message.message);
   return {
     scanner: "sast",
     rule_id: `${ID2}/${code}`,
     file_path: filePath,
-    line,
-    ...endLine !== void 0 && endLine > line ? { start_line: line, line: endLine } : {},
+    line: useRange ? endLine : startLine,
+    ...useRange ? { start_line: startLine } : {},
     severity,
     category,
     title,
@@ -56237,7 +56238,15 @@ var semgrepLinter = {
         message: `semgrep output parse failed: ${err.message}`,
         fatal: false
       });
-      return { findings: [], errors, filesExamined: targetFiles.length };
+      return { findings: [], errors, filesExamined: targetFiles.length, networkCalls: 1 };
+    }
+    for (const semgrepErr of output.errors ?? []) {
+      const message = semgrepErr.message ?? semgrepErr.short_msg ?? semgrepErr.type ?? "unknown error";
+      const pathSuffix = semgrepErr.path !== void 0 ? ` (${semgrepErr.path})` : "";
+      errors.push({
+        message: `semgrep partial: ${message}${pathSuffix}`,
+        fatal: false
+      });
     }
     const findings = [];
     for (const result of output.results ?? []) {
@@ -56247,7 +56256,12 @@ var semgrepLinter = {
       if (!changedFile.added_lines.has(result.start.line)) continue;
       findings.push(buildFinding6(changedFile.path, result, changedFile));
     }
-    return { findings, errors, filesExamined: targetFiles.length };
+    return {
+      findings,
+      errors,
+      filesExamined: targetFiles.length,
+      networkCalls: 1
+    };
   }
 };
 function runCli6(files, deps) {
@@ -56412,6 +56426,7 @@ async function orchestrate(deps) {
   const findings = [];
   const errors = [];
   let filesExamined = 0;
+  let networkCalls = 0;
   for (let i2 = 0; i2 < runs.length; i2++) {
     const r2 = runs[i2];
     const linterId = applicable[i2].id;
@@ -56419,6 +56434,7 @@ async function orchestrate(deps) {
       findings.push(...r2.value.findings);
       errors.push(...r2.value.errors);
       filesExamined += r2.value.filesExamined;
+      networkCalls += r2.value.networkCalls ?? 0;
     } else {
       errors.push({
         message: `sast linter '${linterId}' threw: ${r2.reason.message ?? String(r2.reason)}`,
@@ -56426,7 +56442,6 @@ async function orchestrate(deps) {
       });
     }
   }
-  const networkCalls = applicable.some((l2) => l2.id === "semgrep") ? 1 : 0;
   return {
     scanner: SCANNER_ID3,
     findings,
@@ -56434,6 +56449,11 @@ async function orchestrate(deps) {
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,
+      // Sum of per-linter networkCalls (set by each module ONLY when it
+      // actually invoked the network — see LinterRun.networkCalls in
+      // linter.ts). Avoids inflating the metric when a linter was
+      // applicable but its binary wasn't installed and the module exited
+      // early.
       network_calls: networkCalls,
       cache_hits: 0
     }

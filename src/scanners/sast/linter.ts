@@ -32,6 +32,20 @@ export interface LinterRun {
   findings: ScanFinding[];
   errors: ScanError[];
   filesExamined: number;
+  /**
+   * How many logical network operations this linter actually initiated.
+   * Most linters are local-only and leave this 0 (or undefined). semgrep
+   * sets it to 1 when its CLI ran successfully — `--config=auto` fetches
+   * the ruleset from semgrep.dev. The orchestrator sums these for the
+   * scanner-level `network_calls` metric, which feeds cost/security
+   * telemetry and matters for air-gapped/strict-egress operators.
+   *
+   * Important: only set this AFTER the linter actually invoked the
+   * network (e.g. set in the success path of runCli, not in `applies()`).
+   * Counting based on applicability inflates the metric for repos where
+   * the binary is missing.
+   */
+  networkCalls?: number;
 }
 
 /**
