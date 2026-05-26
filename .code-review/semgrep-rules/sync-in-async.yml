@@ -1,0 +1,126 @@
+# Synchronous I/O inside async functions
+#
+# Why: blocking the event loop with `fs.readFileSync` / `writeFileSync`
+# inside a function declared `async` defeats the whole point of the
+# async keyword — every other in-flight request stalls until the
+# blocking syscall returns. This is a common copy/paste accident
+# ("the example used readFileSync, I just kept it") that's invisible
+# at code-review time without searching for the pattern.
+#
+# Scope: TypeScript / JavaScript only (Python's `open()` is the
+# canonical idiom — `aiofiles.open` is the async variant; that's a
+# separate rule we may add later).
+#
+# Severity: ERROR (semgrep ERROR → ScanFinding "important"). Visible
+# without auto-block.
+#
+# To suppress: add an entry to .code-review/security-ignore.yml with
+# rule like "sast:semgrep/code-review.sync-in-async.readFileSync".
+
+rules:
+  - id: code-review.sync-in-async.readFileSync
+    message: |
+      `fs.readFileSync` inside an `async` function blocks the event
+      loop. Other in-flight requests on the same Node process stall
+      until this syscall completes. Use `await fs.promises.readFile`
+      (or `await readFile` from `node:fs/promises`).
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-833
+    patterns:
+      - pattern-either:
+          - pattern: readFileSync(...)
+          - pattern: fs.readFileSync(...)
+          - pattern: $FS.readFileSync(...)
+      - pattern-inside: |
+          async function $F(...) {
+            ...
+          }
+
+  - id: code-review.sync-in-async.readFileSync-arrow
+    message: |
+      `fs.readFileSync` inside an async arrow function blocks the event
+      loop. Use `await fs.promises.readFile` instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-833
+    patterns:
+      - pattern-either:
+          - pattern: readFileSync(...)
+          - pattern: fs.readFileSync(...)
+          - pattern: $FS.readFileSync(...)
+      - pattern-inside: |
+          async (...) => {
+            ...
+          }
+
+  - id: code-review.sync-in-async.writeFileSync
+    message: |
+      `fs.writeFileSync` inside an `async` function blocks the event
+      loop. Use `await fs.promises.writeFile` instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-833
+    patterns:
+      - pattern-either:
+          - pattern: writeFileSync(...)
+          - pattern: fs.writeFileSync(...)
+          - pattern: $FS.writeFileSync(...)
+      - pattern-inside: |
+          async function $F(...) {
+            ...
+          }
+
+  - id: code-review.sync-in-async.writeFileSync-arrow
+    message: |
+      `fs.writeFileSync` inside an async arrow function blocks the
+      event loop. Use `await fs.promises.writeFile` instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-833
+    patterns:
+      - pattern-either:
+          - pattern: writeFileSync(...)
+          - pattern: fs.writeFileSync(...)
+          - pattern: $FS.writeFileSync(...)
+      - pattern-inside: |
+          async (...) => {
+            ...
+          }
+
+  - id: code-review.sync-in-async.execSync
+    message: |
+      `child_process.execSync` inside an `async` function blocks the
+      event loop until the child process exits. Use `exec`,
+      `execFile`, or the `promisify`'d variants. The sync APIs are
+      reasonable in CLI scripts, not in request-handler / server code.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-833
+    patterns:
+      - pattern-either:
+          - pattern: execSync(...)
+          - pattern: spawnSync(...)
+          - pattern: execFileSync(...)
+          - pattern: $CP.execSync(...)
+          - pattern: $CP.spawnSync(...)
+          - pattern: $CP.execFileSync(...)
+      - pattern-either:
+          - pattern-inside: |
+              async function $F(...) {
+                ...
+              }
+          - pattern-inside: |
+              async (...) => {
+                ...
+              }

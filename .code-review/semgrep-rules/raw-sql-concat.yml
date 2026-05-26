@@ -1,0 +1,139 @@
+# Raw SQL via string concatenation or template literal interpolation.
+#
+# Why: the canonical injection vector — `"SELECT * FROM users WHERE id = " + x`
+# or backtick equivalent ``SELECT * FROM users WHERE id = ${x}`` — is a
+# pattern semgrep can recognize cheaply. Even when the input "looks safe"
+# (an integer parsed from a route param), letting this shape into the
+# codebase normalizes the antipattern for later code touched by less
+# careful contributors.
+#
+# Scope: TS/JS (concat + template literal) and Python (f-string + %).
+#
+# Severity: ERROR (semgrep ERROR → ScanFinding "important") — visible
+# in PR comments without auto-block. Reviewer judges whether the input
+# is actually attacker-controlled.
+#
+# Caveats: matches the SYNTACTIC shape, not actual attack reachability.
+# True positives on test fixtures and migration scripts should be
+# suppressed via .code-review/security-ignore.yml.
+#
+# To suppress: rule id is e.g.
+# "sast:semgrep/code-review.raw-sql-concat.string-plus".
+
+rules:
+  - id: code-review.raw-sql-concat.string-plus
+    message: |
+      SQL query built by string concatenation. This is the canonical
+      SQL injection shape. Use a parameterized query (`?` / `$1`
+      placeholders + a values array) so the driver escapes the input.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-89
+      owasp: A03:2021
+    pattern-either:
+      - pattern: |
+          "$SQL " + $X
+      - pattern: |
+          "$SQL" + $X + $Y
+      - pattern: |
+          'SELECT ' + $X
+      - pattern: |
+          'INSERT ' + $X
+      - pattern: |
+          'UPDATE ' + $X
+      - pattern: |
+          'DELETE ' + $X
+      - pattern: |
+          "SELECT " + $X
+      - pattern: |
+          "INSERT " + $X
+      - pattern: |
+          "UPDATE " + $X
+      - pattern: |
+          "DELETE " + $X
+
+  - id: code-review.raw-sql-concat.template-literal
+    message: |
+      SQL query built by template-literal interpolation. The `${x}`
+      placeholders are SUBSTITUTED into the string before reaching
+      the driver — the driver never sees them as parameters. Use a
+      parameterized query (`?` / `$1` placeholders + a values array).
+      Tagged template literals like sql`SELECT ... ${x}` (postgres-js,
+      @vercel/postgres) ARE safe because the tag interposes parameter
+      binding; those don't match this rule.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-89
+      owasp: A03:2021
+    pattern-either:
+      # Raw template literal containing a SQL keyword + ${expr}.
+      # The leading word forces a SQL-shaped match and avoids firing
+      # on every templated string in the codebase.
+      - pattern: |
+          `SELECT ... ${$X} ...`
+      - pattern: |
+          `INSERT ... ${$X} ...`
+      - pattern: |
+          `UPDATE ... ${$X} ...`
+      - pattern: |
+          `DELETE ... ${$X} ...`
+      - pattern: |
+          `WHERE ${$X}`
+
+  - id: code-review.raw-sql-concat.python-fstring
+    message: |
+      SQL query built by f-string interpolation. The interpolated
+      values are substituted before the cursor sees the SQL — the
+      driver has no chance to escape them. Use `cursor.execute(sql,
+      params)` with %s placeholders (DB-API parameterization).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: CWE-89
+      owasp: A03:2021
+    pattern-either:
+      - pattern: |
+          f"SELECT ... {$X} ..."
+      - pattern: |
+          f"INSERT ... {$X} ..."
+      - pattern: |
+          f"UPDATE ... {$X} ..."
+      - pattern: |
+          f"DELETE ... {$X} ..."
+      - pattern: |
+          f"WHERE {$X}"
+
+  - id: code-review.raw-sql-concat.python-percent
+    message: |
+      SQL query built by `%`-format / `.format()`. Driver-level
+      parameterization (`cursor.execute(sql, params)` with `%s`
+      placeholders in the SQL) is the correct shape. The `%` you use
+      to BUILD the string is not the `%s` the driver looks for.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: CWE-89
+      owasp: A03:2021
+    pattern-either:
+      - pattern: |
+          "SELECT ... %s ..." % $X
+      - pattern: |
+          "INSERT ... %s ..." % $X
+      - pattern: |
+          "UPDATE ... %s ..." % $X
+      - pattern: |
+          "DELETE ... %s ..." % $X
+      - pattern: |
+          "SELECT ... {} ...".format(...)
+      - pattern: |
+          "INSERT ... {} ...".format(...)
+      - pattern: |
+          "UPDATE ... {} ...".format(...)
+      - pattern: |
+          "DELETE ... {} ...".format(...)

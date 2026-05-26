@@ -1,0 +1,177 @@
+# N+1 query / sequential-await-in-loop detection
+#
+# Why: `await` inside a synchronous loop construct serializes every
+# iteration on the event loop and is the canonical shape of an N+1 query.
+# In a list of 100 items, this is 100 round-trips instead of 1 batched
+# call. Semgrep catches the SHAPE deterministically; the LLM can save its
+# turns for the semantic call ("is this batchable?").
+#
+# Scope: TS/JS (await inside for, while, .forEach/.map callbacks) and
+# Python (await inside `for ... in`, `while`).
+#
+# Severity: WARNING (semgrep WARNING → ScanFinding "minor"). Surfaced
+# without auto-block; reviewers decide whether the latency hit is
+# acceptable for the call site.
+#
+# Tuning: the patterns deliberately match `await` only when it appears
+# as a statement-position expression INSIDE the loop body — not as a
+# top-level loop-bounds expression like `for (const x of await fetchAll())`
+# (which awaits once). The body-only constraint keeps false-positive
+# rate low while still catching the actual N+1 shape.
+#
+# To suppress a specific finding, add an entry to
+# .code-review/security-ignore.yml with rule:
+# "sast:semgrep/code-review.n-plus-one.await-in-for-loop" (or the
+# matching id from below).
+
+rules:
+  - id: code-review.n-plus-one.await-in-for-loop
+    message: |
+      `await` inside a `for` loop body serializes each iteration on the
+      event loop. If the awaited call is a query, this is the N+1 shape.
+      Prefer `Promise.all(items.map(...))` or a batched query.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-1050
+    patterns:
+      - pattern: |
+          for (...) {
+            ...
+            await $X;
+            ...
+          }
+      - pattern-not-inside: |
+          for (...) {
+            ...
+            await Promise.all(...);
+            ...
+          }
+
+  - id: code-review.n-plus-one.await-in-for-of-loop
+    message: |
+      `await` inside `for ... of` serializes each iteration. If the
+      awaited call hits a database / network, this is N+1. Prefer
+      `Promise.all(items.map(async (x) => ...))` to fan out.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-1050
+    patterns:
+      - pattern: |
+          for (... of $XS) {
+            ...
+            await $X;
+            ...
+          }
+      - pattern-not-inside: |
+          for (... of $XS) {
+            ...
+            await Promise.all(...);
+            ...
+          }
+
+  - id: code-review.n-plus-one.await-in-while-loop
+    message: |
+      `await` inside a `while` loop serializes iterations. For paginated
+      I/O this is sometimes intentional (each page depends on the prior);
+      for unbatched DB calls it's N+1. Verify the body is genuinely
+      sequential.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      category: performance
+      cwe: CWE-1050
+    pattern: |
+      while (...) {
+        ...
+        await $X;
+        ...
+      }
+
+  - id: code-review.n-plus-one.await-in-forEach
+    message: |
+      `await` inside `.forEach()` does NOT actually wait — `forEach`
+      returns void and the callback's promise is discarded. This is
+      both a correctness bug (race) AND an N+1 shape (no batching).
+      Switch to `for ... of` with await, or `Promise.all(arr.map(...))`.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: correctness
+      cwe: CWE-362
+    pattern: |
+      $XS.forEach(async (...) => {
+        ...
+        await $X;
+        ...
+      })
+
+  - id: code-review.n-plus-one.await-in-map
+    message: |
+      `await` inside `.map()` produces an array of pending Promises, not
+      values. Either wrap the call in `Promise.all(...)` (batched
+      concurrent) or use `for ... of` (sequential, intentional). The
+      bare `arr.map(async ...)` is almost always a bug.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: correctness
+      cwe: CWE-754
+    patterns:
+      - pattern: |
+          $XS.map(async (...) => {
+            ...
+            await $X;
+            ...
+          })
+      - pattern-not-inside: |
+          Promise.all($XS.map(async (...) => {
+            ...
+            await $X;
+            ...
+          }))
+      - pattern-not-inside: |
+          await Promise.all(...)
+
+  # Python: `await` inside `for ... in` / `while` loops. Same N+1
+  # shape; asyncio's equivalent of Promise.all is `asyncio.gather`.
+  - id: code-review.n-plus-one.await-in-for-loop-py
+    message: |
+      `await` inside a `for` loop in Python serializes each iteration.
+      If the awaited call is a query, this is N+1. Prefer
+      `asyncio.gather(*[fn(x) for x in items])` to fan out.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: performance
+      cwe: CWE-1050
+    patterns:
+      - pattern: |
+          for $X in $XS:
+              ...
+              await $Y
+              ...
+      - pattern-not-inside: |
+          for $X in $XS:
+              ...
+              await asyncio.gather(...)
+              ...
+
+  - id: code-review.n-plus-one.await-in-while-loop-py
+    message: |
+      `await` inside a `while` loop in Python serializes iterations.
+      For paginated I/O this is sometimes intentional; for unbatched
+      DB calls it's N+1.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: performance
+      cwe: CWE-1050
+    pattern: |
+      while $COND:
+          ...
+          await $Y
+          ...

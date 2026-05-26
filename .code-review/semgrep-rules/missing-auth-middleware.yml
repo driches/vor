@@ -1,0 +1,178 @@
+# Express / Fastify / Koa route handlers registered without an
+# authentication middleware in the same call site.
+#
+# Why: an unauthenticated mutating endpoint slipping into production is
+# one of the highest-impact bugs an LLM reviewer can catch — and one
+# whose ABSENCE-of-pattern is exactly what an LLM tends to spend turns
+# searching for. The same check is cheap in semgrep: we look for
+# `app.post(...)` / `router.put(...)` / `fastify.delete(...)` etc. where
+# no `authenticate` / `requireAuth` / `isAuthenticated` token appears in
+# the call.
+#
+# Scope: TS/JS only. Conservative: matches the SHAPE
+# `app.<verb>(path, handler)` where the handler list lacks a recognized
+# auth-middleware name. Misses framework conventions that put auth in a
+# higher-level `app.use(...)` — those produce false positives here and
+# should be suppressed via .code-review/security-ignore.yml.
+#
+# Severity: ERROR (semgrep ERROR → ScanFinding "important"). Mutating
+# verbs are reported; GET/HEAD are intentionally NOT flagged to keep
+# noise down on public read endpoints.
+#
+# To suppress: rule id is
+# "sast:semgrep/code-review.missing-auth-middleware.post-no-auth" (etc.).
+
+rules:
+  - id: code-review.missing-auth-middleware.post-no-auth
+    message: |
+      `POST` route handler with no recognized auth middleware
+      (authenticate / requireAuth / isAuthenticated / requireUser /
+      ensureAuthenticated) in the call. If this endpoint is intended
+      to be public, suppress in .code-review/security-ignore.yml. If
+      it's not, add the middleware.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-306
+      owasp: A01:2021
+    pattern-either:
+      - patterns:
+          - pattern: $APP.post($PATH, $HANDLER)
+          - pattern-not: $APP.post($PATH, authenticate, ...)
+          - pattern-not: $APP.post($PATH, requireAuth, ...)
+          - pattern-not: $APP.post($PATH, isAuthenticated, ...)
+          - pattern-not: $APP.post($PATH, requireUser, ...)
+          - pattern-not: $APP.post($PATH, ensureAuthenticated, ...)
+          - pattern-not: $APP.post($PATH, authMiddleware, ...)
+          - pattern-not: $APP.post($PATH, auth, ...)
+          - pattern-not: $APP.post($PATH, auth(...), ...)
+          - pattern-not: $APP.post($PATH, authenticate(...), ...)
+          - pattern-not: $APP.post($PATH, requireAuth(...), ...)
+          - pattern-not: $APP.post($PATH, isAuthenticated(...), ...)
+          - pattern-not: $APP.post($PATH, ensureAuthenticated(...), ...)
+
+  - id: code-review.missing-auth-middleware.put-no-auth
+    message: |
+      `PUT` route handler with no recognized auth middleware. Confirm
+      the endpoint is intentionally public, or add auth.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-306
+      owasp: A01:2021
+    pattern-either:
+      - patterns:
+          - pattern: $APP.put($PATH, $HANDLER)
+          - pattern-not: $APP.put($PATH, authenticate, ...)
+          - pattern-not: $APP.put($PATH, requireAuth, ...)
+          - pattern-not: $APP.put($PATH, isAuthenticated, ...)
+          - pattern-not: $APP.put($PATH, requireUser, ...)
+          - pattern-not: $APP.put($PATH, ensureAuthenticated, ...)
+          - pattern-not: $APP.put($PATH, authMiddleware, ...)
+          - pattern-not: $APP.put($PATH, auth, ...)
+          - pattern-not: $APP.put($PATH, auth(...), ...)
+          - pattern-not: $APP.put($PATH, authenticate(...), ...)
+          - pattern-not: $APP.put($PATH, requireAuth(...), ...)
+
+  - id: code-review.missing-auth-middleware.patch-no-auth
+    message: |
+      `PATCH` route handler with no recognized auth middleware. Confirm
+      the endpoint is intentionally public, or add auth.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-306
+      owasp: A01:2021
+    pattern-either:
+      - patterns:
+          - pattern: $APP.patch($PATH, $HANDLER)
+          - pattern-not: $APP.patch($PATH, authenticate, ...)
+          - pattern-not: $APP.patch($PATH, requireAuth, ...)
+          - pattern-not: $APP.patch($PATH, isAuthenticated, ...)
+          - pattern-not: $APP.patch($PATH, requireUser, ...)
+          - pattern-not: $APP.patch($PATH, ensureAuthenticated, ...)
+          - pattern-not: $APP.patch($PATH, authMiddleware, ...)
+          - pattern-not: $APP.patch($PATH, auth, ...)
+          - pattern-not: $APP.patch($PATH, auth(...), ...)
+          - pattern-not: $APP.patch($PATH, authenticate(...), ...)
+          - pattern-not: $APP.patch($PATH, requireAuth(...), ...)
+
+  - id: code-review.missing-auth-middleware.delete-no-auth
+    message: |
+      `DELETE` route handler with no recognized auth middleware. This
+      is the highest-impact public mutation possible — confirm the
+      endpoint is genuinely public, or add auth.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-306
+      owasp: A01:2021
+    pattern-either:
+      - patterns:
+          - pattern: $APP.delete($PATH, $HANDLER)
+          - pattern-not: $APP.delete($PATH, authenticate, ...)
+          - pattern-not: $APP.delete($PATH, requireAuth, ...)
+          - pattern-not: $APP.delete($PATH, isAuthenticated, ...)
+          - pattern-not: $APP.delete($PATH, requireUser, ...)
+          - pattern-not: $APP.delete($PATH, ensureAuthenticated, ...)
+          - pattern-not: $APP.delete($PATH, authMiddleware, ...)
+          - pattern-not: $APP.delete($PATH, auth, ...)
+          - pattern-not: $APP.delete($PATH, auth(...), ...)
+          - pattern-not: $APP.delete($PATH, authenticate(...), ...)
+          - pattern-not: $APP.delete($PATH, requireAuth(...), ...)
+
+  # Fastify shorthand: fastify.route({ method, url, handler })
+  # without preHandler / onRequest hook in the same object literal.
+  - id: code-review.missing-auth-middleware.fastify-route-no-auth
+    message: |
+      Fastify `route()` with a mutating method but no `preHandler` /
+      `onRequest` / `preValidation` hook in the route options.
+      Fastify-auth conventions register the hook here; if you use a
+      global `app.addHook('onRequest', ...)` instead, suppress this
+      rule in .code-review/security-ignore.yml.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      cwe: CWE-306
+      owasp: A01:2021
+    pattern-either:
+      - patterns:
+          - pattern: |
+              $APP.route({
+                method: $METHOD,
+                ...
+              })
+          - pattern-not: |
+              $APP.route({
+                ...,
+                preHandler: ...,
+                ...
+              })
+          - pattern-not: |
+              $APP.route({
+                ...,
+                onRequest: ...,
+                ...
+              })
+          - pattern-not: |
+              $APP.route({
+                ...,
+                preValidation: ...,
+                ...
+              })
+          - metavariable-pattern:
+              metavariable: $METHOD
+              pattern-either:
+                - pattern: "'POST'"
+                - pattern: '"POST"'
+                - pattern: "'PUT'"
+                - pattern: '"PUT"'
+                - pattern: "'PATCH'"
+                - pattern: '"PATCH"'
+                - pattern: "'DELETE'"
+                - pattern: '"DELETE"'
