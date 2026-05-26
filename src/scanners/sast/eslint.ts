@@ -18,6 +18,7 @@ import type { Category, ChangedFile, Confidence, Severity } from '../../types.js
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
+  buildSpawnInvocation,
   filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
@@ -139,25 +140,29 @@ export const eslintLinter: LinterModule = {
 
 function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
+    // DEP0190 (Node v24 runtime deprecation): spawn(cmd, args, {shell:true})
+    // is deprecated. buildSpawnInvocation returns either a command+args
+    // tuple (shell:false) or a single command-line string (shell:true).
+    const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ['--format', 'json', '--no-error-on-unmatched-pattern', ...files],
-      {
-        cwd: deps.workspaceDir,
-        // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
-        // for the rationale. Stripping secrets out of the spawned
-        // process limits exfiltration even when a malicious workspace
-        // binary runs.
-        env: buildLinterEnv(),
-        // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
-        // findWorkspaceBinary sets needsShell when the resolved file is
-        // one of those. shell:true is otherwise off (filenames here come
-        // from npm conventions, not user input, so the shell-injection
-        // surface is bounded — but defense in depth says don't enable
-        // shell unless required).
-        shell: bin.needsShell,
-      },
+      bin.needsShell,
     );
+    const spawnOptions = {
+      cwd: deps.workspaceDir,
+      // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
+      // for the rationale. Stripping secrets out of the spawned
+      // process limits exfiltration even when a malicious workspace
+      // binary runs.
+      env: buildLinterEnv(),
+      // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
+      // findWorkspaceBinary sets needsShell when the resolved file is
+      // one of those.
+      shell: bin.needsShell,
+    };
+    const child = argsForSpawn === null
+      ? spawn(command, spawnOptions)
+      : spawn(command, argsForSpawn, spawnOptions);
     // Collect chunks as Buffers; concatenate once at close. Avoids the
     // O(n²) string-concat copy on large outputs and prevents UTF-8
     // corruption when a multi-byte sequence straddles a chunk boundary.

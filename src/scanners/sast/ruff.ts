@@ -23,6 +23,7 @@ import type { Category, ChangedFile, Confidence, Severity } from '../../types.js
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
+  buildSpawnInvocation,
   filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
@@ -158,15 +159,20 @@ function runCli(
   deps: ScannerDeps,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
+    // DEP0190 — see eslint.ts for the full rationale.
+    const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv(),
-        shell: bin.needsShell,
-      },
+      bin.needsShell,
     );
+    const spawnOptions = {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv(),
+      shell: bin.needsShell,
+    };
+    const child = argsForSpawn === null
+      ? spawn(command, spawnOptions)
+      : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];

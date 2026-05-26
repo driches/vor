@@ -55526,6 +55526,12 @@ function isShellSafePath(p2) {
 function shellQuoteBinary(bin) {
   return bin.needsShell ? `"${bin.path}"` : bin.path;
 }
+function buildSpawnInvocation(binary, args, needsShell) {
+  if (needsShell) {
+    return { command: [binary, ...args].join(" "), argsForSpawn: null };
+  }
+  return { command: binary, argsForSpawn: [...args] };
+}
 function filterShellSafePaths(paths, needsShell) {
   const safe = [];
   const dropped = [];
@@ -55634,25 +55640,24 @@ var eslintLinter = {
 };
 function runCli(bin, files, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process3.spawn)(
+    const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
-      {
-        cwd: deps.workspaceDir,
-        // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
-        // for the rationale. Stripping secrets out of the spawned
-        // process limits exfiltration even when a malicious workspace
-        // binary runs.
-        env: buildLinterEnv(),
-        // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
-        // findWorkspaceBinary sets needsShell when the resolved file is
-        // one of those. shell:true is otherwise off (filenames here come
-        // from npm conventions, not user input, so the shell-injection
-        // surface is bounded — but defense in depth says don't enable
-        // shell unless required).
-        shell: bin.needsShell
-      }
+      bin.needsShell
     );
+    const spawnOptions = {
+      cwd: deps.workspaceDir,
+      // Allowlisted env — see buildLinterEnv() / LINTER_ENV_ALLOWLIST
+      // for the rationale. Stripping secrets out of the spawned
+      // process limits exfiltration even when a malicious workspace
+      // binary runs.
+      env: buildLinterEnv(),
+      // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
+      // findWorkspaceBinary sets needsShell when the resolved file is
+      // one of those.
+      shell: bin.needsShell
+    };
+    const child2 = argsForSpawn === null ? (0, import_node_child_process3.spawn)(command, spawnOptions) : (0, import_node_child_process3.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -55830,15 +55835,17 @@ function locateBin(workspaceDir) {
 }
 function runCli2(bin, files, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process4.spawn)(
+    const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv(),
-        shell: bin.needsShell
-      }
+      bin.needsShell
     );
+    const spawnOptions = {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv(),
+      shell: bin.needsShell
+    };
+    const child2 = argsForSpawn === null ? (0, import_node_child_process4.spawn)(command, spawnOptions) : (0, import_node_child_process4.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -56382,11 +56389,17 @@ function locateBin2(workspaceDir) {
 }
 function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process7.spawn)(shellQuoteBinary(bin), ["--reporter", "json"], {
+    const { command, argsForSpawn } = buildSpawnInvocation(
+      shellQuoteBinary(bin),
+      ["--reporter", "json"],
+      bin.needsShell
+    );
+    const spawnOptions = {
       cwd: deps.workspaceDir,
       env: buildLinterEnv(),
       shell: bin.needsShell
-    });
+    };
+    const child2 = argsForSpawn === null ? (0, import_node_child_process7.spawn)(command, spawnOptions) : (0, import_node_child_process7.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;

@@ -27,6 +27,7 @@ import type { Category, ChangedFile, Confidence, Severity } from '../../types.js
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
+  buildSpawnInvocation,
   findWorkspaceBinary,
   normalizeToolPath,
   shellQuoteBinary,
@@ -282,11 +283,20 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     // it across the whole repo (knip's analysis IS whole-project — you
     // can't reliably detect unused exports from a partial file list).
     // The filter to PR-added lines happens in the orchestrator above.
-    const child = spawn(shellQuoteBinary(bin), ['--reporter', 'json'], {
+    // DEP0190 — see eslint.ts for the full rationale.
+    const { command, argsForSpawn } = buildSpawnInvocation(
+      shellQuoteBinary(bin),
+      ['--reporter', 'json'],
+      bin.needsShell,
+    );
+    const spawnOptions = {
       cwd: deps.workspaceDir,
       env: buildLinterEnv(),
       shell: bin.needsShell,
-    });
+    };
+    const child = argsForSpawn === null
+      ? spawn(command, spawnOptions)
+      : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries. knip's whole-project
     // analysis output can be MBs on monorepos.

@@ -283,6 +283,41 @@ export function shellQuoteBinary(bin: ResolvedBinary): string {
 }
 
 /**
+ * Build the spawn arguments for a linter, choosing the shape that's safe
+ * in both shell and non-shell modes.
+ *
+ * Node v24.0.0 promoted DEP0190 to a runtime deprecation: passing an
+ * `args` array alongside `shell: true` is deprecated because the shell
+ * concatenates them without escaping. Per Node's official deprecations
+ * doc — verified at nodejs.org/api/deprecations.html — under
+ * `NODE_OPTIONS=--throw-deprecation` (or future Node majors where it
+ * becomes an error) this throws and the linter fails.
+ *
+ * The portable fix is to construct a single command-line string when
+ * shell mode is required, and call `spawn(commandLine, options)` without
+ * the args array. All args (binary path via `shellQuoteBinary`, file
+ * paths via `filterShellSafePaths`) are already shell-quoted, so simple
+ * concatenation is safe.
+ *
+ * Non-shell mode is unchanged — the args array is correct and required
+ * there because execve does no parsing.
+ *
+ * Returns the tuple `[command, args, useArgs]` that `spawn` accepts:
+ *   useArgs=true  → spawn(command, args, options)
+ *   useArgs=false → spawn(commandLine, options)  // args is unused
+ */
+export function buildSpawnInvocation(
+  binary: string,
+  args: readonly string[],
+  needsShell: boolean,
+): { command: string; argsForSpawn: string[] | null } {
+  if (needsShell) {
+    return { command: [binary, ...args].join(' '), argsForSpawn: null };
+  }
+  return { command: binary, argsForSpawn: [...args] };
+}
+
+/**
  * Filter a path list and return entries safe to pass to spawn's argv.
  *
  * Two threat classes the PR-filename attack surface produces:
