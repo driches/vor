@@ -116,5 +116,8 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       enabled: false,
       worker_model: 'claude-haiku-4-5',
     },
+    // Default off — sequential ordering trades wall-clock for the chance
+    // at a cost cut; needs A/B data per repo before flipping on.
+    scanner_findings_in_user_prompt: false,
   },
 };
