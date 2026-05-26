@@ -27,7 +27,6 @@ import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
   filterShellSafePaths,
-  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -209,9 +208,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // Buffer accumulation — semgrep JSON on a large monorepo with
     // --config=auto can be tens of MB. The pre-fix `stdout += chunk`
     // pattern was O(n²) AND risked UTF-8 corruption on chunk boundaries.
+    // Per-linter TIMEOUT_MS (180s) provides runaway protection. A prior
+    // attempt at a hard byte cap correlated with a CI hang that ran out
+    // the GH Actions 45-min budget; reverted while investigating.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -221,19 +222,6 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
-      if (resolved) return;
-      stdoutSize += b.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        // Cap exceeded — kill the child rather than risk OOM on the
-        // runner. semgrep's `--config=auto` on a huge monorepo CAN
-        // legitimately produce this much output; operators hitting
-        // this should switch to a curated `--config=<path>` ruleset.
-        resolved = true;
-        clearTimeout(timer);
-        child.kill('SIGKILL');
-        reject(new Error(`semgrep stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {

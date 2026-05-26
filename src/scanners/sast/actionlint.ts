@@ -26,7 +26,6 @@ import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
   filterShellSafePaths,
-  MAX_LINTER_STDOUT_BYTES,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
@@ -133,7 +132,6 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // correctly regardless of where chunks happened to split.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -143,15 +141,6 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
-      if (resolved) return;
-      stdoutSize += b.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child.kill('SIGKILL');
-        reject(new Error(`actionlint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {

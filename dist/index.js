@@ -55503,7 +55503,6 @@ var SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
 function isShellSafePath(p2) {
   return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
 }
-var MAX_LINTER_STDOUT_BYTES = 200 * 1024 * 1024;
 function filterShellSafePaths(paths, needsShell) {
   const safe = [];
   const dropped = [];
@@ -55630,7 +55629,6 @@ function runCli(bin, files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55639,15 +55637,6 @@ function runCli(bin, files, deps) {
       reject(new Error(`eslint timed out after ${TIMEOUT_MS2}ms`));
     }, TIMEOUT_MS2);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`eslint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -55818,7 +55807,6 @@ function runCli2(bin, files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55827,15 +55815,6 @@ function runCli2(bin, files, deps) {
       reject(new Error(`ruff timed out after ${TIMEOUT_MS3}ms`));
     }, TIMEOUT_MS3);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`ruff stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56006,8 +55985,6 @@ function runCli3(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
-    let stderrSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56016,27 +55993,9 @@ function runCli3(files, deps) {
       reject(new Error(`dart analyze timed out after ${TIMEOUT_MS4}ms`));
     }, TIMEOUT_MS4);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`dart analyze stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      if (resolved) return;
-      stderrSize += b2.length;
-      if (stderrSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`dart analyze stderr exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
@@ -56182,7 +56141,6 @@ function runCli4(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56191,15 +56149,6 @@ function runCli4(files, deps) {
       reject(new Error(`actionlint timed out after ${TIMEOUT_MS5}ms`));
     }, TIMEOUT_MS5);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`actionlint stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56389,7 +56338,6 @@ function runCli5(bin, deps) {
     });
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56398,15 +56346,6 @@ function runCli5(bin, deps) {
       reject(new Error(`knip timed out after ${TIMEOUT_MS6}ms`));
     }, TIMEOUT_MS6);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`knip stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56593,7 +56532,6 @@ function runCli6(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
-    let stdoutSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56602,15 +56540,6 @@ function runCli6(files, deps) {
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS7}ms`));
     }, TIMEOUT_MS7);
     child2.stdout.on("data", (b2) => {
-      if (resolved) return;
-      stdoutSize += b2.length;
-      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
-        resolved = true;
-        clearTimeout(timer);
-        child2.kill("SIGKILL");
-        reject(new Error(`semgrep stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
-        return;
-      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
