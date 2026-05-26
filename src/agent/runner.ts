@@ -31,6 +31,7 @@ import { makeReadFileAtRefTool } from '../tools/read-file-at-ref.js';
 import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js';
 import { makeSkipFileTool } from '../tools/skip-file.js';
 import { makeWorkerCheckUsageClaimTool } from '../tools/worker-check-usage-claim.js';
+import { makeWorkerSummarizeFileTool } from '../tools/worker-summarize-file.js';
 import type { ToolDeps } from '../tools/types.js';
 import { renderPreflightSection, runPreflight } from './preflight.js';
 import { WorkerClient } from './worker.js';
@@ -441,11 +442,13 @@ function markLastBlockForCaching(message: Anthropic.MessageParam): void {
  * Bridge MCP tool definitions (from the tools/ modules) into our internal
  * shape with JSON Schema + a plain handler that returns a string.
  *
- * When `deps.worker` is present (worker_delegation flag enabled), an extra
- * `worker_check_usage_claim` tool joins the list. Tool order does not affect
- * Sonnet's choice but does affect the cache_control breakpoint placement —
- * the LAST tool gets the breakpoint, so we keep the worker tool at the end
- * so its addition doesn't bust the existing cache anchor.
+ * When `deps.worker` is present (worker_delegation flag enabled), the worker
+ * tools (`worker_summarize_file`, `worker_check_usage_claim`) join the list.
+ * Tool order does not affect Sonnet's choice but does affect the cache_control
+ * breakpoint placement — the LAST tool gets the breakpoint. We keep the worker
+ * tools at the END so the breakpoint lands on a worker-tool block, not in the
+ * middle of the base tool set (which would force a cache miss every time the
+ * flag toggles).
  */
 function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
   const mcpTools = [
@@ -458,7 +461,9 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
-    ...(deps.worker !== undefined ? [makeWorkerCheckUsageClaimTool(deps)] : []),
+    ...(deps.worker !== undefined
+      ? [makeWorkerSummarizeFileTool(deps), makeWorkerCheckUsageClaimTool(deps)]
+      : []),
   ];
 
   return mcpTools.map((mcp) => {

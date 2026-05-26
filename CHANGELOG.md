@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `worker_summarize_file` Haiku tool (behind `worker_delegation` flag)
+- **Second worker tool** for Sonnet to delegate to: [src/tools/worker-summarize-file.ts](src/tools/worker-summarize-file.ts). Sonnet calls `worker_summarize_file(path, focus_question)` for orientation/triage reads — "what does this file do?" or "how does X work?" — instead of `read_file_at_ref`. Haiku reads the file inside the tool handler, returns a structured summary (3-line file purpose + direct answer to the focus question + up to 5 line-specific flags worth deeper investigation). Sonnet's conversation only carries the summary, not the raw 500-line file content that would otherwise sit in the cache pool for every subsequent turn.
+- **Verification invariant preserved.** The tool deliberately does NOT call `recordHeadRead`, so worker summaries do NOT satisfy the read-before-post validator. For critical/important findings, Sonnet must still call `read_file_at_ref` itself on the target range — the validator (and a unit test in [src/tools/worker-summarize-file.test.ts](src/tools/worker-summarize-file.test.ts)) pin this. Worker output is a hint, not evidence.
+- **Cost mechanism.** A typical 500-line file read places ~5K input tokens in the conversation that re-bills at the cache-read rate for every subsequent turn (~75K cache-read tokens over a 15-turn loop). Replacing 3-5 such reads per PR with one-shot Haiku summaries trades a small Haiku spend (~$0.005-0.01 per call) for a sizable Sonnet cache-pool cut. Eval data forthcoming.
+- **Opt-in via the existing flag.** Surfaces only when `experimental.worker_delegation.enabled: true` in `.code-review.yml`, alongside the existing `worker_check_usage_claim` tool. Default OFF.
+
 ## [0.4.0] - 2026-05-26
 
 ### Added — Static-first hybrid analysis (multi-language SAST)
