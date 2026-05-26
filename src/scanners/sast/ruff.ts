@@ -236,7 +236,11 @@ function buildFinding(
     endLine !== undefined &&
     endLine > startLine &&
     changedFile.added_lines.has(endLine);
-  const fingerprint = `${ID}:${code}:${filePath}:${startLine}`;
+  // Fingerprint anchors at the line we actually post the comment at —
+  // see eslint.ts for the full rationale. Pre-fix this used `startLine`
+  // unconditionally, so a useRange finding's fingerprint disagreed with
+  // the comment's actual `endLine` anchor, breaking dedup across runs.
+  const fingerprint = `${ID}:${code}:${filePath}:${useRange ? endLine : startLine}`;
   const title = renderTitle(code, message.message);
   const description = renderDescription(code, message.message);
   return {

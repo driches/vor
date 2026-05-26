@@ -173,6 +173,17 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
   'ProgramFiles',
   'ProgramFiles(x86)',
   'ProgramW6432',
+  // Dart / Flutter SDK lookup. `dart analyze` resolves its own SDK
+  // libraries via DART_SDK / FLUTTER_ROOT, and reads its package cache
+  // from PUB_CACHE / PUB_HOSTED_URL. Stripping these from the spawned
+  // env causes dart to ENOENT on its own libraries or fall back to
+  // wrong defaults, producing zero findings with no error — a silent
+  // false-negative that's hard to diagnose in CI.
+  'DART_SDK',
+  'FLUTTER_ROOT',
+  'FLUTTER_HOME',
+  'PUB_CACHE',
+  'PUB_HOSTED_URL',
 ];
 
 export function buildLinterEnv(): NodeJS.ProcessEnv {

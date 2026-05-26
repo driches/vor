@@ -234,12 +234,6 @@ function buildFinding(
     message.severity === 2 ? 'important' : message.severity === 1 ? 'minor' : 'nit';
   const category: Category = categorize(message.ruleId ?? 'unknown');
   const confidence: Confidence = 'high';
-  // Use the same `?? 'unknown'` coalescence as rule_id (further down)
-  // so the dedup keys stay consistent. Parse errors set ruleId:null,
-  // and a literal `'null'` segment in the fingerprint would cause the
-  // file_path+line+rule_id dedup key to disagree with the fingerprint
-  // key — risking duplicate posts of the same parse error.
-  const fingerprint = `${ID}:${message.ruleId ?? 'unknown'}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
   // Anchor the finding to the START line (the line ESLint actually
@@ -255,11 +249,22 @@ function buildFinding(
     endLine !== undefined &&
     endLine > message.line &&
     changedFile.added_lines.has(endLine);
+  // Fingerprint must match the line the comment is posted at — the
+  // dedup/ignore-list key (file_path + line + rule_id) lives at the
+  // anchored line, so the fingerprint has to use the same. Pre-fix it
+  // always used `message.line`, so when useRange flipped the post line
+  // to `endLine` the two keys disagreed across runs and the same
+  // violation could re-post.
+  //
+  // Use the same `?? 'unknown'` coalescence as rule_id (below) so parse
+  // errors (ruleId: null) don't leak a literal `'null'` segment.
+  const anchorLine = useRange ? endLine : message.line;
+  const fingerprint = `${ID}:${message.ruleId ?? 'unknown'}:${filePath}:${anchorLine}`;
   return {
     scanner: 'sast',
     rule_id: `${ID}/${message.ruleId ?? 'unknown'}`,
     file_path: filePath,
-    line: useRange ? endLine : message.line,
+    line: anchorLine,
     ...(useRange ? { start_line: message.line } : {}),
     severity,
     category,

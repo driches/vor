@@ -55489,7 +55489,18 @@ var LINTER_ENV_ALLOWLIST = [
   "LOCALAPPDATA",
   "ProgramFiles",
   "ProgramFiles(x86)",
-  "ProgramW6432"
+  "ProgramW6432",
+  // Dart / Flutter SDK lookup. `dart analyze` resolves its own SDK
+  // libraries via DART_SDK / FLUTTER_ROOT, and reads its package cache
+  // from PUB_CACHE / PUB_HOSTED_URL. Stripping these from the spawned
+  // env causes dart to ENOENT on its own libraries or fall back to
+  // wrong defaults, producing zero findings with no error — a silent
+  // false-negative that's hard to diagnose in CI.
+  "DART_SDK",
+  "FLUTTER_ROOT",
+  "FLUTTER_HOME",
+  "PUB_CACHE",
+  "PUB_HOSTED_URL"
 ];
 function buildLinterEnv() {
   const out = {};
@@ -55690,16 +55701,17 @@ function buildFinding2(filePath, message, changedFile) {
   const severity = message.severity === 2 ? "important" : message.severity === 1 ? "minor" : "nit";
   const category = categorize(message.ruleId ?? "unknown");
   const confidence = "high";
-  const fingerprint = `${ID}:${message.ruleId ?? "unknown"}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
   const endLine = message.endLine;
   const useRange = endLine !== void 0 && endLine > message.line && changedFile.added_lines.has(endLine);
+  const anchorLine = useRange ? endLine : message.line;
+  const fingerprint = `${ID}:${message.ruleId ?? "unknown"}:${filePath}:${anchorLine}`;
   return {
     scanner: "sast",
     rule_id: `${ID}/${message.ruleId ?? "unknown"}`,
     file_path: filePath,
-    line: useRange ? endLine : message.line,
+    line: anchorLine,
     ...useRange ? { start_line: message.line } : {},
     severity,
     category,
@@ -55874,7 +55886,7 @@ function buildFinding3(filePath, message, changedFile) {
   const startLine = message.location.row;
   const endLine = message.end_location?.row;
   const useRange = endLine !== void 0 && endLine > startLine && changedFile.added_lines.has(endLine);
-  const fingerprint = `${ID2}:${code}:${filePath}:${startLine}`;
+  const fingerprint = `${ID2}:${code}:${filePath}:${useRange ? endLine : startLine}`;
   const title = renderTitle2(code, message.message);
   const description = renderDescription2(code, message.message);
   return {
@@ -56617,10 +56629,10 @@ function buildFinding6(filePath, result, changedFile) {
   const severity = severityFromSemgrep(result.extra.severity);
   const category = categorize5(result);
   const confidence = "high";
-  const fingerprint = `${ID6}:${result.check_id}:${filePath}:${result.start.line}`;
   const startLine = result.start.line;
   const endLine = result.end?.line;
   const useRange = endLine !== void 0 && endLine > startLine && changedFile.added_lines.has(endLine);
+  const fingerprint = `${ID6}:${result.check_id}:${filePath}:${useRange ? endLine : startLine}`;
   const cweRaw = result.extra.metadata?.cwe;
   const cwe = Array.isArray(cweRaw) ? cweRaw : cweRaw !== void 0 ? [cweRaw] : [];
   return {
@@ -56713,7 +56725,7 @@ async function orchestrate(deps) {
     applicable.map(
       (linter) => linter.run(
         deps,
-        liveFiles.filter((f2) => linter.applies([f2]))
+        linter.id === "knip" ? liveFiles : liveFiles.filter((f2) => linter.applies([f2]))
       )
     )
   );

@@ -284,7 +284,6 @@ function buildFinding(
   const severity: Severity = severityFromSemgrep(result.extra.severity);
   const category: Category = categorize(result);
   const confidence: Confidence = 'high';
-  const fingerprint = `${ID}:${result.check_id}:${filePath}:${result.start.line}`;
   const startLine = result.start.line;
   const endLine = result.end?.line;
   // Anchor on the START line. Only attach a multi-line range when BOTH
@@ -295,6 +294,11 @@ function buildFinding(
     endLine !== undefined &&
     endLine > startLine &&
     changedFile.added_lines.has(endLine);
+  // Fingerprint anchors at the line we actually post the comment at —
+  // see eslint.ts for the full rationale. Pre-fix this used startLine
+  // unconditionally, so useRange findings dedup'd against a different
+  // key than the one their comment lives at, breaking re-run dedup.
+  const fingerprint = `${ID}:${result.check_id}:${filePath}:${useRange ? endLine : startLine}`;
   const cweRaw = result.extra.metadata?.cwe;
   const cwe = Array.isArray(cweRaw) ? cweRaw : cweRaw !== undefined ? [cweRaw] : [];
   return {

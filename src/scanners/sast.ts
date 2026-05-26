@@ -106,11 +106,20 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
   // For each applicable linter, filter to JUST its scope (so ESLint isn't
   // invoked on .py files, ruff isn't invoked on .ts files, etc.). The
   // per-linter `applies()` is the predicate.
+  //
+  // Exception: knip runs whole-project (it doesn't take a file argv) and
+  // the linter's output loop uses `targetFiles` to look up which finding
+  // attaches to which PR-changed file. If we only handed it the TS/JS
+  // subset, a future knip release that touches non-TS metadata (or any
+  // path we didn't expect in its scope) would silently drop. Pass the
+  // full live set so the lookup map covers everything in the PR.
   const runs = await Promise.allSettled(
     applicable.map((linter) =>
       linter.run(
         deps,
-        liveFiles.filter((f) => linter.applies([f])),
+        linter.id === 'knip'
+          ? liveFiles
+          : liveFiles.filter((f) => linter.applies([f])),
       ),
     ),
   );
