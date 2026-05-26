@@ -57,5 +57,9 @@ function buildSource(f: ScanFinding): FindingSource {
         ...(first !== undefined ? { cve_id: first } : {}),
       };
     }
+    case 'coverage':
+      // No CVE/GHSA — `rule_id` carries the scanner attribution; the
+      // specific tool that produced the coverage data lives in evidence.
+      return { kind: 'scanner', scanner: f.scanner, rule_id: f.rule_id };
   }
 }

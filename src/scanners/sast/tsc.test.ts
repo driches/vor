@@ -139,6 +139,7 @@ function makeDeps(
         ...(overrides.tscConfig !== undefined ? { tsc: overrides.tscConfig } : {}),
       },
       container_cve: { enabled: false },
+      coverage_delta: { enabled: false },
     },
     cache: { enabled: false },
     persistence: { enabled: false },

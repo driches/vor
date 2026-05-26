@@ -44,6 +44,7 @@ const SCANNER_CONFIG_KEY = {
   secrets: 'secrets',
   sast: 'sast',
   'container-cve': 'container_cve',
+  'coverage-delta': 'coverage_delta',
 } as const satisfies Record<ScannerId, string>;
 
 /**

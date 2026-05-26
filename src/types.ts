@@ -44,7 +44,12 @@ export type Category = (typeof CATEGORIES)[number];
  * Identifier for a security scanner plugin. Used by `FindingSource` to attribute
  * scanner-originated findings.
  */
-export type ScannerId = 'dependency-cve' | 'secrets' | 'sast' | 'container-cve';
+export type ScannerId =
+  | 'dependency-cve'
+  | 'secrets'
+  | 'sast'
+  | 'container-cve'
+  | 'coverage-delta';
 
 /**
  * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;

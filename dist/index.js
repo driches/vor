@@ -766,14 +766,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path18 = url.path;
-      if (path18.length === 0) {
+      const path19 = url.path;
+      if (path19.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path18.length === 1 && isNormalizedWindowsDriveLetter(path18[0])) {
+      if (url.scheme === "file" && path19.length === 1 && isNormalizedWindowsDriveLetter(path19[0])) {
         return;
       }
-      path18.pop();
+      path19.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -2823,14 +2823,14 @@ var require_lib2 = __commonJS({
         }
         const abortAndFinalize = function abortAndFinalize2() {
           abort();
-          finalize();
+          finalize2();
         };
         const req = send(options);
         let reqTimeout;
         if (signal) {
           signal.addEventListener("abort", abortAndFinalize);
         }
-        function finalize() {
+        function finalize2() {
           req.abort();
           if (signal) signal.removeEventListener("abort", abortAndFinalize);
           clearTimeout(reqTimeout);
@@ -2839,7 +2839,7 @@ var require_lib2 = __commonJS({
           req.once("socket", function(socket) {
             reqTimeout = setTimeout(function() {
               reject(new FetchError(`network timeout at: ${request2.url}`, "request-timeout"));
-              finalize();
+              finalize2();
             }, request2.timeout);
           });
         }
@@ -2848,7 +2848,7 @@ var require_lib2 = __commonJS({
           if (response && response.body) {
             destroyStream(response.body, err);
           }
-          finalize();
+          finalize2();
         });
         fixResponseChunkedTransferBadEnding(req, function(err) {
           if (signal && signal.aborted) {
@@ -2881,14 +2881,14 @@ var require_lib2 = __commonJS({
             } catch (err) {
               if (request2.redirect !== "manual") {
                 reject(new FetchError(`uri requested responds with an invalid redirect URL: ${location}`, "invalid-redirect"));
-                finalize();
+                finalize2();
                 return;
               }
             }
             switch (request2.redirect) {
               case "error":
                 reject(new FetchError(`uri requested responds with a redirect, redirect mode is set to error: ${request2.url}`, "no-redirect"));
-                finalize();
+                finalize2();
                 return;
               case "manual":
                 if (locationURL !== null) {
@@ -2905,7 +2905,7 @@ var require_lib2 = __commonJS({
                 }
                 if (request2.counter >= request2.follow) {
                   reject(new FetchError(`maximum redirect reached at: ${request2.url}`, "max-redirect"));
-                  finalize();
+                  finalize2();
                   return;
                 }
                 const requestOpts = {
@@ -2927,7 +2927,7 @@ var require_lib2 = __commonJS({
                 }
                 if (res.statusCode !== 303 && request2.body && getTotalBytes(request2) === null) {
                   reject(new FetchError("Cannot follow redirect with body being a readable stream", "unsupported-redirect"));
-                  finalize();
+                  finalize2();
                   return;
                 }
                 if (res.statusCode === 303 || (res.statusCode === 301 || res.statusCode === 302) && request2.method === "POST") {
@@ -2936,7 +2936,7 @@ var require_lib2 = __commonJS({
                   requestOpts.headers.delete("content-length");
                 }
                 resolve3(fetch3(new Request3(locationURL, requestOpts)));
-                finalize();
+                finalize2();
                 return;
             }
           }
@@ -6352,14 +6352,14 @@ __export(fileFromPath_exports, {
   fileFromPathSync: () => fileFromPathSync,
   isFile: () => isFile
 });
-function createFileFromPath(path18, { mtimeMs, size }, filenameOrOptions, options = {}) {
+function createFileFromPath(path19, { mtimeMs, size }, filenameOrOptions, options = {}) {
   let filename;
   if (isPlainObject_default2(filenameOrOptions)) {
     [options, filename] = [filenameOrOptions, void 0];
   } else {
     filename = filenameOrOptions;
   }
-  const file = new FileFromPath({ path: path18, size, lastModified: mtimeMs });
+  const file = new FileFromPath({ path: path19, size, lastModified: mtimeMs });
   if (!filename) {
     filename = file.name;
   }
@@ -6368,13 +6368,13 @@ function createFileFromPath(path18, { mtimeMs, size }, filenameOrOptions, option
     lastModified: file.lastModified
   });
 }
-function fileFromPathSync(path18, filenameOrOptions, options = {}) {
-  const stats = (0, import_fs.statSync)(path18);
-  return createFileFromPath(path18, stats, filenameOrOptions, options);
+function fileFromPathSync(path19, filenameOrOptions, options = {}) {
+  const stats = (0, import_fs.statSync)(path19);
+  return createFileFromPath(path19, stats, filenameOrOptions, options);
 }
-async function fileFromPath2(path18, filenameOrOptions, options) {
-  const stats = await import_fs.promises.stat(path18);
-  return createFileFromPath(path18, stats, filenameOrOptions, options);
+async function fileFromPath2(path19, filenameOrOptions, options) {
+  const stats = await import_fs.promises.stat(path19);
+  return createFileFromPath(path19, stats, filenameOrOptions, options);
 }
 var import_fs, import_path, import_node_domexception, __classPrivateFieldSet4, __classPrivateFieldGet5, _FileFromPath_path, _FileFromPath_start, MESSAGE, FileFromPath;
 var init_fileFromPath = __esm({
@@ -7667,14 +7667,14 @@ var require_util = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path18 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path19 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path18 && path18[0] !== "/") {
-          path18 = `/${path18}`;
+        if (path19 && path19[0] !== "/") {
+          path19 = `/${path19}`;
         }
-        return new URL(`${origin}${path18}`);
+        return new URL(`${origin}${path19}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -8125,39 +8125,39 @@ var require_diagnostics = __commonJS({
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
         const {
-          request: { method, path: path18, origin }
+          request: { method, path: path19, origin }
         } = evt;
-        debuglog("sending request to %s %s/%s", method, origin, path18);
+        debuglog("sending request to %s %s/%s", method, origin, path19);
       });
       diagnosticsChannel.channel("undici:request:headers").subscribe((evt) => {
         const {
-          request: { method, path: path18, origin },
+          request: { method, path: path19, origin },
           response: { statusCode }
         } = evt;
         debuglog(
           "received response to %s %s/%s - HTTP %d",
           method,
           origin,
-          path18,
+          path19,
           statusCode
         );
       });
       diagnosticsChannel.channel("undici:request:trailers").subscribe((evt) => {
         const {
-          request: { method, path: path18, origin }
+          request: { method, path: path19, origin }
         } = evt;
-        debuglog("trailers received from %s %s/%s", method, origin, path18);
+        debuglog("trailers received from %s %s/%s", method, origin, path19);
       });
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
-          request: { method, path: path18, origin },
+          request: { method, path: path19, origin },
           error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
-          path18,
+          path19,
           error2.message
         );
       });
@@ -8206,9 +8206,9 @@ var require_diagnostics = __commonJS({
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
           const {
-            request: { method, path: path18, origin }
+            request: { method, path: path19, origin }
           } = evt;
-          debuglog("sending request to %s %s/%s", method, origin, path18);
+          debuglog("sending request to %s %s/%s", method, origin, path19);
         });
       }
       diagnosticsChannel.channel("undici:websocket:open").subscribe((evt) => {
@@ -8271,7 +8271,7 @@ var require_request = __commonJS({
     var kHandler = /* @__PURE__ */ Symbol("handler");
     var Request3 = class {
       constructor(origin, {
-        path: path18,
+        path: path19,
         method,
         body,
         headers,
@@ -8286,11 +8286,11 @@ var require_request = __commonJS({
         expectContinue,
         servername
       }, handler2) {
-        if (typeof path18 !== "string") {
+        if (typeof path19 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path18[0] !== "/" && !(path18.startsWith("http://") || path18.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path19[0] !== "/" && !(path19.startsWith("http://") || path19.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path18)) {
+        } else if (invalidPathRegex.test(path19)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -8356,7 +8356,7 @@ var require_request = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? buildURL(path18, query) : path18;
+        this.path = query ? buildURL(path19, query) : path19;
         this.origin = origin;
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
         this.blocking = blocking == null ? false : blocking;
@@ -12882,7 +12882,7 @@ var require_client_h1 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request2) {
-      const { method, path: path18, host, upgrade, blocking, reset } = request2;
+      const { method, path: path19, host, upgrade, blocking, reset } = request2;
       let { body, headers, contentLength } = request2;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util2.isFormDataLike(body)) {
@@ -12948,7 +12948,7 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header = `${method} ${path18} HTTP/1.1\r
+      let header = `${method} ${path19} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -13474,7 +13474,7 @@ var require_client_h2 = __commonJS({
     }
     function writeH2(client, request2) {
       const session = client[kHTTP2Session];
-      const { method, path: path18, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
+      const { method, path: path19, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
       let { body } = request2;
       if (upgrade) {
         util2.errorRequest(client, request2, new Error("Upgrade not supported for H2"));
@@ -13541,7 +13541,7 @@ var require_client_h2 = __commonJS({
         });
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path18;
+      headers[HTTP2_HEADER_PATH] = path19;
       headers[HTTP2_HEADER_SCHEME] = "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -13894,9 +13894,9 @@ var require_redirect_handler = __commonJS({
           return this.handler.onHeaders(statusCode, headers, resume, statusText);
         }
         const { origin, pathname, search } = util2.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path18 = search ? `${pathname}${search}` : pathname;
+        const path19 = search ? `${pathname}${search}` : pathname;
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path18;
+        this.opts.path = path19;
         this.opts.origin = origin;
         this.opts.maxRedirections = 0;
         this.opts.query = null;
@@ -15131,10 +15131,10 @@ var require_proxy_agent = __commonJS({
         };
         const {
           origin,
-          path: path18 = "/",
+          path: path19 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path18;
+        opts.path = origin + path19;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL2(origin);
           headers.host = host;
@@ -17055,20 +17055,20 @@ var require_mock_utils = __commonJS({
       }
       return true;
     }
-    function safeUrl(path18) {
-      if (typeof path18 !== "string") {
-        return path18;
+    function safeUrl(path19) {
+      if (typeof path19 !== "string") {
+        return path19;
       }
-      const pathSegments = path18.split("?");
+      const pathSegments = path19.split("?");
       if (pathSegments.length !== 2) {
-        return path18;
+        return path19;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path18, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path18);
+    function matchKey(mockDispatch2, { path: path19, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path19);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -17090,7 +17090,7 @@ var require_mock_utils = __commonJS({
     function getMockDispatch(mockDispatches, key) {
       const basePath = key.query ? buildURL(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path18 }) => matchValue(safeUrl(path18), resolvedPath));
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path19 }) => matchValue(safeUrl(path19), resolvedPath));
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
       }
@@ -17128,9 +17128,9 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildKey(opts) {
-      const { path: path18, method, body, headers, query } = opts;
+      const { path: path19, method, body, headers, query } = opts;
       return {
-        path: path18,
+        path: path19,
         method,
         body,
         headers,
@@ -17593,10 +17593,10 @@ var require_pending_interceptors_formatter = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path18, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path19, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path18,
+            Path: path19,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -22477,9 +22477,9 @@ var require_util6 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path18) {
-      for (let i2 = 0; i2 < path18.length; ++i2) {
-        const code = path18.charCodeAt(i2);
+    function validateCookiePath(path19) {
+      for (let i2 = 0; i2 < path19.length; ++i2) {
+        const code = path19.charCodeAt(i2);
         if (code < 32 || // exclude CTLs (0-31)
         code === 127 || // DEL
         code === 59) {
@@ -25156,11 +25156,11 @@ var require_undici = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path18 = opts.path;
+          let path19 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path18 = `/${path18}`;
+            path19 = `/${path19}`;
           }
-          url = new URL(util2.parseOrigin(url).origin + path18);
+          url = new URL(util2.parseOrigin(url).origin + path19);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -27460,17 +27460,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path18) {
-      const ctrl = callVisitor(key, node, visitor, path18);
+    function visit_(key, node, visitor, path19) {
+      const ctrl = callVisitor(key, node, visitor, path19);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path18, ctrl);
-        return visit_(key, ctrl, visitor, path18);
+        replaceNode(key, path19, ctrl);
+        return visit_(key, ctrl, visitor, path19);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path18 = Object.freeze(path18.concat(node));
+          path19 = Object.freeze(path19.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path18);
+            const ci = visit_(i2, node.items[i2], visitor, path19);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -27481,13 +27481,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path18 = Object.freeze(path18.concat(node));
-          const ck = visit_("key", node.key, visitor, path18);
+          path19 = Object.freeze(path19.concat(node));
+          const ck = visit_("key", node.key, visitor, path19);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path18);
+          const cv = visit_("value", node.value, visitor, path19);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -27508,17 +27508,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path18) {
-      const ctrl = await callVisitor(key, node, visitor, path18);
+    async function visitAsync_(key, node, visitor, path19) {
+      const ctrl = await callVisitor(key, node, visitor, path19);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path18, ctrl);
-        return visitAsync_(key, ctrl, visitor, path18);
+        replaceNode(key, path19, ctrl);
+        return visitAsync_(key, ctrl, visitor, path19);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path18 = Object.freeze(path18.concat(node));
+          path19 = Object.freeze(path19.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path18);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path19);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -27529,13 +27529,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path18 = Object.freeze(path18.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path18);
+          path19 = Object.freeze(path19.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path19);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path18);
+          const cv = await visitAsync_("value", node.value, visitor, path19);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -27562,23 +27562,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path18) {
+    function callVisitor(key, node, visitor, path19) {
       if (typeof visitor === "function")
-        return visitor(key, node, path18);
+        return visitor(key, node, path19);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path18);
+        return visitor.Map?.(key, node, path19);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path18);
+        return visitor.Seq?.(key, node, path19);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path18);
+        return visitor.Pair?.(key, node, path19);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path18);
+        return visitor.Scalar?.(key, node, path19);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path18);
+        return visitor.Alias?.(key, node, path19);
       return void 0;
     }
-    function replaceNode(key, path18, node) {
-      const parent = path18[path18.length - 1];
+    function replaceNode(key, path19, node) {
+      const parent = path19[path19.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -28188,10 +28188,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path18, value) {
+    function collectionFromPath(schema, path19, value) {
       let v2 = value;
-      for (let i2 = path18.length - 1; i2 >= 0; --i2) {
-        const k2 = path18[i2];
+      for (let i2 = path19.length - 1; i2 >= 0; --i2) {
+        const k2 = path19[i2];
         if (typeof k2 === "number" && Number.isInteger(k2) && k2 >= 0) {
           const a2 = [];
           a2[k2] = v2;
@@ -28210,7 +28210,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path18) => path18 == null || typeof path18 === "object" && !!path18[Symbol.iterator]().next().done;
+    var isEmptyPath = (path19) => path19 == null || typeof path19 === "object" && !!path19[Symbol.iterator]().next().done;
     var Collection2 = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -28240,11 +28240,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path18, value) {
-        if (isEmptyPath(path18))
+      addIn(path19, value) {
+        if (isEmptyPath(path19))
           this.add(value);
         else {
-          const [key, ...rest] = path18;
+          const [key, ...rest] = path19;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -28258,8 +28258,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path18) {
-        const [key, ...rest] = path18;
+      deleteIn(path19) {
+        const [key, ...rest] = path19;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -28273,8 +28273,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path18, keepScalar) {
-        const [key, ...rest] = path18;
+      getIn(path19, keepScalar) {
+        const [key, ...rest] = path19;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -28292,8 +28292,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path18) {
-        const [key, ...rest] = path18;
+      hasIn(path19) {
+        const [key, ...rest] = path19;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -28303,8 +28303,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path18, value) {
-        const [key, ...rest] = path18;
+      setIn(path19, value) {
+        const [key, ...rest] = path19;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -30819,9 +30819,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path18, value) {
+      addIn(path19, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path18, value);
+          this.contents.addIn(path19, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -30896,14 +30896,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path18) {
-        if (Collection2.isEmptyPath(path18)) {
+      deleteIn(path19) {
+        if (Collection2.isEmptyPath(path19)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path18) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path19) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -30918,10 +30918,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path18, keepScalar) {
-        if (Collection2.isEmptyPath(path18))
+      getIn(path19, keepScalar) {
+        if (Collection2.isEmptyPath(path19))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path18, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path19, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -30932,10 +30932,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path18) {
-        if (Collection2.isEmptyPath(path18))
+      hasIn(path19) {
+        if (Collection2.isEmptyPath(path19))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path18) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path19) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -30952,13 +30952,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path18, value) {
-        if (Collection2.isEmptyPath(path18)) {
+      setIn(path19, value) {
+        if (Collection2.isEmptyPath(path19)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path18), value);
+          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path19), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path18, value);
+          this.contents.setIn(path19, value);
         }
       }
       /**
@@ -32918,9 +32918,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path18) => {
+    visit.itemAtPath = (cst, path19) => {
       let item = cst;
-      for (const [field, index] of path18) {
+      for (const [field, index] of path19) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -32929,23 +32929,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path18) => {
-      const parent = visit.itemAtPath(cst, path18.slice(0, -1));
-      const field = path18[path18.length - 1][0];
+    visit.parentCollection = (cst, path19) => {
+      const parent = visit.itemAtPath(cst, path19.slice(0, -1));
+      const field = path19[path19.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path18, item, visitor) {
-      let ctrl = visitor(item, path18);
+    function _visit(path19, item, visitor) {
+      let ctrl = visitor(item, path19);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path18.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path19.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -32956,10 +32956,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path18);
+            ctrl = ctrl(item, path19);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path18) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path19) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -38398,7 +38398,7 @@ var import_promises2 = require("node:fs/promises");
 
 // src/orchestrator.ts
 var import_promises = require("node:fs/promises");
-var import_node_path12 = require("node:path");
+var import_node_path13 = require("node:path");
 
 // node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION = "0.39.0";
@@ -38779,13 +38779,13 @@ var MultipartBody = class {
 // node_modules/@anthropic-ai/sdk/_shims/node-runtime.mjs
 var import_web = require("node:stream/web");
 var fileFromPathWarned = false;
-async function fileFromPath3(path18, ...args) {
+async function fileFromPath3(path19, ...args) {
   const { fileFromPath: _fileFromPath } = await Promise.resolve().then(() => (init_fileFromPath(), fileFromPath_exports));
   if (!fileFromPathWarned) {
-    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path18)}) instead`);
+    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path19)}) instead`);
     fileFromPathWarned = true;
   }
-  return await _fileFromPath(path18, ...args);
+  return await _fileFromPath(path19, ...args);
 }
 var defaultHttpAgent = new import_agentkeepalive.default({ keepAlive: true, timeout: 5 * 60 * 1e3 });
 var defaultHttpsAgent = new import_agentkeepalive.default.HttpsAgent({ keepAlive: true, timeout: 5 * 60 * 1e3 });
@@ -39509,29 +39509,29 @@ var APIClient = class {
   defaultIdempotencyKey() {
     return `stainless-node-retry-${uuid4()}`;
   }
-  get(path18, opts) {
-    return this.methodRequest("get", path18, opts);
+  get(path19, opts) {
+    return this.methodRequest("get", path19, opts);
   }
-  post(path18, opts) {
-    return this.methodRequest("post", path18, opts);
+  post(path19, opts) {
+    return this.methodRequest("post", path19, opts);
   }
-  patch(path18, opts) {
-    return this.methodRequest("patch", path18, opts);
+  patch(path19, opts) {
+    return this.methodRequest("patch", path19, opts);
   }
-  put(path18, opts) {
-    return this.methodRequest("put", path18, opts);
+  put(path19, opts) {
+    return this.methodRequest("put", path19, opts);
   }
-  delete(path18, opts) {
-    return this.methodRequest("delete", path18, opts);
+  delete(path19, opts) {
+    return this.methodRequest("delete", path19, opts);
   }
-  methodRequest(method, path18, opts) {
+  methodRequest(method, path19, opts) {
     return this.request(Promise.resolve(opts).then(async (opts2) => {
       const body = opts2 && isBlobLike(opts2?.body) ? new DataView(await opts2.body.arrayBuffer()) : opts2?.body instanceof DataView ? opts2.body : opts2?.body instanceof ArrayBuffer ? new DataView(opts2.body) : opts2 && ArrayBuffer.isView(opts2?.body) ? new DataView(opts2.body.buffer) : opts2?.body;
-      return { method, path: path18, ...opts2, body };
+      return { method, path: path19, ...opts2, body };
     }));
   }
-  getAPIList(path18, Page3, opts) {
-    return this.requestAPIList(Page3, { method: "get", path: path18, ...opts });
+  getAPIList(path19, Page3, opts) {
+    return this.requestAPIList(Page3, { method: "get", path: path19, ...opts });
   }
   calculateContentLength(body) {
     if (typeof body === "string") {
@@ -39550,10 +39550,10 @@ var APIClient = class {
   }
   buildRequest(options, { retryCount = 0 } = {}) {
     options = { ...options };
-    const { method, path: path18, query, headers = {} } = options;
+    const { method, path: path19, query, headers = {} } = options;
     const body = ArrayBuffer.isView(options.body) || options.__binaryRequest && typeof options.body === "string" ? options.body : isMultipartBody(options.body) ? options.body.body : options.body ? JSON.stringify(options.body, null, 2) : null;
     const contentLength = this.calculateContentLength(body);
-    const url = this.buildURL(path18, query);
+    const url = this.buildURL(path19, query);
     if ("timeout" in options)
       validatePositiveInteger("timeout", options.timeout);
     options.timeout = options.timeout ?? this.timeout;
@@ -39677,8 +39677,8 @@ var APIClient = class {
     const request2 = this.makeRequest(options, null);
     return new PagePromise(this, request2, Page3);
   }
-  buildURL(path18, query) {
-    const url = isAbsoluteURL(path18) ? new URL(path18) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path18.startsWith("/") ? path18.slice(1) : path18));
+  buildURL(path19, query) {
+    const url = isAbsoluteURL(path19) ? new URL(path19) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path19.startsWith("/") ? path19.slice(1) : path19));
     const defaultQuery = this.defaultQuery();
     if (!isEmptyObj(defaultQuery)) {
       query = { ...defaultQuery, ...query };
@@ -42559,8 +42559,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path18, errorMaps, issueData } = params;
-  const fullPath = [...path18, ...issueData.path || []];
+  const { data, path: path19, errorMaps, issueData } = params;
+  const fullPath = [...path19, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -42676,11 +42676,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path18, key) {
+  constructor(parent, value, path19, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path18;
+    this._path = path19;
     this._key = key;
   }
   get path() {
@@ -49543,12 +49543,12 @@ function encodeURIPath(str2) {
   return str2.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@]+/g, encodeURIComponent);
 }
 var EMPTY = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
-var createPathTagFunction = (pathEncoder = encodeURIPath) => function path18(statics, ...params) {
+var createPathTagFunction = (pathEncoder = encodeURIPath) => function path19(statics, ...params) {
   if (statics.length === 1)
     return statics[0];
   let postPath = false;
   const invalidSegments = [];
-  const path19 = statics.reduce((previousValue, currentValue, index) => {
+  const path20 = statics.reduce((previousValue, currentValue, index) => {
     if (/[?#]/.test(currentValue)) {
       postPath = true;
     }
@@ -49565,7 +49565,7 @@ var createPathTagFunction = (pathEncoder = encodeURIPath) => function path18(sta
     }
     return previousValue + currentValue + (index === params.length ? "" : encoded);
   }, "");
-  const pathOnly = path19.split(/[?#]/, 1)[0];
+  const pathOnly = path20.split(/[?#]/, 1)[0];
   const invalidSegmentPattern = /(?<=^|\/)(?:\.|%2e){1,2}(?=\/|$)/gi;
   let match;
   while ((match = invalidSegmentPattern.exec(pathOnly)) !== null) {
@@ -49586,10 +49586,10 @@ var createPathTagFunction = (pathEncoder = encodeURIPath) => function path18(sta
     }, "");
     throw new OpenAIError(`Path parameters result in path with invalid segments:
 ${invalidSegments.map((e2) => e2.error).join("\n")}
-${path19}
+${path20}
 ${underline}`);
   }
-  return path19;
+  return path20;
 };
 var path6 = /* @__PURE__ */ createPathTagFunction(encodeURIPath);
 
@@ -57065,9 +57065,9 @@ var OpenAI = class {
     this.apiKey = token;
     return true;
   }
-  buildURL(path18, query, defaultBaseURL) {
+  buildURL(path19, query, defaultBaseURL) {
     const baseURL = !__classPrivateFieldGet10(this, _OpenAI_instances, "m", _OpenAI_baseURLOverridden).call(this) && defaultBaseURL || this.baseURL;
-    const url = isAbsoluteURL2(path18) ? new URL(path18) : new URL(baseURL + (baseURL.endsWith("/") && path18.startsWith("/") ? path18.slice(1) : path18));
+    const url = isAbsoluteURL2(path19) ? new URL(path19) : new URL(baseURL + (baseURL.endsWith("/") && path19.startsWith("/") ? path19.slice(1) : path19));
     const defaultQuery = this.defaultQuery();
     const pathQuery = Object.fromEntries(url.searchParams);
     if (!isEmptyObj2(defaultQuery) || !isEmptyObj2(pathQuery)) {
@@ -57095,24 +57095,24 @@ var OpenAI = class {
    */
   async prepareRequest(request2, { url, options }) {
   }
-  get(path18, opts) {
-    return this.methodRequest("get", path18, opts);
+  get(path19, opts) {
+    return this.methodRequest("get", path19, opts);
   }
-  post(path18, opts) {
-    return this.methodRequest("post", path18, opts);
+  post(path19, opts) {
+    return this.methodRequest("post", path19, opts);
   }
-  patch(path18, opts) {
-    return this.methodRequest("patch", path18, opts);
+  patch(path19, opts) {
+    return this.methodRequest("patch", path19, opts);
   }
-  put(path18, opts) {
-    return this.methodRequest("put", path18, opts);
+  put(path19, opts) {
+    return this.methodRequest("put", path19, opts);
   }
-  delete(path18, opts) {
-    return this.methodRequest("delete", path18, opts);
+  delete(path19, opts) {
+    return this.methodRequest("delete", path19, opts);
   }
-  methodRequest(method, path18, opts) {
+  methodRequest(method, path19, opts) {
     return this.request(Promise.resolve(opts).then((opts2) => {
-      return { method, path: path18, ...opts2 };
+      return { method, path: path19, ...opts2 };
     }));
   }
   request(options, remainingRetries = null) {
@@ -57231,8 +57231,8 @@ var OpenAI = class {
     }));
     return { response, options, controller, requestLogID, retryOfRequestLogID, startTime };
   }
-  getAPIList(path18, Page3, opts) {
-    return this.requestAPIList(Page3, opts && "then" in opts ? opts.then((opts2) => ({ method: "get", path: path18, ...opts2 })) : { method: "get", path: path18, ...opts });
+  getAPIList(path19, Page3, opts) {
+    return this.requestAPIList(Page3, opts && "then" in opts ? opts.then((opts2) => ({ method: "get", path: path19, ...opts2 })) : { method: "get", path: path19, ...opts });
   }
   requestAPIList(Page3, options) {
     const request2 = this.makeRequest(options, null, void 0);
@@ -57326,8 +57326,8 @@ var OpenAI = class {
   }
   async buildRequest(inputOptions, { retryCount = 0 } = {}) {
     const options = { ...inputOptions };
-    const { method, path: path18, query, defaultBaseURL } = options;
-    const url = this.buildURL(path18, query, defaultBaseURL);
+    const { method, path: path19, query, defaultBaseURL } = options;
+    const url = this.buildURL(path19, query, defaultBaseURL);
     if ("timeout" in options)
       validatePositiveInteger2("timeout", options.timeout);
     options.timeout = options.timeout ?? this.timeout;
@@ -58007,17 +58007,17 @@ var CATEGORIES = [
 function createRunContext() {
   return { readRanges: /* @__PURE__ */ new Map() };
 }
-function recordHeadRead(ctx, path18, startLine, endLine) {
+function recordHeadRead(ctx, path19, startLine, endLine) {
   if (endLine < startLine) return;
-  let ranges = ctx.readRanges.get(path18);
+  let ranges = ctx.readRanges.get(path19);
   if (ranges === void 0) {
     ranges = [];
-    ctx.readRanges.set(path18, ranges);
+    ctx.readRanges.set(path19, ranges);
   }
   ranges.push([startLine, endLine]);
 }
-function hasReadRange(ctx, path18, line) {
-  const ranges = ctx.readRanges.get(path18);
+function hasReadRange(ctx, path19, line) {
+  const ranges = ctx.readRanges.get(path19);
   if (ranges === void 0) return false;
   return ranges.some(([s2, e2]) => line >= s2 && line <= e2);
 }
@@ -58506,8 +58506,8 @@ function makeWorkerCheckUsageClaimTool(deps) {
       const matches = await runGitGrep2(args.symbol, deps.workspaceDir, args.path_glob);
       const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
       const fileSnippets = [];
-      for (const path18 of topPaths) {
-        const firstMatch = matches.find((m2) => m2.path === path18);
+      for (const path19 of topPaths) {
+        const firstMatch = matches.find((m2) => m2.path === path19);
         const matchLine = firstMatch?.line ?? 1;
         const readStart = Math.max(
           1,
@@ -58516,12 +58516,12 @@ function makeWorkerCheckUsageClaimTool(deps) {
         const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
-          { owner: deps.owner, repo: deps.repo, path: path18, ref: head },
+          { owner: deps.owner, repo: deps.repo, path: path19, ref: head },
           readStart,
           readEnd
         );
         if (result !== null) {
-          fileSnippets.push({ path: path18, content: result.content });
+          fileSnippets.push({ path: path19, content: result.content });
         }
       }
       const userPrompt = renderUserPrompt({
@@ -59419,7 +59419,14 @@ var DEFAULT_CONFIG = {
         semgrep: { custom_rules_path: ".code-review/semgrep-rules" },
         tsc: { enabled: true }
       },
-      container_cve: { enabled: false }
+      container_cve: { enabled: false },
+      // coverage-delta runs the project's existing coverage tool (vitest /
+      // jest / pytest-cov) and emits a finding on every PR-added line that
+      // isn't exercised by the test suite. Opt-in by default — full coverage
+      // runs can be slow and require the project's test deps to be installed
+      // in the workspace. Enable via
+      // `security.scanners.coverage_delta.enabled: true`.
+      coverage_delta: { enabled: false }
     },
     cache: { enabled: true },
     persistence: { enabled: false }
@@ -59467,7 +59474,8 @@ var securitySchema = external_exports.object({
     dependency_cve: scannerCommon.extend({ osv_endpoint: external_exports.string().url().optional() }),
     secrets: scannerCommon.extend({ include_generic_entropy: external_exports.boolean() }),
     sast: sastSchema,
-    container_cve: scannerCommon
+    container_cve: scannerCommon,
+    coverage_delta: scannerCommon
   }),
   cache: external_exports.object({ enabled: external_exports.boolean() }),
   persistence: external_exports.object({ enabled: external_exports.boolean() })
@@ -60501,17 +60509,17 @@ function requestLog(octokit) {
     octokit.log.debug("request", options);
     const start = Date.now();
     const requestOptions = octokit.request.endpoint.parse(options);
-    const path18 = requestOptions.url.replace(options.baseUrl, "");
+    const path19 = requestOptions.url.replace(options.baseUrl, "");
     return request2(options).then((response) => {
       const requestId = response.headers["x-github-request-id"];
       octokit.log.info(
-        `${requestOptions.method} ${path18} - ${response.status} with id ${requestId} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path19} - ${response.status} with id ${requestId} in ${Date.now() - start}ms`
       );
       return response;
     }).catch((error2) => {
       const requestId = error2.response?.headers["x-github-request-id"] || "UNKNOWN";
       octokit.log.error(
-        `${requestOptions.method} ${path18} - ${error2.status} with id ${requestId} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path19} - ${error2.status} with id ${requestId} in ${Date.now() - start}ms`
       );
       throw error2;
     });
@@ -63244,7 +63252,7 @@ var triggers_notification_paths_default = [
 ];
 function routeMatcher(paths) {
   const regexes = paths.map(
-    (path18) => path18.split("/").map((c2) => c2.startsWith("{") ? "(?:.+?)" : c2).join("/")
+    (path19) => path19.split("/").map((c2) => c2.startsWith("{") ? "(?:.+?)" : c2).join("/")
   );
   const regex2 = `^(?:${regexes.map((r2) => `(?:${r2})`).join("|")})[^/]*$`;
   return new RegExp(regex2, "i");
@@ -63563,14 +63571,14 @@ var LANGUAGE_BY_EXT = {
   hcl: "hcl",
   dockerfile: "dockerfile"
 };
-function detectLanguage(path18) {
-  const name = path18.split("/").pop() ?? "";
+function detectLanguage(path19) {
+  const name = path19.split("/").pop() ?? "";
   if (/^Dockerfile/i.test(name)) return "dockerfile";
   const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
   return LANGUAGE_BY_EXT[ext] ?? "plain";
 }
-function isGenerated(path18) {
-  return GENERATED_PATTERNS.some((re2) => re2.test(path18));
+function isGenerated(path19) {
+  return GENERATED_PATTERNS.some((re2) => re2.test(path19));
 }
 function determineStatus(file) {
   if (file.deleted) return "removed";
@@ -63581,7 +63589,7 @@ function determineStatus(file) {
 function parseUnifiedDiff(diff) {
   const files = (0, import_parse_diff.default)(diff);
   return files.map((file) => {
-    const path18 = file.to && file.to !== "/dev/null" ? file.to : file.from ?? "";
+    const path19 = file.to && file.to !== "/dev/null" ? file.to : file.from ?? "";
     const previousPath = file.from && file.from !== file.to ? file.from : void 0;
     const reviewable = computeReviewableLines(file.chunks);
     const totalChanges = file.chunks.reduce(
@@ -63589,15 +63597,15 @@ function parseUnifiedDiff(diff) {
       0
     );
     return {
-      path: path18,
+      path: path19,
       ...previousPath ? { previous_path: previousPath } : {},
       status: determineStatus(file),
       additions: file.additions,
       deletions: file.deletions,
       reviewable_lines: reviewable.ranges,
       added_lines: reviewable.addedSet,
-      language: detectLanguage(path18),
-      is_generated: isGenerated(path18),
+      language: detectLanguage(path19),
+      is_generated: isGenerated(path19),
       is_binary: file.chunks.length === 0 && totalChanges === 0,
       size_bytes: 0,
       // Filled in by pr-context.ts via the Files API
@@ -63774,6 +63782,8 @@ _via OSV \xB7 ${id}_`;
       return "\n\n_via SAST_";
     case "container-cve":
       return "\n\n_via container scan_";
+    case "coverage-delta":
+      return "\n\n_via coverage scan_";
     default: {
       const _exhaustive = c2.source.scanner;
       void _exhaustive;
@@ -63953,7 +63963,8 @@ function formatScannerCountsLine(comments) {
     ["dependency-cve", "dependency CVE", "dependency CVEs"],
     ["secrets", "secret", "secrets"],
     ["sast", "SAST", "SAST"],
-    ["container-cve", "container CVE", "container CVEs"]
+    ["container-cve", "container CVE", "container CVEs"],
+    ["coverage-delta", "coverage gap", "coverage gaps"]
   ];
   const breakdown = labels.map(([id, singular, plural]) => {
     const n2 = byScanner.get(id) ?? 0;
@@ -64003,6 +64014,8 @@ function buildSource(f2) {
         ...first !== void 0 ? { cve_id: first } : {}
       };
     }
+    case "coverage":
+      return { kind: "scanner", scanner: f2.scanner, rule_id: f2.rule_id };
   }
 }
 
@@ -67188,6 +67201,415 @@ var containerScannerStub = {
   scan: async () => emptyResult("container-cve")
 };
 
+// src/scanners/coverage-delta.ts
+var import_node_child_process10 = require("node:child_process");
+var import_node_fs5 = require("node:fs");
+var import_node_path12 = __toESM(require("node:path"), 1);
+var SCANNER_ID4 = "coverage-delta";
+var COVERAGE_TIMEOUT_MS = 24e4;
+var MAX_COVERAGE_JSON_BYTES = 50 * 1024 * 1024;
+var JS_SOURCE_EXTENSION = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+var PYTHON_SOURCE_EXTENSION = /\.(py|pyi)$/;
+function createCoverageDeltaScanner(options = {}) {
+  const log2 = options.logger ?? logger;
+  const detect = options.detectTool ?? detectCoverageTool;
+  const run = options.runCli ?? runCoverageCli;
+  const load = options.loadCoverage ?? loadCoverageMap;
+  return {
+    id: SCANNER_ID4,
+    // Coverage runs can be slow — large test suites routinely take 60-180s.
+    // Match the SAST budget so the per-scanner deadline doesn't kill a
+    // legitimate run.
+    timeoutMs: COVERAGE_TIMEOUT_MS,
+    applies(files) {
+      for (const f2 of files) {
+        if (!f2.is_binary && !f2.is_generated && f2.added_lines.size > 0) return true;
+      }
+      return false;
+    },
+    async scan(deps) {
+      const started = Date.now();
+      const errors = [];
+      const findings = [];
+      let files_examined = 0;
+      let tool2;
+      try {
+        tool2 = detect(deps);
+      } catch (err) {
+        void log2.warn(
+          `coverage-delta: tool detection failed: ${err.message}`
+        );
+        return finalize(started, [], errors, 0);
+      }
+      if (tool2 === null) {
+        void log2.debug(
+          "coverage-delta: no supported coverage tool detected; skipping"
+        );
+        return finalize(started, [], errors, 0);
+      }
+      void log2.debug(
+        `coverage-delta: detected ${tool2.id}; artifact=${tool2.artifact}`
+      );
+      let outcome;
+      try {
+        outcome = await run(tool2, deps);
+      } catch (err) {
+        void log2.warn(
+          `coverage-delta: ${tool2.id} runner threw: ${err.message}`
+        );
+        errors.push({
+          message: `coverage-delta: ${tool2.id} runner failed`,
+          cause: err.message,
+          fatal: false
+        });
+        return finalize(started, [], errors, 0);
+      }
+      if (!outcome.ok) {
+        void log2.warn(
+          `coverage-delta: ${tool2.id} did not produce coverage data: ${outcome.reason ?? "unknown"}`
+        );
+        errors.push({
+          message: `coverage-delta: ${tool2.id} did not produce coverage data`,
+          cause: outcome.reason,
+          fatal: false
+        });
+        return finalize(started, [], errors, 0);
+      }
+      let coverage;
+      try {
+        coverage = load(tool2, deps);
+      } catch (err) {
+        void log2.warn(
+          `coverage-delta: failed to load coverage report: ${err.message}`
+        );
+        errors.push({
+          message: "coverage-delta: failed to load coverage report",
+          cause: err.message,
+          fatal: false
+        });
+        return finalize(started, [], errors, 0);
+      }
+      if (coverage === null) {
+        return finalize(started, [], errors, 0);
+      }
+      const byRepoPath = /* @__PURE__ */ new Map();
+      for (const [rawPath, fileCov] of Object.entries(coverage)) {
+        if (fileCov === void 0 || fileCov === null) continue;
+        const rel = normalizeReportPath(deps.workspaceDir, rawPath);
+        byRepoPath.set(rel, fileCov);
+      }
+      for (const file of deps.changedFiles) {
+        if (file.is_binary || file.is_generated) continue;
+        if (file.added_lines.size === 0) continue;
+        const fc = byRepoPath.get(file.path);
+        if (fc === void 0) continue;
+        files_examined += 1;
+        const uncovered = uncoveredLines(fc);
+        for (const lineNo of file.added_lines) {
+          if (!uncovered.has(lineNo)) continue;
+          const finding = buildFinding8(tool2, file.path, lineNo);
+          const match = deps.ignoreList.matches(finding);
+          if (match.ignored) {
+            if (match.expired) {
+              void log2.notice(
+                `coverage-delta: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
+              );
+            }
+            continue;
+          }
+          findings.push(finding);
+        }
+      }
+      return finalize(started, findings, errors, files_examined);
+    }
+  };
+}
+function detectCoverageTool(deps) {
+  const ws = deps.workspaceDir;
+  const pkgJson = readJsonIfExists(import_node_path12.default.join(ws, "package.json"));
+  if (pkgJson !== null && (hasCoverageScript(pkgJson) || hasNamedDep(pkgJson, "vitest")) && hasJsOrTsChange(deps.changedFiles)) {
+    if (hasNamedDep(pkgJson, "vitest") || hasViteConfig(ws)) {
+      return {
+        id: "vitest",
+        // Vitest's `--coverage --reporter=json` writes coverage data to
+        // `coverage/coverage-final.json` by default (controlled by the
+        // istanbul reporter under the hood). We read this artifact rather
+        // than the stdout reporter so the parsing path stays consistent
+        // across CI configs that customize stdout reporters.
+        artifact: import_node_path12.default.join(ws, "coverage", "coverage-final.json")
+      };
+    }
+  }
+  if (pkgJson !== null && (hasNamedDep(pkgJson, "jest") || pkgJson.jest !== void 0 || hasJestConfig(ws)) && hasJsOrTsChange(deps.changedFiles)) {
+    return {
+      id: "jest",
+      artifact: import_node_path12.default.join(ws, "coverage", "coverage-final.json")
+    };
+  }
+  if (hasPythonProject(ws) && hasPythonChange(deps.changedFiles)) {
+    return {
+      id: "pytest-cov",
+      // `pytest --cov --cov-report=json` writes to `coverage.json` in the
+      // current working directory by default. We pin the path explicitly
+      // via `--cov-report=json:<path>` in runCoverageCli so this stays in
+      // sync.
+      artifact: import_node_path12.default.join(ws, "coverage.json")
+    };
+  }
+  return null;
+}
+function hasJsOrTsChange(files) {
+  for (const f2 of files) {
+    if (f2.is_binary || f2.is_generated) continue;
+    if (JS_SOURCE_EXTENSION.test(f2.path)) return true;
+  }
+  return false;
+}
+function hasPythonChange(files) {
+  for (const f2 of files) {
+    if (f2.is_binary || f2.is_generated) continue;
+    if (PYTHON_SOURCE_EXTENSION.test(f2.path)) return true;
+  }
+  return false;
+}
+function readJsonIfExists(p2) {
+  try {
+    if (!(0, import_node_fs5.existsSync)(p2)) return null;
+    const raw = (0, import_node_fs5.readFileSync)(p2, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function hasCoverageScript(pkg) {
+  const scripts = pkg.scripts;
+  if (!scripts || typeof scripts !== "object") return false;
+  return typeof scripts.coverage === "string" || typeof scripts["test:coverage"] === "string";
+}
+function hasNamedDep(pkg, name) {
+  return pkg.dependencies?.[name] !== void 0 || pkg.devDependencies?.[name] !== void 0 || pkg.peerDependencies?.[name] !== void 0 || pkg.optionalDependencies?.[name] !== void 0;
+}
+function hasViteConfig(workspaceDir) {
+  return (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "vitest.config.mjs"));
+}
+function hasJestConfig(workspaceDir) {
+  return (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "jest.config.json"));
+}
+function hasPythonProject(workspaceDir) {
+  return (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs5.existsSync)(import_node_path12.default.join(workspaceDir, "conftest.py"));
+}
+function normalizeReportPath(workspaceDir, toolPath) {
+  const normalized = import_node_path12.default.isAbsolute(toolPath) ? import_node_path12.default.relative(workspaceDir, toolPath) : import_node_path12.default.normalize(toolPath);
+  return normalized.split(import_node_path12.default.sep).join("/");
+}
+function uncoveredLines(fc) {
+  const maxHitsByLine = /* @__PURE__ */ new Map();
+  for (const [stmtId, loc] of Object.entries(fc.statementMap)) {
+    if (loc === void 0 || loc === null || loc.start === void 0) continue;
+    const startLine = loc.start.line;
+    if (typeof startLine !== "number" || !Number.isFinite(startLine)) continue;
+    const hits = fc.s[stmtId];
+    const count = typeof hits === "number" ? hits : 0;
+    const prev = maxHitsByLine.get(startLine);
+    if (prev === void 0 || count > prev) {
+      maxHitsByLine.set(startLine, count);
+    }
+    const endLine = loc.end?.line;
+    if (typeof endLine === "number" && endLine > startLine) {
+      for (let l2 = startLine + 1; l2 <= endLine; l2 += 1) {
+        const p2 = maxHitsByLine.get(l2);
+        if (p2 === void 0 || count > p2) maxHitsByLine.set(l2, count);
+      }
+    }
+  }
+  const out = /* @__PURE__ */ new Set();
+  for (const [line, max] of maxHitsByLine) {
+    if (max === 0) out.add(line);
+  }
+  return out;
+}
+function buildFinding8(tool2, file_path, line) {
+  const rule_id = `coverage:${tool2.id}:uncovered-line`;
+  return {
+    scanner: SCANNER_ID4,
+    rule_id,
+    file_path,
+    line,
+    severity: "minor",
+    category: "test-gap",
+    title: `Untested line in ${import_node_path12.default.basename(file_path)}:${line}`,
+    description: "This added line is not exercised by the test suite. Consider adding a test that covers this path, or move the logic behind a tested entry point.",
+    confidence: "medium",
+    evidence: { kind: "coverage", tool: tool2.id },
+    fingerprint: `${SCANNER_ID4}:${tool2.id}:${file_path}:${line}`
+  };
+}
+async function runCoverageCli(tool2, deps) {
+  const { command, args, env } = buildCoverageInvocation(tool2, deps);
+  return new Promise((resolve3) => {
+    const child2 = (0, import_node_child_process10.spawn)(command, args, {
+      cwd: deps.workspaceDir,
+      env,
+      // We never run under shell:true here. Coverage commands always go
+      // through `npx` / `pytest`, never a .cmd shim, so the shell-quoting
+      // gymnastics the SAST linters need don't apply.
+      shell: false
+    });
+    const stderrChunks = [];
+    let settled = false;
+    const finishOk = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if ((0, import_node_fs5.existsSync)(tool2.artifact)) {
+        resolve3({ ok: true });
+      } else {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim().slice(0, 500);
+        resolve3({
+          ok: false,
+          reason: `${tool2.id} produced no coverage artifact at ${tool2.artifact}${stderr ? `; stderr: ${stderr}` : ""}`
+        });
+      }
+    };
+    const finishErr = (reason) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child2.kill("SIGKILL");
+      resolve3({ ok: false, reason });
+    };
+    const timer = setTimeout(() => {
+      finishErr(`${tool2.id} timed out after ${COVERAGE_TIMEOUT_MS}ms`);
+    }, COVERAGE_TIMEOUT_MS);
+    child2.stdout.on("data", () => void 0);
+    const STDERR_BUDGET = 16 * 1024;
+    let stderrTotal = 0;
+    child2.stderr.on("data", (b2) => {
+      if (stderrTotal >= STDERR_BUDGET) return;
+      stderrChunks.push(b2);
+      stderrTotal += b2.length;
+    });
+    deps.signal.addEventListener(
+      "abort",
+      () => finishErr(`${tool2.id} aborted`),
+      { once: true }
+    );
+    child2.on("close", () => finishOk());
+    child2.on("error", (err) => finishErr(`${tool2.id} spawn error: ${err.message}`));
+  });
+}
+function buildCoverageInvocation(tool2, _deps) {
+  const env = { ...process.env };
+  switch (tool2.id) {
+    case "vitest":
+      return {
+        command: "npx",
+        // `vitest run` is the explicit non-watch entry point. `--coverage`
+        // turns on the v8 / istanbul reporter; `--reporter=json` makes
+        // stdout machine-readable (we don't read stdout but it stops the
+        // CLI from printing a noisy human reporter to the runner log).
+        args: ["vitest", "run", "--coverage", "--reporter=json"],
+        env
+      };
+    case "jest":
+      return {
+        command: "npx",
+        // `--coverageReporters=json` produces the Istanbul-format
+        // `coverage/coverage-final.json` that downstream parsing expects.
+        // We don't override --coverageDirectory because the default
+        // (`<workspace>/coverage`) is what `detectCoverageTool` declared
+        // as the artifact path.
+        args: ["jest", "--coverage", "--coverageReporters=json"],
+        env
+      };
+    case "pytest-cov":
+      return {
+        command: "pytest",
+        // Pin the JSON report destination explicitly so it matches the
+        // `tool.artifact` we declared in detection. `--cov` without an
+        // argument tells coverage.py to measure everything pytest runs.
+        args: ["--cov", `--cov-report=json:${tool2.artifact}`],
+        env
+      };
+  }
+}
+function loadCoverageMap(tool2, _deps) {
+  if (!(0, import_node_fs5.existsSync)(tool2.artifact)) return null;
+  let raw;
+  try {
+    raw = (0, import_node_fs5.readFileSync)(tool2.artifact, "utf-8");
+  } catch {
+    return null;
+  }
+  if (raw.length > MAX_COVERAGE_JSON_BYTES) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object") return null;
+  switch (tool2.id) {
+    case "vitest":
+    case "jest":
+      return coerceIstanbulMap(parsed);
+    case "pytest-cov":
+      return translatePythonCoverage(parsed);
+  }
+}
+function coerceIstanbulMap(raw) {
+  const out = {};
+  for (const [path_, fc] of Object.entries(raw)) {
+    if (fc === null || typeof fc !== "object") continue;
+    const obj = fc;
+    const statementMap = obj.statementMap;
+    const s2 = obj.s;
+    if (statementMap === null || typeof statementMap !== "object" || s2 === null || typeof s2 !== "object") {
+      continue;
+    }
+    out[path_] = {
+      statementMap,
+      s: s2
+    };
+  }
+  return out;
+}
+function translatePythonCoverage(report) {
+  const out = {};
+  if (!report.files || typeof report.files !== "object") return out;
+  for (const [path_, file] of Object.entries(report.files)) {
+    if (file === null || typeof file !== "object") continue;
+    const executed = Array.isArray(file.executed_lines) ? file.executed_lines : [];
+    const missing = Array.isArray(file.missing_lines) ? file.missing_lines : [];
+    const statementMap = {};
+    const s2 = {};
+    let nextId = 0;
+    for (const line of executed) {
+      if (typeof line !== "number") continue;
+      const id = String(nextId++);
+      statementMap[id] = { start: { line }, end: { line } };
+      s2[id] = 1;
+    }
+    for (const line of missing) {
+      if (typeof line !== "number") continue;
+      const id = String(nextId++);
+      statementMap[id] = { start: { line }, end: { line } };
+      s2[id] = 0;
+    }
+    out[path_] = { statementMap, s: s2 };
+  }
+  return out;
+}
+function finalize(started, findings, errors, files_examined) {
+  const metrics = {
+    duration_ms: Date.now() - started,
+    files_examined,
+    network_calls: 0,
+    cache_hits: 0
+  };
+  return { scanner: SCANNER_ID4, findings, errors, metrics };
+}
+
 // src/scanners/registry.ts
 function buildEnabledScanners(config, options = {}) {
   if (config.enabled === false) return [];
@@ -67217,6 +67639,10 @@ function buildEnabledScanners(config, options = {}) {
   }
   if (config.scanners.container_cve.enabled) {
     const factory = overrides["container-cve"] ?? (() => containerScannerStub);
+    out.push(factory());
+  }
+  if (config.scanners.coverage_delta.enabled) {
+    const factory = overrides["coverage-delta"] ?? (() => createCoverageDeltaScanner());
     out.push(factory());
   }
   return out;
@@ -67350,7 +67776,8 @@ var SCANNER_CONFIG_KEY = {
   "dependency-cve": "dependency_cve",
   secrets: "secrets",
   sast: "sast",
-  "container-cve": "container_cve"
+  "container-cve": "container_cve",
+  "coverage-delta": "coverage_delta"
 };
 function scannerMinSeverity(id, cfg) {
   const key = SCANNER_CONFIG_KEY[id];
@@ -67642,7 +68069,7 @@ async function loadConfig(input, fileReader, headSha) {
     await logger.debug(`Could not read ${input.config_path} from GitHub: ${err.message}`);
   }
   try {
-    const localPath = (0, import_node_path12.resolve)(input.workspace_dir, input.config_path);
+    const localPath = (0, import_node_path13.resolve)(input.workspace_dir, input.config_path);
     const content = await (0, import_promises.readFile)(localPath, "utf-8");
     return loadConfigFromString(content);
   } catch {

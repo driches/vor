@@ -28,6 +28,7 @@ import { createDependencyCveScanner } from './dependency-cve.js';
 import { createSecretsScanner } from './secrets.js';
 import { sastScannerStub } from './sast.js';
 import { containerScannerStub } from './container.js';
+import { createCoverageDeltaScanner } from './coverage-delta.js';
 import { createOsvClient } from './osv-client.js';
 
 /**
@@ -42,9 +43,9 @@ export interface BuildScannersOptions {
 
 /**
  * Build the array of enabled Scanner instances in a deterministic order
- * (dependency-cve, secrets, sast, container-cve). Order is stable so the
- * runner's perScanner array — and ultimately the review summary — keeps a
- * predictable shape across runs.
+ * (dependency-cve, secrets, sast, container-cve, coverage-delta). Order is
+ * stable so the runner's perScanner array — and ultimately the review
+ * summary — keeps a predictable shape across runs.
  *
  * Note: this function performs no I/O. The dependency-cve factory does lazy
  * construction of the OSV client internally, so even when osv_endpoint is
@@ -104,6 +105,16 @@ export function buildEnabledScanners(
   if (config.scanners.container_cve.enabled) {
     const factory: () => Scanner =
       overrides['container-cve'] ?? (() => containerScannerStub);
+    out.push(factory());
+  }
+
+  // coverage-delta (opt-in — see DEFAULT_CONFIG comment for the rationale).
+  // Last in the order so any LLM-side dedup against AI test-gap comments
+  // sees the higher-context findings first. Stable position lets the
+  // perScanner array and review summary keep predictable shape.
+  if (config.scanners.coverage_delta.enabled) {
+    const factory: () => Scanner =
+      overrides['coverage-delta'] ?? (() => createCoverageDeltaScanner());
     out.push(factory());
   }
 

@@ -123,6 +123,11 @@ export type ScanEvidence =
       base_image: string;
       tag: string;
       cve_ids: string[];
+    }
+  | {
+      kind: 'coverage';
+      /** Which coverage tool produced the data (vitest / jest / pytest-cov). */
+      tool: 'vitest' | 'jest' | 'pytest-cov';
     };
 
 /**
