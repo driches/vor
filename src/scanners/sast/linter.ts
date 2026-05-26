@@ -184,30 +184,32 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
   'FLUTTER_HOME',
   'PUB_CACHE',
   'PUB_HOSTED_URL',
-  // Semgrep authentication. Operators using Semgrep Pro authenticate via
-  // SEMGREP_APP_TOKEN to access proprietary rule packs, organization
-  // policies, and managed configs. Stripping it from the spawn env
-  // silently degrades them to the free `--config=auto` ruleset with no
-  // warning. This IS a credential — we're trading the env-allowlist
-  // boundary for the visibility of Pro coverage. Acceptable because (a)
-  // the linter is the legitimate consumer of this token, and (b) the
-  // alternative (silent coverage degradation) is worse for the operator.
-  //
-  // SECURITY WARNING for `pull_request_target` workflows: secrets are
-  // exposed to PR code in that trigger mode, and a malicious PR can add
-  // a `semgrep` binary earlier on PATH (or shadow `node_modules/.bin/semgrep`
-  // via package.json) before this action runs. That attacker-controlled
-  // binary would inherit SEMGREP_APP_TOKEN from the env we pass and could
-  // exfiltrate it. Mitigations: (1) don't run this action on
-  // `pull_request_target` against untrusted forks, (2) future bundled-
-  // binary mode will resolve semgrep from a pinned location instead of
-  // PATH, eliminating the shadow vector for this token specifically.
-  'SEMGREP_APP_TOKEN',
+  // NOTE: SEMGREP_APP_TOKEN is NOT in this shared allowlist. It's passed
+  // ONLY to the semgrep subprocess via the `extraEnvKeys` parameter of
+  // buildLinterEnv (see semgrep.ts). Per-linter scoping limits blast
+  // radius: a malicious workspace-resolved binary (eslint, ruff, knip)
+  // can't see the token if its consumer is only semgrep.
 ];
 
-export function buildLinterEnv(): NodeJS.ProcessEnv {
+/**
+ * Credentials that some linters need but which we DON'T want exposed to
+ * the others. Passed selectively via `buildLinterEnv(extraKeys)` from
+ * the linter that legitimately needs them.
+ */
+export const SEMGREP_EXTRA_ENV_KEYS: readonly string[] = ['SEMGREP_APP_TOKEN'];
+
+export function buildLinterEnv(
+  extraKeys: readonly string[] = [],
+): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const key of LINTER_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) out[key] = value;
+  }
+  // Per-linter extras (e.g. SEMGREP_APP_TOKEN for semgrep). Kept out of
+  // the shared allowlist so a malicious workspace binary for a DIFFERENT
+  // linter can't read credentials it has no legitimate need for.
+  for (const key of extraKeys) {
     const value = process.env[key];
     if (value !== undefined) out[key] = value;
   }

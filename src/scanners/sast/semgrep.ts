@@ -28,6 +28,7 @@ import {
   buildLinterEnv,
   filterShellSafePaths,
   normalizeToolPath,
+  SEMGREP_EXTRA_ENV_KEYS,
   type LinterModule,
   type LinterRun,
 } from './linter.js';
@@ -213,7 +214,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       ],
       {
         cwd: deps.workspaceDir,
-        env: buildLinterEnv(),
+        // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
+        // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
+        // malicious workspace-resolved eslint/ruff/knip binary cannot
+        // read this credential.
+        env: buildLinterEnv(SEMGREP_EXTRA_ENV_KEYS),
       },
     );
     // Buffer accumulation — semgrep JSON on a large monorepo with
