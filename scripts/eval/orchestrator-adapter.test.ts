@@ -271,6 +271,49 @@ describe('evalRun', () => {
     expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
   });
 
+  it('force-disables worker_delegation in the sandboxed config so eval runs never hit real Anthropic SDK (Codex P2 #3300812876)', async () => {
+    // Case configs that opt into `experimental.worker_delegation.enabled`
+    // would otherwise cause runAgent to construct a real
+    // `new Anthropic({ apiKey })` for pre-flight Haiku + WorkerClient —
+    // bypassing the providerFactory sandbox and either hitting the live
+    // API or 401'ing with the dummy test key. evalRun deep-clones the
+    // input and force-disables the flag before serializing to YAML.
+    //
+    // The caller's config object must NOT be mutated (clones are dropped).
+    const callerConfig: ReviewConfig = {
+      ...DEFAULT_CONFIG,
+      experimental: {
+        ...DEFAULT_CONFIG.experimental,
+        worker_delegation: {
+          ...DEFAULT_CONFIG.experimental.worker_delegation,
+          enabled: true,
+        },
+      },
+    };
+    const minimalCase: LoadedCase = {
+      case_id: 'sandbox-worker-disable',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    await evalRun({
+      case: minimalCase,
+      config: callerConfig,
+      apiKey: 'sk-ant-test',
+      agentScript: endTurnScript(),
+    });
+
+    // 1. The caller's config is unmutated — they still see enabled: true.
+    expect(callerConfig.experimental.worker_delegation.enabled).toBe(true);
+    // 2. The serialized .code-review.yml the orchestrator reads has the
+    //    flag flipped off (we don't have direct access to it post-run, but
+    //    the absence of a thrown error from runAgent's worker/pre-flight
+    //    code paths is the load-bearing signal — with enabled=true and
+    //    the dummy key, the real Anthropic SDK would have 401'd).
+    // 3. Implicit by surviving the await above without an Anthropic SDK
+    //    auth error.
+  });
+
   it('does not double-charge cached tokens for cache-heavy OpenAI scripts (Codex P2 #3300723609)', async () => {
     // OpenAI reports `input_tokens` INCLUDING cached_tokens as a subset
     // (charged at the discounted cache_read rate). Without provider-aware

@@ -321,7 +321,22 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
     // serve a serialized form of the supplied config so the orchestrator picks
     // up exactly what the test asked for.
-    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
+    //
+    // Force-disable `experimental.worker_delegation` for the eval-run
+    // sandbox: the providerFactory injection only stubs `provider.complete()`
+    // on the MAIN agent loop. The pre-flight Haiku call and the
+    // worker_check_usage_claim tool both construct their own real
+    // `new Anthropic({ apiKey })` instances inside runAgent — meaning a
+    // case config with worker_delegation.enabled = true would hit the live
+    // Anthropic API (or fail outright with the dummy `sk-ant-test` key),
+    // bypassing the sandbox and skewing eval results. We deep-clone the
+    // config first so the caller's object isn't mutated. Codex P2
+    // #3300812876.
+    const sandboxedConfig: ReviewConfig = JSON.parse(
+      JSON.stringify(input.config),
+    ) as ReviewConfig;
+    sandboxedConfig.experimental.worker_delegation.enabled = false;
+    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(sandboxedConfig));
 
     const wallStart = Date.now();
     // Do NOT swallow runOrchestrator exceptions. Converting them into a
