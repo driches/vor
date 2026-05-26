@@ -1027,39 +1027,28 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
       ],
     };
 
-    // Concurrency probe — count how many getVuln calls are in flight at
-    // their peak. A parallel implementation hits inFlight === 3 (all three
-    // calls suspended inside the deferred promise at the same time); a
-    // serial implementation never exceeds 1. This is a timing-free signal:
-    // we wait for ALL three calls to be in-flight before resolving any of
-    // them, so the test deterministically distinguishes parallel from
-    // serial regardless of CI jitter, scheduling, or sleep durations.
+    // Each getVuln sleeps SLEEP_MS before returning. Serial cost is
+    // 3 × SLEEP_MS; parallel cost is ~SLEEP_MS. Threshold sits between the
+    // two with real headroom on both sides.
     //
-    // Previously this test used a wall-clock threshold (elapsed < 145ms)
-    // which was both flaky (run 26454890305 hit 156ms vs 145ms cap) AND,
-    // when widened to 300ms to absorb jitter, no longer caught regressions
-    // to serial (3 × 50ms = 150ms serial passes a 300ms cap). Codex
-    // flagged the regression-detection gap on PR #28 — this is the fix.
-    const inFlight = { current: 0, max: 0 };
-    let releaseAll: (() => void) | null = null;
-    const allInFlight = new Promise<void>((resolve) => {
-      releaseAll = resolve;
-    });
-
+    // SLEEP_MS = 200, THRESHOLD = 400 means:
+    //   parallel baseline ≈ 200ms, +200ms jitter slack before tripping
+    //   serial baseline = 600ms, -200ms below the cap is impossible
+    //
+    // The PR #28 history is instructive: the original cap (145ms above
+    // a 50ms sleep) was 95ms above perfect-parallel and 5ms below serial,
+    // which made it both flake-prone AND tight. The first proposed fix
+    // (bump to 300ms) absorbed jitter but accepted serial (150ms < 300ms)
+    // — Codex flagged correctly. The second attempt (concurrency probe
+    // with a 200ms safety timer) caught regressions deterministically but
+    // hung CI workers twice in a row on the same SHA, so we're back to a
+    // timing assertion with fixture sizes that give it real margin.
+    const SLEEP_MS = 200;
+    const PARALLEL_THRESHOLD_MS = 400;
     const osvClient: OsvClient = {
       queryBatch: vi.fn().mockResolvedValue(batchResp),
       getVuln: vi.fn().mockImplementation(async (id: string) => {
-        inFlight.current += 1;
-        inFlight.max = Math.max(inFlight.max, inFlight.current);
-        // Resolve the gate once all 3 calls have entered. A serial caller
-        // would deadlock here — exactly the regression we want to catch.
-        // The 200ms safety timer below ensures a serial regression fails
-        // the assertion rather than hanging the test indefinitely.
-        if (inFlight.current >= 3 && releaseAll) {
-          releaseAll();
-        }
-        await allInFlight;
-        inFlight.current -= 1;
+        await new Promise((r) => setTimeout(r, SLEEP_MS));
         return { ...LODASH_VULN, id };
       }),
     };
@@ -1068,28 +1057,21 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
     } as unknown as FileReader;
     const scanner = createDependencyCveScanner({ osvClient });
 
-    // Safety timer — if the scanner is serial, only one getVuln will ever
-    // be in flight and `allInFlight` will never resolve, hanging the
-    // scanner. Release the gate after 200ms so the scanner completes and
-    // the assertion below fails cleanly with inFlight.max === 1 instead
-    // of the test timing out.
-    const safetyTimer = setTimeout(() => {
-      if (releaseAll) releaseAll();
-    }, 200);
-
+    const start = Date.now();
     const result = await scanner.scan(
       makeScannerDeps({
         changedFiles: [makeChangedFile({ path: 'package-lock.json' })],
         fileReader: reader,
       }),
     );
-    clearTimeout(safetyTimer);
+    const elapsed = Date.now() - start;
 
     expect(osvClient.getVuln).toHaveBeenCalledTimes(3);
     expect(result.findings.length).toBeGreaterThanOrEqual(3);
-    // The load-bearing assertion: all three getVuln calls must have been
-    // in flight simultaneously. Serial code path → max=1 → fails.
-    expect(inFlight.max).toBe(3);
+    // A serial run is 600ms (3 × 200ms) — well above the 400ms cap, with
+    // no plausible CI jitter that closes the 200ms gap. A parallel run is
+    // ~200ms with 200ms of jitter slack before tripping the cap.
+    expect(elapsed).toBeLessThan(PARALLEL_THRESHOLD_MS);
   });
 });
 
