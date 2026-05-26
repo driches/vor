@@ -81,11 +81,20 @@ export const ruffLinter: LinterModule = {
       const msg = (err as Error).message;
       // Quiet skip when ruff isn't actually installed anywhere
       // resolvable. `locateBin` falls back to the bare name 'ruff' for
-      // PATH lookup, and `spawn` reports ENOENT when PATH doesn't have
-      // it either — that's the "no ruff in this workspace" case, not a
-      // scanner failure. (Many Python repos use flake8/pylint instead.)
-      // Match the dart and actionlint modules' contract.
-      if (msg.includes('ENOENT') || msg.includes('not found')) {
+      // PATH lookup (now with shell:true on Windows for .cmd shims),
+      // so we need the full set of missing-binary signals across
+      // platforms. Same enumeration as knip.ts — see the comment there
+      // for the per-signal rationale (ENOENT, "not found", cmd.exe's
+      // "is not recognized" / exit 9009, POSIX sh exit 127). The
+      // 9009/127 exit codes are locale-independent and load-bearing;
+      // the English substrings are belt-and-suspenders.
+      const isMissingBinary =
+        msg.includes('ENOENT') ||
+        msg.includes('not found') ||
+        msg.includes('is not recognized') ||
+        msg.includes('exited 9009') ||
+        msg.includes('exited 127');
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `ruff failed: ${msg}`, fatal: false });
