@@ -55793,7 +55793,7 @@ var ruffLinter = {
       rawOutput = await runCli2(bin, safe, deps);
     } catch (err) {
       const msg = err.message;
-      const isMissingBinary = msg.includes("ENOENT") || msg.includes("not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
+      const isMissingBinary = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
@@ -56291,6 +56291,11 @@ var TIMEOUT_MS6 = 12e4;
 var TARGET_EXTENSIONS3 = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 var knipLinter = {
   id: ID5,
+  // knip analyzes the whole project via its symbol table; we don't pass
+  // a file list in argv. The orchestrator uses this flag to hand knip
+  // the full liveFiles set (not just the TS/JS subset) so the output
+  // attribution map can match any PR-changed path knip references.
+  wholeProject: true,
   applies(files) {
     return files.some(
       (f2) => TARGET_EXTENSIONS3.test(f2.path) && !f2.is_binary && !f2.is_generated
@@ -56304,7 +56309,7 @@ var knipLinter = {
       rawOutput = await runCli5(bin, deps);
     } catch (err) {
       const msg = err.message;
-      const isMissingBinary = msg.includes("ENOENT") || msg.includes("not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
+      const isMissingBinary = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
@@ -56759,7 +56764,7 @@ async function orchestrate(deps) {
     applicable.map(
       (linter) => linter.run(
         deps,
-        linter.id === "knip" ? liveFiles : liveFiles.filter((f2) => linter.applies([f2]))
+        linter.wholeProject === true ? liveFiles : liveFiles.filter((f2) => linter.applies([f2]))
       )
     )
   );

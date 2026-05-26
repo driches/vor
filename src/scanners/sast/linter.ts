@@ -422,6 +422,20 @@ export interface LinterModule {
   applies(files: readonly ChangedFile[]): boolean;
 
   /**
+   * True for linters that analyze the whole project regardless of which
+   * specific files were passed (knip's symbol-table analysis is the
+   * canonical example). The orchestrator passes the full liveFiles set
+   * to these linters' output-attribution lookup map instead of the
+   * extension-filtered subset — otherwise a finding for a file outside
+   * the linter's normal scope would be silently dropped.
+   *
+   * Replaces the hardcoded `linter.id === 'knip'` check the orchestrator
+   * used to carry; explicit field is forward-compatible for any future
+   * whole-project linter (e.g. a TypeScript project-wide checker).
+   */
+  readonly wholeProject?: boolean;
+
+  /**
    * Spawn the linter, parse its output, and return findings restricted to
    * lines the PR actually added. `targetFiles` is pre-filtered by the
    * sast orchestrator to the files this linter's `applies()` matched.

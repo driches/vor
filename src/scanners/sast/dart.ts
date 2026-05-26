@@ -108,8 +108,13 @@ export const dartLinter: LinterModule = {
  * Parse one line of dart analyze --format=machine output. Lines that
  * don't fit the 8-pipe schema (header lines, empty lines, the trailing
  * "N issues found" status line) return null.
+ *
+ * Exported for testing — the parsing has more invariants than its size
+ * suggests (8-pipe schema, message tails containing `|`, severity
+ * validation, numeric coercion), and a regression here drops every dart
+ * finding silently.
  */
-function parseDartLine(line: string): DartFinding | null {
+export function parseDartLine(line: string): DartFinding | null {
   if (line.trim().length === 0) return null;
   const parts = line.split('|');
   if (parts.length < 8) return null;

@@ -107,17 +107,19 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
   // invoked on .py files, ruff isn't invoked on .ts files, etc.). The
   // per-linter `applies()` is the predicate.
   //
-  // Exception: knip runs whole-project (it doesn't take a file argv) and
-  // the linter's output loop uses `targetFiles` to look up which finding
-  // attaches to which PR-changed file. If we only handed it the TS/JS
-  // subset, a future knip release that touches non-TS metadata (or any
-  // path we didn't expect in its scope) would silently drop. Pass the
-  // full live set so the lookup map covers everything in the PR.
+  // Exception: whole-project linters (knip today; potentially more
+  // TypeScript-project-wide tools in future) don't take a file argv and
+  // use the targetFiles map for output-to-PR-file attribution. They get
+  // the full liveFiles set; otherwise a finding for a file outside the
+  // linter's normal extension scope would silently drop. The
+  // `wholeProject` field on LinterModule replaces the previous hardcoded
+  // `linter.id === 'knip'` check so adding a new whole-project linter is
+  // a one-line opt-in instead of an orchestrator edit.
   const runs = await Promise.allSettled(
     applicable.map((linter) =>
       linter.run(
         deps,
-        linter.id === 'knip'
+        linter.wholeProject === true
           ? liveFiles
           : liveFiles.filter((f) => linter.applies([f])),
       ),

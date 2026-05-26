@@ -97,6 +97,11 @@ interface KnipDuplicateIssue {
 
 export const knipLinter: LinterModule = {
   id: ID,
+  // knip analyzes the whole project via its symbol table; we don't pass
+  // a file list in argv. The orchestrator uses this flag to hand knip
+  // the full liveFiles set (not just the TS/JS subset) so the output
+  // attribution map can match any PR-changed path knip references.
+  wholeProject: true,
   applies(files: readonly ChangedFile[]): boolean {
     return files.some(
       (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
@@ -130,9 +135,15 @@ export const knipLinter: LinterModule = {
       // The 9009/127 codes are the load-bearing signals; the substring
       // matches cover edge cases where Node-wrapping the error obscures
       // the exit code.
+      // `command not found` (POSIX shell) is the specific match, not bare
+      // `not found` — knip's own error messages like
+      // "Config file not found at knip.config.ts" contain `not found`
+      // and would be wrongly classified as missing-binary, silently
+      // swallowing a real config error. The exit-code matches (9009/127)
+      // are still the load-bearing signals.
       const isMissingBinary =
         msg.includes('ENOENT') ||
-        msg.includes('not found') ||
+        msg.includes('command not found') ||
         msg.includes('is not recognized') ||
         msg.includes('exited 9009') ||
         msg.includes('exited 127');

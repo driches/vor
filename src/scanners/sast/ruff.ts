@@ -89,9 +89,15 @@ export const ruffLinter: LinterModule = {
       // "is not recognized" / exit 9009, POSIX sh exit 127). The
       // 9009/127 exit codes are locale-independent and load-bearing;
       // the English substrings are belt-and-suspenders.
+      // `command not found` (POSIX shell) is the specific match, not bare
+      // `not found` — ruff's own error messages like
+      // "Rule not found: X" or "ruff.toml not found" contain `not found`
+      // and would be wrongly classified as missing-binary, silently
+      // swallowing a real config error. The exit-code matches (9009/127)
+      // are still the load-bearing signals.
       const isMissingBinary =
         msg.includes('ENOENT') ||
-        msg.includes('not found') ||
+        msg.includes('command not found') ||
         msg.includes('is not recognized') ||
         msg.includes('exited 9009') ||
         msg.includes('exited 127');
