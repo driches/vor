@@ -56421,7 +56421,7 @@ function runCli5(bin, deps) {
         reject(new Error(`knip killed by signal ${signal ?? "unknown"}`));
         return;
       }
-      if (code > 2) {
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

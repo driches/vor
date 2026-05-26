@@ -326,13 +326,17 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
         reject(new Error(`knip killed by signal ${signal ?? 'unknown'}`));
         return;
       }
-      // knip exit codes (verified via knip/src/cli.ts):
-      //   0 = no issues
-      //   1 = issues in dev files
-      //   2 = issues in production files (NORMAL — not a runtime error)
-      //   >2 = config/runtime error
-      // All of 0/1/2 produce parseable JSON; only >2 should reject.
-      if (code > 2) {
+      // knip exit codes (verified directly from knip/src/cli.ts):
+      //   0 = success (with or without findings)
+      //   1 = findings present (the documented "issues found" exit code)
+      //   2 = ERROR — knip's source sets `process.exitCode = 2` in its
+      //       top-level catch block and in the config-error path. The
+      //       JSON output is typically empty/partial.
+      // Earlier commit 4f3824f mistakenly accepted code 2 as success
+      // based on a self-review claim that was the OPPOSITE of the
+      // truth. Reverted: code > 1 is the correct boundary, matching
+      // the original v0.4.0 behavior.
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
