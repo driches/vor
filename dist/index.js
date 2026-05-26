@@ -56439,8 +56439,8 @@ Knip detects this via whole-project analysis. If \`${issue2.name}\` is intended 
 }
 function buildDuplicateFinding(filePath, issue2) {
   const ruleId = "duplicate-export";
-  const severity = "important";
-  const category = "bug";
+  const severity = "minor";
+  const category = "readability";
   const confidence = "high";
   const fingerprint = `${ID5}:${ruleId}:${filePath}:${issue2.line}:${issue2.name}`;
   const what = `\`${issue2.name}\` is exported from multiple files \u2014 consumers may import the wrong one.`;

@@ -389,8 +389,15 @@ function buildDuplicateFinding(
   issue: KnipDuplicateIssue & { line: number },
 ): ScanFinding {
   const ruleId = 'duplicate-export';
-  const severity: Severity = 'important';
-  const category: Category = 'bug';
+  // Duplicate exports are a code-organization concern, not a runtime
+  // crash — the symbol exists in two places, which is confusing but
+  // rarely breaks behavior. Tagging 'important' bypassed the default
+  // 'minor' floor and would have flooded PRs on re-export-heavy
+  // codebases, eroding trust in the scanner. 'minor' / 'readability'
+  // aligns with buildExportFinding's calibration for regular unused
+  // exports; operators who care more can lower their severity floor.
+  const severity: Severity = 'minor';
+  const category: Category = 'readability';
   const confidence: Confidence = 'high';
   const fingerprint = `${ID}:${ruleId}:${filePath}:${issue.line}:${issue.name}`;
   const what = `\`${issue.name}\` is exported from multiple files — consumers may import the wrong one.`;

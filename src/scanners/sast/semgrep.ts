@@ -177,9 +177,11 @@ export const semgrepLinter: LinterModule = {
 function runCli(files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     // --config=auto pulls the appropriate ruleset for detected languages.
-    // --quiet suppresses the human-readable summary that would corrupt the
-    // JSON output. --no-rewrite-rule-ids keeps check_ids stable across
-    // runs for fingerprinting. --metrics=off suppresses semgrep's default
+    // --quiet suppresses semgrep's progress output on stderr, reducing CI
+    // log noise. The JSON results go to stdout regardless; --quiet does
+    // not affect the JSON stream (those are separate file descriptors).
+    // --no-rewrite-rule-ids keeps check_ids stable across runs for
+    // fingerprinting. --metrics=off suppresses semgrep's default
     // telemetry beacon to semgrep.dev (separate from --disable-version-check,
     // which only stops the version ping). Operators with strict egress
     // controls or data-residency requirements need this off; the
