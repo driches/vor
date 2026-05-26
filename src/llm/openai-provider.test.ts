@@ -486,6 +486,28 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('end_turn');
   });
 
+  it('handles top-level refusal items (Codex P2 #3300757030)', async () => {
+    // The Responses API can emit a refusal as a standalone output item
+    // (not nested inside a message). The parser used to fall through to
+    // the catch-all no-op and silently lose the refusal text — leaving
+    // `text` empty and `refused` false, so the runner saw what looked
+    // like a vanilla empty completion instead of a refused turn.
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        output: [
+          {
+            type: 'refusal',
+            refusal: 'I cannot help with that request.',
+          },
+        ],
+        status: 'completed',
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    expect(result.text).toBe('[refused] I cannot help with that request.');
+    expect(result.stop_reason).toBe('end_turn');
+    expect(result.tool_calls).toHaveLength(0);
+  });
+
   it('prefers tool_calls over refusal in stop_reason when both are present (PR #20 self-review #3300684739)', async () => {
     // Edge case: the API doesn't forbid a response with both a refusal
     // message AND a function_call item. If we let `refused` win, the

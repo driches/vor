@@ -367,6 +367,20 @@ export function responsesResponseToCanonical(
       continue;
     }
 
+    // Top-level refusal item. The API can return a refusal as a standalone
+    // output item (not just nested inside a message). Same semantics as the
+    // nested case: refusal text is authoritative. Codex P2 #3300757030 —
+    // `isOpenAIResponseOutput` already recognized this shape on the
+    // provider_state replay path; the response parser needs to handle it
+    // here too, otherwise refusal-only responses lose the refusal text.
+    const itemType = (item as { type?: string }).type;
+    if (itemType === 'refusal') {
+      const refusalText = (item as { refusal?: string }).refusal ?? '';
+      refused = true;
+      text = `[refused] ${refusalText}`;
+      continue;
+    }
+
     // reasoning items + every other output item type round-trip via
     // provider_state and are not surfaced in canonical text. No-op here.
   }
