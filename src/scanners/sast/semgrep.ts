@@ -157,13 +157,14 @@ export const semgrepLinter: LinterModule = {
       findings.push(buildFinding(changedFile.path, result, changedFile));
     }
 
-    // Successful invocation — conservatively count 1 network call. The
-    // `--config=auto` resolver MAY contact semgrep.dev to fetch rules,
-    // but warm runners hit the on-disk cache and never egress. We can't
-    // tell from the exit code which happened, so we count 1 to avoid
-    // undercounting on cold runners. Operators needing exact egress
-    // accounting should switch to `--config=<local-path>` and patch
-    // this metric to 0.
+    // Count 1 network call for any run that reached the JSON-parse stage —
+    // exit 0/1/2 all indicate semgrep attempted the `--config=auto` rule
+    // fetch (warm runners hit the on-disk cache and don't actually egress,
+    // but we can't tell from the exit code which happened, so we count
+    // the attempt). Exit 2 specifically means "errors but partial results"
+    // — still counts because rules were fetched before scanning began.
+    // Operators needing exact egress accounting should switch to
+    // `--config=<local-path>` (see TODO in runCli below).
     return {
       findings,
       errors,
@@ -184,6 +185,13 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // controls or data-residency requirements need this off; the
     // --config=auto rule fetch is already documented and accounted for in
     // networkCalls, the metrics beacon was an undocumented additional call.
+    // TODO(v0.4.1): expose `security.scanners.sast.semgrep_config` in
+    // .code-review.yml so operators in air-gapped or strict-egress
+    // environments can point at a local ruleset (e.g. `--config=p/default`
+    // shipped with semgrep itself, or `--config=./.semgrep.yml`) without
+    // disabling the whole SAST pipeline. Today the only opt-out is
+    // `security.scanners.sast.enabled: false`, which also kills the other
+    // five linters that have no network dependency.
     const child = spawn(
       'semgrep',
       [

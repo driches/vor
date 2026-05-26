@@ -59,6 +59,13 @@ export const eslintLinter: LinterModule = {
       path.join(deps.workspaceDir, 'node_modules', '.bin', 'eslint'),
     ]);
     if (bin === null) {
+      // Operators with SAST enabled may not realize ESLint silently
+      // no-op'd. The other linters log via their ENOENT catch when the
+      // binary isn't on PATH; ESLint bails before spawn, so emit a debug
+      // line here so the missing-binary case is visible in CI logs.
+      logger.debug(
+        `eslint: skipped — no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`,
+      );
       return { findings: [], errors: [], filesExamined: 0 };
     }
 
@@ -108,7 +115,13 @@ export const eslintLinter: LinterModule = {
       if (changedFile === undefined) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
-        if (message.ruleId === null) continue;
+        // ESLint sets `ruleId: null` for fatal parsing errors — the file
+        // couldn't even be parsed. These are severity:2 messages and
+        // among the most actionable findings ESLint emits. Pre-fix the
+        // null guard silently dropped them, so a syntax error in a TS/JS
+        // PR produced no scanner finding. Surface them with a synthetic
+        // 'parse-error' rule id; the rest of the title/description
+        // rendering already handles null ruleId gracefully.
         findings.push(buildFinding(changedFile.path, message, changedFile));
       }
     }

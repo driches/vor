@@ -55563,6 +55563,9 @@ var eslintLinter = {
       import_node_path7.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint")
     ]);
     if (bin === null) {
+      logger.debug(
+        `eslint: skipped \u2014 no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`
+      );
       return { findings: [], errors: [], filesExamined: 0 };
     }
     const { safe, dropped } = filterShellSafePaths(
@@ -55603,7 +55606,6 @@ var eslintLinter = {
       if (changedFile === void 0) continue;
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
-        if (message.ruleId === null) continue;
         findings.push(buildFinding2(changedFile.path, message, changedFile));
       }
     }
