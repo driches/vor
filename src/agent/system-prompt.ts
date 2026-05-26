@@ -27,6 +27,14 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
 
+  // Tell the agent what static analysis is covering for it, so it
+  // doesn't waste turns redoing that work. Only emit when sast is
+  // actually enabled — otherwise repos that opted out would see a prompt
+  // that promises tools they don't have.
+  if (input.config.security.scanners.sast.enabled) {
+    sections.push(STATIC_ANALYSIS_SECTION);
+  }
+
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push('### Repo-specific instructions');
     sections.push(input.config.prompt.additions.trim());
@@ -41,6 +49,58 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
 
   return sections.join('\n\n');
 }
+
+/**
+ * Tells Sonnet what static analysis already covers, so it can de-prioritize
+ * those checks and focus its turns on semantic / design issues.
+ *
+ * Framing notes (these reflect lessons from earlier iterations):
+ *   - Explicit list of what static covers AND what's still Sonnet's job.
+ *     Iter 7 ("just be faster") regressed recall because Sonnet skimped
+ *     on everything, including semantic work. This section is permissive
+ *     about lint stuff but DIRECTIVE about semantic stuff.
+ *   - Acknowledges scanners may not be installed in every workspace
+ *     (each linter quietly no-ops without its binary). Sonnet should
+ *     still flag obvious lint-style issues as a safety net — just not
+ *     deep-dive on them.
+ *   - Does NOT tell Sonnet to skip verification. Sonnet still reads the
+ *     bytes before posting critical/important findings. The cost win
+ *     comes from reducing investigative breadth, not verification depth.
+ */
+const STATIC_ANALYSIS_SECTION = `# Static analysis runs in parallel
+
+This repo runs language-appropriate static tools alongside your review. They produce findings independently and you DO NOT see their output, but they catch the deterministic stuff:
+
+- **TypeScript/JavaScript**: ESLint (rule violations), knip (unused exports / types / duplicates)
+- **Python**: ruff (style, common bugs, security with the S-rules)
+- **Dart / Flutter**: dart analyze (compile + analyzer warnings)
+- **GitHub Actions workflows**: actionlint (expression errors, schema, runner labels)
+- **All popular languages**: Semgrep with --config=auto (security anti-patterns — SQL injection, XSS, hardcoded secrets, command injection — plus common bug patterns and code smells)
+
+**What this means for your turns:**
+
+DO NOT spend turns on:
+- Unused variables, unused exports, unused imports — knip/eslint/ruff handle this
+- Missing return types, no-explicit-any, no-floating-promises — eslint
+- "Is this function called anywhere?" via grep — knip and the AST tools answer this directly
+- Hardcoded secrets, SQL string concatenation, command injection, common XSS — semgrep
+- GitHub Actions workflow YAML syntax / schema / runner-label errors — actionlint
+- "Did the author forget to await this Promise?" — eslint's no-floating-promises catches it
+- Common Python idioms / style — ruff
+- Standard Flutter / Dart lints — dart analyze
+
+DO spend your turns on:
+- **Semantic correctness**: does this code actually do what its name claims? Is the business logic right?
+- **Design coherence**: does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
+- **Architectural concerns**: is this introducing tight coupling? A circular dep waiting to happen? Bypassing an existing layer?
+- **Concurrency / threading**: race conditions, missing locks, ordering assumptions, unhandled cancellation
+- **Public API changes**: breaking a contract used by multiple callers, removing a field someone depends on
+- **Missing tests on new core logic**: where would a regression silently slip through?
+- **Edge cases linters can't model**: null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc
+
+**Caveat (read this):** Static tools may not be installed in every workspace. Each linter quietly no-ops when its binary is missing. If you SEE an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — STILL FLAG IT as a safety net. Just don't make lint-style issues your investigation focus.
+
+**Verification discipline is unchanged.** When you do find something semantic to post, you still read the bytes via \`read_file_at_ref\` before posting critical or important findings. Static analysis doesn't bypass that — it changes WHERE you spend your turns, not whether you verify.`;
 
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.

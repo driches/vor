@@ -63,4 +63,45 @@ describe('buildSystemPrompt', () => {
     expect(p.length).toBeLessThan(15_000);
     expect(p).toMatch(/omitted due to size cap/);
   });
+
+  it('emits the static-analysis section when sast is enabled (default config)', () => {
+    const p = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'r',
+      contextFiles: [],
+    });
+    // The default config has sast.enabled = true; Sonnet should see the
+    // "what static tools cover" framing so it doesn't redo lint-level work.
+    expect(p).toContain('Static analysis runs in parallel');
+    expect(p).toContain('ESLint');
+    expect(p).toContain('Semgrep');
+    // The section must include both directives: what static covers AND
+    // what's still Sonnet's job. Iter 7 ("just be faster") regressed
+    // recall — the explicit "DO spend your turns on" half is the
+    // anti-regression safety belt.
+    expect(p).toContain('DO NOT spend turns on');
+    expect(p).toContain('DO spend your turns on');
+    expect(p).toContain('Semantic correctness');
+    // Static tools may be missing from a workspace; Sonnet must still
+    // flag obvious lint-style bugs as a safety net.
+    expect(p).toMatch(/safety net|safety-net/i);
+  });
+
+  it('omits the static-analysis section when sast is disabled', () => {
+    const p = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        security: {
+          ...DEFAULT_CONFIG.security,
+          scanners: {
+            ...DEFAULT_CONFIG.security.scanners,
+            sast: { enabled: false },
+          },
+        },
+      },
+      repoName: 'r',
+      contextFiles: [],
+    });
+    expect(p).not.toContain('Static analysis runs in parallel');
+  });
 });

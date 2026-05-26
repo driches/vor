@@ -57,7 +57,17 @@ export const ruffLinter: LinterModule = {
     try {
       rawOutput = await runCli(bin, targetFiles.map((f) => f.path), deps);
     } catch (err) {
-      errors.push({ message: `ruff failed: ${(err as Error).message}`, fatal: false });
+      const msg = (err as Error).message;
+      // Quiet skip when ruff isn't actually installed anywhere
+      // resolvable. `locateBin` falls back to the bare name 'ruff' for
+      // PATH lookup, and `spawn` reports ENOENT when PATH doesn't have
+      // it either — that's the "no ruff in this workspace" case, not a
+      // scanner failure. (Many Python repos use flake8/pylint instead.)
+      // Match the dart and actionlint modules' contract.
+      if (msg.includes('ENOENT') || msg.includes('not found')) {
+        return { findings: [], errors: [], filesExamined: 0 };
+      }
+      errors.push({ message: `ruff failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
     }
 
