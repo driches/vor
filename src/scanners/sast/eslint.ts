@@ -11,11 +11,17 @@
  * `severity: 1` (warning) → 'minor'. Rule-specific tuning is a v2.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  findWorkspaceBinary,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+  type ResolvedBinary,
+} from './linter.js';
 
 const ID = 'eslint';
 const TIMEOUT_MS = 60_000;
@@ -44,8 +50,10 @@ export const eslintLinter: LinterModule = {
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
-    const bin = path.join(deps.workspaceDir, 'node_modules', '.bin', 'eslint');
-    if (!existsSync(bin)) {
+    const bin = findWorkspaceBinary([
+      path.join(deps.workspaceDir, 'node_modules', '.bin', 'eslint'),
+    ]);
+    if (bin === null) {
       return { findings: [], errors: [], filesExamined: 0 };
     }
 
@@ -85,10 +93,10 @@ export const eslintLinter: LinterModule = {
   },
 };
 
-function runCli(bin: string, files: string[], deps: ScannerDeps): Promise<string> {
+function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      bin,
+      bin.path,
       ['--format', 'json', '--no-error-on-unmatched-pattern', ...files],
       {
         cwd: deps.workspaceDir,
@@ -97,6 +105,13 @@ function runCli(bin: string, files: string[], deps: ScannerDeps): Promise<string
         // process limits exfiltration even when a malicious workspace
         // binary runs.
         env: buildLinterEnv(),
+        // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
+        // findWorkspaceBinary sets needsShell when the resolved file is
+        // one of those. shell:true is otherwise off (filenames here come
+        // from npm conventions, not user input, so the shell-injection
+        // surface is bounded — but defense in depth says don't enable
+        // shell unless required).
+        shell: bin.needsShell,
       },
     );
     let stdout = '';

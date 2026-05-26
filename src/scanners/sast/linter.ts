@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -139,6 +140,53 @@ export function buildLinterEnv(): NodeJS.ProcessEnv {
     if (value !== undefined) out[key] = value;
   }
   return out;
+}
+
+/**
+ * Windows portability layer for resolving a linter binary that may live
+ * in the workspace (e.g. `node_modules/.bin/eslint`, `.venv/bin/ruff`).
+ *
+ * Two Windows quirks the bare-Unix code missed:
+ *   1. npm shims under `node_modules/.bin/` are `.cmd` files on Windows
+ *      (eslint.cmd, knip.cmd). Node's child_process.spawn against an
+ *      ABSOLUTE path doesn't honor PATHEXT, so a direct spawn of the
+ *      no-extension path silently ENOENTs.
+ *   2. Python venvs use `.venv/Scripts/` on Windows instead of
+ *      `.venv/bin/`.
+ *
+ * Resolution strategy: walk the candidate list in order; for each
+ * candidate, try the bare path, then `${path}.cmd`, then `${path}.exe`.
+ * Return the first one that exists, plus a `needsShell` flag set when
+ * the resolved file is `.cmd` or `.bat` (those require cmd.exe and
+ * can't be spawned directly on Windows).
+ *
+ * Returns null when nothing resolves — caller falls back to PATH (which
+ * DOES honor PATHEXT for bare-name spawn) or quiet-skips.
+ */
+export interface ResolvedBinary {
+  path: string;
+  needsShell: boolean;
+}
+
+export function findWorkspaceBinary(
+  candidates: readonly string[],
+): ResolvedBinary | null {
+  // Try the no-extension form first (Unix), then Windows shim/exe forms.
+  // Most repos resolve at the first candidate; the extension fallbacks
+  // only kick in on Windows.
+  const exts = ['', '.cmd', '.exe', '.bat'];
+  for (const base of candidates) {
+    for (const ext of exts) {
+      const full = base + ext;
+      if (existsSync(full)) {
+        return {
+          path: full,
+          needsShell: ext === '.cmd' || ext === '.bat',
+        };
+      }
+    }
+  }
+  return null;
 }
 
 export interface LinterModule {

@@ -22,11 +22,17 @@
  * filter to lines this PR added.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  findWorkspaceBinary,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+  type ResolvedBinary,
+} from './linter.js';
 
 const ID = 'knip';
 const TIMEOUT_MS = 120_000;
@@ -130,24 +136,29 @@ export const knipLinter: LinterModule = {
   },
 };
 
-function locateBin(workspaceDir: string): string {
-  const local = path.join(workspaceDir, 'node_modules', '.bin', 'knip');
-  if (existsSync(local)) return local;
-  // PATH lookup — spawn resolves; ENOENT is caught in the runCli caller
-  // and surfaces as a quiet skip (no knip installed). The return type
-  // is plain `string` to reflect that this never returns null.
-  return 'knip';
+function locateBin(workspaceDir: string): ResolvedBinary {
+  // node_modules/.bin/knip on Unix; npm shims at knip.cmd on Windows
+  // (findWorkspaceBinary tries .cmd / .exe variants automatically).
+  const ws = findWorkspaceBinary([
+    path.join(workspaceDir, 'node_modules', '.bin', 'knip'),
+  ]);
+  if (ws !== null) return ws;
+  // PATH lookup — Node's spawn honors PATHEXT on Windows for bare-name
+  // lookups. ENOENT here is caught by runCli and surfaces as a quiet
+  // skip (no knip installed).
+  return { path: 'knip', needsShell: false };
 }
 
-function runCli(bin: string, deps: ScannerDeps): Promise<string> {
+function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     // --reporter json is the documented machine-readable format. We run
     // it across the whole repo (knip's analysis IS whole-project — you
     // can't reliably detect unused exports from a partial file list).
     // The filter to PR-added lines happens in the orchestrator above.
-    const child = spawn(bin, ['--reporter', 'json'], {
+    const child = spawn(bin.path, ['--reporter', 'json'], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv(),
+      shell: bin.needsShell,
     });
     let stdout = '';
     let stderr = '';

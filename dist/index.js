@@ -55414,10 +55414,10 @@ function emptyResult(scanner, durationMs = 0) {
 
 // src/scanners/sast/eslint.ts
 var import_node_child_process3 = require("node:child_process");
-var import_node_fs2 = require("node:fs");
 var import_node_path7 = __toESM(require("node:path"), 1);
 
 // src/scanners/sast/linter.ts
+var import_node_fs2 = require("node:fs");
 var import_node_path6 = __toESM(require("node:path"), 1);
 function normalizeToolPath(workspaceDir, toolPath) {
   const normalized = import_node_path6.default.isAbsolute(toolPath) ? import_node_path6.default.relative(workspaceDir, toolPath) : import_node_path6.default.normalize(toolPath);
@@ -55457,6 +55457,21 @@ function buildLinterEnv() {
   }
   return out;
 }
+function findWorkspaceBinary(candidates) {
+  const exts = ["", ".cmd", ".exe", ".bat"];
+  for (const base of candidates) {
+    for (const ext of exts) {
+      const full = base + ext;
+      if ((0, import_node_fs2.existsSync)(full)) {
+        return {
+          path: full,
+          needsShell: ext === ".cmd" || ext === ".bat"
+        };
+      }
+    }
+  }
+  return null;
+}
 
 // src/scanners/sast/eslint.ts
 var ID = "eslint";
@@ -55471,8 +55486,10 @@ var eslintLinter = {
   },
   async run(deps, targetFiles) {
     const errors = [];
-    const bin = import_node_path7.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint");
-    if (!(0, import_node_fs2.existsSync)(bin)) {
+    const bin = findWorkspaceBinary([
+      import_node_path7.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint")
+    ]);
+    if (bin === null) {
       return { findings: [], errors: [], filesExamined: 0 };
     }
     let rawOutput;
@@ -55510,7 +55527,7 @@ var eslintLinter = {
 function runCli(bin, files, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process3.spawn)(
-      bin,
+      bin.path,
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
       {
         cwd: deps.workspaceDir,
@@ -55518,7 +55535,14 @@ function runCli(bin, files, deps) {
         // for the rationale. Stripping secrets out of the spawned
         // process limits exfiltration even when a malicious workspace
         // binary runs.
-        env: buildLinterEnv()
+        env: buildLinterEnv(),
+        // Windows npm shims (.cmd / .bat) need cmd.exe to execute —
+        // findWorkspaceBinary sets needsShell when the resolved file is
+        // one of those. shell:true is otherwise off (filenames here come
+        // from npm conventions, not user input, so the shell-injection
+        // surface is bounded — but defense in depth says don't enable
+        // shell unless required).
+        shell: bin.needsShell
       }
     );
     let stdout = "";
@@ -55610,7 +55634,6 @@ ${message.message}`;
 
 // src/scanners/sast/ruff.ts
 var import_node_child_process4 = require("node:child_process");
-var import_node_fs3 = require("node:fs");
 var import_node_path8 = __toESM(require("node:path"), 1);
 var ID2 = "ruff";
 var TIMEOUT_MS3 = 6e4;
@@ -55625,9 +55648,6 @@ var ruffLinter = {
   async run(deps, targetFiles) {
     const errors = [];
     const bin = locateBin(deps.workspaceDir);
-    if (bin === null) {
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
     let rawOutput;
     try {
       rawOutput = await runCli2(bin, targetFiles.map((f2) => f2.path), deps);
@@ -55663,23 +55683,23 @@ var ruffLinter = {
   }
 };
 function locateBin(workspaceDir) {
-  const candidates = [
+  const ws = findWorkspaceBinary([
     import_node_path8.default.join(workspaceDir, ".venv", "bin", "ruff"),
+    import_node_path8.default.join(workspaceDir, ".venv", "Scripts", "ruff"),
     import_node_path8.default.join(workspaceDir, "node_modules", ".bin", "ruff")
-  ];
-  for (const c2 of candidates) {
-    if ((0, import_node_fs3.existsSync)(c2)) return c2;
-  }
-  return "ruff";
+  ]);
+  if (ws !== null) return ws;
+  return { path: "ruff", needsShell: false };
 }
 function runCli2(bin, files, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process4.spawn)(
-      bin,
+      bin.path,
       ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
       {
         cwd: deps.workspaceDir,
-        env: buildLinterEnv()
+        env: buildLinterEnv(),
+        shell: bin.needsShell
       }
     );
     let stdout = "";
@@ -56065,7 +56085,6 @@ ${message.message}`;
 
 // src/scanners/sast/knip.ts
 var import_node_child_process7 = require("node:child_process");
-var import_node_fs4 = require("node:fs");
 var import_node_path9 = __toESM(require("node:path"), 1);
 var ID5 = "knip";
 var TIMEOUT_MS6 = 12e4;
@@ -56133,15 +56152,18 @@ var knipLinter = {
   }
 };
 function locateBin2(workspaceDir) {
-  const local = import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "knip");
-  if ((0, import_node_fs4.existsSync)(local)) return local;
-  return "knip";
+  const ws = findWorkspaceBinary([
+    import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "knip")
+  ]);
+  if (ws !== null) return ws;
+  return { path: "knip", needsShell: false };
 }
 function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process7.spawn)(bin, ["--reporter", "json"], {
+    const child2 = (0, import_node_child_process7.spawn)(bin.path, ["--reporter", "json"], {
       cwd: deps.workspaceDir,
-      env: buildLinterEnv()
+      env: buildLinterEnv(),
+      shell: bin.needsShell
     });
     let stdout = "";
     let stderr = "";

@@ -18,11 +18,17 @@
  * Ruff JSON format docs: https://docs.astral.sh/ruff/configuration/#output-format
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  findWorkspaceBinary,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+  type ResolvedBinary,
+} from './linter.js';
 
 const ID = 'ruff';
 const TIMEOUT_MS = 60_000;
@@ -47,11 +53,6 @@ export const ruffLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
-    if (bin === null) {
-      // No ruff available — quiet skip. Python repos using other linters
-      // (flake8, pylint) shouldn't see this as an error.
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
 
     let rawOutput: string;
     try {
@@ -98,34 +99,38 @@ export const ruffLinter: LinterModule = {
   },
 };
 
-function locateBin(workspaceDir: string): string | null {
-  // Prefer venv-local install — venv ruff matches the repo's pinned
-  // version and config. Fall back to node_modules (rare) and PATH last
-  // (system install, no version guarantee).
-  const candidates = [
+function locateBin(workspaceDir: string): ResolvedBinary {
+  // Workspace candidates first — venv ruff matches the repo's pinned
+  // version and config. Both Unix (`.venv/bin/`) and Windows
+  // (`.venv/Scripts/`) layouts are checked, plus the rare `@ruff/cli`
+  // npm install at `node_modules/.bin/ruff`. findWorkspaceBinary tries
+  // .cmd / .exe variants on each.
+  const ws = findWorkspaceBinary([
     path.join(workspaceDir, '.venv', 'bin', 'ruff'),
+    path.join(workspaceDir, '.venv', 'Scripts', 'ruff'),
     path.join(workspaceDir, 'node_modules', '.bin', 'ruff'),
-  ];
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  // PATH-resolved is just 'ruff' — spawn() will use PATH lookup. Return
-  // the bare name as a signal to runCli to spawn without an explicit path.
-  return 'ruff';
+  ]);
+  if (ws !== null) return ws;
+  // PATH-resolved is just 'ruff' — Node's spawn honors PATHEXT on
+  // Windows for bare-name lookups, so this works on both platforms.
+  // ENOENT here is caught by runCli's error handler and becomes a
+  // quiet skip.
+  return { path: 'ruff', needsShell: false };
 }
 
 function runCli(
-  bin: string,
+  bin: ResolvedBinary,
   files: string[],
   deps: ScannerDeps,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      bin,
+      bin.path,
       ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
       {
         cwd: deps.workspaceDir,
         env: buildLinterEnv(),
+        shell: bin.needsShell,
       },
     );
     let stdout = '';
