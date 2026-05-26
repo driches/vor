@@ -37,6 +37,7 @@ import type {
   LLMProvider,
   StopReason,
 } from './types.js';
+import { inputTokensFullRateFor } from './types.js';
 
 export class OpenAIProvider implements LLMProvider {
   readonly id = 'openai' as const;
@@ -92,7 +93,7 @@ export class OpenAIProvider implements LLMProvider {
    * the cached prefix alone.
    */
   inputTokensFullRate(usage: CanonicalUsage): number {
-    return usage.input_tokens - (usage.cache_read_tokens ?? 0);
+    return inputTokensFullRateFor('openai', usage);
   }
 }
 
@@ -147,7 +148,11 @@ function isOpenAIResponseOutput(arr: unknown[]): boolean {
       t === 'message' ||
       t === 'function_call' ||
       t === 'reasoning' ||
-      t === 'function_call_output' ||
+      // NOTE: `function_call_output` is an INPUT-only item (sent TO the
+      // API to deliver tool results); it never appears in
+      // `response.output[]`. Deliberately excluded so the allowlist
+      // doesn't accidentally validate cross-direction items as outputs.
+      // PR #20 self-review #3300871787.
       t === 'refusal' ||
       t === 'web_search_call' ||
       t === 'file_search_call' ||

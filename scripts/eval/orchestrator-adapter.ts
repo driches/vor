@@ -32,6 +32,7 @@ import {
 import { MODEL_PRICING } from '../../src/util/pricing.js';
 import {
   inferProviderFromModel,
+  inputTokensFullRateFor,
   type CanonicalMessage,
   type CanonicalTool,
   type CanonicalUsage,
@@ -162,21 +163,14 @@ export class FakeProvider implements LLMProvider {
     return next;
   }
   /**
-   * Dispatches on `this.id` so the runner's budget accumulator sees the
-   * same input_tokens value production would. See
-   * `AnthropicProvider.inputTokensFullRate` (returns `usage.input_tokens`
-   * unchanged) and `OpenAIProvider.inputTokensFullRate` (returns
-   * `usage.input_tokens - cache_read_tokens`). Today's scripts use zero
-   * cache tokens so the formulas converge, but any future OpenAI eval
-   * with non-zero `cache_read_tokens` would otherwise compute against
-   * the wrong shape.
+   * Delegates to the shared `inputTokensFullRateFor` helper so the eval
+   * harness, the runner, the real adapters, and any test FakeProvider
+   * all share one formula. Without this, a future change to the rule
+   * (e.g. a third provider) would need to touch four call sites in
+   * lockstep — PR #20 self-review #3300871789.
    */
   inputTokensFullRate(usage: CanonicalUsage): number {
-    if (this.id === 'anthropic') {
-      return usage.input_tokens;
-    }
-    // openai
-    return usage.input_tokens - (usage.cache_read_tokens ?? 0);
+    return inputTokensFullRateFor(this.id, usage);
   }
 }
 

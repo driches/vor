@@ -28,6 +28,7 @@ import type {
   LLMProvider,
   StopReason,
 } from './types.js';
+import { inputTokensFullRateFor } from './types.js';
 
 /**
  * Anthropic SDK's hard ceiling on `max_tokens` when NOT using streaming.
@@ -105,7 +106,7 @@ export class AnthropicProvider implements LLMProvider {
    * cap on turn 1).
    */
   inputTokensFullRate(usage: CanonicalUsage): number {
-    return usage.input_tokens;
+    return inputTokensFullRateFor('anthropic', usage);
   }
 }
 

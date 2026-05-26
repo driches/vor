@@ -127,13 +127,16 @@ async function main(): Promise<void> {
   // Cost computation
   // ============================================================
   console.log('\n--- Cost summary ---');
+  // Use provider.inputTokensFullRate so the cached portion (subset of
+  // input_tokens for OpenAI) isn't double-charged at both input AND
+  // cache_read rates. PR #20 self-review IMPORTANT #3300871782.
   const c1 = costFromUsage(MODEL, {
-    inputTokens: r1.usage.input_tokens,
+    inputTokens: provider.inputTokensFullRate(r1.usage),
     outputTokens: r1.usage.output_tokens,
     cacheReadTokens: r1.usage.cache_read_tokens,
   });
   const c2 = costFromUsage(MODEL, {
-    inputTokens: r2.usage.input_tokens,
+    inputTokens: provider.inputTokensFullRate(r2.usage),
     outputTokens: r2.usage.output_tokens,
     cacheReadTokens: r2.usage.cache_read_tokens,
   });

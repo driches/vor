@@ -17,14 +17,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  CanonicalMessage,
-  CanonicalTool,
-  CanonicalUsage,
-  CompleteOptions,
-  CompleteResponse,
-  LLMProvider,
-  ProviderId,
+import {
+  inputTokensFullRateFor,
+  type CanonicalMessage,
+  type CanonicalTool,
+  type CanonicalUsage,
+  type CompleteOptions,
+  type CompleteResponse,
+  type LLMProvider,
+  type ProviderId,
 } from '../llm/index.js';
 
 // Mock createProvider so tests can inject a scripted FakeProvider per case.
@@ -82,14 +83,10 @@ class FakeProvider implements LLMProvider {
   }
 
   inputTokensFullRate(usage: CanonicalUsage): number {
-    // Mirror the real adapters' per-id semantics so OpenAI tests in this
-    // file exercise the cache_read subtraction. Anthropic: input_tokens
-    // unchanged (already non-cached). OpenAI: subtract cache_read since
-    // it's a subset of input_tokens.
-    if (this.id === 'openai') {
-      return usage.input_tokens - (usage.cache_read_tokens ?? 0);
-    }
-    return usage.input_tokens;
+    // Delegate to the shared helper so this test, the eval harness, and
+    // the real adapters all use one formula — PR #20 self-review
+    // #3300871789.
+    return inputTokensFullRateFor(this.id, usage);
   }
 }
 

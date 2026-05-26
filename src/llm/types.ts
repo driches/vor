@@ -114,6 +114,31 @@ export interface CompleteResponse {
  * implements this so the runner has exactly one code path regardless of
  * which vendor is configured.
  */
+/**
+ * Single source of truth for the per-provider `inputTokensFullRate`
+ * formula. Real adapters delegate here; FakeProviders in the test/eval
+ * harness delegate here. Without this, the formula was duplicated in
+ * four places (anthropic-provider, openai-provider, runner.test
+ * FakeProvider, eval orchestrator-adapter FakeProvider) and any change
+ * had to touch all four — PR #20 self-review #3300871789 caught this
+ * after fix #3300684724 removed the runner's inline branch.
+ *
+ * Semantics: returns the input_tokens value to populate when feeding
+ * an Anthropic-shape `ModelUsage` to the per-model Budget accumulator
+ * (whose billable formula is `input_tokens + cache_creation_input_tokens`).
+ *  - Anthropic: `usage.input_tokens` unchanged (already excludes cache_read).
+ *  - OpenAI: `usage.input_tokens - cache_read_tokens` (cache_read is a
+ *    subset of input_tokens that's charged at the discounted rate).
+ */
+export function inputTokensFullRateFor(
+  providerId: ProviderId,
+  usage: CanonicalUsage,
+): number {
+  if (providerId === 'anthropic') return usage.input_tokens;
+  // openai
+  return usage.input_tokens - (usage.cache_read_tokens ?? 0);
+}
+
 export interface LLMProvider {
   readonly id: ProviderId;
   complete(
