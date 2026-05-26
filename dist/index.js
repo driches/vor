@@ -55976,7 +55976,8 @@ var dartLinter = {
       rawOutput = await runCli3(safe, deps);
     } catch (err) {
       const msg = err.message;
-      if (msg.includes("ENOENT") || msg.includes("not found")) {
+      const isMissingBinary = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });
@@ -56152,7 +56153,8 @@ var actionlintLinter = {
       rawOutput = await runCli4(safe, deps);
     } catch (err) {
       const msg = err.message;
-      if (msg.includes("ENOENT") || msg.includes("not found")) {
+      const isMissingBinary = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `actionlint failed: ${msg}`, fatal: false });

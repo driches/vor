@@ -78,10 +78,18 @@ export const dartLinter: LinterModule = {
       rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
-      // ENOENT means the dart binary isn't on PATH — quiet skip for repos
-      // that don't have it. Any other error is real and goes to the
-      // errors array.
-      if (msg.includes('ENOENT') || msg.includes('not found')) {
+      // Match knip/ruff/semgrep: `command not found` (POSIX shell prefix)
+      // is the specific signal — bare `not found` would also match real
+      // dart errors like "Analysis target not found" or "Library not
+      // found", silently swallowing them. Exit codes 9009/127 cover
+      // Windows cmd.exe and POSIX sh missing-command cases.
+      const isMissingBinary =
+        msg.includes('ENOENT') ||
+        msg.includes('command not found') ||
+        msg.includes('is not recognized') ||
+        msg.includes('exited 9009') ||
+        msg.includes('exited 127');
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });

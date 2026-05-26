@@ -79,8 +79,18 @@ export const actionlintLinter: LinterModule = {
       rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
-      // Missing binary → quiet skip. Anything else → record error.
-      if (msg.includes('ENOENT') || msg.includes('not found')) {
+      // Match knip/ruff/semgrep/dart: `command not found` (POSIX shell
+      // prefix) is the specific signal — bare `not found` would also
+      // match real actionlint errors like "workflow file not found" or
+      // "action not found", silently swallowing them. Exit codes
+      // 9009/127 cover Windows cmd.exe and POSIX sh missing-command.
+      const isMissingBinary =
+        msg.includes('ENOENT') ||
+        msg.includes('command not found') ||
+        msg.includes('is not recognized') ||
+        msg.includes('exited 9009') ||
+        msg.includes('exited 127');
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `actionlint failed: ${msg}`, fatal: false });
