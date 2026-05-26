@@ -67421,6 +67421,15 @@ async function main() {
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
   const config_path = process.env.INPUT_CONFIG_PATH?.trim() || ".code-review.yml";
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
+  const eventName = process.env.GITHUB_EVENT_NAME?.trim() ?? "";
+  const allowAutoTrigger = (process.env.INPUT_ALLOW_AUTO_TRIGGER ?? "false").toLowerCase() === "true";
+  const isAutoEvent = eventName === "pull_request" || eventName === "pull_request_target" || eventName === "pull_request_review" || eventName === "pull_request_review_comment";
+  if (isAutoEvent && !allowAutoTrigger) {
+    await logger.notice(
+      `Refusing to run on '${eventName}' event. This action is manual-only by default \u2014 use 'on: workflow_dispatch' (with a pr_number input) instead. To re-enable PR-event auto-triggering for this repo, set 'allow_auto_trigger: true' in the action's inputs (and accept the iteration-cost / noise tradeoff that motivated this default).`
+    );
+    return;
+  }
   if (!github_token) {
     await logger.error("GITHUB_TOKEN is not set. Cannot fetch PR or post review.");
     process.exitCode = 1;

@@ -39,6 +39,10 @@ inputs:
   pr_number:
     description: 'PR number. Auto-detected from pull_request events; required for manual triggers.'
     required: false
+  allow_auto_trigger:
+    description: 'By default this action refuses to run on pull_request / pull_request_target / pull_request_review events to avoid tight review-iteration loops. Set to "true" to opt in to auto-triggering on PR events. Recommended invocation is `on: workflow_dispatch` (manual) with an explicit pr_number input.'
+    required: false
+    default: 'false'
 
 outputs:
   review_id:
@@ -76,3 +80,4 @@ runs:
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         INPUT_DRY_RUN: ${{ inputs.dry_run }}
         INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        INPUT_ALLOW_AUTO_TRIGGER: ${{ inputs.allow_auto_trigger }}
