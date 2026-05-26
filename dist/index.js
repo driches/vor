@@ -56006,6 +56006,7 @@ function runCli3(files, deps) {
     );
     const stdoutChunks = [];
     const stderrChunks = [];
+    let stdoutSize = 0;
     let stderrSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
@@ -56015,6 +56016,15 @@ function runCli3(files, deps) {
       reject(new Error(`dart analyze timed out after ${TIMEOUT_MS4}ms`));
     }, TIMEOUT_MS4);
     child2.stdout.on("data", (b2) => {
+      if (resolved) return;
+      stdoutSize += b2.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error(`dart analyze stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
@@ -56024,7 +56034,7 @@ function runCli3(files, deps) {
         resolved = true;
         clearTimeout(timer);
         child2.kill("SIGKILL");
-        reject(new Error(`dart analyze output exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        reject(new Error(`dart analyze stderr exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
         return;
       }
       stderrChunks.push(b2);
@@ -56306,7 +56316,7 @@ var knipLinter = {
       return { findings: [], errors, filesExamined: 0 };
     }
     const findings = [];
-    const usedModernFormat = (output.issues?.length ?? 0) > 0;
+    const usedModernFormat = output.issues !== void 0;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
       const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);

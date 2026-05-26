@@ -157,7 +157,12 @@ export const knipLinter: LinterModule = {
     // populated BOTH shapes in one blob caused every finding to be
     // emitted twice (same fingerprint, but the per-file cap and comment
     // count doubled).
-    const usedModernFormat = (output.issues?.length ?? 0) > 0;
+    //
+    // Use `issues !== undefined` (not `issues.length > 0`): a clean knip
+    // run emits `{ "issues": [] }` — the key is present but empty. Pre-
+    // fix, that evaluated `usedModernFormat = false` and ran the legacy
+    // loops anyway, defeating the dedup guard.
+    const usedModernFormat = output.issues !== undefined;
     for (const entry of output.issues ?? []) {
       const relPath = normalizeToolPath(deps.workspaceDir, entry.file);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);

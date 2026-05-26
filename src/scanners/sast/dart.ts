@@ -152,8 +152,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
-    // dart analyze emits findings on stderr, so cap that channel rather
-    // than stdout. The semantics are otherwise identical.
+    // dart analyze emits findings on stderr (stdout is typically empty),
+    // but we defensively read both streams. Cap BOTH channels — a future
+    // SDK version routing output to stdout, or any binary at the dart
+    // PATH slot streaming unbounded data, would otherwise OOM the runner.
+    let stdoutSize = 0;
     let stderrSize = 0;
     let resolved = false;
     const timer = setTimeout(() => {
@@ -164,6 +167,15 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     }, TIMEOUT_MS);
 
     child.stdout.on('data', (b: Buffer) => {
+      if (resolved) return;
+      stdoutSize += b.length;
+      if (stdoutSize > MAX_LINTER_STDOUT_BYTES) {
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error(`dart analyze stdout exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        return;
+      }
       stdoutChunks.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {
@@ -173,7 +185,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         resolved = true;
         clearTimeout(timer);
         child.kill('SIGKILL');
-        reject(new Error(`dart analyze output exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
+        reject(new Error(`dart analyze stderr exceeded ${MAX_LINTER_STDOUT_BYTES} bytes`));
         return;
       }
       stderrChunks.push(b);
