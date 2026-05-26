@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runAgent } from './agent/runner.js';
+import { buildAgentScopeNotice, scopePrContextForAgent } from './agent/pr-scope.js';
 import { createRunContext } from './agent/run-context.js';
 import { buildSystemPrompt, type RepoContextEntry } from './agent/system-prompt.js';
 import { buildUserPrompt } from './agent/user-prompt.js';
@@ -230,11 +231,21 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     repoName: `${input.owner}/${input.repo}`,
     contextFiles,
   });
-  const userPrompt = buildUserPrompt({
+  const agentScope = scopePrContextForAgent(prContext, config.exclude);
+  if (agentScope.unreviewedPaths.length > 0) {
+    await logger.info(
+      `Agent scope: ${agentScope.prContext.files.length}/${prContext.files.length} file(s) visible to LLM; ` +
+        `${agentScope.unreviewedPaths.length} path(s) skipped by deterministic scope gates.`,
+    );
+  }
+
+  const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
+  const userPromptBase = buildUserPrompt({
     owner: input.owner,
     repo: input.repo,
     pull_number: input.pull_number,
   });
+  const userPrompt = scopeNotice ? `${scopeNotice}\n\n${userPromptBase}` : userPromptBase;
 
   // Load the security ignore list at HEAD. Always returns a usable instance —
   // malformed YAML / missing file degrades to an empty list inside .load().
@@ -292,37 +303,48 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // narrow window between agent rejection and the scanner branch settling.
   // Without the abort, a long-running scanner could keep doing useful network
   // I/O after we've already decided to throw the agent error away.
-  const agentPromise = runAgent({
-    deps: {
-      octokit,
-      owner: input.owner,
-      repo: input.repo,
-      pull_number: input.pull_number,
-      prContext,
-      fileReader,
-      aggregator,
-      config,
-      workspaceDir: input.workspace_dir,
-      runContext: createRunContext(),
-    },
-    systemPrompt,
-    userPrompt,
-    model: config.model,
-    maxTurns: config.max_turns,
-    maxInputTokens: config.budget.max_input_tokens,
-    maxOutputTokens: config.budget.max_output_tokens,
-    apiKey,
-    // Always pass the resolved provider — same string we already computed
-    // above. Skips one redundant inferProviderFromModel() call inside the
-    // runner and pins routing even for model ids that match no known prefix
-    // (where the runner's inference would throw).
-    providerHint: resolvedProvider,
-    // Forward an optional providerFactory override. Production callers omit
-    // this; the eval harness injects a scripted FakeProvider here.
-    ...(input.providerFactory !== undefined
-      ? { providerFactory: input.providerFactory }
-      : {}),
-  });
+  const agentPromise =
+    agentScope.prContext.files.length === 0
+      ? Promise.resolve({
+          ended: 'summary_posted' as const,
+          turns: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+          perModelCost: [],
+        })
+      : runAgent({
+          deps: {
+            octokit,
+            owner: input.owner,
+            repo: input.repo,
+            pull_number: input.pull_number,
+            prContext: agentScope.prContext,
+            fileReader,
+            aggregator,
+            config,
+            workspaceDir: input.workspace_dir,
+            runContext: createRunContext(),
+          },
+          systemPrompt,
+          userPrompt,
+          model: config.model,
+          maxTurns: config.max_turns,
+          maxInputTokens: config.budget.max_input_tokens,
+          maxOutputTokens: config.budget.max_output_tokens,
+          apiKey,
+          openai: config.providers.openai,
+          // Always pass the resolved provider — same string we already computed
+          // above. Skips one redundant inferProviderFromModel() call inside the
+          // runner and pins routing even for model ids that match no known prefix
+          // (where the runner's inference would throw).
+          providerHint: resolvedProvider,
+          // Forward an optional providerFactory override. Production callers omit
+          // this; the eval harness injects a scripted FakeProvider here.
+          ...(input.providerFactory !== undefined
+            ? { providerFactory: input.providerFactory }
+            : {}),
+        });
   const scannerPromise = runScanners(scanners, scannerDeps);
 
   // Fire the abort the moment the agent rejects — synchronously, before we
@@ -355,6 +377,15 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     throw agentOutcome.reason;
   }
   const result = agentOutcome.value;
+  if (agentScope.prContext.files.length === 0 && !aggregator.hasSummary()) {
+    aggregator.setSummary({
+      strengths: ['Deterministic scanners still ran on the skipped paths'],
+      assessment: 'comment',
+      assessment_reasoning:
+        'No LLM review was run because every changed path was outside the configured LLM review scope. Deterministic scanners still inspected applicable files and any scanner findings are included below.',
+      unreviewed_paths: agentScope.unreviewedPaths,
+    });
+  }
   const scanRunResult =
     scanOutcome.status === 'fulfilled'
       ? scanOutcome.value
@@ -475,6 +506,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     configEvent: config.review.event,
     modelName: config.model,
     agentEnded: result.ended,
+    unreviewedPaths: agentScope.unreviewedPaths,
   });
 
   // Dry run: log instead of posting
@@ -579,4 +611,3 @@ async function loadRepoContextFiles(
   }
   return entries;
 }
-

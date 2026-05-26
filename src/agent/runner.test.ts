@@ -163,6 +163,28 @@ describe('runAgent', () => {
     expect(provider.completeCalls[0]!.opts.abortSignal).toBe(abortController.signal);
   });
 
+  it('passes OpenAI-specific options through to provider.complete', async () => {
+    const provider = new FakeProvider([makeResponse()], 'openai');
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    await runAgent({
+      ...baseInput(),
+      model: 'gpt-5.4-mini',
+      providerHint: 'openai',
+      openai: {
+        service_tier: 'flex',
+        prompt_cache_key: 'owner/repo',
+        reasoning_effort: 'low',
+      },
+    });
+
+    expect(provider.completeCalls[0]!.opts.openai).toEqual({
+      service_tier: 'flex',
+      prompt_cache_key: 'owner/repo',
+      reasoning_effort: 'low',
+    });
+  });
+
   it('omits abortSignal when no abortController is supplied', async () => {
     const provider = new FakeProvider([makeResponse()]);
     vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
@@ -336,6 +358,43 @@ describe('runAgent', () => {
     expect(result.ended).toBe('budget_exceeded');
     expect(result.error).toBeTruthy();
     expect(result.turns).toBe(1);
+  });
+
+  it('asks the model to wrap up when soft budget threshold is crossed', async () => {
+    const input = baseInput();
+    const provider = new FakeProvider([
+      makeResponse({
+        tool_calls: [{ id: 'c1', name: 'get_pr_metadata', arguments: {} }],
+        stop_reason: 'tool_calls',
+        usage: { input_tokens: 450, output_tokens: 10 },
+      }),
+      makeResponse({
+        tool_calls: [
+          {
+            id: 'c2',
+            name: 'post_summary',
+            arguments: {
+              strengths: ['The implementation remains focused and small'],
+              assessment: 'approve',
+              assessment_reasoning: 'The scoped review completed without identifying any actionable issues.',
+            },
+          },
+        ],
+        stop_reason: 'tool_calls',
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }),
+    ]);
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent({ ...input, maxInputTokens: 500 });
+
+    expect(result.ended).toBe('summary_posted');
+    expect(provider.completeCalls).toHaveLength(2);
+    const secondTurn = provider.completeCalls[1]!.messages;
+    expect(secondTurn[secondTurn.length - 1]).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('Budget is nearly exhausted'),
+    });
   });
 
   it('reports `output_truncated` (not `max_turns`) when the response stops with max_tokens (PR #20 self-review #3300818622)', async () => {

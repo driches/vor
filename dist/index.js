@@ -47545,6 +47545,12 @@ var MODEL_PRICING = {
   "gpt-4.1-nano": { input: 0.1, output: 0.4, cache_read: 0.025 },
   "gpt-4o": { input: 2.5, output: 10, cache_read: 1.25 },
   "gpt-4o-mini": { input: 0.15, output: 0.6, cache_read: 0.075 },
+  // GPT-5.x / Codex API pricing from OpenAI pricing page as of 2026-05.
+  "gpt-5.5": { input: 5, output: 30, cache_read: 0.5 },
+  "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
+  "gpt-5.4-nano": { input: 0.2, output: 1.25, cache_read: 0.02 },
+  "gpt-5.3-codex": { input: 1.75, output: 14, cache_read: 0.175 },
   // o-series reasoning models. `inferProviderFromModel` routes any
   // `/^o\d/` id to OpenAI, so every o-prefix model needs a pricing entry
   // — without them, production silently falls back to Sonnet rates (3–5×
@@ -57457,6 +57463,48 @@ OpenAI.Containers = Containers;
 OpenAI.Skills = Skills;
 OpenAI.Videos = Videos;
 
+// src/llm/openai-capabilities.ts
+var OPENAI_MODEL_CAPABILITIES = {
+  "gpt-4.1": { reasoning: false, temperature: true, promptCacheRetention24h: true },
+  "gpt-4.1-mini": { reasoning: false, temperature: true, promptCacheRetention24h: false },
+  "gpt-4.1-nano": { reasoning: false, temperature: true, promptCacheRetention24h: false },
+  "gpt-4o": { reasoning: false, temperature: true, promptCacheRetention24h: false },
+  "gpt-4o-mini": { reasoning: false, temperature: true, promptCacheRetention24h: false },
+  o1: { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  "o1-mini": { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  "o1-preview": { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  o3: { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  "o3-mini": { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  "o4-mini": { reasoning: true, temperature: false, promptCacheRetention24h: false },
+  "gpt-5.5": { reasoning: true, temperature: false, promptCacheRetention24h: true },
+  "gpt-5.4": { reasoning: true, temperature: false, promptCacheRetention24h: true },
+  "gpt-5.4-mini": { reasoning: true, temperature: false, promptCacheRetention24h: true },
+  "gpt-5.4-nano": { reasoning: true, temperature: false, promptCacheRetention24h: true },
+  "gpt-5.3-codex": { reasoning: true, temperature: false, promptCacheRetention24h: false }
+};
+var DEFAULT_GPT5_CAPABILITIES = {
+  reasoning: true,
+  temperature: false,
+  promptCacheRetention24h: true
+};
+var DEFAULT_O_SERIES_CAPABILITIES = {
+  reasoning: true,
+  temperature: false,
+  promptCacheRetention24h: false
+};
+var DEFAULT_GPT4_CAPABILITIES = {
+  reasoning: false,
+  temperature: true,
+  promptCacheRetention24h: false
+};
+function openaiCapabilitiesForModel(model) {
+  const exact = OPENAI_MODEL_CAPABILITIES[model];
+  if (exact) return exact;
+  if (/^o\d/.test(model)) return DEFAULT_O_SERIES_CAPABILITIES;
+  if (/^gpt-5/.test(model) || /codex/.test(model)) return DEFAULT_GPT5_CAPABILITIES;
+  return DEFAULT_GPT4_CAPABILITIES;
+}
+
 // src/llm/openai-provider.ts
 var OpenAIProvider = class {
   id = "openai";
@@ -57467,7 +57515,8 @@ var OpenAIProvider = class {
   async complete(messages, tools, opts) {
     const input = canonicalMessagesToResponsesInput(messages);
     const responsesTools = canonicalToolsToResponses(tools);
-    const reasoning = isReasoningModel(opts.model);
+    const capabilities = openaiCapabilitiesForModel(opts.model);
+    const promptCacheRetention = opts.openai?.prompt_cache_retention;
     const requestBody = {
       model: opts.model,
       input,
@@ -57482,10 +57531,15 @@ var OpenAIProvider = class {
       // them next turn without retention. No-op on non-reasoning models, but
       // gpt-* will 400 if you pass an unsupported `include` value, hence the
       // conditional.
-      ...reasoning ? { include: ["reasoning.encrypted_content"] } : {},
-      // Reasoning models (o1/o3/o4) reject the `temperature` parameter —
-      // they sample deterministically by design. Only send it for gpt-*.
-      ...supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}
+      ...capabilities.reasoning ? { include: ["reasoning.encrypted_content"] } : {},
+      // Reasoning models reject the `temperature` parameter. Only send it
+      // for models whose capability row says it is supported.
+      ...supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {},
+      ...opts.openai?.service_tier ? { service_tier: opts.openai.service_tier } : {},
+      ...opts.openai?.prompt_cache_key ? { prompt_cache_key: opts.openai.prompt_cache_key } : {},
+      ...promptCacheRetention && (promptCacheRetention !== "24h" || capabilities.promptCacheRetention24h) ? { prompt_cache_retention: promptCacheRetention } : {},
+      ...opts.openai?.reasoning_effort && capabilities.reasoning ? { reasoning: { effort: opts.openai.reasoning_effort } } : {},
+      ...opts.openai?.text_verbosity ? { text: { verbosity: opts.openai.text_verbosity } } : {}
     };
     const response = await this.client.responses.create(
       requestBody,
@@ -57505,11 +57559,8 @@ var OpenAIProvider = class {
     return inputTokensFullRateFor("openai", usage);
   }
 };
-function isReasoningModel(model) {
-  return /^o\d/.test(model);
-}
 function supportsTemperature(model) {
-  return !isReasoningModel(model);
+  return openaiCapabilitiesForModel(model).temperature;
 }
 function isOpenAIResponseOutput(arr) {
   return arr.every((item) => {
@@ -58947,6 +58998,7 @@ async function runAgent(input) {
   let ended = "error";
   let lastError;
   let preflightBudgetExceeded = false;
+  let wrapUpRequested = false;
   if (worker !== void 0 && anthropicClient !== void 0) {
     try {
       const analysis = await runPreflight({
@@ -59000,6 +59052,7 @@ async function runAgent(input) {
         // JSDoc for the recall/cost history. The OpenAI adapter drops the
         // field automatically for o-series reasoning models that reject it.
         temperature,
+        ...input.openai !== void 0 ? { openai: input.openai } : {},
         ...input.abortController ? { abortSignal: input.abortController.signal } : {}
       });
       try {
@@ -59063,6 +59116,13 @@ async function runAgent(input) {
           content: result,
           ...isError ? { is_error: true } : {}
         });
+      }
+      if (!wrapUpRequested && !input.deps.aggregator.hasSummary() && turns < input.maxTurns && budget.shouldWrapUp()) {
+        messages.push({
+          role: "user",
+          content: "Budget is nearly exhausted. Stop broad investigation now. Post only already-verified findings, include any intentionally unreviewed paths in `post_summary.unreviewed_paths`, and call `post_summary` on your next turn."
+        });
+        wrapUpRequested = true;
       }
       if (input.deps.aggregator.hasSummary()) {
         ended = "summary_posted";
@@ -59155,6 +59215,99 @@ function buildToolDefinitions(deps) {
       }
     };
   });
+}
+
+// src/agent/pr-scope.ts
+function scopePrContextForAgent(prContext, exclude) {
+  const kept = [];
+  const unreviewedPaths = [];
+  for (const file of prContext.files) {
+    if (matchesAnyPattern(file.path, exclude.paths)) {
+      unreviewedPaths.push(file.path);
+      continue;
+    }
+    if (file.previous_path && matchesAnyPattern(file.previous_path, exclude.paths)) {
+      unreviewedPaths.push(file.path);
+      continue;
+    }
+    const changedLines = file.additions + file.deletions;
+    if (changedLines > exclude.max_diff_lines_per_file) {
+      unreviewedPaths.push(file.path);
+      continue;
+    }
+    kept.push(file);
+  }
+  const keptPaths = new Set(kept.map((f2) => f2.path));
+  return {
+    prContext: {
+      ...prContext,
+      files: kept,
+      diff: filterDiffByPaths2(prContext.diff, keptPaths)
+    },
+    unreviewedPaths
+  };
+}
+function buildAgentScopeNotice(unreviewedPaths) {
+  if (unreviewedPaths.length === 0) return "";
+  const shown = unreviewedPaths.slice(0, 30).map((p2) => `- ${p2}`).join("\n");
+  const extra = unreviewedPaths.length > 30 ? `
+- ...and ${unreviewedPaths.length - 30} more path(s)` : "";
+  return [
+    "## Agent scope",
+    "",
+    "The following path(s) are intentionally outside the LLM review scope due to configured exclusions or per-file diff budget. Deterministic scanners may still inspect them and post findings independently. Do not spend tool calls trying to review these paths; include them in `post_summary.unreviewed_paths` if you mention coverage.",
+    "",
+    shown + extra
+  ].join("\n");
+}
+function matchesAnyPattern(path19, patterns) {
+  return patterns.some((pattern) => globToRegExp(pattern).test(path19));
+}
+var regexCache = /* @__PURE__ */ new Map();
+function globToRegExp(pattern) {
+  const cached = regexCache.get(pattern);
+  if (cached) return cached;
+  let out = "^";
+  for (let i2 = 0; i2 < pattern.length; i2++) {
+    const ch = pattern[i2];
+    if (ch === "*") {
+      const next = pattern[i2 + 1];
+      if (next === "*") {
+        const after = pattern[i2 + 2];
+        if (after === "/") {
+          out += "(?:.*/)?";
+          i2 += 2;
+        } else {
+          out += ".*";
+          i2 += 1;
+        }
+      } else {
+        out += "[^/]*";
+      }
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      continue;
+    }
+    out += escapeRegexChar(ch);
+  }
+  out += "$";
+  const re2 = new RegExp(out);
+  regexCache.set(pattern, re2);
+  return re2;
+}
+function escapeRegexChar(ch) {
+  return /[\\^$+?.()|{}[\]]/.test(ch) ? `\\${ch}` : ch;
+}
+function filterDiffByPaths2(diff, wanted) {
+  if (wanted.size === 0 || diff.length === 0) return "";
+  const blocks = diff.split(/(?=^diff --git )/m);
+  return blocks.filter((block) => {
+    const m2 = block.match(/^diff --git a\/(.+) b\/(.+)$/m);
+    if (!m2) return false;
+    return wanted.has(m2[2]) || wanted.has(m2[1]);
+  }).join("");
 }
 
 // src/agent/system-prompt.ts
@@ -59431,6 +59584,9 @@ var DEFAULT_CONFIG = {
     cache: { enabled: true },
     persistence: { enabled: false }
   },
+  providers: {
+    openai: {}
+  },
   experimental: {
     worker_delegation: {
       enabled: false,
@@ -59443,6 +59599,7 @@ var DEFAULT_CONFIG = {
 var severitySchema2 = external_exports.enum(["critical", "important", "minor", "nit"]);
 var eventSchema = external_exports.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]);
 var providerSchema = external_exports.enum(["anthropic", "openai"]);
+var openaiReasoningEffortSchema = external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh"]);
 var scannerCommon = external_exports.object({
   enabled: external_exports.boolean(),
   min_severity: severitySchema2.optional()
@@ -59486,6 +59643,15 @@ var experimentalSchema = external_exports.object({
     worker_model: external_exports.string().min(1)
   })
 });
+var providerConfigSchema = external_exports.object({
+  openai: external_exports.object({
+    service_tier: external_exports.enum(["auto", "default", "flex"]).optional(),
+    prompt_cache_key: external_exports.string().min(1).max(256).optional(),
+    prompt_cache_retention: external_exports.enum(["in_memory", "24h"]).optional(),
+    reasoning_effort: openaiReasoningEffortSchema.optional(),
+    text_verbosity: external_exports.enum(["low", "medium", "high"]).optional()
+  })
+});
 var configSchema = external_exports.object({
   model: external_exports.string().min(1),
   provider: providerSchema.optional(),
@@ -59524,6 +59690,7 @@ var configSchema = external_exports.object({
     max_output_tokens: external_exports.number().int().positive()
   }),
   security: securitySchema,
+  providers: providerConfigSchema,
   experimental: experimentalSchema
 }).strict();
 var partialConfigSchema = configSchema.deepPartial();
@@ -63871,6 +64038,10 @@ function bySeverityDesc(a2, b2) {
 // src/output/formatter.ts
 function renderSummary(input) {
   const summary2 = input.draft.summary;
+  const unreviewedPaths = mergeUniquePaths(
+    summary2?.unreviewed_paths ?? [],
+    input.unreviewedPaths ?? []
+  );
   const sections = [];
   sections.push(`### ${severityHeader(input.keptComments)}`);
   if (!summary2) {
@@ -63896,9 +64067,9 @@ function renderSummary(input) {
     sections.push("### Coverage");
     sections.push(summary2.coverage_note);
   }
-  if (summary2?.unreviewed_paths && summary2.unreviewed_paths.length > 0) {
+  if (unreviewedPaths.length > 0) {
     sections.push(
-      `_Skipped (out of budget):_ ${summary2.unreviewed_paths.slice(0, 20).join(", ")}` + (summary2.unreviewed_paths.length > 20 ? ` _+${summary2.unreviewed_paths.length - 20} more_` : "")
+      `_Skipped (out of budget):_ ${unreviewedPaths.slice(0, 20).join(", ")}` + (unreviewedPaths.length > 20 ? ` _+${unreviewedPaths.length - 20} more_` : "")
     );
   }
   if (input.truncatedCount > 0) {
@@ -63913,6 +64084,9 @@ function renderSummary(input) {
   const agentEvent = !summary2 ? "COMMENT" : summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
   const event = chooseEvent(input.configEvent, agentEvent);
   return { body: sections.join("\n\n"), event };
+}
+function mergeUniquePaths(a2, b2) {
+  return [.../* @__PURE__ */ new Set([...a2, ...b2])];
 }
 function chooseEvent(configCeiling, agentChoice) {
   const rank = { COMMENT: 0, APPROVE: 1, REQUEST_CHANGES: 2 };
@@ -67856,11 +68030,21 @@ async function runOrchestrator(input) {
     repoName: `${input.owner}/${input.repo}`,
     contextFiles
   });
-  const userPrompt = buildUserPrompt({
+  const agentScope = scopePrContextForAgent(prContext, config.exclude);
+  if (agentScope.unreviewedPaths.length > 0) {
+    await logger.info(
+      `Agent scope: ${agentScope.prContext.files.length}/${prContext.files.length} file(s) visible to LLM; ${agentScope.unreviewedPaths.length} path(s) skipped by deterministic scope gates.`
+    );
+  }
+  const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
+  const userPromptBase = buildUserPrompt({
     owner: input.owner,
     repo: input.repo,
     pull_number: input.pull_number
   });
+  const userPrompt = scopeNotice ? `${scopeNotice}
+
+${userPromptBase}` : userPromptBase;
   const ignoreList = await IgnoreList.load(fileReader, {
     owner: input.owner,
     repo: input.repo,
@@ -67890,13 +68074,20 @@ async function runOrchestrator(input) {
     config: config.security,
     signal: orchestratorAbort.signal
   };
-  const agentPromise = runAgent({
+  const agentPromise = agentScope.prContext.files.length === 0 ? Promise.resolve({
+    ended: "summary_posted",
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+    perModelCost: []
+  }) : runAgent({
     deps: {
       octokit,
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
-      prContext,
+      prContext: agentScope.prContext,
       fileReader,
       aggregator,
       config,
@@ -67910,6 +68101,7 @@ async function runOrchestrator(input) {
     maxInputTokens: config.budget.max_input_tokens,
     maxOutputTokens: config.budget.max_output_tokens,
     apiKey,
+    openai: config.providers.openai,
     // Always pass the resolved provider — same string we already computed
     // above. Skips one redundant inferProviderFromModel() call inside the
     // runner and pins routing even for model ids that match no known prefix
@@ -67937,6 +68129,14 @@ async function runOrchestrator(input) {
     throw agentOutcome.reason;
   }
   const result = agentOutcome.value;
+  if (agentScope.prContext.files.length === 0 && !aggregator.hasSummary()) {
+    aggregator.setSummary({
+      strengths: ["Deterministic scanners still ran on the skipped paths"],
+      assessment: "comment",
+      assessment_reasoning: "No LLM review was run because every changed path was outside the configured LLM review scope. Deterministic scanners still inspected applicable files and any scanner findings are included below.",
+      unreviewed_paths: agentScope.unreviewedPaths
+    });
+  }
   const scanRunResult = scanOutcome.status === "fulfilled" ? scanOutcome.value : { findings: [], perScanner: [] };
   if (scanOutcome.status === "rejected") {
     await logger.warn(
@@ -68004,7 +68204,8 @@ async function runOrchestrator(input) {
     truncatedCount: filtered.dropped,
     configEvent: config.review.event,
     modelName: config.model,
-    agentEnded: result.ended
+    agentEnded: result.ended,
+    unreviewedPaths: agentScope.unreviewedPaths
   });
   if (input.dry_run) {
     await logDryRunReview({

@@ -1255,6 +1255,9 @@ describe('runOrchestrator — Scenario 3: dependency-cve happy path', () => {
         '      enabled: true',
         '    secrets:',
         '      enabled: false',
+        'exclude:',
+        '  paths: []',
+        '  max_diff_lines_per_file: 1500',
       ].join('\n'),
     );
 
@@ -1370,6 +1373,9 @@ describe('runOrchestrator — Scenario 4: scanner error does not block AI review
         '      enabled: true',
         '    secrets:',
         '      enabled: false',
+        'exclude:',
+        '  paths: []',
+        '  max_diff_lines_per_file: 1500',
       ].join('\n'),
     );
 
@@ -1464,6 +1470,9 @@ describe('runOrchestrator — parallel execution of agent and scanners', () => {
         '      enabled: true',
         '    secrets:',
         '      enabled: false',
+        'exclude:',
+        '  paths: []',
+        '  max_diff_lines_per_file: 1500',
       ].join('\n'),
     );
 
@@ -1550,6 +1559,9 @@ describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner si
         '      enabled: true',
         '    secrets:',
         '      enabled: false',
+        'exclude:',
+        '  paths: []',
+        '  max_diff_lines_per_file: 1500',
       ].join('\n'),
     );
 

@@ -153,6 +153,20 @@ describe('renderSummary — body content', () => {
     expect(r.body).toContain('a.ts, b.ts, c.ts');
   });
 
+  it('merges orchestrator-scoped unreviewed paths with summary paths', () => {
+    const r = renderSummary({
+      draft: baseDraft({
+        summary: baseSummary({ unreviewed_paths: ['a.ts'] }),
+      }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      unreviewedPaths: ['a.ts', 'dist/bundle.js'],
+    });
+    expect(r.body).toContain('a.ts, dist/bundle.js');
+  });
+
   it('synthesizes a body from comments when the agent skipped post_summary', () => {
     const r = renderSummary({
       draft: { comments: [], skipped: [] },

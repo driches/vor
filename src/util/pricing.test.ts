@@ -59,6 +59,11 @@ describe('pricingForModel', () => {
       'gpt-4.1-nano',
       'gpt-4o',
       'gpt-4o-mini',
+      'gpt-5.3-codex',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.5',
       'o1',
       'o1-mini',
       'o1-preview',
@@ -121,6 +126,19 @@ describe('pricingForModel', () => {
     expect(p!.output).toBe(4.4);
     expect(p!.cache_read).toBe(0.275);
     expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices GPT-5.4-mini and GPT-5.3 Codex from the current OpenAI table', () => {
+    expect(pricingForModel('gpt-5.4-mini')).toEqual({
+      input: 0.75,
+      output: 4.5,
+      cache_read: 0.075,
+    });
+    expect(pricingForModel('gpt-5.3-codex')).toEqual({
+      input: 1.75,
+      output: 14,
+      cache_read: 0.175,
+    });
   });
 
   it('prices o1 at $15/$60 with $7.5 cache read', () => {

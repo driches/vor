@@ -159,6 +159,15 @@ budget:
   max_input_tokens: 500000
   max_output_tokens: 50000
 
+providers:
+  openai:
+    # Optional OpenAI Responses API controls. Omit to use conservative defaults.
+    # service_tier: flex                 # lower cost, slower/less available
+    # prompt_cache_key: owner/repo       # stable low-cardinality cache routing key
+    # prompt_cache_retention: 24h        # in_memory | 24h, model-dependent
+    # reasoning_effort: low              # reasoning-capable models only
+    # text_verbosity: low                # GPT-5 text verbosity knob
+
 security:
   enabled: true                                       # set false to skip all scanners
   ignore_file: .code-review/security-ignore.yml

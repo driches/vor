@@ -42,6 +42,12 @@ describe('isReasoningModel', () => {
     expect(isReasoningModel('o4-mini')).toBe(true);
   });
 
+  it('returns true for GPT-5.x and Codex reasoning models', () => {
+    expect(isReasoningModel('gpt-5.5')).toBe(true);
+    expect(isReasoningModel('gpt-5.4-mini')).toBe(true);
+    expect(isReasoningModel('gpt-5.3-codex')).toBe(true);
+  });
+
   it('returns false for gpt-* and chatgpt-*', () => {
     expect(isReasoningModel('gpt-4.1')).toBe(false);
     expect(isReasoningModel('gpt-4o')).toBe(false);
@@ -58,6 +64,7 @@ describe('supportsTemperature', () => {
     expect(supportsTemperature('gpt-4.1')).toBe(true);
     expect(supportsTemperature('gpt-4o')).toBe(true);
     expect(supportsTemperature('chatgpt-4o-latest')).toBe(true);
+    expect(supportsTemperature('gpt-5.5')).toBe(false);
   });
 });
 
@@ -927,6 +934,51 @@ describe('OpenAIProvider', () => {
         temperature: 0.2,
       });
       expect(createSpy.mock.calls[0]![0].temperature).toBe(0.2);
+    });
+
+    it('forwards configured OpenAI Responses controls', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('gpt-5.4-mini'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-5.4-mini',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: {
+          service_tier: 'flex',
+          prompt_cache_key: 'repo-owner/repo',
+          prompt_cache_retention: '24h',
+          reasoning_effort: 'low',
+          text_verbosity: 'low',
+        },
+      });
+      const body = createSpy.mock.calls[0]![0];
+      expect(body.service_tier).toBe('flex');
+      expect(body.prompt_cache_key).toBe('repo-owner/repo');
+      expect(body.prompt_cache_retention).toBe('24h');
+      expect(body.reasoning).toEqual({ effort: 'low' });
+      expect(body.text).toEqual({ verbosity: 'low' });
+      expect(body).not.toHaveProperty('temperature');
+    });
+
+    it('does not send reasoning effort for non-reasoning GPT-4 models', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('gpt-4.1'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-4.1',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: { reasoning_effort: 'low' },
+      });
+      expect(createSpy.mock.calls[0]![0]).not.toHaveProperty('reasoning');
+    });
+
+    it('omits 24h prompt-cache retention for models that do not support it', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('gpt-4o-mini'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-4o-mini',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: { prompt_cache_retention: '24h' },
+      });
+      expect(createSpy.mock.calls[0]![0]).not.toHaveProperty('prompt_cache_retention');
     });
 
     it('passes abortSignal through to the SDK request opts', async () => {
