@@ -42,6 +42,8 @@ import { eslintLinter } from './sast/eslint.js';
 import { ruffLinter } from './sast/ruff.js';
 import { dartLinter } from './sast/dart.js';
 import { actionlintLinter } from './sast/actionlint.js';
+import { knipLinter } from './sast/knip.js';
+import { semgrepLinter } from './sast/semgrep.js';
 import type { LinterModule } from './sast/linter.js';
 
 const SCANNER_ID: ScannerId = 'sast';
@@ -55,6 +57,8 @@ const LINTERS: readonly LinterModule[] = [
   ruffLinter,
   dartLinter,
   actionlintLinter,
+  knipLinter,
+  semgrepLinter,
 ];
 
 export function createSastScanner(): Scanner {

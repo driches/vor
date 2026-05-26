@@ -1,0 +1,247 @@
+/**
+ * Semgrep linter module — runs the target repo's semgrep against changed
+ * files, with the auto-detected ruleset.
+ *
+ * Why this exists: pattern-recognition (security anti-patterns, N+1 in
+ * loops, dangerous string concatenation, etc.) was identified as ~15% of
+ * Sonnet's tool-loop overhead. Semgrep was specifically called out as the
+ * deterministic tool for these checks. Each semgrep finding the agent
+ * would have spent multiple turns finding (grep for the pattern, read
+ * surrounding code, decide if it's the anti-pattern) is now produced in
+ * one CLI invocation at zero token cost.
+ *
+ * Cross-language by design — semgrep ships with rule packs for TS/JS,
+ * Python, Go, Ruby, Java, Rust, C/C++, and more. The `--config=auto`
+ * flag picks rules based on the languages it detects in the workspace.
+ *
+ * Activation: requires `semgrep` on PATH (single-binary install via
+ * `pip install semgrep` or `brew install semgrep`). Returns empty
+ * quietly when missing.
+ *
+ * Output format: `semgrep scan --json` emits:
+ *   { results: [{ check_id, path, start: { line, col }, extra: { message, severity, lines } }, ...], errors: [...] }
+ */
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
+import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
+import type { LinterModule, LinterRun } from './linter.js';
+
+const ID = 'semgrep';
+const TIMEOUT_MS = 180_000;
+// Semgrep handles many languages; we let semgrep's auto-config decide
+// which rules apply. We only filter the input set to non-binary,
+// non-generated source files to avoid wasting semgrep cycles on lockfiles.
+const PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|m|mm|scala|clj|ex|exs|sh|bash|yaml|yml|tf|hcl)$/;
+
+interface SemgrepOutput {
+  results: SemgrepResult[];
+  errors?: unknown[];
+}
+
+interface SemgrepResult {
+  check_id: string;
+  path: string;
+  start: { line: number; col?: number };
+  end?: { line: number; col?: number };
+  extra: {
+    message: string;
+    severity: 'INFO' | 'WARNING' | 'ERROR';
+    /** The matched lines, joined. We include in the description. */
+    lines?: string;
+    /** Optional rule metadata — category, CWE, OWASP. */
+    metadata?: {
+      category?: string;
+      cwe?: string | string[];
+      owasp?: string | string[];
+    };
+  };
+}
+
+export const semgrepLinter: LinterModule = {
+  id: ID,
+  applies(files: readonly ChangedFile[]): boolean {
+    return files.some(
+      (f) => PROBABLY_SOURCE.test(f.path) && !f.is_binary && !f.is_generated,
+    );
+  },
+  async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
+    const errors: ScanError[] = [];
+
+    let rawOutput: string;
+    try {
+      rawOutput = await runCli(targetFiles.map((f) => f.path), deps);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('ENOENT') || msg.includes('not found')) {
+        return { findings: [], errors: [], filesExamined: 0 };
+      }
+      errors.push({ message: `semgrep failed: ${msg}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+
+    let output: SemgrepOutput;
+    try {
+      output = JSON.parse(rawOutput) as SemgrepOutput;
+    } catch (err) {
+      errors.push({
+        message: `semgrep output parse failed: ${(err as Error).message}`,
+        fatal: false,
+      });
+      return { findings: [], errors, filesExamined: targetFiles.length };
+    }
+
+    const findings: ScanFinding[] = [];
+    for (const result of output.results ?? []) {
+      const relPath = path.relative(deps.workspaceDir, result.path);
+      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      if (changedFile === undefined) continue;
+      if (!changedFile.added_lines.has(result.start.line)) continue;
+      findings.push(buildFinding(changedFile.path, result));
+    }
+
+    return { findings, errors, filesExamined: targetFiles.length };
+  },
+};
+
+function runCli(files: string[], deps: ScannerDeps): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // --config=auto pulls the appropriate ruleset for detected languages.
+    // --quiet suppresses the human-readable summary that would corrupt the
+    // JSON output. --no-rewrite-rule-ids keeps check_ids stable across
+    // runs for fingerprinting.
+    const child = spawn(
+      'semgrep',
+      [
+        'scan',
+        '--json',
+        '--quiet',
+        '--config=auto',
+        '--no-rewrite-rule-ids',
+        '--disable-version-check',
+        ...files,
+      ],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? '' },
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child.kill('SIGKILL');
+      reject(new Error(`semgrep timed out after ${TIMEOUT_MS}ms`));
+    }, TIMEOUT_MS);
+
+    child.stdout.on('data', (b) => {
+      stdout += b.toString('utf-8');
+    });
+    child.stderr.on('data', (b) => {
+      stderr += b.toString('utf-8');
+    });
+    deps.signal.addEventListener('abort', () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(new Error('semgrep aborted'));
+    });
+    child.on('close', (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      // Semgrep exit codes: 0 = clean, 1 = findings, 2 = errors but partial
+      // results, >2 = fatal. 0/1/2 produce parseable JSON.
+      if (code !== null && code > 2) {
+        reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve(stdout);
+    });
+    child.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+function buildFinding(filePath: string, result: SemgrepResult): ScanFinding {
+  const severity: Severity = severityFromSemgrep(result.extra.severity);
+  const category: Category = categorize(result);
+  const confidence: Confidence = 'high';
+  const fingerprint = `${ID}:${result.check_id}:${filePath}:${result.start.line}`;
+  const line = result.start.line;
+  const endLine = result.end?.line;
+  const cweRaw = result.extra.metadata?.cwe;
+  const cwe = Array.isArray(cweRaw) ? cweRaw : cweRaw !== undefined ? [cweRaw] : [];
+  return {
+    scanner: 'sast',
+    rule_id: `${ID}/${result.check_id}`,
+    file_path: filePath,
+    line,
+    ...(endLine !== undefined && endLine > line
+      ? { start_line: line, line: endLine }
+      : {}),
+    severity,
+    category,
+    title: renderTitle(result),
+    description: renderDescription(result),
+    confidence,
+    evidence: { kind: 'sast', cwe },
+    fingerprint,
+  };
+}
+
+function severityFromSemgrep(s: SemgrepResult['extra']['severity']): Severity {
+  if (s === 'ERROR') return 'important';
+  if (s === 'WARNING') return 'minor';
+  return 'nit';
+}
+
+function categorize(result: SemgrepResult): Category {
+  const ruleCategory = result.extra.metadata?.category;
+  // Common semgrep rule categories: security, correctness, performance,
+  // best-practice, maintainability.
+  if (ruleCategory === 'security') return 'vulnerability';
+  if (ruleCategory === 'correctness') return 'bug';
+  if (ruleCategory === 'performance') return 'performance';
+  // Fall back to check_id heuristics — semgrep packs often use prefixes
+  // like `python.lang.security.foo` that hint at the category.
+  if (result.check_id.includes('security')) return 'vulnerability';
+  if (result.check_id.includes('correctness') || result.check_id.includes('bug')) {
+    return 'bug';
+  }
+  if (result.check_id.includes('performance') || result.check_id.includes('perf')) {
+    return 'performance';
+  }
+  return 'readability';
+}
+
+function renderTitle(result: SemgrepResult): string {
+  // Take the first line of semgrep's message — semgrep messages are often
+  // multi-paragraph with mitigation guidance.
+  const firstLine = result.extra.message.split('\n')[0]!.trim();
+  const ruleStr = `[${ID}/${result.check_id}] `;
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + '...' : candidate;
+}
+
+function renderDescription(result: SemgrepResult): string {
+  const cweRaw = result.extra.metadata?.cwe;
+  const cwes = Array.isArray(cweRaw) ? cweRaw.join(', ') : cweRaw;
+  const meta: string[] = [];
+  if (cwes !== undefined && cwes.length > 0) meta.push(`CWE: ${cwes}`);
+  if (result.extra.metadata?.owasp !== undefined) {
+    const owasp = Array.isArray(result.extra.metadata.owasp)
+      ? result.extra.metadata.owasp.join(', ')
+      : result.extra.metadata.owasp;
+    meta.push(`OWASP: ${owasp}`);
+  }
+  const metaStr = meta.length > 0 ? `\n\n_${meta.join(' · ')}_` : '';
+  return `Semgrep rule: \`${result.check_id}\`.\n\n${result.extra.message.trim()}${metaStr}`;
+}

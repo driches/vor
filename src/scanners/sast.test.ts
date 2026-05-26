@@ -52,12 +52,24 @@ describe('sast scanner (fan-out orchestrator)', () => {
     expect(scanner.applies([])).toBe(false);
     expect(scanner.applies([makeFile({ path: 'README.md' })])).toBe(false);
     expect(scanner.applies([makeFile({ path: 'requirements.txt' })])).toBe(false);
-    // Generic yaml that's NOT in .github/workflows shouldn't trigger actionlint
-    expect(scanner.applies([makeFile({ path: 'config.yml' })])).toBe(false);
-    expect(scanner.applies([makeFile({ path: 'kustomization.yaml' })])).toBe(false);
-    // Other source languages we haven't added a linter for yet
-    expect(scanner.applies([makeFile({ path: 'src/foo.go' })])).toBe(false);
-    expect(scanner.applies([makeFile({ path: 'src/foo.rs' })])).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'CHANGELOG.md' })])).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'docs/architecture.md' })])).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'icon.png' })])).toBe(false);
+  });
+
+  it('applies() returns true for source files in languages semgrep covers (Go, Rust, Ruby, etc.) — even when no dedicated linter is wired', () => {
+    // Semgrep's auto ruleset spans most popular languages, so the sast
+    // scanner activates for them even though we haven't added a
+    // dedicated linter module. If semgrep isn't installed in the
+    // workspace, the module quietly no-ops at run time.
+    const scanner = createSastScanner();
+    expect(scanner.applies([makeFile({ path: 'src/foo.go' })])).toBe(true);
+    expect(scanner.applies([makeFile({ path: 'src/foo.rs' })])).toBe(true);
+    expect(scanner.applies([makeFile({ path: 'lib/foo.rb' })])).toBe(true);
+    expect(scanner.applies([makeFile({ path: 'src/foo.java' })])).toBe(true);
+    // Generic YAML / Terraform — semgrep has rule packs for IaC patterns.
+    expect(scanner.applies([makeFile({ path: 'config.yml' })])).toBe(true);
+    expect(scanner.applies([makeFile({ path: 'infra/main.tf' })])).toBe(true);
   });
 
   it('applies() skips generated and binary files even when extension matches', () => {
