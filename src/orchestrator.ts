@@ -12,6 +12,7 @@ import { buildUserPrompt } from './agent/user-prompt.js';
 import { loadConfigFromString } from './config/loader.js';
 import { DEFAULT_CONFIG } from './config/defaults.js';
 import type { ReviewConfig } from './config/types.js';
+import type { Octokit } from '@octokit/rest';
 import { createOctokit } from './github/client.js';
 import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
@@ -92,6 +93,14 @@ export interface OrchestratorInput {
     apiKey: string;
     providerHint?: ProviderId;
   }) => LLMProvider;
+  /**
+   * Optional override for Octokit instantiation. Production omits this and
+   * `createOctokit` is used against the real GitHub API. The local-review
+   * CLI (`scripts/local-review.ts`) injects a git-backed FakeOctokit here
+   * so the same `runOrchestrator` path runs against the user's working
+   * copy with no GitHub round-trip. Same shape as `providerFactory`.
+   */
+  octokitFactory?: (opts: { auth: string }) => Octokit;
 }
 
 export interface OrchestratorOutput {
@@ -146,7 +155,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       (input.dry_run ? ' (DRY RUN)' : ''),
   );
 
-  const octokit = createOctokit({ auth: input.github_token });
+  const octokit = (input.octokitFactory ?? createOctokit)({
+    auth: input.github_token,
+  });
 
   // Fetch PR metadata + files + diff
   const prContext = await fetchPRContext(octokit, {
