@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * Shared types for per-language linter modules under src/scanners/sast/.
  *
@@ -30,6 +32,36 @@ export interface LinterRun {
   findings: ScanFinding[];
   errors: ScanError[];
   filesExamined: number;
+}
+
+/**
+ * Normalize a path emitted by an external linter into the repo-relative
+ * form `changedFiles` is keyed by.
+ *
+ * Different linters report paths differently:
+ *   - ESLint and `dart analyze --format=machine` emit ABSOLUTE paths.
+ *   - Ruff (--output-format=json), Knip (--reporter json), Semgrep
+ *     (--json), and actionlint (-format '{{json .}}') emit
+ *     REPO-RELATIVE paths.
+ *
+ * Pre-fix, this module unconditionally called `path.relative(workspaceDir,
+ * toolPath)` to map back to `changedFiles` keys. That works for absolute
+ * inputs but mangles relative inputs into '../../...' strings that never
+ * match — and the failure mode is silent (every finding gets dropped at
+ * the `changedFiles.find(...)` step). The fix is to detect the input
+ * shape: re-relativize when absolute, pass through when relative.
+ *
+ * Exported so each linter module can use one consistent normalizer
+ * instead of re-deriving the same logic and re-introducing the same bug.
+ */
+export function normalizeToolPath(workspaceDir: string, toolPath: string): string {
+  if (path.isAbsolute(toolPath)) {
+    return path.relative(workspaceDir, toolPath);
+  }
+  // Relative paths from linters are already in the shape we want, but
+  // normalize away any redundant `./` prefixes or doubled separators so
+  // the `===` lookup against changedFiles is byte-stable.
+  return path.normalize(toolPath);
 }
 
 export interface LinterModule {

@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import type { LinterModule, LinterRun } from './linter.js';
+import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'eslint';
 const TIMEOUT_MS = 60_000;
@@ -71,7 +71,7 @@ export const eslintLinter: LinterModule = {
 
     const findings: ScanFinding[] = [];
     for (const fileResult of results) {
-      const relPath = path.relative(deps.workspaceDir, fileResult.filePath);
+      const relPath = normalizeToolPath(deps.workspaceDir, fileResult.filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const message of fileResult.messages) {

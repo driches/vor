@@ -20,10 +20,9 @@
  *   - INFO → 'nit' (style + recommendations)
  */
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import type { LinterModule, LinterRun } from './linter.js';
+import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'dart';
 const TIMEOUT_MS = 90_000;
@@ -69,7 +68,7 @@ export const dartLinter: LinterModule = {
     for (const line of rawOutput.split('\n')) {
       const parsed = parseDartLine(line);
       if (parsed === null) continue;
-      const relPath = path.relative(deps.workspaceDir, parsed.filePath);
+      const relPath = normalizeToolPath(deps.workspaceDir, parsed.filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(parsed.line)) continue;

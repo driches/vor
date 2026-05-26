@@ -22,10 +22,9 @@
  *   { results: [{ check_id, path, start: { line, col }, extra: { message, severity, lines } }, ...], errors: [...] }
  */
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import type { LinterModule, LinterRun } from './linter.js';
+import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'semgrep';
 const TIMEOUT_MS = 180_000;
@@ -93,7 +92,7 @@ export const semgrepLinter: LinterModule = {
 
     const findings: ScanFinding[] = [];
     for (const result of output.results ?? []) {
-      const relPath = path.relative(deps.workspaceDir, result.path);
+      const relPath = normalizeToolPath(deps.workspaceDir, result.path);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;

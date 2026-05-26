@@ -22,7 +22,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import type { LinterModule, LinterRun } from './linter.js';
+import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'ruff';
 const TIMEOUT_MS = 60_000;
@@ -86,7 +86,7 @@ export const ruffLinter: LinterModule = {
 
     const findings: ScanFinding[] = [];
     for (const message of messages) {
-      const relPath = path.relative(deps.workspaceDir, message.filename);
+      const relPath = normalizeToolPath(deps.workspaceDir, message.filename);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(message.location.row)) continue;

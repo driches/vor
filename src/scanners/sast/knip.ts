@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import type { LinterModule, LinterRun } from './linter.js';
+import { normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
 
 const ID = 'knip';
 const TIMEOUT_MS = 120_000;
@@ -99,7 +99,7 @@ export const knipLinter: LinterModule = {
     // Unused exports — the big category. For each file knip flagged,
     // emit one finding per unused export, filtered to PR-added lines.
     for (const [filePath, issues] of Object.entries(output.exports ?? {})) {
-      const relPath = path.relative(deps.workspaceDir, filePath);
+      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const issue of issues) {
@@ -109,7 +109,7 @@ export const knipLinter: LinterModule = {
     }
     // Unused types — same shape as exports.
     for (const [filePath, issues] of Object.entries(output.types ?? {})) {
-      const relPath = path.relative(deps.workspaceDir, filePath);
+      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const issue of issues) {
@@ -120,7 +120,7 @@ export const knipLinter: LinterModule = {
     // Duplicate exports — usually a sign the new code is overriding or
     // shadowing something. Worth flagging.
     for (const [filePath, issues] of Object.entries(output.duplicates ?? {})) {
-      const relPath = path.relative(deps.workspaceDir, filePath);
+      const relPath = normalizeToolPath(deps.workspaceDir, filePath);
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       for (const issue of issues) {
