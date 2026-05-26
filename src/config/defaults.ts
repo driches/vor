@@ -77,7 +77,16 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       // changed TS/JS files. Zero LLM token cost; catches type errors,
       // unused vars, common pitfalls before they reach Sonnet. Opt out
       // by setting `security.scanners.sast.enabled: false`.
-      sast: { enabled: true },
+      //
+      // v0.4.1 adds an opt-in custom Semgrep ruleset alongside the
+      // existing `--config=auto`. The default path points at the bundled
+      // rule pack under `.code-review/semgrep-rules/` (N+1, sync-in-async,
+      // raw SQL, missing auth). When the directory is absent, semgrep is
+      // configured exactly as before — no behavior change for old configs.
+      sast: {
+        enabled: true,
+        semgrep: { custom_rules_path: '.code-review/semgrep-rules' },
+      },
       container_cve: { enabled: false },
     },
     cache: { enabled: true },

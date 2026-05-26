@@ -134,6 +134,51 @@ security:
     });
     expect(result.success).toBe(true);
   });
+
+  // v0.4.1 backwards-compat regression test: a config written before
+  // custom_rules_path existed must still validate AND must NOT lose its
+  // sibling sast fields when merged with defaults.
+  it('accepts an old-style sast config with no semgrep block', () => {
+    const cfg = loadConfigFromString(`
+security:
+  scanners:
+    sast:
+      enabled: true
+`);
+    expect(cfg.security.scanners.sast.enabled).toBe(true);
+    // Default semgrep block is preserved (custom_rules_path falls back to
+    // the bundled rule pack location).
+    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe(
+      '.code-review/semgrep-rules',
+    );
+  });
+
+  it('accepts an explicit custom_rules_path override', () => {
+    const cfg = loadConfigFromString(`
+security:
+  scanners:
+    sast:
+      enabled: true
+      semgrep:
+        custom_rules_path: rules/semgrep
+`);
+    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe(
+      'rules/semgrep',
+    );
+  });
+
+  it('accepts the empty-string opt-out for custom_rules_path', () => {
+    // Empty string is the explicit "use only --config=auto" sentinel —
+    // distinguishable from "field unset, fall back to bundled rules".
+    const cfg = loadConfigFromString(`
+security:
+  scanners:
+    sast:
+      semgrep:
+        custom_rules_path: ""
+`);
+    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe('');
+  });
 });
 
 describe('provider field', () => {

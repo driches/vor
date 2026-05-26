@@ -9,13 +9,30 @@ const scannerCommon = z.object({
   min_severity: severitySchema.optional(),
 });
 
+const semgrepSchema = z.object({
+  // Path is a free-form string (relative to workspaceDir OR absolute) that
+  // we existence-check at run time; treating it as a path-segment regex
+  // here would reject perfectly valid absolute paths on Windows.
+  //
+  // The empty string is allowed and acts as an explicit opt-out: it
+  // bypasses the default `.code-review/semgrep-rules` directory without
+  // forcing the operator to also disable the entire sast scanner. The
+  // resolver in semgrep.ts treats unset, empty, and missing-on-disk
+  // identically — all three forward only `--config=auto`.
+  custom_rules_path: z.string().optional(),
+});
+
+const sastSchema = scannerCommon.extend({
+  semgrep: semgrepSchema.optional(),
+});
+
 const securitySchema = z.object({
   enabled: z.boolean(),
   ignore_file: z.string(),
   scanners: z.object({
     dependency_cve: scannerCommon.extend({ osv_endpoint: z.string().url().optional() }),
     secrets: scannerCommon.extend({ include_generic_entropy: z.boolean() }),
-    sast: scannerCommon,
+    sast: sastSchema,
     container_cve: scannerCommon,
   }),
   cache: z.object({ enabled: z.boolean() }),

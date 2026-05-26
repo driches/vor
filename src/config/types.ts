@@ -89,9 +89,29 @@ export interface SecurityConfig {
   scanners: {
     dependency_cve: ScannerConfig & { osv_endpoint?: string };
     secrets: ScannerConfig & { include_generic_entropy: boolean };
-    sast: ScannerConfig;
+    sast: SastConfig;
     container_cve: ScannerConfig;
   };
   cache: { enabled: boolean };
   persistence: { enabled: boolean };
+}
+
+export interface SastConfig extends ScannerConfig {
+  semgrep?: SemgrepConfig;
+}
+
+export interface SemgrepConfig {
+  /**
+   * Path (relative to the workspace root, or absolute) to a directory of
+   * custom Semgrep rule YAMLs that should be loaded *in addition to* the
+   * built-in `--config=auto` ruleset. When set and present on disk, the
+   * orchestrator appends `--config <abs_path>` to the semgrep invocation;
+   * Semgrep merges multiple `--config` flags into a single rule set.
+   *
+   * Resolves silently when the path is unset OR is configured but missing
+   * on disk — repos that don't ship rules just get the default ruleset.
+   * Defaults to `'.code-review/semgrep-rules'`, which is the conventional
+   * location the action's bundled rule pack ships at.
+   */
+  custom_rules_path?: string;
 }

@@ -22,6 +22,8 @@
  *   { results: [{ check_id, path, start: { line, col }, extra: { message, severity, lines } }, ...], errors: [...] }
  */
 import { spawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
+import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
@@ -106,9 +108,17 @@ export const semgrepLinter: LinterModule = {
       return { findings: [], errors: [], filesExamined: 0 };
     }
 
+    // Resolve the optional custom-rules directory. The config layer
+    // defaults this to '.code-review/semgrep-rules'; we only forward it to
+    // semgrep when something actually exists at the resolved path so that
+    // unset-or-absent stays a true no-op (no extra `--config` flag, no
+    // semgrep error). Existence is checked, not readability — if the path
+    // exists but is unreadable, semgrep itself will surface the error.
+    const customRulesPath = await resolveCustomRulesPath(deps);
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(safe, deps);
+      rawOutput = await runCli(safe, deps, customRulesPath);
     } catch (err) {
       const msg = (err as Error).message;
       // Match knip/ruff: `command not found` (the POSIX shell prefix)
@@ -186,7 +196,49 @@ export const semgrepLinter: LinterModule = {
   },
 };
 
-function runCli(files: string[], deps: ScannerDeps): Promise<string> {
+/**
+ * Resolve `security.scanners.sast.semgrep.custom_rules_path` against the
+ * workspace, returning the absolute path when the directory actually
+ * exists and `null` otherwise. The "exists but missing on disk" case is
+ * common (e.g. a consumer hasn't shipped their own pack yet, or only the
+ * default scaffolding is present) and must NOT fail the run — we log at
+ * debug and forward only `--config=auto`.
+ *
+ * Exported for tests; the only caller in product code is `run()`.
+ */
+export async function resolveCustomRulesPath(deps: ScannerDeps): Promise<string | null> {
+  const customRulesPath = deps.config?.scanners?.sast?.semgrep?.custom_rules_path;
+  if (customRulesPath === undefined || customRulesPath.length === 0) {
+    return null;
+  }
+  const absPath = path.isAbsolute(customRulesPath)
+    ? customRulesPath
+    : path.resolve(deps.workspaceDir, customRulesPath);
+  if (!existsSync(absPath)) {
+    await logger.debug(
+      `semgrep: custom_rules_path ${customRulesPath} not found at ${absPath}, skipping`,
+    );
+    return null;
+  }
+  // Allow either a directory of rule YAMLs (the common case — multiple
+  // rules grouped by topic) OR a single rule file (an operator who wants
+  // just one pattern). Both are valid `--config` arguments to semgrep.
+  try {
+    statSync(absPath);
+  } catch (err) {
+    await logger.debug(
+      `semgrep: custom_rules_path ${absPath} stat failed (${(err as Error).message}), skipping`,
+    );
+    return null;
+  }
+  return absPath;
+}
+
+function runCli(
+  files: string[],
+  deps: ScannerDeps,
+  customRulesPath: string | null,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     // --config=auto pulls the appropriate ruleset for detected languages.
     // --quiet suppresses semgrep's progress output on stderr, reducing CI
@@ -199,39 +251,39 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // controls or data-residency requirements need this off; the
     // --config=auto rule fetch is already documented and accounted for in
     // networkCalls, the metrics beacon was an undocumented additional call.
-    // TODO(v0.4.1): two config keys needed for air-gapped/strict-egress
-    // operators, neither of which exists today.
     //
-    // 1. `security.scanners.sast.semgrep_config` — point semgrep at a
-    //    local ruleset (e.g. `--config=p/default` shipped with semgrep
-    //    itself, or `--config=./.semgrep.yml`) so the --config=auto
-    //    network fetch is avoided entirely.
+    // Custom rules: semgrep accepts MULTIPLE `--config` flags and merges
+    // them into a single rule set. When `custom_rules_path` is set AND
+    // the path exists on disk (checked in run() above), we append a
+    // second `--config <abs_path>` so the bundled rule pack (N+1, sync-
+    // in-async, raw SQL, missing auth) layers on top of the auto-detected
+    // packs. Order is auto first, custom second — both contribute, no
+    // override semantics.
     //
-    // 2. `security.scanners.sast.linters.semgrep.enabled: false` — a
-    //    per-linter escape hatch so an operator can disable JUST semgrep
-    //    without losing the other five linters (eslint/ruff/dart/
-    //    actionlint/knip), none of which make network calls.
-    //
-    // Today the only opt-out is `security.scanners.sast.enabled: false`,
-    // which is a sledgehammer that kills all 6 linters even though only
-    // semgrep has the network dependency.
+    // TODO(v0.4.2): still needed for strict-egress operators:
+    //   1. `security.scanners.sast.linters.semgrep.enabled: false` — a
+    //      per-linter escape hatch so an operator can disable JUST semgrep
+    //      without losing the other five linters (eslint/ruff/dart/
+    //      actionlint/knip), none of which make network calls.
+    const args = [
+      'scan',
+      '--json',
+      '--quiet',
+      '--config=auto',
+      ...(customRulesPath !== null ? ['--config', customRulesPath] : []),
+      '--no-rewrite-rule-ids',
+      '--disable-version-check',
+      '--metrics=off',
+      // End-of-options separator — defense in depth alongside the
+      // leading-dash filter above. If anything slips through (e.g. a
+      // future caller forgets to filter), `--` guarantees semgrep
+      // treats every following token as a target, not an option.
+      '--',
+      ...files,
+    ];
     const child = spawn(
       'semgrep',
-      [
-        'scan',
-        '--json',
-        '--quiet',
-        '--config=auto',
-        '--no-rewrite-rule-ids',
-        '--disable-version-check',
-        '--metrics=off',
-        // End-of-options separator — defense in depth alongside the
-        // leading-dash filter above. If anything slips through (e.g. a
-        // future caller forgets to filter), `--` guarantees semgrep
-        // treats every following token as a target, not an option.
-        '--',
-        ...files,
-      ],
+      args,
       {
         cwd: deps.workspaceDir,
         // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
