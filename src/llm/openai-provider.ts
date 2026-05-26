@@ -306,16 +306,20 @@ export function canonicalToolsToResponses(
  *    they ever appear, they're meant for OpenAI-side bookkeeping and will
  *    round-trip via `provider_state`.
  *
- * Stop reason normalization:
- *  - Any tool_calls present → `'tool_calls'`
- *  - `response.status === 'completed'` → `'end_turn'`
- *  - `response.status === 'incomplete'` with
- *    `incomplete_details.reason === 'max_output_tokens'` → `'max_tokens'`
- *  - `response.status === 'incomplete'` with any other reason
- *    (content_filter, …) → `'other'`
+ * Stop reason normalization (resolution order matters):
  *  - `response.status === 'failed'` → THROWS (surfaces via runner's
  *    AgentError wrap as `ended: 'error'`; avoids silently posting an
  *    empty review when the API itself errored — Codex P1 #3303141995)
+ *  - `response.status === 'incomplete'` → `'max_tokens'` / `'other'`
+ *    based on `incomplete_details.reason`. PREEMPTS tool_calls: a
+ *    truncated response can produce malformed tool-call JSON that our
+ *    parser coerces to `{}`, and executing those with empty args would
+ *    be silently wrong. Honoring incomplete here turns into the runner's
+ *    `ended: 'output_truncated'`, giving operators the right knob
+ *    (`budget.max_output_tokens`). Codex P2 #3303193357.
+ *  - Any tool_calls present → `'tool_calls'`
+ *  - Refusal → `'end_turn'`
+ *  - `response.status === 'completed'` → `'end_turn'`
  *  - Anything else (in_progress, queued, cancelled, future statuses) →
  *    `'other'`
  *  - Refusal forces `'end_turn'` regardless.
@@ -395,47 +399,52 @@ export function responsesResponseToCanonical(
     // provider_state and are not surfaced in canonical text. No-op here.
   }
 
-  // Stop reason. tool_calls takes precedence over refusal: if the model
-  // emits both in the same response (rare but the API doesn't forbid it),
-  // dropping tool_calls would silently lose work the model explicitly
-  // requested. The refusal text still surfaces in canonical `text` so the
-  // runner can log it; the loop continues to execute the tool_calls.
-  // PR #20 self-review minor #3300684739.
+  // Stop reason. Resolution order:
+  //
+  //   1. status === 'failed' → throw (Codex P1 #3303141995)
+  //   2. status === 'incomplete' → 'max_tokens' / 'other' (PREEMPTS tool_calls
+  //      — see below)
+  //   3. tool_calls present → 'tool_calls' (preempts refusal: PR #20
+  //      self-review minor #3300684739)
+  //   4. refused → 'end_turn'
+  //   5. status === 'completed' → 'end_turn'
+  //   6. anything else (in_progress, queued, cancelled, future) → 'other'
+  //
+  // Why incomplete preempts tool_calls (Codex P2 #3303193357): when a
+  // response is truncated mid-stream, the last tool_call's `arguments` JSON
+  // can be cut off. The malformed-JSON branch above coerces failed parses
+  // to `{}` so we don't crash — but executing a tool with empty args is
+  // wrong, and the runner has no signal to retry. Honoring the incomplete
+  // status here turns into the runner's `ended: 'output_truncated'`, which
+  // gives operators the right action (bump `budget.max_output_tokens`)
+  // instead of silently producing tool executions with truncated args.
   let stop_reason: StopReason;
-  if (tool_calls.length > 0) {
+  if (response.status === 'failed') {
+    // Provider-side generation failure. Throwing surfaces via the runner's
+    // AgentError wrap as `ended: 'error'` instead of silently collapsing
+    // into `max_turns`. Codex P1 #3303141995.
+    const errMsg = response.error?.message ?? 'unknown error';
+    const errCode = response.error?.code ? ` (code: ${response.error.code})` : '';
+    throw new Error(
+      `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`,
+    );
+  } else if (response.status === 'incomplete') {
+    stop_reason =
+      response.incomplete_details?.reason === 'max_output_tokens'
+        ? 'max_tokens'
+        : 'other';
+  } else if (tool_calls.length > 0) {
     stop_reason = 'tool_calls';
   } else if (refused) {
     stop_reason = 'end_turn';
+  } else if (response.status === 'completed') {
+    stop_reason = 'end_turn';
   } else {
-    switch (response.status) {
-      case 'completed':
-        stop_reason = 'end_turn';
-        break;
-      case 'incomplete':
-        stop_reason =
-          response.incomplete_details?.reason === 'max_output_tokens'
-            ? 'max_tokens'
-            : 'other';
-        break;
-      case 'failed': {
-        // Provider-side generation failure. Throwing here surfaces via the
-        // runner's AgentError wrap as `ended: 'error'` instead of silently
-        // collapsing into `max_turns` (the runner's `toolCalls.length === 0`
-        // branch would otherwise post an empty/partial review and report
-        // success). Codex P1 #3303141995.
-        const errMsg = response.error?.message ?? 'unknown error';
-        const errCode = response.error?.code ? ` (code: ${response.error.code})` : '';
-        throw new Error(
-          `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`,
-        );
-      }
-      default:
-        // `in_progress`, `queued`, `cancelled`, or any future status the SDK
-        // adds. Non-streaming requests shouldn't see these synchronously,
-        // but if one ever escapes, treat it as `'other'` so the runner can
-        // log + exit cleanly via the max_turns branch rather than crashing.
-        stop_reason = 'other';
-    }
+    // `in_progress`, `queued`, `cancelled`, or any future status the SDK
+    // adds. Non-streaming requests shouldn't see these synchronously, but
+    // if one escapes, treat as 'other' so the runner exits cleanly via
+    // the max_turns branch rather than crashing.
+    stop_reason = 'other';
   }
 
   // Usage.

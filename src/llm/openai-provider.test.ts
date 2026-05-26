@@ -642,6 +642,64 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('other');
   });
 
+  it('incomplete status preempts tool_calls — does not execute potentially-truncated calls (Codex P2 #3303193357)', async () => {
+    // When the model is cut off mid-stream by max_output_tokens, its last
+    // function_call's `arguments` JSON can be truncated. Our parser coerces
+    // failed parses to `{}` so we don't crash, but executing a tool with
+    // empty args would be silently wrong. The fix: honor the incomplete
+    // status FIRST, before checking tool_calls. The runner then reports
+    // `ended: 'output_truncated'` and the operator knows to raise
+    // `budget.max_output_tokens` instead of seeing a partial tool execution
+    // succeed.
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc1',
+            call_id: 'call_x',
+            name: 'get_pr_diff',
+            arguments: '{"file":"src/foo.ts","limit":', // truncated JSON
+            status: 'completed',
+          },
+        ],
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    // Stop reason ignores the (truncated) tool_call and reports max_tokens.
+    expect(result.stop_reason).toBe('max_tokens');
+    // The runner uses provider_state for replay, so the truncated tool_call
+    // still appears in tool_calls (and in provider_state) — but the runner's
+    // ended branch will trip on max_tokens before executing it. We don't
+    // mutate the tool_calls array here; the protection is at the stop_reason
+    // level so the loop terminates.
+    expect(result.tool_calls.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it('incomplete with non-max_output_tokens reason preempts tool_calls too (maps to other)', async () => {
+    // Same defensive shape: any incomplete response is suspect for partial
+    // tool args. content_filter, max_input_tokens, etc. all route through
+    // 'other' rather than executing.
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc1',
+            call_id: 'call_x',
+            name: 'get_pr_diff',
+            arguments: '{}',
+            status: 'completed',
+          },
+        ],
+        status: 'incomplete',
+        incomplete_details: { reason: 'content_filter' },
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    expect(result.stop_reason).toBe('other');
+  });
+
   it('throws on status=failed (Codex P1 #3303141995 — surfaces as runner ended=error)', async () => {
     // Provider-side generation failure must surface as an error rather than
     // silently collapse to max_turns. The runner's AgentError wrap turns

@@ -57616,28 +57616,22 @@ function responsesResponseToCanonical(response) {
     }
   }
   let stop_reason;
-  if (tool_calls.length > 0) {
+  if (response.status === "failed") {
+    const errMsg = response.error?.message ?? "unknown error";
+    const errCode = response.error?.code ? ` (code: ${response.error.code})` : "";
+    throw new Error(
+      `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`
+    );
+  } else if (response.status === "incomplete") {
+    stop_reason = response.incomplete_details?.reason === "max_output_tokens" ? "max_tokens" : "other";
+  } else if (tool_calls.length > 0) {
     stop_reason = "tool_calls";
   } else if (refused) {
     stop_reason = "end_turn";
+  } else if (response.status === "completed") {
+    stop_reason = "end_turn";
   } else {
-    switch (response.status) {
-      case "completed":
-        stop_reason = "end_turn";
-        break;
-      case "incomplete":
-        stop_reason = response.incomplete_details?.reason === "max_output_tokens" ? "max_tokens" : "other";
-        break;
-      case "failed": {
-        const errMsg = response.error?.message ?? "unknown error";
-        const errCode = response.error?.code ? ` (code: ${response.error.code})` : "";
-        throw new Error(
-          `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`
-        );
-      }
-      default:
-        stop_reason = "other";
-    }
+    stop_reason = "other";
   }
   const usage = {
     input_tokens: response.usage?.input_tokens ?? 0,
