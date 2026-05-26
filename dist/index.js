@@ -766,14 +766,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path11 = url.path;
-      if (path11.length === 0) {
+      const path15 = url.path;
+      if (path15.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path11.length === 1 && isNormalizedWindowsDriveLetter(path11[0])) {
+      if (url.scheme === "file" && path15.length === 1 && isNormalizedWindowsDriveLetter(path15[0])) {
         return;
       }
-      path11.pop();
+      path15.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -6352,14 +6352,14 @@ __export(fileFromPath_exports, {
   fileFromPathSync: () => fileFromPathSync,
   isFile: () => isFile
 });
-function createFileFromPath(path11, { mtimeMs, size }, filenameOrOptions, options = {}) {
+function createFileFromPath(path15, { mtimeMs, size }, filenameOrOptions, options = {}) {
   let filename;
   if (isPlainObject_default2(filenameOrOptions)) {
     [options, filename] = [filenameOrOptions, void 0];
   } else {
     filename = filenameOrOptions;
   }
-  const file = new FileFromPath({ path: path11, size, lastModified: mtimeMs });
+  const file = new FileFromPath({ path: path15, size, lastModified: mtimeMs });
   if (!filename) {
     filename = file.name;
   }
@@ -6368,13 +6368,13 @@ function createFileFromPath(path11, { mtimeMs, size }, filenameOrOptions, option
     lastModified: file.lastModified
   });
 }
-function fileFromPathSync(path11, filenameOrOptions, options = {}) {
-  const stats = (0, import_fs.statSync)(path11);
-  return createFileFromPath(path11, stats, filenameOrOptions, options);
+function fileFromPathSync(path15, filenameOrOptions, options = {}) {
+  const stats = (0, import_fs.statSync)(path15);
+  return createFileFromPath(path15, stats, filenameOrOptions, options);
 }
-async function fileFromPath2(path11, filenameOrOptions, options) {
-  const stats = await import_fs.promises.stat(path11);
-  return createFileFromPath(path11, stats, filenameOrOptions, options);
+async function fileFromPath2(path15, filenameOrOptions, options) {
+  const stats = await import_fs.promises.stat(path15);
+  return createFileFromPath(path15, stats, filenameOrOptions, options);
 }
 var import_fs, import_path, import_node_domexception, __classPrivateFieldSet4, __classPrivateFieldGet5, _FileFromPath_path, _FileFromPath_start, MESSAGE, FileFromPath;
 var init_fileFromPath = __esm({
@@ -7667,14 +7667,14 @@ var require_util = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path11 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path15 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path11 && path11[0] !== "/") {
-          path11 = `/${path11}`;
+        if (path15 && path15[0] !== "/") {
+          path15 = `/${path15}`;
         }
-        return new URL(`${origin}${path11}`);
+        return new URL(`${origin}${path15}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -8125,39 +8125,39 @@ var require_diagnostics = __commonJS({
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin }
+          request: { method, path: path15, origin }
         } = evt;
-        debuglog("sending request to %s %s/%s", method, origin, path11);
+        debuglog("sending request to %s %s/%s", method, origin, path15);
       });
       diagnosticsChannel.channel("undici:request:headers").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin },
+          request: { method, path: path15, origin },
           response: { statusCode }
         } = evt;
         debuglog(
           "received response to %s %s/%s - HTTP %d",
           method,
           origin,
-          path11,
+          path15,
           statusCode
         );
       });
       diagnosticsChannel.channel("undici:request:trailers").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin }
+          request: { method, path: path15, origin }
         } = evt;
-        debuglog("trailers received from %s %s/%s", method, origin, path11);
+        debuglog("trailers received from %s %s/%s", method, origin, path15);
       });
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
-          request: { method, path: path11, origin },
+          request: { method, path: path15, origin },
           error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
-          path11,
+          path15,
           error2.message
         );
       });
@@ -8206,9 +8206,9 @@ var require_diagnostics = __commonJS({
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
           const {
-            request: { method, path: path11, origin }
+            request: { method, path: path15, origin }
           } = evt;
-          debuglog("sending request to %s %s/%s", method, origin, path11);
+          debuglog("sending request to %s %s/%s", method, origin, path15);
         });
       }
       diagnosticsChannel.channel("undici:websocket:open").subscribe((evt) => {
@@ -8271,7 +8271,7 @@ var require_request = __commonJS({
     var kHandler = /* @__PURE__ */ Symbol("handler");
     var Request3 = class {
       constructor(origin, {
-        path: path11,
+        path: path15,
         method,
         body,
         headers,
@@ -8286,11 +8286,11 @@ var require_request = __commonJS({
         expectContinue,
         servername
       }, handler2) {
-        if (typeof path11 !== "string") {
+        if (typeof path15 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path11[0] !== "/" && !(path11.startsWith("http://") || path11.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path15[0] !== "/" && !(path15.startsWith("http://") || path15.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path11)) {
+        } else if (invalidPathRegex.test(path15)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -8356,7 +8356,7 @@ var require_request = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? buildURL(path11, query) : path11;
+        this.path = query ? buildURL(path15, query) : path15;
         this.origin = origin;
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
         this.blocking = blocking == null ? false : blocking;
@@ -12882,7 +12882,7 @@ var require_client_h1 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request2) {
-      const { method, path: path11, host, upgrade, blocking, reset } = request2;
+      const { method, path: path15, host, upgrade, blocking, reset } = request2;
       let { body, headers, contentLength } = request2;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util2.isFormDataLike(body)) {
@@ -12948,7 +12948,7 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header = `${method} ${path11} HTTP/1.1\r
+      let header = `${method} ${path15} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -13474,7 +13474,7 @@ var require_client_h2 = __commonJS({
     }
     function writeH2(client, request2) {
       const session = client[kHTTP2Session];
-      const { method, path: path11, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
+      const { method, path: path15, host, upgrade, expectContinue, signal, headers: reqHeaders } = request2;
       let { body } = request2;
       if (upgrade) {
         util2.errorRequest(client, request2, new Error("Upgrade not supported for H2"));
@@ -13541,7 +13541,7 @@ var require_client_h2 = __commonJS({
         });
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path11;
+      headers[HTTP2_HEADER_PATH] = path15;
       headers[HTTP2_HEADER_SCHEME] = "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -13894,9 +13894,9 @@ var require_redirect_handler = __commonJS({
           return this.handler.onHeaders(statusCode, headers, resume, statusText);
         }
         const { origin, pathname, search } = util2.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path11 = search ? `${pathname}${search}` : pathname;
+        const path15 = search ? `${pathname}${search}` : pathname;
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path11;
+        this.opts.path = path15;
         this.opts.origin = origin;
         this.opts.maxRedirections = 0;
         this.opts.query = null;
@@ -15131,10 +15131,10 @@ var require_proxy_agent = __commonJS({
         };
         const {
           origin,
-          path: path11 = "/",
+          path: path15 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path11;
+        opts.path = origin + path15;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL2(origin);
           headers.host = host;
@@ -17055,20 +17055,20 @@ var require_mock_utils = __commonJS({
       }
       return true;
     }
-    function safeUrl(path11) {
-      if (typeof path11 !== "string") {
-        return path11;
+    function safeUrl(path15) {
+      if (typeof path15 !== "string") {
+        return path15;
       }
-      const pathSegments = path11.split("?");
+      const pathSegments = path15.split("?");
       if (pathSegments.length !== 2) {
-        return path11;
+        return path15;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path11, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path11);
+    function matchKey(mockDispatch2, { path: path15, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path15);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -17090,7 +17090,7 @@ var require_mock_utils = __commonJS({
     function getMockDispatch(mockDispatches, key) {
       const basePath = key.query ? buildURL(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path11 }) => matchValue(safeUrl(path11), resolvedPath));
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path15 }) => matchValue(safeUrl(path15), resolvedPath));
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
       }
@@ -17128,9 +17128,9 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildKey(opts) {
-      const { path: path11, method, body, headers, query } = opts;
+      const { path: path15, method, body, headers, query } = opts;
       return {
-        path: path11,
+        path: path15,
         method,
         body,
         headers,
@@ -17593,10 +17593,10 @@ var require_pending_interceptors_formatter = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path11, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path15, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path11,
+            Path: path15,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -22477,9 +22477,9 @@ var require_util6 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path11) {
-      for (let i2 = 0; i2 < path11.length; ++i2) {
-        const code = path11.charCodeAt(i2);
+    function validateCookiePath(path15) {
+      for (let i2 = 0; i2 < path15.length; ++i2) {
+        const code = path15.charCodeAt(i2);
         if (code < 32 || // exclude CTLs (0-31)
         code === 127 || // DEL
         code === 59) {
@@ -25156,11 +25156,11 @@ var require_undici = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path11 = opts.path;
+          let path15 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path11 = `/${path11}`;
+            path15 = `/${path15}`;
           }
-          url = new URL(util2.parseOrigin(url).origin + path11);
+          url = new URL(util2.parseOrigin(url).origin + path15);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -27460,17 +27460,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path11) {
-      const ctrl = callVisitor(key, node, visitor, path11);
+    function visit_(key, node, visitor, path15) {
+      const ctrl = callVisitor(key, node, visitor, path15);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visit_(key, ctrl, visitor, path11);
+        replaceNode(key, path15, ctrl);
+        return visit_(key, ctrl, visitor, path15);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path15 = Object.freeze(path15.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path11);
+            const ci = visit_(i2, node.items[i2], visitor, path15);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -27481,13 +27481,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = visit_("key", node.key, visitor, path11);
+          path15 = Object.freeze(path15.concat(node));
+          const ck = visit_("key", node.key, visitor, path15);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path11);
+          const cv = visit_("value", node.value, visitor, path15);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -27508,17 +27508,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path11) {
-      const ctrl = await callVisitor(key, node, visitor, path11);
+    async function visitAsync_(key, node, visitor, path15) {
+      const ctrl = await callVisitor(key, node, visitor, path15);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visitAsync_(key, ctrl, visitor, path11);
+        replaceNode(key, path15, ctrl);
+        return visitAsync_(key, ctrl, visitor, path15);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path15 = Object.freeze(path15.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path11);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path15);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -27529,13 +27529,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path11);
+          path15 = Object.freeze(path15.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path15);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path11);
+          const cv = await visitAsync_("value", node.value, visitor, path15);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -27562,23 +27562,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path11) {
+    function callVisitor(key, node, visitor, path15) {
       if (typeof visitor === "function")
-        return visitor(key, node, path11);
+        return visitor(key, node, path15);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path11);
+        return visitor.Map?.(key, node, path15);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path11);
+        return visitor.Seq?.(key, node, path15);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path11);
+        return visitor.Pair?.(key, node, path15);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path11);
+        return visitor.Scalar?.(key, node, path15);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path11);
+        return visitor.Alias?.(key, node, path15);
       return void 0;
     }
-    function replaceNode(key, path11, node) {
-      const parent = path11[path11.length - 1];
+    function replaceNode(key, path15, node) {
+      const parent = path15[path15.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -28188,10 +28188,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path11, value) {
+    function collectionFromPath(schema, path15, value) {
       let v2 = value;
-      for (let i2 = path11.length - 1; i2 >= 0; --i2) {
-        const k2 = path11[i2];
+      for (let i2 = path15.length - 1; i2 >= 0; --i2) {
+        const k2 = path15[i2];
         if (typeof k2 === "number" && Number.isInteger(k2) && k2 >= 0) {
           const a2 = [];
           a2[k2] = v2;
@@ -28210,7 +28210,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path11) => path11 == null || typeof path11 === "object" && !!path11[Symbol.iterator]().next().done;
+    var isEmptyPath = (path15) => path15 == null || typeof path15 === "object" && !!path15[Symbol.iterator]().next().done;
     var Collection2 = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -28240,11 +28240,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path11, value) {
-        if (isEmptyPath(path11))
+      addIn(path15, value) {
+        if (isEmptyPath(path15))
           this.add(value);
         else {
-          const [key, ...rest] = path11;
+          const [key, ...rest] = path15;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -28258,8 +28258,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        const [key, ...rest] = path11;
+      deleteIn(path15) {
+        const [key, ...rest] = path15;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -28273,8 +28273,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        const [key, ...rest] = path11;
+      getIn(path15, keepScalar) {
+        const [key, ...rest] = path15;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -28292,8 +28292,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path11) {
-        const [key, ...rest] = path11;
+      hasIn(path15) {
+        const [key, ...rest] = path15;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -28303,8 +28303,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        const [key, ...rest] = path11;
+      setIn(path15, value) {
+        const [key, ...rest] = path15;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -30819,9 +30819,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path11, value) {
+      addIn(path15, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path11, value);
+          this.contents.addIn(path15, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -30896,14 +30896,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        if (Collection2.isEmptyPath(path11)) {
+      deleteIn(path15) {
+        if (Collection2.isEmptyPath(path15)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path11) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path15) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -30918,10 +30918,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        if (Collection2.isEmptyPath(path11))
+      getIn(path15, keepScalar) {
+        if (Collection2.isEmptyPath(path15))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path11, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path15, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -30932,10 +30932,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path11) {
-        if (Collection2.isEmptyPath(path11))
+      hasIn(path15) {
+        if (Collection2.isEmptyPath(path15))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path11) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path15) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -30952,13 +30952,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        if (Collection2.isEmptyPath(path11)) {
+      setIn(path15, value) {
+        if (Collection2.isEmptyPath(path15)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path11), value);
+          this.contents = Collection2.collectionFromPath(this.schema, Array.from(path15), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path11, value);
+          this.contents.setIn(path15, value);
         }
       }
       /**
@@ -32918,9 +32918,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path11) => {
+    visit.itemAtPath = (cst, path15) => {
       let item = cst;
-      for (const [field, index] of path11) {
+      for (const [field, index] of path15) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -32929,23 +32929,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path11) => {
-      const parent = visit.itemAtPath(cst, path11.slice(0, -1));
-      const field = path11[path11.length - 1][0];
+    visit.parentCollection = (cst, path15) => {
+      const parent = visit.itemAtPath(cst, path15.slice(0, -1));
+      const field = path15[path15.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path11, item, visitor) {
-      let ctrl = visitor(item, path11);
+    function _visit(path15, item, visitor) {
+      let ctrl = visitor(item, path15);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path11.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path15.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -32956,10 +32956,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path11);
+            ctrl = ctrl(item, path15);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path11) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path15) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -38398,7 +38398,7 @@ var import_promises2 = require("node:fs/promises");
 
 // src/orchestrator.ts
 var import_promises = require("node:fs/promises");
-var import_node_path6 = require("node:path");
+var import_node_path10 = require("node:path");
 
 // node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION = "0.39.0";
@@ -38779,13 +38779,13 @@ var MultipartBody = class {
 // node_modules/@anthropic-ai/sdk/_shims/node-runtime.mjs
 var import_web = require("node:stream/web");
 var fileFromPathWarned = false;
-async function fileFromPath3(path11, ...args) {
+async function fileFromPath3(path15, ...args) {
   const { fileFromPath: _fileFromPath } = await Promise.resolve().then(() => (init_fileFromPath(), fileFromPath_exports));
   if (!fileFromPathWarned) {
-    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path11)}) instead`);
+    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path15)}) instead`);
     fileFromPathWarned = true;
   }
-  return await _fileFromPath(path11, ...args);
+  return await _fileFromPath(path15, ...args);
 }
 var defaultHttpAgent = new import_agentkeepalive.default({ keepAlive: true, timeout: 5 * 60 * 1e3 });
 var defaultHttpsAgent = new import_agentkeepalive.default.HttpsAgent({ keepAlive: true, timeout: 5 * 60 * 1e3 });
@@ -39509,29 +39509,29 @@ var APIClient = class {
   defaultIdempotencyKey() {
     return `stainless-node-retry-${uuid4()}`;
   }
-  get(path11, opts) {
-    return this.methodRequest("get", path11, opts);
+  get(path15, opts) {
+    return this.methodRequest("get", path15, opts);
   }
-  post(path11, opts) {
-    return this.methodRequest("post", path11, opts);
+  post(path15, opts) {
+    return this.methodRequest("post", path15, opts);
   }
-  patch(path11, opts) {
-    return this.methodRequest("patch", path11, opts);
+  patch(path15, opts) {
+    return this.methodRequest("patch", path15, opts);
   }
-  put(path11, opts) {
-    return this.methodRequest("put", path11, opts);
+  put(path15, opts) {
+    return this.methodRequest("put", path15, opts);
   }
-  delete(path11, opts) {
-    return this.methodRequest("delete", path11, opts);
+  delete(path15, opts) {
+    return this.methodRequest("delete", path15, opts);
   }
-  methodRequest(method, path11, opts) {
+  methodRequest(method, path15, opts) {
     return this.request(Promise.resolve(opts).then(async (opts2) => {
       const body = opts2 && isBlobLike(opts2?.body) ? new DataView(await opts2.body.arrayBuffer()) : opts2?.body instanceof DataView ? opts2.body : opts2?.body instanceof ArrayBuffer ? new DataView(opts2.body) : opts2 && ArrayBuffer.isView(opts2?.body) ? new DataView(opts2.body.buffer) : opts2?.body;
-      return { method, path: path11, ...opts2, body };
+      return { method, path: path15, ...opts2, body };
     }));
   }
-  getAPIList(path11, Page2, opts) {
-    return this.requestAPIList(Page2, { method: "get", path: path11, ...opts });
+  getAPIList(path15, Page2, opts) {
+    return this.requestAPIList(Page2, { method: "get", path: path15, ...opts });
   }
   calculateContentLength(body) {
     if (typeof body === "string") {
@@ -39550,10 +39550,10 @@ var APIClient = class {
   }
   buildRequest(options, { retryCount = 0 } = {}) {
     options = { ...options };
-    const { method, path: path11, query, headers = {} } = options;
+    const { method, path: path15, query, headers = {} } = options;
     const body = ArrayBuffer.isView(options.body) || options.__binaryRequest && typeof options.body === "string" ? options.body : isMultipartBody(options.body) ? options.body.body : options.body ? JSON.stringify(options.body, null, 2) : null;
     const contentLength = this.calculateContentLength(body);
-    const url = this.buildURL(path11, query);
+    const url = this.buildURL(path15, query);
     if ("timeout" in options)
       validatePositiveInteger("timeout", options.timeout);
     options.timeout = options.timeout ?? this.timeout;
@@ -39677,8 +39677,8 @@ var APIClient = class {
     const request2 = this.makeRequest(options, null);
     return new PagePromise(this, request2, Page2);
   }
-  buildURL(path11, query) {
-    const url = isAbsoluteURL(path11) ? new URL(path11) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path11.startsWith("/") ? path11.slice(1) : path11));
+  buildURL(path15, query) {
+    const url = isAbsoluteURL(path15) ? new URL(path15) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path15.startsWith("/") ? path15.slice(1) : path15));
     const defaultQuery = this.defaultQuery();
     if (!isEmptyObj(defaultQuery)) {
       query = { ...defaultQuery, ...query };
@@ -42559,8 +42559,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path15, errorMaps, issueData } = params;
+  const fullPath = [...path15, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -42676,11 +42676,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path15, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path15;
     this._key = key;
   }
   get path() {
@@ -47884,17 +47884,17 @@ var CATEGORIES = [
 function createRunContext() {
   return { readRanges: /* @__PURE__ */ new Map() };
 }
-function recordHeadRead(ctx, path11, startLine, endLine) {
+function recordHeadRead(ctx, path15, startLine, endLine) {
   if (endLine < startLine) return;
-  let ranges = ctx.readRanges.get(path11);
+  let ranges = ctx.readRanges.get(path15);
   if (ranges === void 0) {
     ranges = [];
-    ctx.readRanges.set(path11, ranges);
+    ctx.readRanges.set(path15, ranges);
   }
   ranges.push([startLine, endLine]);
 }
-function hasReadRange(ctx, path11, line) {
-  const ranges = ctx.readRanges.get(path11);
+function hasReadRange(ctx, path15, line) {
+  const ranges = ctx.readRanges.get(path15);
   if (ranges === void 0) return false;
   return ranges.some(([s2, e2]) => line >= s2 && line <= e2);
 }
@@ -48383,8 +48383,8 @@ function makeWorkerCheckUsageClaimTool(deps) {
       const matches = await runGitGrep2(args.symbol, deps.workspaceDir, args.path_glob);
       const topPaths = uniquePaths(matches).slice(0, TOP_FILES_TO_READ);
       const fileSnippets = [];
-      for (const path11 of topPaths) {
-        const firstMatch = matches.find((m2) => m2.path === path11);
+      for (const path15 of topPaths) {
+        const firstMatch = matches.find((m2) => m2.path === path15);
         const matchLine = firstMatch?.line ?? 1;
         const readStart = Math.max(
           1,
@@ -48393,12 +48393,12 @@ function makeWorkerCheckUsageClaimTool(deps) {
         const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
-          { owner: deps.owner, repo: deps.repo, path: path11, ref: head },
+          { owner: deps.owner, repo: deps.repo, path: path15, ref: head },
           readStart,
           readEnd
         );
         if (result !== null) {
-          fileSnippets.push({ path: path11, content: result.content });
+          fileSnippets.push({ path: path15, content: result.content });
         }
       }
       const userPrompt = renderUserPrompt({
@@ -49266,7 +49266,11 @@ var DEFAULT_CONFIG = {
     scanners: {
       dependency_cve: { enabled: true },
       secrets: { enabled: true, include_generic_entropy: false },
-      sast: { enabled: false },
+      // v0.4.0 enables sast by default — runs the repo's own ESLint on
+      // changed TS/JS files. Zero LLM token cost; catches type errors,
+      // unused vars, common pitfalls before they reach Sonnet. Opt out
+      // by setting `security.scanners.sast.enabled: false`.
+      sast: { enabled: true },
       container_cve: { enabled: false }
     },
     cache: { enabled: true },
@@ -50327,17 +50331,17 @@ function requestLog(octokit) {
     octokit.log.debug("request", options);
     const start = Date.now();
     const requestOptions = octokit.request.endpoint.parse(options);
-    const path11 = requestOptions.url.replace(options.baseUrl, "");
+    const path15 = requestOptions.url.replace(options.baseUrl, "");
     return request2(options).then((response) => {
       const requestId = response.headers["x-github-request-id"];
       octokit.log.info(
-        `${requestOptions.method} ${path11} - ${response.status} with id ${requestId} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path15} - ${response.status} with id ${requestId} in ${Date.now() - start}ms`
       );
       return response;
     }).catch((error2) => {
       const requestId = error2.response?.headers["x-github-request-id"] || "UNKNOWN";
       octokit.log.error(
-        `${requestOptions.method} ${path11} - ${error2.status} with id ${requestId} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path15} - ${error2.status} with id ${requestId} in ${Date.now() - start}ms`
       );
       throw error2;
     });
@@ -53070,7 +53074,7 @@ var triggers_notification_paths_default = [
 ];
 function routeMatcher(paths) {
   const regexes = paths.map(
-    (path11) => path11.split("/").map((c2) => c2.startsWith("{") ? "(?:.+?)" : c2).join("/")
+    (path15) => path15.split("/").map((c2) => c2.startsWith("{") ? "(?:.+?)" : c2).join("/")
   );
   const regex2 = `^(?:${regexes.map((r2) => `(?:${r2})`).join("|")})[^/]*$`;
   return new RegExp(regex2, "i");
@@ -53389,14 +53393,14 @@ var LANGUAGE_BY_EXT = {
   hcl: "hcl",
   dockerfile: "dockerfile"
 };
-function detectLanguage(path11) {
-  const name = path11.split("/").pop() ?? "";
+function detectLanguage(path15) {
+  const name = path15.split("/").pop() ?? "";
   if (/^Dockerfile/i.test(name)) return "dockerfile";
   const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
   return LANGUAGE_BY_EXT[ext] ?? "plain";
 }
-function isGenerated(path11) {
-  return GENERATED_PATTERNS.some((re2) => re2.test(path11));
+function isGenerated(path15) {
+  return GENERATED_PATTERNS.some((re2) => re2.test(path15));
 }
 function determineStatus(file) {
   if (file.deleted) return "removed";
@@ -53407,7 +53411,7 @@ function determineStatus(file) {
 function parseUnifiedDiff(diff) {
   const files = (0, import_parse_diff.default)(diff);
   return files.map((file) => {
-    const path11 = file.to && file.to !== "/dev/null" ? file.to : file.from ?? "";
+    const path15 = file.to && file.to !== "/dev/null" ? file.to : file.from ?? "";
     const previousPath = file.from && file.from !== file.to ? file.from : void 0;
     const reviewable = computeReviewableLines(file.chunks);
     const totalChanges = file.chunks.reduce(
@@ -53415,15 +53419,15 @@ function parseUnifiedDiff(diff) {
       0
     );
     return {
-      path: path11,
+      path: path15,
       ...previousPath ? { previous_path: previousPath } : {},
       status: determineStatus(file),
       additions: file.additions,
       deletions: file.deletions,
       reviewable_lines: reviewable.ranges,
       added_lines: reviewable.addedSet,
-      language: detectLanguage(path11),
-      is_generated: isGenerated(path11),
+      language: detectLanguage(path15),
+      is_generated: isGenerated(path15),
       is_binary: file.chunks.length === 0 && totalChanges === 0,
       size_bytes: 0,
       // Filled in by pr-context.ts via the Files API
@@ -55388,12 +55392,667 @@ function emptyResult(scanner, durationMs = 0) {
   };
 }
 
-// src/scanners/sast.ts
-var sastScannerStub = {
-  id: "sast",
-  applies: () => false,
-  scan: async () => emptyResult("sast")
+// src/scanners/sast/eslint.ts
+var import_node_child_process3 = require("node:child_process");
+var import_node_fs2 = require("node:fs");
+var import_node_path6 = __toESM(require("node:path"), 1);
+var ID = "eslint";
+var TIMEOUT_MS2 = 6e4;
+var TARGET_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+var eslintLinter = {
+  id: ID,
+  applies(files) {
+    return files.some(
+      (f2) => TARGET_EXTENSIONS.test(f2.path) && !f2.is_binary && !f2.is_generated
+    );
+  },
+  async run(deps, targetFiles) {
+    const errors = [];
+    const bin = import_node_path6.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint");
+    if (!(0, import_node_fs2.existsSync)(bin)) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+    let rawOutput;
+    try {
+      rawOutput = await runCli(bin, targetFiles.map((f2) => f2.path), deps);
+    } catch (err) {
+      errors.push({ message: `eslint failed: ${err.message}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+    let results;
+    try {
+      results = JSON.parse(rawOutput);
+      if (!Array.isArray(results)) throw new Error("non-array output");
+    } catch (err) {
+      errors.push({
+        message: `eslint output parse failed: ${err.message}`,
+        fatal: false
+      });
+      return { findings: [], errors, filesExamined: targetFiles.length };
+    }
+    const findings = [];
+    for (const fileResult of results) {
+      const relPath = import_node_path6.default.relative(deps.workspaceDir, fileResult.filePath);
+      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      if (changedFile === void 0) continue;
+      for (const message of fileResult.messages) {
+        if (!changedFile.added_lines.has(message.line)) continue;
+        if (message.ruleId === null) continue;
+        findings.push(buildFinding2(changedFile.path, message));
+      }
+    }
+    return { findings, errors, filesExamined: targetFiles.length };
+  }
 };
+function runCli(bin, files, deps) {
+  return new Promise((resolve3, reject) => {
+    const child2 = (0, import_node_child_process3.spawn)(
+      bin,
+      ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? "" }
+      }
+    );
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      reject(new Error(`eslint timed out after ${TIMEOUT_MS2}ms`));
+    }, TIMEOUT_MS2);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    deps.signal.addEventListener("abort", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child2.kill("SIGKILL");
+      reject(new Error("eslint aborted"));
+    });
+    child2.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      if (code !== null && code > 1) {
+        reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve3(stdout);
+    });
+    child2.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+function buildFinding2(filePath, message) {
+  const severity = message.severity === 2 ? "important" : "minor";
+  const category = categorize(message.ruleId ?? "unknown");
+  const confidence = "high";
+  const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
+  const title = renderTitle(message);
+  const description = renderDescription(message);
+  return {
+    scanner: "sast",
+    rule_id: `${ID}/${message.ruleId ?? "unknown"}`,
+    file_path: filePath,
+    line: message.line,
+    ...message.endLine !== void 0 && message.endLine > message.line ? { start_line: message.line, line: message.endLine } : {},
+    severity,
+    category,
+    title,
+    description,
+    confidence,
+    evidence: { kind: "sast", cwe: [] },
+    fingerprint
+  };
+}
+function categorize(ruleId) {
+  if (ruleId.startsWith("security/") || ruleId.includes("xss") || ruleId.includes("injection")) {
+    return "vulnerability";
+  }
+  if (ruleId.includes("unused")) return "readability";
+  if (ruleId.includes("no-floating-promises") || ruleId.includes("no-misused-promises") || ruleId.includes("await-thenable")) {
+    return "bug";
+  }
+  if (ruleId.startsWith("@typescript-eslint/")) return "bug";
+  return "readability";
+}
+function renderTitle(message) {
+  const ruleStr = message.ruleId !== null ? `[${ID}/${message.ruleId}] ` : "";
+  const firstLine = message.message.split("\n")[0];
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + "..." : candidate;
+}
+function renderDescription(message) {
+  const ruleStr = message.ruleId !== null ? `ESLint rule: \`${message.ruleId}\`.` : "Reported by ESLint.";
+  return `${ruleStr}
+
+${message.message}`;
+}
+
+// src/scanners/sast/ruff.ts
+var import_node_child_process4 = require("node:child_process");
+var import_node_fs3 = require("node:fs");
+var import_node_path7 = __toESM(require("node:path"), 1);
+var ID2 = "ruff";
+var TIMEOUT_MS3 = 6e4;
+var TARGET_EXTENSIONS2 = /\.(py|pyi)$/;
+var ruffLinter = {
+  id: ID2,
+  applies(files) {
+    return files.some(
+      (f2) => TARGET_EXTENSIONS2.test(f2.path) && !f2.is_binary && !f2.is_generated
+    );
+  },
+  async run(deps, targetFiles) {
+    const errors = [];
+    const bin = locateBin(deps.workspaceDir);
+    if (bin === null) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+    let rawOutput;
+    try {
+      rawOutput = await runCli2(bin, targetFiles.map((f2) => f2.path), deps);
+    } catch (err) {
+      errors.push({ message: `ruff failed: ${err.message}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+    let messages;
+    try {
+      messages = JSON.parse(rawOutput);
+      if (!Array.isArray(messages)) throw new Error("non-array output");
+    } catch (err) {
+      errors.push({
+        message: `ruff output parse failed: ${err.message}`,
+        fatal: false
+      });
+      return { findings: [], errors, filesExamined: targetFiles.length };
+    }
+    const findings = [];
+    for (const message of messages) {
+      const relPath = import_node_path7.default.relative(deps.workspaceDir, message.filename);
+      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      if (changedFile === void 0) continue;
+      if (!changedFile.added_lines.has(message.location.row)) continue;
+      if (message.code === null) continue;
+      findings.push(buildFinding3(changedFile.path, message));
+    }
+    return { findings, errors, filesExamined: targetFiles.length };
+  }
+};
+function locateBin(workspaceDir) {
+  const candidates = [
+    import_node_path7.default.join(workspaceDir, ".venv", "bin", "ruff"),
+    import_node_path7.default.join(workspaceDir, "node_modules", ".bin", "ruff")
+  ];
+  for (const c2 of candidates) {
+    if ((0, import_node_fs3.existsSync)(c2)) return c2;
+  }
+  return "ruff";
+}
+function runCli2(bin, files, deps) {
+  return new Promise((resolve3, reject) => {
+    const child2 = (0, import_node_child_process4.spawn)(
+      bin,
+      ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? "" }
+      }
+    );
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      reject(new Error(`ruff timed out after ${TIMEOUT_MS3}ms`));
+    }, TIMEOUT_MS3);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    deps.signal.addEventListener("abort", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child2.kill("SIGKILL");
+      reject(new Error("ruff aborted"));
+    });
+    child2.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      if (code !== null && code !== 0) {
+        reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve3(stdout);
+    });
+    child2.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+function buildFinding3(filePath, message) {
+  const code = message.code ?? "unknown";
+  const severity = severityFromCode(code);
+  const category = categorize2(code);
+  const confidence = "high";
+  const line = message.location.row;
+  const endLine = message.end_location?.row;
+  const fingerprint = `${ID2}:${code}:${filePath}:${line}`;
+  const title = renderTitle2(code, message.message);
+  const description = renderDescription2(code, message.message);
+  return {
+    scanner: "sast",
+    rule_id: `${ID2}/${code}`,
+    file_path: filePath,
+    line,
+    ...endLine !== void 0 && endLine > line ? { start_line: line, line: endLine } : {},
+    severity,
+    category,
+    title,
+    description,
+    confidence,
+    evidence: { kind: "sast", cwe: [] },
+    fingerprint
+  };
+}
+function severityFromCode(code) {
+  if (code.startsWith("F") || code.startsWith("E9")) return "important";
+  if (code.startsWith("S")) return "important";
+  return "minor";
+}
+function categorize2(code) {
+  if (code.startsWith("S")) return "vulnerability";
+  if (code.startsWith("F")) return "bug";
+  if (code.startsWith("B")) return "bug";
+  return "readability";
+}
+function renderTitle2(code, message) {
+  const ruleStr = `[${ID2}/${code}] `;
+  const firstLine = message.split("\n")[0];
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + "..." : candidate;
+}
+function renderDescription2(code, message) {
+  return `Ruff rule: \`${code}\`.
+
+${message}`;
+}
+
+// src/scanners/sast/dart.ts
+var import_node_child_process5 = require("node:child_process");
+var import_node_path8 = __toESM(require("node:path"), 1);
+var ID3 = "dart";
+var TIMEOUT_MS4 = 9e4;
+var TARGET_EXTENSION = /\.dart$/;
+var dartLinter = {
+  id: ID3,
+  applies(files) {
+    return files.some(
+      (f2) => TARGET_EXTENSION.test(f2.path) && !f2.is_binary && !f2.is_generated
+    );
+  },
+  async run(deps, targetFiles) {
+    const errors = [];
+    let rawOutput;
+    try {
+      rawOutput = await runCli3(targetFiles.map((f2) => f2.path), deps);
+    } catch (err) {
+      const msg = err.message;
+      if (msg.includes("ENOENT") || msg.includes("not found")) {
+        return { findings: [], errors: [], filesExamined: 0 };
+      }
+      errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+    const findings = [];
+    for (const line of rawOutput.split("\n")) {
+      const parsed = parseDartLine(line);
+      if (parsed === null) continue;
+      const relPath = import_node_path8.default.relative(deps.workspaceDir, parsed.filePath);
+      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      if (changedFile === void 0) continue;
+      if (!changedFile.added_lines.has(parsed.line)) continue;
+      findings.push(buildFinding4(changedFile.path, parsed));
+    }
+    return { findings, errors, filesExamined: targetFiles.length };
+  }
+};
+function parseDartLine(line) {
+  if (line.trim().length === 0) return null;
+  const parts = line.split("|");
+  if (parts.length < 8) return null;
+  const [severity, type, ruleName, filePath, lineStr, columnStr, lengthStr, ...messageParts] = parts;
+  if (severity !== "ERROR" && severity !== "WARNING" && severity !== "INFO") {
+    return null;
+  }
+  const lineNum = Number.parseInt(lineStr ?? "", 10);
+  if (!Number.isFinite(lineNum) || lineNum <= 0) return null;
+  const columnNum = Number.parseInt(columnStr ?? "", 10);
+  const lengthNum = Number.parseInt(lengthStr ?? "", 10);
+  return {
+    severity,
+    type: type ?? "",
+    ruleName: ruleName ?? "",
+    filePath: filePath ?? "",
+    line: lineNum,
+    column: Number.isFinite(columnNum) ? columnNum : 0,
+    length: Number.isFinite(lengthNum) ? lengthNum : 0,
+    // Message can contain `|` so re-join the tail.
+    message: messageParts.join("|")
+  };
+}
+function runCli3(files, deps) {
+  return new Promise((resolve3, reject) => {
+    const child2 = (0, import_node_child_process5.spawn)(
+      "dart",
+      ["analyze", "--format=machine", ...files],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? "" }
+      }
+    );
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      reject(new Error(`dart analyze timed out after ${TIMEOUT_MS4}ms`));
+    }, TIMEOUT_MS4);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    deps.signal.addEventListener("abort", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child2.kill("SIGKILL");
+      reject(new Error("dart analyze aborted"));
+    });
+    child2.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      if (code !== null && code > 3) {
+        reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve3(stdout);
+    });
+    child2.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+function buildFinding4(filePath, finding) {
+  const severity = severityFromDart(finding.severity);
+  const category = categorize3(finding.type, finding.ruleName);
+  const confidence = "high";
+  const fingerprint = `${ID3}:${finding.ruleName}:${filePath}:${finding.line}`;
+  return {
+    scanner: "sast",
+    rule_id: `${ID3}/${finding.ruleName}`,
+    file_path: filePath,
+    line: finding.line,
+    severity,
+    category,
+    title: renderTitle3(finding),
+    description: renderDescription3(finding),
+    confidence,
+    evidence: { kind: "sast", cwe: [] },
+    fingerprint
+  };
+}
+function severityFromDart(s2) {
+  if (s2 === "ERROR") return "important";
+  if (s2 === "WARNING") return "minor";
+  return "nit";
+}
+function categorize3(type, ruleName) {
+  if (type === "ERROR") return "bug";
+  if (ruleName.includes("async") || ruleName.includes("await")) return "bug";
+  return "readability";
+}
+function renderTitle3(finding) {
+  const ruleStr = `[${ID3}/${finding.ruleName}] `;
+  const firstLine = finding.message.split("\n")[0];
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + "..." : candidate;
+}
+function renderDescription3(finding) {
+  return `Dart analyzer rule: \`${finding.ruleName}\` (${finding.type.toLowerCase()}).
+
+${finding.message}`;
+}
+
+// src/scanners/sast/actionlint.ts
+var import_node_child_process6 = require("node:child_process");
+var import_node_path9 = __toESM(require("node:path"), 1);
+var ID4 = "actionlint";
+var TIMEOUT_MS5 = 3e4;
+var WORKFLOW_PATH_RE = /^\.github\/workflows\/.+\.ya?ml$/;
+var actionlintLinter = {
+  id: ID4,
+  applies(files) {
+    return files.some(
+      (f2) => WORKFLOW_PATH_RE.test(f2.path) && !f2.is_binary && !f2.is_generated
+    );
+  },
+  async run(deps, targetFiles) {
+    const errors = [];
+    let rawOutput;
+    try {
+      rawOutput = await runCli4(targetFiles.map((f2) => f2.path), deps);
+    } catch (err) {
+      const msg = err.message;
+      if (msg.includes("ENOENT") || msg.includes("not found")) {
+        return { findings: [], errors: [], filesExamined: 0 };
+      }
+      errors.push({ message: `actionlint failed: ${msg}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+    let messages;
+    try {
+      messages = JSON.parse(rawOutput);
+      if (!Array.isArray(messages)) throw new Error("non-array output");
+    } catch (err) {
+      errors.push({
+        message: `actionlint output parse failed: ${err.message}`,
+        fatal: false
+      });
+      return { findings: [], errors, filesExamined: targetFiles.length };
+    }
+    const findings = [];
+    for (const message of messages) {
+      const relPath = import_node_path9.default.relative(deps.workspaceDir, message.filepath);
+      const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
+      if (changedFile === void 0) continue;
+      if (!changedFile.added_lines.has(message.line)) continue;
+      findings.push(buildFinding5(changedFile.path, message));
+    }
+    return { findings, errors, filesExamined: targetFiles.length };
+  }
+};
+function runCli4(files, deps) {
+  return new Promise((resolve3, reject) => {
+    const child2 = (0, import_node_child_process6.spawn)(
+      "actionlint",
+      ["-no-color", "-format", "{{json .}}", ...files],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? "" }
+      }
+    );
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child2.kill("SIGKILL");
+      reject(new Error(`actionlint timed out after ${TIMEOUT_MS5}ms`));
+    }, TIMEOUT_MS5);
+    child2.stdout.on("data", (b2) => {
+      stdout += b2.toString("utf-8");
+    });
+    child2.stderr.on("data", (b2) => {
+      stderr += b2.toString("utf-8");
+    });
+    deps.signal.addEventListener("abort", () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child2.kill("SIGKILL");
+      reject(new Error("actionlint aborted"));
+    });
+    child2.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      if (code !== null && code > 1) {
+        reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve3(stdout);
+    });
+    child2.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+function buildFinding5(filePath, message) {
+  const severity = severityFromKind(message.kind);
+  const category = categorize4(message.kind);
+  const confidence = "high";
+  const fingerprint = `${ID4}:${message.kind}:${filePath}:${message.line}`;
+  return {
+    scanner: "sast",
+    rule_id: `${ID4}/${message.kind}`,
+    file_path: filePath,
+    line: message.line,
+    severity,
+    category,
+    title: renderTitle4(message),
+    description: renderDescription4(message),
+    confidence,
+    evidence: { kind: "sast", cwe: [] },
+    fingerprint
+  };
+}
+function severityFromKind(kind2) {
+  if (kind2 === "syntax-check" || kind2 === "workflow-schema" || kind2 === "workflow-call") {
+    return "important";
+  }
+  return "minor";
+}
+function categorize4(kind2) {
+  if (kind2 === "expression" || kind2 === "syntax-check") return "bug";
+  if (kind2 === "shellcheck") return "bug";
+  return "readability";
+}
+function renderTitle4(message) {
+  const ruleStr = `[${ID4}/${message.kind}] `;
+  const firstLine = message.message.split("\n")[0];
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + "..." : candidate;
+}
+function renderDescription4(message) {
+  return `actionlint check: \`${message.kind}\`.
+
+${message.message}`;
+}
+
+// src/scanners/sast.ts
+var SCANNER_ID3 = "sast";
+var LINTERS = [
+  eslintLinter,
+  ruffLinter,
+  dartLinter,
+  actionlintLinter
+];
+function createSastScanner() {
+  return {
+    id: SCANNER_ID3,
+    applies(files) {
+      return LINTERS.some((l2) => l2.applies(files));
+    },
+    scan: orchestrate
+  };
+}
+var sastScannerStub = createSastScanner();
+async function orchestrate(deps) {
+  const startTime = Date.now();
+  const applicable = LINTERS.filter((l2) => l2.applies(deps.changedFiles));
+  if (applicable.length === 0) {
+    return emptyResult(SCANNER_ID3, Date.now() - startTime);
+  }
+  const runs = await Promise.allSettled(
+    applicable.map(
+      (linter) => linter.run(
+        deps,
+        deps.changedFiles.filter((f2) => linter.applies([f2]))
+      )
+    )
+  );
+  const findings = [];
+  const errors = [];
+  let filesExamined = 0;
+  for (let i2 = 0; i2 < runs.length; i2++) {
+    const r2 = runs[i2];
+    const linterId = applicable[i2].id;
+    if (r2.status === "fulfilled") {
+      findings.push(...r2.value.findings);
+      errors.push(...r2.value.errors);
+      filesExamined += r2.value.filesExamined;
+    } else {
+      errors.push({
+        message: `sast linter '${linterId}' threw: ${r2.reason.message ?? String(r2.reason)}`,
+        fatal: false
+      });
+    }
+  }
+  return {
+    scanner: SCANNER_ID3,
+    findings,
+    errors,
+    metrics: {
+      duration_ms: Date.now() - startTime,
+      files_examined: filesExamined,
+      network_calls: 0,
+      cache_hits: 0
+    }
+  };
+}
 
 // src/scanners/container.ts
 var containerScannerStub = {
@@ -55820,7 +56479,7 @@ async function loadConfig(input, fileReader, headSha) {
     await logger.debug(`Could not read ${input.config_path} from GitHub: ${err.message}`);
   }
   try {
-    const localPath = (0, import_node_path6.resolve)(input.workspace_dir, input.config_path);
+    const localPath = (0, import_node_path10.resolve)(input.workspace_dir, input.config_path);
     const content = await (0, import_promises.readFile)(localPath, "utf-8");
     return loadConfigFromString(content);
   } catch {

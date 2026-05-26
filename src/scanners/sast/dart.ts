@@ -1,0 +1,215 @@
+/**
+ * Dart linter module — runs `dart analyze` against changed .dart files.
+ *
+ * Activation: requires `dart` on PATH (Flutter SDK or standalone Dart
+ * install). Returns empty quietly when missing.
+ *
+ * Output format: dart analyze --format=machine emits pipe-delimited
+ * lines, one per finding:
+ *   SEVERITY|TYPE|RULE_NAME|FILE|LINE|COLUMN|LENGTH|MESSAGE
+ * Example:
+ *   INFO|LINT|prefer_const_constructors|lib/foo.dart|42|7|5|Prefer const ...
+ *
+ * The MACHINE format is documented at
+ * https://dart.dev/tools/dart-analyze#machine-readable-output and is the
+ * stable contract for scripting; the human format is for terminal use.
+ *
+ * Severity mapping (dart's own SEVERITY column):
+ *   - ERROR → 'important' (compile errors, runtime crashes)
+ *   - WARNING → 'minor' (likely bugs but not blocking)
+ *   - INFO → 'nit' (style + recommendations)
+ */
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
+import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
+import type { LinterModule, LinterRun } from './linter.js';
+
+const ID = 'dart';
+const TIMEOUT_MS = 90_000;
+const TARGET_EXTENSION = /\.dart$/;
+
+interface DartFinding {
+  severity: 'ERROR' | 'WARNING' | 'INFO';
+  type: string;
+  ruleName: string;
+  filePath: string;
+  line: number;
+  column: number;
+  length: number;
+  message: string;
+}
+
+export const dartLinter: LinterModule = {
+  id: ID,
+  applies(files: readonly ChangedFile[]): boolean {
+    return files.some(
+      (f) => TARGET_EXTENSION.test(f.path) && !f.is_binary && !f.is_generated,
+    );
+  },
+  async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
+    const errors: ScanError[] = [];
+
+    let rawOutput: string;
+    try {
+      rawOutput = await runCli(targetFiles.map((f) => f.path), deps);
+    } catch (err) {
+      const msg = (err as Error).message;
+      // ENOENT means the dart binary isn't on PATH — quiet skip for repos
+      // that don't have it. Any other error is real and goes to the
+      // errors array.
+      if (msg.includes('ENOENT') || msg.includes('not found')) {
+        return { findings: [], errors: [], filesExamined: 0 };
+      }
+      errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });
+      return { findings: [], errors, filesExamined: 0 };
+    }
+
+    const findings: ScanFinding[] = [];
+    for (const line of rawOutput.split('\n')) {
+      const parsed = parseDartLine(line);
+      if (parsed === null) continue;
+      const relPath = path.relative(deps.workspaceDir, parsed.filePath);
+      const changedFile = deps.changedFiles.find((f) => f.path === relPath);
+      if (changedFile === undefined) continue;
+      if (!changedFile.added_lines.has(parsed.line)) continue;
+      findings.push(buildFinding(changedFile.path, parsed));
+    }
+
+    return { findings, errors, filesExamined: targetFiles.length };
+  },
+};
+
+/**
+ * Parse one line of dart analyze --format=machine output. Lines that
+ * don't fit the 8-pipe schema (header lines, empty lines, the trailing
+ * "N issues found" status line) return null.
+ */
+function parseDartLine(line: string): DartFinding | null {
+  if (line.trim().length === 0) return null;
+  const parts = line.split('|');
+  if (parts.length < 8) return null;
+  const [severity, type, ruleName, filePath, lineStr, columnStr, lengthStr, ...messageParts] = parts;
+  if (
+    severity !== 'ERROR' &&
+    severity !== 'WARNING' &&
+    severity !== 'INFO'
+  ) {
+    return null;
+  }
+  const lineNum = Number.parseInt(lineStr ?? '', 10);
+  if (!Number.isFinite(lineNum) || lineNum <= 0) return null;
+  const columnNum = Number.parseInt(columnStr ?? '', 10);
+  const lengthNum = Number.parseInt(lengthStr ?? '', 10);
+  return {
+    severity,
+    type: type ?? '',
+    ruleName: ruleName ?? '',
+    filePath: filePath ?? '',
+    line: lineNum,
+    column: Number.isFinite(columnNum) ? columnNum : 0,
+    length: Number.isFinite(lengthNum) ? lengthNum : 0,
+    // Message can contain `|` so re-join the tail.
+    message: messageParts.join('|'),
+  };
+}
+
+function runCli(files: string[], deps: ScannerDeps): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'dart',
+      ['analyze', '--format=machine', ...files],
+      {
+        cwd: deps.workspaceDir,
+        env: { PATH: process.env.PATH ?? '' },
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      child.kill('SIGKILL');
+      reject(new Error(`dart analyze timed out after ${TIMEOUT_MS}ms`));
+    }, TIMEOUT_MS);
+
+    child.stdout.on('data', (b) => {
+      stdout += b.toString('utf-8');
+    });
+    child.stderr.on('data', (b) => {
+      stderr += b.toString('utf-8');
+    });
+    deps.signal.addEventListener('abort', () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(new Error('dart analyze aborted'));
+    });
+    child.on('close', (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      // dart analyze: 0 = no issues, 1 = info-only, 2 = warnings, 3 = errors.
+      // All four are "ran successfully and reported issues" — only treat
+      // codes >3 (or null) as runtime errors.
+      if (code !== null && code > 3) {
+        reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      resolve(stdout);
+    });
+    child.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+function buildFinding(filePath: string, finding: DartFinding): ScanFinding {
+  const severity: Severity = severityFromDart(finding.severity);
+  const category: Category = categorize(finding.type, finding.ruleName);
+  const confidence: Confidence = 'high';
+  const fingerprint = `${ID}:${finding.ruleName}:${filePath}:${finding.line}`;
+  return {
+    scanner: 'sast',
+    rule_id: `${ID}/${finding.ruleName}`,
+    file_path: filePath,
+    line: finding.line,
+    severity,
+    category,
+    title: renderTitle(finding),
+    description: renderDescription(finding),
+    confidence,
+    evidence: { kind: 'sast', cwe: [] },
+    fingerprint,
+  };
+}
+
+function severityFromDart(s: DartFinding['severity']): Severity {
+  if (s === 'ERROR') return 'important';
+  if (s === 'WARNING') return 'minor';
+  return 'nit';
+}
+
+function categorize(type: string, ruleName: string): Category {
+  // type is one of ERROR | LINT | HINT. ERRORs from the analyzer are real
+  // bugs. LINT/HINT are style/recommendations.
+  if (type === 'ERROR') return 'bug';
+  if (ruleName.includes('async') || ruleName.includes('await')) return 'bug';
+  return 'readability';
+}
+
+function renderTitle(finding: DartFinding): string {
+  const ruleStr = `[${ID}/${finding.ruleName}] `;
+  const firstLine = finding.message.split('\n')[0]!;
+  const candidate = `${ruleStr}${firstLine}`;
+  return candidate.length > 120 ? candidate.slice(0, 117) + '...' : candidate;
+}
+
+function renderDescription(finding: DartFinding): string {
+  return `Dart analyzer rule: \`${finding.ruleName}\` (${finding.type.toLowerCase()}).\n\n${finding.message}`;
+}

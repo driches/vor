@@ -73,7 +73,11 @@ export const DEFAULT_CONFIG: ReviewConfig = {
     scanners: {
       dependency_cve: { enabled: true },
       secrets: { enabled: true, include_generic_entropy: false },
-      sast: { enabled: false },
+      // v0.4.0 enables sast by default — runs the repo's own ESLint on
+      // changed TS/JS files. Zero LLM token cost; catches type errors,
+      // unused vars, common pitfalls before they reach Sonnet. Opt out
+      // by setting `security.scanners.sast.enabled: false`.
+      sast: { enabled: true },
       container_cve: { enabled: false },
     },
     cache: { enabled: true },

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-26
+
+### Added — Static-first hybrid analysis (multi-language SAST)
+- **Linter fan-out under the `sast` scanner slot.** A new orchestrator in [src/scanners/sast.ts](src/scanners/sast.ts) runs per-language linter modules in parallel and concatenates their findings. The intent is to push deterministic findings (type errors, unused imports, framework anti-patterns, config typos) out of Sonnet's tool loop and onto the free-and-instant scanner path, so per-finding cost approaches $0 for everything a linter can express. Sonnet's budget is reserved for semantic and design judgment that no linter expresses.
+- **Per-language modules**, each a `LinterModule` registered with the orchestrator:
+  - [src/scanners/sast/eslint.ts](src/scanners/sast/eslint.ts) — TypeScript/JavaScript via the repo's own ESLint config (requires `node_modules/.bin/eslint` in the workspace).
+  - [src/scanners/sast/ruff.ts](src/scanners/sast/ruff.ts) — Python via ruff (resolves `<workspace>/.venv/bin/ruff` → PATH).
+  - [src/scanners/sast/dart.ts](src/scanners/sast/dart.ts) — Dart/Flutter via `dart analyze --format=machine` (Flutter SDK on PATH).
+  - [src/scanners/sast/actionlint.ts](src/scanners/sast/actionlint.ts) — GitHub Actions workflow YAML via `actionlint -format '{{json .}}'` (binary on PATH).
+- **`sast.enabled: true` by default.** [src/config/defaults.ts](src/config/defaults.ts). Opt out via `security.scanners.sast.enabled: false`. Each linter quietly no-ops when its binary isn't available, so adoption is zero-config for repos that already have the tools in their CI workflow.
+- **Findings are restricted to lines the PR actually added** (per-file `added_lines` set). Pre-existing violations on context lines pre-date the PR and would be noise.
+- **Failure isolation.** A misbehaving linter (parse error, runtime crash) surfaces as a non-fatal `ScanError` and the other linters still run. The sast scanner itself MUST NOT throw — contract identical to existing OSV and secrets scanners.
+
+### Why this matters
+v0.3.0 measured ~$1.99 per 3-case golden eval at 7/7 recall, with ~80% of Sonnet's turns spent on tool calls that deterministic tools could have answered for free. The v0.4.0 architectural shift is: scanners handle anything a linter can express; Sonnet handles only what requires natural-language reasoning. The eval harness uses `runAgent` directly and doesn't exercise scanners, so the cost win must be measured in production — see the PR description for the measurement plan.
+
+### Notes for operators
+- **Bring your own linter binaries.** Linters resolve from the workspace (eslint via `node_modules`, ruff via `.venv`, dart/actionlint via PATH). If your CI doesn't install these before the code-review step, the corresponding linter is a no-op. Future versions may bundle binaries.
+- **Language coverage is intentionally incremental.** v0.4.0 ships 4 languages. Planned next: Go (`go vet` / `golangci-lint`), Rust (`clippy`), Shell (`shellcheck`), Ruby (`rubocop`).
+
 ## [0.3.0] - 2026-05-25
 
 ### Added
