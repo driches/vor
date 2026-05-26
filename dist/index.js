@@ -55627,8 +55627,8 @@ function runCli(bin, files, deps) {
         shell: bin.needsShell
       }
     );
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55637,10 +55637,10 @@ function runCli(bin, files, deps) {
       reject(new Error(`eslint timed out after ${TIMEOUT_MS2}ms`));
     }, TIMEOUT_MS2);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -55662,10 +55662,11 @@ function runCli(bin, files, deps) {
       resolved = true;
       clearTimeout(timer);
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -55804,8 +55805,8 @@ function runCli2(bin, files, deps) {
         shell: bin.needsShell
       }
     );
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55814,10 +55815,10 @@ function runCli2(bin, files, deps) {
       reject(new Error(`ruff timed out after ${TIMEOUT_MS3}ms`));
     }, TIMEOUT_MS3);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -55835,10 +55836,11 @@ function runCli2(bin, files, deps) {
       resolved = true;
       clearTimeout(timer);
       if (code !== null && code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -55981,8 +55983,8 @@ function runCli3(files, deps) {
         env: buildLinterEnv()
       }
     );
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -55991,10 +55993,10 @@ function runCli3(files, deps) {
       reject(new Error(`dart analyze timed out after ${TIMEOUT_MS4}ms`));
     }, TIMEOUT_MS4);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -56011,10 +56013,12 @@ function runCli3(files, deps) {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       if (code !== null && code > 3) {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
+      const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       resolve3(stderr + "\n" + stdout);
     });
     child2.on("error", (err) => {
@@ -56135,8 +56139,8 @@ function runCli4(files, deps) {
         env: buildLinterEnv()
       }
     );
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56145,10 +56149,10 @@ function runCli4(files, deps) {
       reject(new Error(`actionlint timed out after ${TIMEOUT_MS5}ms`));
     }, TIMEOUT_MS5);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -56166,10 +56170,11 @@ function runCli4(files, deps) {
       resolved = true;
       clearTimeout(timer);
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -56234,7 +56239,7 @@ var knipLinter = {
       (f2) => TARGET_EXTENSIONS3.test(f2.path) && !f2.is_binary && !f2.is_generated
     );
   },
-  async run(deps, targetFiles) {
+  async run(deps, _targetFiles) {
     const errors = [];
     const bin = locateBin2(deps.workspaceDir);
     let rawOutput;
@@ -56256,7 +56261,7 @@ var knipLinter = {
         message: `knip output parse failed: ${err.message}`,
         fatal: false
       });
-      return { findings: [], errors, filesExamined: targetFiles.length };
+      return { findings: [], errors, filesExamined: 0 };
     }
     const findings = [];
     for (const entry of output.issues ?? []) {
@@ -56303,7 +56308,7 @@ var knipLinter = {
         findings.push(buildDuplicateFinding(changedFile.path, issue2));
       }
     }
-    return { findings, errors, filesExamined: targetFiles.length };
+    return { findings, errors, filesExamined: 0 };
   }
 };
 function locateBin2(workspaceDir) {
@@ -56321,8 +56326,8 @@ function runCli5(bin, deps) {
       env: buildLinterEnv(),
       shell: bin.needsShell
     });
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56331,10 +56336,10 @@ function runCli5(bin, deps) {
       reject(new Error(`knip timed out after ${TIMEOUT_MS6}ms`));
     }, TIMEOUT_MS6);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -56352,10 +56357,11 @@ function runCli5(bin, deps) {
       resolved = true;
       clearTimeout(timer);
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -56514,8 +56520,8 @@ function runCli6(files, deps) {
         env: buildLinterEnv()
       }
     );
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks = [];
+    const stderrChunks = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -56524,10 +56530,10 @@ function runCli6(files, deps) {
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS7}ms`));
     }, TIMEOUT_MS7);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      stdoutChunks.push(b2);
     });
     child2.stderr.on("data", (b2) => {
-      stderr += b2.toString("utf-8");
+      stderrChunks.push(b2);
     });
     deps.signal.addEventListener(
       "abort",
@@ -56545,10 +56551,11 @@ function runCli6(files, deps) {
       resolved = true;
       clearTimeout(timer);
       if (code !== null && code > 2) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;

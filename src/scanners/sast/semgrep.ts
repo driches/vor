@@ -202,8 +202,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         env: buildLinterEnv(),
       },
     );
-    let stdout = '';
-    let stderr = '';
+    // Buffer accumulation — semgrep JSON on a large monorepo with
+    // --config=auto can be tens of MB. The pre-fix `stdout += chunk`
+    // pattern was O(n²) AND risked UTF-8 corruption on chunk boundaries.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -212,11 +215,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -236,10 +239,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       // Semgrep exit codes: 0 = clean, 1 = findings, 2 = errors but partial
       // results, >2 = fatal. 0/1/2 produce parseable JSON.
       if (code !== null && code > 2) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      resolve(Buffer.concat(stdoutChunks).toString('utf-8'));
     });
     child.on('error', (err) => {
       if (resolved) return;

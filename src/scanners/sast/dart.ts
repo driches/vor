@@ -147,8 +147,10 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         env: buildLinterEnv(),
       },
     );
-    let stdout = '';
-    let stderr = '';
+    // Buffer accumulation — avoids O(n²) string concat on large outputs
+    // and UTF-8 corruption across chunk boundaries.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -157,11 +159,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       reject(new Error(`dart analyze timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -178,6 +180,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      const stderr = Buffer.concat(stderrChunks).toString('utf-8');
       // dart analyze: 0 = no issues, 1 = info-only, 2 = warnings, 3 = errors.
       // All four are "ran successfully and reported issues" — only treat
       // codes >3 (or null) as runtime errors.
@@ -191,6 +194,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       // produce zero findings. The parseDartLine filter accepts only
       // pipe-delimited lines that match the schema, so any non-finding
       // content from either stream is harmlessly skipped.
+      const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
       resolve(stderr + '\n' + stdout);
     });
     child.on('error', (err) => {

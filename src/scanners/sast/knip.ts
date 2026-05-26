@@ -85,7 +85,9 @@ export const knipLinter: LinterModule = {
       (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
     );
   },
-  async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
+  async run(deps: ScannerDeps, _targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
+    // `_targetFiles` is unused: knip runs whole-project (no per-file argv),
+    // and the per-file filter is applied via `deps.changedFiles` below.
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
 
@@ -109,7 +111,12 @@ export const knipLinter: LinterModule = {
         message: `knip output parse failed: ${(err as Error).message}`,
         fatal: false,
       });
-      return { findings: [], errors, filesExamined: targetFiles.length };
+      // knip is whole-project; we never passed targetFiles in argv. Report
+      // 0 here rather than `targetFiles.length` (which would falsely imply
+      // we limited the scan to PR-changed files when knip actually
+      // analyzed everything). See the trailing return below for the
+      // success path's matching choice.
+      return { findings: [], errors, filesExamined: 0 };
     }
 
     const findings: ScanFinding[] = [];
@@ -166,7 +173,13 @@ export const knipLinter: LinterModule = {
       }
     }
 
-    return { findings, errors, filesExamined: targetFiles.length };
+    // knip runs whole-project analysis — no targetFiles in argv. We use
+    // `targetFiles` only to filter the OUTPUT to PR-changed lines. So
+    // `filesExamined` should reflect the actual scan scope (whole project,
+    // unknown count from this vantage point), not the PR-changed subset.
+    // Report 0 to avoid misleading operators who read it as "knip only
+    // looked at 3 files".
+    return { findings, errors, filesExamined: 0 };
   },
 };
 
@@ -200,8 +213,11 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       env: buildLinterEnv(),
       shell: bin.needsShell,
     });
-    let stdout = '';
-    let stderr = '';
+    // Buffer accumulation — avoids O(n²) string concat on large outputs
+    // and UTF-8 corruption across chunk boundaries. knip's whole-project
+    // analysis output can be MBs on monorepos.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -210,11 +226,11 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       reject(new Error(`knip timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -233,10 +249,11 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       clearTimeout(timer);
       // Knip exits non-zero when it has findings. 1 = findings, >1 = config/runtime error.
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      resolve(Buffer.concat(stdoutChunks).toString('utf-8'));
     });
     child.on('error', (err) => {
       if (resolved) return;

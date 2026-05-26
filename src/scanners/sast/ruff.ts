@@ -152,8 +152,10 @@ function runCli(
         shell: bin.needsShell,
       },
     );
-    let stdout = '';
-    let stderr = '';
+    // Buffer accumulation — avoids O(n²) string concat on large outputs
+    // and UTF-8 corruption across chunk boundaries.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -162,11 +164,11 @@ function runCli(
       reject(new Error(`ruff timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -186,10 +188,11 @@ function runCli(
       // --exit-zero means ruff returns 0 even with findings. Any non-zero
       // exit is a real error (bad args, config error, missing files).
       if (code !== null && code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      resolve(Buffer.concat(stdoutChunks).toString('utf-8'));
     });
     child.on('error', (err) => {
       if (resolved) return;

@@ -134,8 +134,11 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
         shell: bin.needsShell,
       },
     );
-    let stdout = '';
-    let stderr = '';
+    // Collect chunks as Buffers; concatenate once at close. Avoids the
+    // O(n²) string-concat copy on large outputs and prevents UTF-8
+    // corruption when a multi-byte sequence straddles a chunk boundary.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -144,11 +147,11 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
       reject(new Error(`eslint timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -171,10 +174,11 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
       clearTimeout(timer);
       // 0 = clean, 1 = findings (normal), >1 = config/runtime error.
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      resolve(Buffer.concat(stdoutChunks).toString('utf-8'));
     });
     child.on('error', (err) => {
       if (resolved) return;

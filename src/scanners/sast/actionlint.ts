@@ -124,8 +124,14 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         env: buildLinterEnv(),
       },
     );
-    let stdout = '';
-    let stderr = '';
+    // Collect chunks as Buffers and concatenate once at close time. The
+    // pre-fix `stdout += chunk.toString('utf-8')` pattern is O(n²) on long
+    // outputs AND can corrupt UTF-8 sequences that straddle a chunk
+    // boundary (each chunk gets decoded independently). Buffer.concat
+    // preserves byte boundaries; a single trailing toString decodes
+    // correctly regardless of where chunks happened to split.
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -134,11 +140,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       reject(new Error(`actionlint timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
-    child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+    child.stdout.on('data', (b: Buffer) => {
+      stdoutChunks.push(b);
     });
-    child.stderr.on('data', (b) => {
-      stderr += b.toString('utf-8');
+    child.stderr.on('data', (b: Buffer) => {
+      stderrChunks.push(b);
     });
     deps.signal.addEventListener(
       'abort',
@@ -157,10 +163,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       clearTimeout(timer);
       // actionlint: 0 = clean, 1 = findings, >1 = runtime/config error.
       if (code !== null && code > 1) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      resolve(Buffer.concat(stdoutChunks).toString('utf-8'));
     });
     child.on('error', (err) => {
       if (resolved) return;
