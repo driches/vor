@@ -40,6 +40,12 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gpt-4.1-nano':  { input: 0.1,  output: 0.4,  cache_read: 0.025 },
   'gpt-4o':        { input: 2.5,  output: 10,   cache_read: 1.25 },
   'gpt-4o-mini':   { input: 0.15, output: 0.6,  cache_read: 0.075 },
+  // GPT-5.x / Codex API pricing from OpenAI pricing page as of 2026-05.
+  'gpt-5.5':        { input: 5,    output: 30,   cache_read: 0.5 },
+  'gpt-5.4':        { input: 2.5,  output: 15,   cache_read: 0.25 },
+  'gpt-5.4-mini':   { input: 0.75, output: 4.5,  cache_read: 0.075 },
+  'gpt-5.4-nano':   { input: 0.2,  output: 1.25, cache_read: 0.02 },
+  'gpt-5.3-codex':  { input: 1.75, output: 14,   cache_read: 0.175 },
   // o-series reasoning models. `inferProviderFromModel` routes any
   // `/^o\d/` id to OpenAI, so every o-prefix model needs a pricing entry
   // — without them, production silently falls back to Sonnet rates (3–5×

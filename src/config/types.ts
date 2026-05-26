@@ -54,11 +54,31 @@ export interface ReviewConfig {
 
   security: SecurityConfig;
 
+  /** Provider-specific request controls. Defaults are conservative. */
+  providers: ProviderConfig;
+
   /**
    * Opt-in feature flags. Default-disabled features land here so they ship
    * without changing behavior for anyone who hasn't opted in.
    */
   experimental: ExperimentalConfig;
+}
+
+export interface ProviderConfig {
+  openai: OpenAIProviderConfig;
+}
+
+export interface OpenAIProviderConfig {
+  /** Responses API service tier. `flex` can reduce cost with slower/less available processing. */
+  service_tier?: 'auto' | 'default' | 'flex';
+  /** Stable cache-routing key for prompt caching. Keep low-cardinality. */
+  prompt_cache_key?: string;
+  /** Prompt cache retention policy when supported by the selected model. */
+  prompt_cache_retention?: 'in_memory' | '24h';
+  /** Reasoning effort for reasoning-capable OpenAI models. */
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  /** GPT-5 text verbosity knob when supported. */
+  text_verbosity?: 'low' | 'medium' | 'high';
 }
 
 export interface ExperimentalConfig {

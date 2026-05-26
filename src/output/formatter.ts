@@ -12,6 +12,8 @@ export interface SummaryRenderInput {
   truncatedCount: number;
   configEvent: ReviewEvent;
   modelName: string;
+  /** Paths removed from the LLM's review scope by deterministic budget gates. */
+  unreviewedPaths?: readonly string[];
   /**
    * How the agent run terminated. When the run ended in anything other than
    * `summary_posted`, we surface that in the body so PR readers don't mistake
@@ -41,6 +43,10 @@ export interface RenderedSummary {
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   const summary = input.draft.summary;
+  const unreviewedPaths = mergeUniquePaths(
+    summary?.unreviewed_paths ?? [],
+    input.unreviewedPaths ?? [],
+  );
   const sections: string[] = [];
 
   // Headline: severity of the highest-severity finding (or "No findings").
@@ -84,11 +90,11 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     sections.push('### Coverage');
     sections.push(summary.coverage_note);
   }
-  if (summary?.unreviewed_paths && summary.unreviewed_paths.length > 0) {
+  if (unreviewedPaths.length > 0) {
     sections.push(
-      `_Skipped (out of budget):_ ${summary.unreviewed_paths.slice(0, 20).join(', ')}` +
-        (summary.unreviewed_paths.length > 20
-          ? ` _+${summary.unreviewed_paths.length - 20} more_`
+      `_Skipped (out of budget):_ ${unreviewedPaths.slice(0, 20).join(', ')}` +
+        (unreviewedPaths.length > 20
+          ? ` _+${unreviewedPaths.length - 20} more_`
           : ''),
     );
   }
@@ -115,6 +121,13 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   const event = chooseEvent(input.configEvent, agentEvent);
 
   return { body: sections.join('\n\n'), event };
+}
+
+function mergeUniquePaths(
+  a: readonly string[],
+  b: readonly string[],
+): string[] {
+  return [...new Set([...a, ...b])];
 }
 
 /** Take the less-aggressive of the two events. */

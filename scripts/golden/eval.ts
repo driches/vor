@@ -17,7 +17,7 @@
  * Privacy guard: outputs are only written under GOLDEN_REPO_PATH. The script
  * refuses to run if GOLDEN_REPO_PATH points anywhere inside this public repo.
  *
- * Required env: ANTHROPIC_API_KEY.
+ * Required env: ANTHROPIC_API_KEY for Claude models, OPENAI_API_KEY for OpenAI models.
  * Honors: GOLDEN_REPO_PATH (default: ../code-review-golden).
  */
 
@@ -35,6 +35,7 @@ import {
   type CaseMeta,
 } from '../../src/eval/local-deps.js';
 import { renderReport, type CaseReport } from '../../src/eval/report.js';
+import { inferProviderFromModel, type ProviderId } from '../../src/llm/index.js';
 import { filterComments } from '../../src/output/filter.js';
 import { renderSummary } from '../../src/output/formatter.js';
 import { logger } from '../../src/util/logger.js';
@@ -51,9 +52,6 @@ interface Args {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) die('ANTHROPIC_API_KEY is required.');
 
   const goldenRoot = resolve(process.env.GOLDEN_REPO_PATH ?? '../code-review-golden');
   assertGoldenPathSafe(goldenRoot);
@@ -91,6 +89,13 @@ async function main(): Promise<void> {
       deps.config.experimental.worker_delegation.enabled = true;
     }
     modelName = deps.config.model;
+    const provider = deps.config.provider ?? inferProviderFromModel(deps.config.model);
+    const apiKey = apiKeyForProvider(provider);
+    if (!apiKey) {
+      die(
+        `${provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'} is required for model ${deps.config.model}.`,
+      );
+    }
 
     const contextFiles = await loadContextFilesForCase(deps, deps.config.context.include);
     const systemPrompt = buildSystemPrompt({
@@ -116,6 +121,8 @@ async function main(): Promise<void> {
       maxInputTokens: deps.config.budget.max_input_tokens,
       maxOutputTokens: deps.config.budget.max_output_tokens,
       apiKey,
+      providerHint: provider,
+      openai: deps.config.providers.openai,
     });
 
     const filtered = filterComments(deps.aggregator.acceptedComments, {
@@ -148,6 +155,15 @@ async function main(): Promise<void> {
           input_tokens: agentResult.inputTokens,
           output_tokens: agentResult.outputTokens,
           cost_usd: agentResult.costUsd,
+          provider,
+          cache_creation_input_tokens: agentResult.perModelCost.reduce(
+            (sum, m) => sum + m.cacheCreationTokens,
+            0,
+          ),
+          cache_read_input_tokens: agentResult.perModelCost.reduce(
+            (sum, m) => sum + m.cacheReadTokens,
+            0,
+          ),
           // v0.3.0+: per-model breakdown for Sonnet/Haiku split when worker
           // delegation is enabled. Single-model runs still write this field
           // with one entry so downstream tooling can rely on it existing.
@@ -300,6 +316,12 @@ function log(msg: string): void {
   void logger.info(msg);
 }
 
+function apiKeyForProvider(provider: ProviderId): string {
+  return provider === 'openai'
+    ? (process.env.OPENAI_API_KEY?.trim() ?? '')
+    : (process.env.ANTHROPIC_API_KEY?.trim() ?? '');
+}
+
 function die(msg: string): never {
   console.error(`[eval] ${msg}`);
   process.exit(1);
@@ -315,7 +337,8 @@ Optional:
   --max-turns <N>     Override the agent's max turn count
 
 Required env:
-  ANTHROPIC_API_KEY — used to call Claude.
+  ANTHROPIC_API_KEY — used for Claude models.
+  OPENAI_API_KEY    — used for OpenAI models.
 
 Honors:
   GOLDEN_REPO_PATH — case + report root (default: ../code-review-golden).

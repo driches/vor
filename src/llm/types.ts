@@ -59,6 +59,16 @@ export interface CompleteOptions {
   system: string;
   temperature?: number;
   abortSignal?: AbortSignal;
+  /** OpenAI Responses API controls. Ignored by non-OpenAI providers. */
+  openai?: OpenAICompleteOptions;
+}
+
+export interface OpenAICompleteOptions {
+  service_tier?: 'auto' | 'default' | 'flex';
+  prompt_cache_key?: string;
+  prompt_cache_retention?: 'in_memory' | '24h';
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  text_verbosity?: 'low' | 'medium' | 'high';
 }
 
 /**

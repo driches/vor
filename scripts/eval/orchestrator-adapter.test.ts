@@ -178,7 +178,10 @@ describe('evalRun', () => {
     await expect(
       evalRun({
         case: minimalCase,
-        config: DEFAULT_CONFIG,
+        config: {
+          ...DEFAULT_CONFIG,
+          security: { ...DEFAULT_CONFIG.security, enabled: false },
+        },
         apiKey: 'sk-ant-test',
         agentScript: [], // empty → FakeProvider will throw on the first turn
       }),

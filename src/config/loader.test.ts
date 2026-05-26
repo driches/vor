@@ -205,3 +205,31 @@ describe('provider field', () => {
     expect(cfg.model).toBe(DEFAULT_CONFIG.model);
   });
 });
+
+describe('provider-specific config', () => {
+  it('merges OpenAI request controls with defaults', () => {
+    const cfg = loadConfigFromString(`
+providers:
+  openai:
+    service_tier: flex
+    prompt_cache_key: driches/code-review
+    prompt_cache_retention: 24h
+    reasoning_effort: low
+    text_verbosity: low
+`);
+    expect(cfg.providers.openai).toEqual({
+      service_tier: 'flex',
+      prompt_cache_key: 'driches/code-review',
+      prompt_cache_retention: '24h',
+      reasoning_effort: 'low',
+      text_verbosity: 'low',
+    });
+  });
+
+  it('rejects invalid OpenAI enum values', () => {
+    const result = partialConfigSchema.safeParse({
+      providers: { openai: { service_tier: 'premium' } },
+    });
+    expect(result.success).toBe(false);
+  });
+});

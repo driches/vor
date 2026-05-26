@@ -41,6 +41,7 @@ import {
   type CanonicalMessage,
   type CanonicalTool,
   type LLMProvider,
+  type OpenAICompleteOptions,
   type ProviderId,
 } from '../llm/index.js';
 import { makeGetPrDiffTool } from '../tools/get-pr-diff.js';
@@ -96,6 +97,8 @@ export interface RunAgentInput {
    * omitted — see that constant's JSDoc for the recall/cost rationale.
    */
   temperature?: number;
+  /** OpenAI-only Responses API request controls. Ignored by other providers. */
+  openai?: OpenAICompleteOptions;
   abortController?: AbortController;
   /**
    * Optional override for provider instantiation. Production omits this and
@@ -224,6 +227,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // or a very large diff) lands in 'budget_exceeded' instead of escaping
   // runAgent and turning into an orchestrator-level failure.
   let preflightBudgetExceeded = false;
+  let wrapUpRequested = false;
   if (worker !== undefined && anthropicClient !== undefined) {
     try {
       // Reuse the same Anthropic client the worker holds — same apiKey,
@@ -290,6 +294,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         // JSDoc for the recall/cost history. The OpenAI adapter drops the
         // field automatically for o-series reasoning models that reject it.
         temperature,
+        ...(input.openai !== undefined ? { openai: input.openai } : {}),
         ...(input.abortController ? { abortSignal: input.abortController.signal } : {}),
       });
 
@@ -390,6 +395,20 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           content: result,
           ...(isError ? { is_error: true } : {}),
         });
+      }
+
+      if (
+        !wrapUpRequested &&
+        !input.deps.aggregator.hasSummary() &&
+        turns < input.maxTurns &&
+        budget.shouldWrapUp()
+      ) {
+        messages.push({
+          role: 'user',
+          content:
+            'Budget is nearly exhausted. Stop broad investigation now. Post only already-verified findings, include any intentionally unreviewed paths in `post_summary.unreviewed_paths`, and call `post_summary` on your next turn.',
+        });
+        wrapUpRequested = true;
       }
 
       // Terminate after summary

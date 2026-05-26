@@ -11,7 +11,7 @@
  *      canonicalToolsToResponses, responsesResponseToCanonical) — named
  *      exports so the unit tests can pin behavior directly.
  *   3. Model-shape predicates (`isReasoningModel`, `supportsTemperature`)
- *      that route around the o-series's "reject temperature" quirk.
+ *      that route around reasoning-model request quirks.
  *
  * Stateless replay design: we set `store: false` on every request — we do
  * NOT use OpenAI's server-side `previous_response_id` continuation. The full
@@ -27,6 +27,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../util/logger.js';
+import { openaiCapabilitiesForModel } from './openai-capabilities.js';
 import type {
   CanonicalMessage,
   CanonicalTool,
@@ -55,8 +56,9 @@ export class OpenAIProvider implements LLMProvider {
     const input = canonicalMessagesToResponsesInput(messages);
     const responsesTools = canonicalToolsToResponses(tools);
 
-    const reasoning = isReasoningModel(opts.model);
-    const requestBody: OpenAI.Responses.ResponseCreateParamsNonStreaming = {
+    const capabilities = openaiCapabilitiesForModel(opts.model);
+    const promptCacheRetention = opts.openai?.prompt_cache_retention;
+    const requestBody: OpenAI.Responses.ResponseCreateParamsNonStreaming & Record<string, unknown> = {
       model: opts.model,
       input,
       instructions: opts.system,
@@ -70,14 +72,28 @@ export class OpenAIProvider implements LLMProvider {
       // them next turn without retention. No-op on non-reasoning models, but
       // gpt-* will 400 if you pass an unsupported `include` value, hence the
       // conditional.
-      ...(reasoning ? { include: ['reasoning.encrypted_content' as const] } : {}),
-      // Reasoning models (o1/o3/o4) reject the `temperature` parameter —
-      // they sample deterministically by design. Only send it for gpt-*.
+      ...(capabilities.reasoning ? { include: ['reasoning.encrypted_content' as const] } : {}),
+      // Reasoning models reject the `temperature` parameter. Only send it
+      // for models whose capability row says it is supported.
       ...(supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}),
+      ...(opts.openai?.service_tier ? { service_tier: opts.openai.service_tier } : {}),
+      ...(opts.openai?.prompt_cache_key
+        ? { prompt_cache_key: opts.openai.prompt_cache_key }
+        : {}),
+      ...(promptCacheRetention &&
+      (promptCacheRetention !== '24h' || capabilities.promptCacheRetention24h)
+        ? { prompt_cache_retention: promptCacheRetention }
+        : {}),
+      ...(opts.openai?.reasoning_effort && capabilities.reasoning
+        ? { reasoning: { effort: opts.openai.reasoning_effort } }
+        : {}),
+      ...(opts.openai?.text_verbosity
+        ? { text: { verbosity: opts.openai.text_verbosity } }
+        : {}),
     };
 
     const response = await this.client.responses.create(
-      requestBody,
+      requestBody as OpenAI.Responses.ResponseCreateParamsNonStreaming,
       opts.abortSignal ? { signal: opts.abortSignal } : undefined,
     );
 
@@ -102,22 +118,21 @@ export class OpenAIProvider implements LLMProvider {
 // ---------------------------------------------------------------------------
 
 /**
- * o-series reasoning models: o1, o3, o3-mini, o4-mini, etc. Matches an `o`
- * followed by a digit so we don't false-positive `omni-*` or any future
- * non-reasoning model that happens to start with `o`.
+ * Reasoning-capable OpenAI models (o-series, GPT-5.x, Codex variants).
+ * Centralized in openai-capabilities.ts so request-shape decisions and tests
+ * do not drift as OpenAI model families change.
  */
 export function isReasoningModel(model: string): boolean {
-  return /^o\d/.test(model);
+  return openaiCapabilitiesForModel(model).reasoning;
 }
 
 /**
- * Reasoning models (`o1`, `o3*`, `o4*`) 400 if you send `temperature`. Every
- * other OpenAI chat-capable model accepts it. Negation of `isReasoningModel`
- * to keep the two rules in sync — if a future model joins the o-series, the
- * single regex update covers both.
+ * Returns true only for models where we should send `temperature`.
+ * New reasoning families often reject it, so this uses the capabilities table
+ * rather than negating `isReasoningModel`.
  */
 export function supportsTemperature(model: string): boolean {
-  return !isReasoningModel(model);
+  return openaiCapabilitiesForModel(model).temperature;
 }
 
 // ---------------------------------------------------------------------------

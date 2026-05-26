@@ -107,6 +107,10 @@ export const DEFAULT_CONFIG: ReviewConfig = {
     persistence: { enabled: false },
   },
 
+  providers: {
+    openai: {},
+  },
+
   experimental: {
     worker_delegation: {
       enabled: false,

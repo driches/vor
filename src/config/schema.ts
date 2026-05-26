@@ -3,6 +3,7 @@ import { z } from 'zod';
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
 const eventSchema = z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
 const providerSchema = z.enum(['anthropic', 'openai']);
+const openaiReasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
 const scannerCommon = z.object({
   enabled: z.boolean(),
@@ -49,6 +50,16 @@ const experimentalSchema = z.object({
   worker_delegation: z.object({
     enabled: z.boolean(),
     worker_model: z.string().min(1),
+  }),
+});
+
+const providerConfigSchema = z.object({
+  openai: z.object({
+    service_tier: z.enum(['auto', 'default', 'flex']).optional(),
+    prompt_cache_key: z.string().min(1).max(256).optional(),
+    prompt_cache_retention: z.enum(['in_memory', '24h']).optional(),
+    reasoning_effort: openaiReasoningEffortSchema.optional(),
+    text_verbosity: z.enum(['low', 'medium', 'high']).optional(),
   }),
 });
 
@@ -103,6 +114,8 @@ export const configSchema = z
     }),
 
     security: securitySchema,
+
+    providers: providerConfigSchema,
 
     experimental: experimentalSchema,
   })
