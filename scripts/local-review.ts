@@ -33,6 +33,14 @@ interface Args {
   output: string;
   configPath: string;
   model?: string;
+  /**
+   * When true, the FakeOctokit's `repos.getContent` for `.code-review.yml`
+   * returns a synthetic YAML overriding `experimental.scanner_findings_in_user_prompt`
+   * to `true` instead of whatever's at HEAD. Lets you A/B the flag without
+   * committing config changes. The override is shallow — any other keys at
+   * HEAD's `.code-review.yml` are ignored.
+   */
+  scannerFindingsInUserPrompt: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -47,6 +55,7 @@ function parseArgs(argv: readonly string[]): Args {
     workspace: a('--workspace', process.cwd())!,
     output: a('--output', `.code-review/local-runs/${ts}.json`)!,
     configPath: a('--config', '.code-review.yml')!,
+    scannerFindingsInUserPrompt: argv.includes('--scanner-findings-in-user-prompt'),
     ...(a('--model') !== undefined ? { model: a('--model') } : {}),
   };
 }
@@ -179,6 +188,12 @@ function buildFakeOctokit(opts: {
     additions: number;
     deletions: number;
   };
+  /**
+   * Path → synthetic content overrides for `repos.getContent`. Used by the
+   * CLI to inject a different `.code-review.yml` than the one committed at
+   * HEAD, so flags can be A/B tested without git churn.
+   */
+  contentOverrides: Map<string, string>;
 }): Octokit {
   // GitHub's listFiles shape has `filename`, `status`, `additions`, `deletions`,
   // `changes`, `patch` (per-file diff). The orchestrator only needs filename +
@@ -235,8 +250,11 @@ function buildFakeOctokit(opts: {
       },
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
+          // Honor explicit overrides first — used by the CLI to inject a
+          // synthetic `.code-review.yml` without committing config changes.
+          const override = opts.contentOverrides.get(args.path);
           const ref = args.ref ?? opts.headSha;
-          const content = getFileContent(opts.workspace, ref, args.path);
+          const content = override ?? getFileContent(opts.workspace, ref, args.path);
           if (content === null) {
             const err = Object.assign(new Error('Not Found'), { status: 404 });
             throw err;
@@ -290,6 +308,20 @@ async function main(): Promise<void> {
       `${files.length} file(s), +${totalAdditions}/-${totalDeletions}, workspace=${args.workspace}`,
   );
 
+  // Build the content-override map. Today: only the experimental flag
+  // for scanner-findings-in-user-prompt. The override is a minimal YAML
+  // snippet — the orchestrator's loadConfig deep-merges it into defaults.
+  const contentOverrides = new Map<string, string>();
+  if (args.scannerFindingsInUserPrompt) {
+    contentOverrides.set(
+      args.configPath,
+      `experimental:\n  scanner_findings_in_user_prompt: true\n`,
+    );
+    console.error(
+      `local-review: injecting scanner_findings_in_user_prompt=true via synthetic ${args.configPath}`,
+    );
+  }
+
   const fakeOctokit = buildFakeOctokit({
     workspace: args.workspace,
     baseSha,
@@ -303,6 +335,7 @@ async function main(): Promise<void> {
       additions: totalAdditions,
       deletions: totalDeletions,
     },
+    contentOverrides,
   });
 
   const result = await runOrchestrator({
