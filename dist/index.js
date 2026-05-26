@@ -56546,7 +56546,8 @@ var semgrepLinter = {
       rawOutput = await runCli6(safe, deps);
     } catch (err) {
       const msg = err.message;
-      if (msg.includes("ENOENT") || msg.includes("not found")) {
+      const isMissingBinary = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `semgrep failed: ${msg}`, fatal: false });
@@ -56741,7 +56742,7 @@ var LINTERS = [
   knipLinter,
   semgrepLinter
 ];
-var SAST_TIMEOUT_MS = 18e4;
+var SAST_TIMEOUT_MS = 24e4;
 function createSastScanner() {
   return {
     id: SCANNER_ID3,

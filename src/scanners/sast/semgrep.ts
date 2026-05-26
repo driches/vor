@@ -111,7 +111,18 @@ export const semgrepLinter: LinterModule = {
       rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('ENOENT') || msg.includes('not found')) {
+      // Match knip/ruff: `command not found` (the POSIX shell prefix)
+      // is the specific signal — bare `not found` would also match real
+      // semgrep runtime errors like "Rule not found", "Config file not
+      // found", "Path not found", silently swallowing them. Exit codes
+      // (9009/127) remain the load-bearing locale-independent signals.
+      const isMissingBinary =
+        msg.includes('ENOENT') ||
+        msg.includes('command not found') ||
+        msg.includes('is not recognized') ||
+        msg.includes('exited 9009') ||
+        msg.includes('exited 127');
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `semgrep failed: ${msg}`, fatal: false });

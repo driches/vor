@@ -67,8 +67,17 @@ const LINTERS: readonly LinterModule[] = [
  * every detected language. On a sizable monorepo that easily exceeds the
  * 60s runner default and would otherwise be aborted before producing
  * findings — see semgrep.ts TIMEOUT_MS for the linter-internal cap.
+ *
+ * MUST be strictly larger than the longest per-linter TIMEOUT_MS
+ * (semgrep, 180_000). Pre-fix this was set equal to semgrep's internal
+ * cap; the outer scanner-level timer can fire FIRST in a race, killing
+ * the whole sast run and discarding the already-collected findings
+ * from eslint/ruff/dart/actionlint/knip — breaking per-linter failure
+ * isolation. Buffer of 60s lets semgrep cleanly hit its own timer
+ * (which kills the child + rejects, surfacing as a non-fatal ScanError
+ * for just semgrep) while preserving the other linters' results.
  */
-const SAST_TIMEOUT_MS = 180_000;
+const SAST_TIMEOUT_MS = 240_000;
 
 export function createSastScanner(): Scanner {
   return {
