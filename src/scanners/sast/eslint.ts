@@ -16,12 +16,14 @@ import type { Category, ChangedFile, Confidence, Severity } from '../../types.js
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
+  filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
   type ResolvedBinary,
 } from './linter.js';
+import { logger } from '../../util/logger.js';
 
 const ID = 'eslint';
 const TIMEOUT_MS = 60_000;
@@ -57,9 +59,27 @@ export const eslintLinter: LinterModule = {
       return { findings: [], errors: [], filesExamined: 0 };
     }
 
+    // When the resolved binary is a Windows .cmd shim, spawn uses
+    // shell:true and cmd.exe parses metacharacters in the argument list.
+    // Filenames come from the PR diff (attacker-controlled), so we filter
+    // shell-unsafe paths out BEFORE building the argv. shell:false runs
+    // (Unix, Windows .exe) bypass this filter — execve doesn't parse args.
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f) => f.path),
+      bin.needsShell,
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `eslint: skipped ${dropped.length} file(s) with shell-unsafe paths (Windows shim mode): ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(bin, targetFiles.map((f) => f.path), deps);
+      rawOutput = await runCli(bin, safe, deps);
     } catch (err) {
       errors.push({ message: `eslint failed: ${(err as Error).message}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -130,13 +150,21 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
     child.stderr.on('data', (b) => {
       stderr += b.toString('utf-8');
     });
-    deps.signal.addEventListener('abort', () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      reject(new Error('eslint aborted'));
-    });
+    deps.signal.addEventListener(
+      'abort',
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error('eslint aborted'));
+      },
+      // { once: true } so the listener is dropped on every normal
+      // completion — `deps.signal` is the long-lived orchestrator
+      // signal shared across all linters, and without { once } each
+      // runCli would leak a listener for the lifetime of the scan run.
+      { once: true },
+    );
     child.on('close', (code) => {
       if (resolved) return;
       resolved = true;

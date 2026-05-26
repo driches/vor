@@ -131,6 +131,23 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
   'NPM_CONFIG_CACHE',
   'FORCE_COLOR',
   'NO_COLOR',
+  // Proxy + cert routing — semgrep --config=auto and ruff/knip in
+  // corporate CI environments need these to reach package registries.
+  // These don't carry application secrets; they configure HTTP transport.
+  // Without them, semgrep silently fails to fetch rules in proxied CI.
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+  'NODE_EXTRA_CA_CERTS',
 ];
 
 export function buildLinterEnv(): NodeJS.ProcessEnv {
@@ -166,6 +183,61 @@ export function buildLinterEnv(): NodeJS.ProcessEnv {
 export interface ResolvedBinary {
   path: string;
   needsShell: boolean;
+}
+
+/**
+ * Filenames that are unsafe to pass to a shell. On Windows, when we spawn
+ * a `.cmd` shim we have to use `shell: true` (Node can't execute .cmd
+ * directly), and cmd.exe interprets these characters in the argument
+ * list — an attacker who can choose a filename can inject commands.
+ * Bash/POSIX shells interpret a similar set.
+ *
+ * Anything in this character class gets refused before being added to a
+ * spawn arg list when shell is enabled. Tab/newline are included because
+ * `git diff` filenames can technically contain them.
+ */
+const SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
+
+/**
+ * Check whether a path is safe to pass to a shell-enabled spawn.
+ *
+ * Used by linter modules whose binary resolves to a `.cmd` Windows shim
+ * (eslint, ruff, knip) where `findWorkspaceBinary` sets `needsShell: true`
+ * — in that mode, file paths flow through `cmd.exe /c` which parses
+ * metacharacters. Filtering at the args boundary means an attacker can't
+ * inject by naming a file `foo.ts & whoami > c:\\pwned`.
+ *
+ * Returns true for safe paths (letters, digits, `._-/`, plus localised
+ * unicode), false for paths containing any of the metacharacters in
+ * SHELL_UNSAFE_FILENAME_CHARS.
+ */
+export function isShellSafePath(p: string): boolean {
+  return !SHELL_UNSAFE_FILENAME_CHARS.test(p);
+}
+
+/**
+ * Filter a path list to only the entries that are safe to pass to a
+ * shell-enabled spawn. When `needsShell` is true (Windows .cmd shim),
+ * any path with shell metacharacters is dropped to avoid command
+ * injection via attacker-chosen filenames in the PR diff. Returns the
+ * filtered list AND the dropped paths so the caller can log a warning.
+ */
+export function filterShellSafePaths(
+  paths: readonly string[],
+  needsShell: boolean,
+): { safe: string[]; dropped: string[] } {
+  if (!needsShell) {
+    // shell:false means Node passes args directly to execve — no shell
+    // parsing, no injection risk via filenames.
+    return { safe: [...paths], dropped: [] };
+  }
+  const safe: string[] = [];
+  const dropped: string[] = [];
+  for (const p of paths) {
+    if (isShellSafePath(p)) safe.push(p);
+    else dropped.push(p);
+  }
+  return { safe, dropped };
 }
 
 export function findWorkspaceBinary(

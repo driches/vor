@@ -55447,7 +55447,24 @@ var LINTER_ENV_ALLOWLIST = [
   "NPM_CONFIG_PREFIX",
   "NPM_CONFIG_CACHE",
   "FORCE_COLOR",
-  "NO_COLOR"
+  "NO_COLOR",
+  // Proxy + cert routing — semgrep --config=auto and ruff/knip in
+  // corporate CI environments need these to reach package registries.
+  // These don't carry application secrets; they configure HTTP transport.
+  // Without them, semgrep silently fails to fetch rules in proxied CI.
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS"
 ];
 function buildLinterEnv() {
   const out = {};
@@ -55456,6 +55473,22 @@ function buildLinterEnv() {
     if (value !== void 0) out[key] = value;
   }
   return out;
+}
+var SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
+function isShellSafePath(p2) {
+  return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
+}
+function filterShellSafePaths(paths, needsShell) {
+  if (!needsShell) {
+    return { safe: [...paths], dropped: [] };
+  }
+  const safe = [];
+  const dropped = [];
+  for (const p2 of paths) {
+    if (isShellSafePath(p2)) safe.push(p2);
+    else dropped.push(p2);
+  }
+  return { safe, dropped };
 }
 function findWorkspaceBinary(candidates) {
   const exts = ["", ".cmd", ".exe", ".bat"];
@@ -55492,9 +55525,21 @@ var eslintLinter = {
     if (bin === null) {
       return { findings: [], errors: [], filesExamined: 0 };
     }
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f2) => f2.path),
+      bin.needsShell
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `eslint: skipped ${dropped.length} file(s) with shell-unsafe paths (Windows shim mode): ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
     let rawOutput;
     try {
-      rawOutput = await runCli(bin, targetFiles.map((f2) => f2.path), deps);
+      rawOutput = await runCli(bin, safe, deps);
     } catch (err) {
       errors.push({ message: `eslint failed: ${err.message}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -55560,13 +55605,21 @@ function runCli(bin, files, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("eslint aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("eslint aborted"));
+      },
+      // { once: true } so the listener is dropped on every normal
+      // completion — `deps.signal` is the long-lived orchestrator
+      // signal shared across all linters, and without { once } each
+      // runCli would leak a listener for the lifetime of the scan run.
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
@@ -55648,9 +55701,21 @@ var ruffLinter = {
   async run(deps, targetFiles) {
     const errors = [];
     const bin = locateBin(deps.workspaceDir);
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f2) => f2.path),
+      bin.needsShell
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `ruff: skipped ${dropped.length} file(s) with shell-unsafe paths (Windows shim mode): ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
     let rawOutput;
     try {
-      rawOutput = await runCli2(bin, targetFiles.map((f2) => f2.path), deps);
+      rawOutput = await runCli2(bin, safe, deps);
     } catch (err) {
       const msg = err.message;
       if (msg.includes("ENOENT") || msg.includes("not found")) {
@@ -55717,13 +55782,17 @@ function runCli2(bin, files, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("ruff aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("ruff aborted"));
+      },
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
@@ -55878,13 +55947,17 @@ function runCli3(files, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("dart analyze aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("dart analyze aborted"));
+      },
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
@@ -56016,13 +56089,17 @@ function runCli4(files, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("actionlint aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("actionlint aborted"));
+      },
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
@@ -56180,13 +56257,17 @@ function runCli5(bin, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("knip aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("knip aborted"));
+      },
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;
@@ -56351,13 +56432,17 @@ function runCli6(files, deps) {
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
     });
-    deps.signal.addEventListener("abort", () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child2.kill("SIGKILL");
-      reject(new Error("semgrep aborted"));
-    });
+    deps.signal.addEventListener(
+      "abort",
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        reject(new Error("semgrep aborted"));
+      },
+      { once: true }
+    );
     child2.on("close", (code) => {
       if (resolved) return;
       resolved = true;

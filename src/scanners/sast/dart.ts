@@ -139,13 +139,17 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     child.stderr.on('data', (b) => {
       stderr += b.toString('utf-8');
     });
-    deps.signal.addEventListener('abort', () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      reject(new Error('dart analyze aborted'));
-    });
+    deps.signal.addEventListener(
+      'abort',
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error('dart analyze aborted'));
+      },
+      { once: true },
+    );
     child.on('close', (code) => {
       if (resolved) return;
       resolved = true;

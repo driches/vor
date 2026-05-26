@@ -23,12 +23,14 @@ import type { Category, ChangedFile, Confidence, Severity } from '../../types.js
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
 import {
   buildLinterEnv,
+  filterShellSafePaths,
   findWorkspaceBinary,
   normalizeToolPath,
   type LinterModule,
   type LinterRun,
   type ResolvedBinary,
 } from './linter.js';
+import { logger } from '../../util/logger.js';
 
 const ID = 'ruff';
 const TIMEOUT_MS = 60_000;
@@ -54,9 +56,26 @@ export const ruffLinter: LinterModule = {
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
 
+    // Shell-injection guard — see eslint.ts for the full rationale. When
+    // the binary resolves to a .cmd Windows shim we use shell:true; PR
+    // file paths are attacker-controlled, so filter out anything with
+    // shell metacharacters before passing to argv.
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f) => f.path),
+      bin.needsShell,
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `ruff: skipped ${dropped.length} file(s) with shell-unsafe paths (Windows shim mode): ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(bin, targetFiles.map((f) => f.path), deps);
+      rawOutput = await runCli(bin, safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
       // Quiet skip when ruff isn't actually installed anywhere
@@ -149,13 +168,17 @@ function runCli(
     child.stderr.on('data', (b) => {
       stderr += b.toString('utf-8');
     });
-    deps.signal.addEventListener('abort', () => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      reject(new Error('ruff aborted'));
-    });
+    deps.signal.addEventListener(
+      'abort',
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        reject(new Error('ruff aborted'));
+      },
+      { once: true },
+    );
     child.on('close', (code) => {
       if (resolved) return;
       resolved = true;
