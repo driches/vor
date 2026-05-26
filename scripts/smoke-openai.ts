@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   console.log('stop_reason: ', r1.stop_reason);
   console.log('usage:       ', JSON.stringify(r1.usage));
   console.log('provider_state present:', r1.provider_state !== undefined);
-  console.log('billable input tokens (budget):', provider.billableInputTokensForBudget(r1.usage));
+  console.log('billable input tokens (budget):', provider.inputTokensFullRate(r1.usage));
 
   if (r1.tool_calls.length === 0) {
     console.error('\nFAIL: expected a tool_call on turn 1 but got none');

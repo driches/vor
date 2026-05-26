@@ -173,7 +173,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   const config = await loadConfig(input, fileReader, prContext.metadata.head_sha);
   if (input.model_override) config.model = input.model_override;
   if (input.max_turns_override) config.max_turns = input.max_turns_override;
-  if (input.provider_override) config.provider = input.provider_override;
+  // Note: we deliberately do NOT mutate `config.provider = input.provider_override`
+  // here. The precedence chain below handles override-wins-over-config; mutating
+  // would also make any post-resolution reader of `config.provider` see the
+  // override value rather than what the operator's `.code-review.yml` actually
+  // contained, which would be a silent source of confusion. PR #20 self-review
+  // minor #3300684743.
 
   // Resolve the provider AFTER config is finalized so we know which API key
   // matters. Precedence: input.provider_override > config.provider > inferred

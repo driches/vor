@@ -33,14 +33,14 @@ describe('createProvider', () => {
     const provider = createProvider({ modelId: 'claude-sonnet-4-6', apiKey: 'sk-test' });
     expect(provider.id).toBe('anthropic');
     expect(typeof provider.complete).toBe('function');
-    expect(typeof provider.billableInputTokensForBudget).toBe('function');
+    expect(typeof provider.inputTokensFullRate).toBe('function');
   });
 
   it('returns an OpenAIProvider instance for gpt-* and o-series model ids', () => {
     const gpt = createProvider({ modelId: 'gpt-4.1', apiKey: 'sk-test' });
     expect(gpt.id).toBe('openai');
     expect(typeof gpt.complete).toBe('function');
-    expect(typeof gpt.billableInputTokensForBudget).toBe('function');
+    expect(typeof gpt.inputTokensFullRate).toBe('function');
 
     const oSeries = createProvider({ modelId: 'o4-mini', apiKey: 'sk-test' });
     expect(oSeries.id).toBe('openai');

@@ -277,33 +277,16 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         // back-compat on persisted eval records. Translate the canonical
         // shape (no `_input_` infix) at this boundary.
         //
-        // Important: the two providers report `input_tokens` differently:
-        //   - Anthropic reports input_tokens EXCLUDING cache_read_input_tokens
-        //     (cache_read is a separate field).
-        //   - OpenAI reports input_tokens INCLUDING cached_tokens (cached
-        //     is a subset of input).
-        // Both Budget's billable formula (`input + cache_creation`) and
-        // costFromUsage's pricing math assume the Anthropic convention. For
-        // OpenAI runs, pass `input_tokens` minus the cached portion so:
-        //   (1) the budget gate doesn't trip early on cache-heavy runs
-        //       (Codex P1 #3300602652 — `billableInputTokensForBudget`
-        //       wasn't being applied at the Budget boundary), and
-        //   (2) cost isn't double-charged (the cached portion would
-        //       otherwise be billed at input rate via inputTokens AND
-        //       at cache_read rate via cache_read_input_tokens).
-        // After this adjustment, perModelCost reports `input_tokens` as the
-        // full-rate portion only on BOTH providers — consistent semantics.
-        const cacheReadTokens = response.usage.cache_read_tokens ?? 0;
-        const cacheCreationTokens = response.usage.cache_creation_tokens ?? 0;
-        const inputTokensFullRate =
-          provider.id === 'openai'
-            ? response.usage.input_tokens - cacheReadTokens
-            : response.usage.input_tokens;
+        // The per-provider normalization of `input_tokens` (Anthropic reports
+        // it excluding cache_read; OpenAI includes it as a subset) lives on
+        // the provider as `inputTokensFullRate(usage)` — keeps the runner
+        // vendor-neutral and means a future third provider only needs to
+        // implement that one method. PR #20 self-review IMPORTANT #3300684724.
         budget.addUsage(input.model, {
-          input_tokens: inputTokensFullRate,
+          input_tokens: provider.inputTokensFullRate(response.usage),
           output_tokens: response.usage.output_tokens,
-          cache_creation_input_tokens: cacheCreationTokens,
-          cache_read_input_tokens: cacheReadTokens,
+          cache_creation_input_tokens: response.usage.cache_creation_tokens ?? 0,
+          cache_read_input_tokens: response.usage.cache_read_tokens ?? 0,
         });
       } catch (err) {
         lastError = (err as Error).message;

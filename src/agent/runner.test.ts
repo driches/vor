@@ -12,7 +12,7 @@
  * network calls — they only inspect `provider.id`.
  *
  * Helper-level tests (`markLatestMessageForCaching`,
- * `AnthropicProvider#billableInputTokensForBudget`, etc.) live in
+ * `AnthropicProvider#inputTokensFullRate`, etc.) live in
  * `src/llm/anthropic-provider.test.ts` — this file is purely about the loop.
  */
 
@@ -81,9 +81,15 @@ class FakeProvider implements LLMProvider {
     return next;
   }
 
-  billableInputTokensForBudget(usage: CanonicalUsage): number {
-    // Anthropic-shape default: input + cache_creation, exclude cache_read.
-    return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
+  inputTokensFullRate(usage: CanonicalUsage): number {
+    // Mirror the real adapters' per-id semantics so OpenAI tests in this
+    // file exercise the cache_read subtraction. Anthropic: input_tokens
+    // unchanged (already non-cached). OpenAI: subtract cache_read since
+    // it's a subset of input_tokens.
+    if (this.id === 'openai') {
+      return usage.input_tokens - (usage.cache_read_tokens ?? 0);
+    }
+    return usage.input_tokens;
   }
 }
 

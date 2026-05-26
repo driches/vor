@@ -271,7 +271,7 @@ describe('evalRun', () => {
     expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
   });
 
-  it('FakeProvider.billableInputTokensForBudget dispatches per provider id', () => {
+  it('FakeProvider.inputTokensFullRate dispatches per provider id', () => {
     // Today's eval scripts use zero cache tokens so the Anthropic and OpenAI
     // formulas happen to converge — but the runner's budget gate must see
     // the same shape production would. Pin the divergence on a non-zero
@@ -285,10 +285,11 @@ describe('evalRun', () => {
       cache_creation_tokens: 200,
       cache_read_tokens: 600,
     };
-    // Anthropic: input + cache_creation = 1200
-    expect(anth.billableInputTokensForBudget(usage)).toBe(1200);
-    // OpenAI: input - cache_read = 400
-    expect(oai.billableInputTokensForBudget(usage)).toBe(400);
+    // Anthropic: returns input_tokens unchanged (cache_creation rides on
+    // the Budget accumulator's separate field; cache_read is excluded).
+    expect(anth.inputTokensFullRate(usage)).toBe(1000);
+    // OpenAI: input - cache_read = 400.
+    expect(oai.inputTokensFullRate(usage)).toBe(400);
   });
 
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {

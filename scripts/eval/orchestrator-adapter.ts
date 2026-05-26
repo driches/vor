@@ -156,16 +156,18 @@ export class FakeProvider implements LLMProvider {
     return next;
   }
   /**
-   * Dispatches on `this.id` so the runner's budget gate sees the same
-   * formula production would. See `AnthropicProvider.billableInputTokensForBudget`
-   * (input + cache_creation) and `OpenAIProvider.billableInputTokensForBudget`
-   * (input - cache_read). Today's scripts use zero cache tokens so the
-   * formulas converge, but any future OpenAI eval with non-zero
-   * `cache_read_tokens` would otherwise compute against the wrong shape.
+   * Dispatches on `this.id` so the runner's budget accumulator sees the
+   * same input_tokens value production would. See
+   * `AnthropicProvider.inputTokensFullRate` (returns `usage.input_tokens`
+   * unchanged) and `OpenAIProvider.inputTokensFullRate` (returns
+   * `usage.input_tokens - cache_read_tokens`). Today's scripts use zero
+   * cache tokens so the formulas converge, but any future OpenAI eval
+   * with non-zero `cache_read_tokens` would otherwise compute against
+   * the wrong shape.
    */
-  billableInputTokensForBudget(usage: CanonicalUsage): number {
+  inputTokensFullRate(usage: CanonicalUsage): number {
     if (this.id === 'anthropic') {
-      return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
+      return usage.input_tokens;
     }
     // openai
     return usage.input_tokens - (usage.cache_read_tokens ?? 0);

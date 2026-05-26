@@ -65,29 +65,26 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   /**
-   * Input-token count that counts against the runner's `max_input_tokens`
-   * budget gate, given a canonical-usage response.
+   * Full-rate input-token portion for the Budget accumulator. The runner
+   * feeds the return value as `input_tokens` in an Anthropic-shape
+   * `ModelUsage`; the accumulator's billable formula is
+   * `input_tokens + cache_creation_input_tokens`, so what we return here
+   * combines with the cache_creation_tokens that the runner forwards
+   * separately to yield the correct total billable.
    *
-   * Includes:
-   *   - `input_tokens` (non-cached input — billed at full rate, 1×)
-   *   - `cache_creation_tokens` (Anthropic bills cache writes at 1.25× input
-   *     rate — full-cost equivalent, so it counts against any "input budget"
-   *     gate)
+   * For Anthropic, `usage.input_tokens` is already the non-cached input
+   * portion (the API reports cache_read and cache_creation as separate
+   * fields), so we return it unchanged.
    *
-   * Deliberately EXCLUDES `cache_read_tokens`. Cache reads are billed at
-   * 0.1× input rate (effectively free) and typically dominate the raw token
-   * count on cached runs (real eval data: cache_read ≈ 800K-1.5M per case vs
-   * input ≈ 400 per turn). Counting them would make the default 500K
-   * `max_input_tokens` cap fire on the first turn of any cache-heavy run,
-   * regressing every operator config sized against the pre-caching semantic.
-   *
-   * Pinned by the class-method tests in anthropic-provider.test.ts — if the
-   * formula ever changes (e.g. someone "fixes" it to count all three), those
-   * tests should fail visibly rather than silently shifting the budget
-   * threshold.
+   * The combined `input + cache_creation` formula treats cache_creation
+   * as billable input — Anthropic charges cache writes at 1.25× input rate
+   * (full-cost equivalent). Cache reads are deliberately excluded from
+   * the budget gate (billed at 0.1× input, effectively free; on cached
+   * runs the read count dominates and would saturate the 500K default
+   * cap on turn 1).
    */
-  billableInputTokensForBudget(usage: CanonicalUsage): number {
-    return usage.input_tokens + (usage.cache_creation_tokens ?? 0);
+  inputTokensFullRate(usage: CanonicalUsage): number {
+    return usage.input_tokens;
   }
 }
 

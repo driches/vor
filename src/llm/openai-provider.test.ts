@@ -486,6 +486,42 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('end_turn');
   });
 
+  it('prefers tool_calls over refusal in stop_reason when both are present (PR #20 self-review #3300684739)', async () => {
+    // Edge case: the API doesn't forbid a response with both a refusal
+    // message AND a function_call item. If we let `refused` win, the
+    // runner's loop sees `end_turn` and silently drops the tool_call.
+    // The fix prefers `tool_calls` so the runner executes the work the
+    // model explicitly requested; refusal text still surfaces in
+    // canonical `text` for the runner to log.
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        output: [
+          {
+            type: 'message',
+            id: 'm1',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'refusal', refusal: 'I cannot help with that.' }],
+          },
+          {
+            type: 'function_call',
+            id: 'fc1',
+            call_id: 'call_x',
+            name: 'get_pr_diff',
+            arguments: '{}',
+            status: 'completed',
+          },
+        ],
+        status: 'completed',
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    expect(result.stop_reason).toBe('tool_calls');
+    expect(result.tool_calls).toHaveLength(1);
+    expect(result.tool_calls[0]!.name).toBe('get_pr_diff');
+    // Refusal text still in canonical text — runner can log it.
+    expect(result.text).toBe('[refused] I cannot help with that.');
+  });
+
   it('discards an output_text preamble that precedes a refusal in the same message (PR #20 self-review #3300641271)', async () => {
     // If a model emits [output_text("Sure, let me..."), refusal("Actually I can't")],
     // the refusal is authoritative — surfacing "Sure, let me...[refused] Actually
@@ -673,12 +709,12 @@ describe('OpenAIProvider', () => {
     expect(new OpenAIProvider('sk-test').id).toBe('openai');
   });
 
-  describe('billableInputTokensForBudget', () => {
+  describe('inputTokensFullRate', () => {
     const provider = new OpenAIProvider('sk-test');
 
     it('subtracts cache_read_tokens from input_tokens (PR #13 budget semantics)', () => {
       expect(
-        provider.billableInputTokensForBudget({
+        provider.inputTokensFullRate({
           input_tokens: 1000,
           output_tokens: 50,
           cache_read_tokens: 600,
@@ -688,7 +724,7 @@ describe('OpenAIProvider', () => {
 
     it('returns input_tokens unchanged when cache_read_tokens is missing', () => {
       expect(
-        provider.billableInputTokensForBudget({
+        provider.inputTokensFullRate({
           input_tokens: 1000,
           output_tokens: 50,
         }),

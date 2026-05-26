@@ -75,9 +75,10 @@ export class OpenAIProvider implements LLMProvider {
       ...(supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}),
     };
 
-    const response = await this.client.responses.create(requestBody, {
-      signal: opts.abortSignal,
-    });
+    const response = await this.client.responses.create(
+      requestBody,
+      opts.abortSignal ? { signal: opts.abortSignal } : undefined,
+    );
 
     return responsesResponseToCanonical(response);
   }
@@ -90,7 +91,7 @@ export class OpenAIProvider implements LLMProvider {
    * Without this, on a cache-heavy first turn the gate would fire against
    * the cached prefix alone.
    */
-  billableInputTokensForBudget(usage: CanonicalUsage): number {
+  inputTokensFullRate(usage: CanonicalUsage): number {
     return usage.input_tokens - (usage.cache_read_tokens ?? 0);
   }
 }
@@ -370,12 +371,17 @@ export function responsesResponseToCanonical(
     // provider_state and are not surfaced in canonical text. No-op here.
   }
 
-  // Stop reason.
+  // Stop reason. tool_calls takes precedence over refusal: if the model
+  // emits both in the same response (rare but the API doesn't forbid it),
+  // dropping tool_calls would silently lose work the model explicitly
+  // requested. The refusal text still surfaces in canonical `text` so the
+  // runner can log it; the loop continues to execute the tool_calls.
+  // PR #20 self-review minor #3300684739.
   let stop_reason: StopReason;
-  if (refused) {
-    stop_reason = 'end_turn';
-  } else if (tool_calls.length > 0) {
+  if (tool_calls.length > 0) {
     stop_reason = 'tool_calls';
+  } else if (refused) {
+    stop_reason = 'end_turn';
   } else {
     switch (response.status) {
       case 'completed':

@@ -122,13 +122,30 @@ export interface LLMProvider {
     opts: CompleteOptions,
   ): Promise<CompleteResponse>;
   /**
-   * Returns the input-token count that should count against the runner's
-   * `max_input_tokens` budget gate. Provider-specific math:
-   *  - Anthropic excludes `cache_read_tokens` (per PR #13) so the default
-   *    500K budget doesn't fire on turn 1 of a cached run.
-   *  - OpenAI subtracts cached tokens for the same reason.
-   * Centralizing this on the provider keeps the runner's budget gate
-   * vendor-neutral.
+   * Returns the input-token count that should populate the `input_tokens`
+   * field when feeding an Anthropic-shape `ModelUsage` to the per-model
+   * Budget accumulator (whose billable formula is `input_tokens +
+   * cache_creation_input_tokens`). The result is the portion of input
+   * charged at the full per-token rate (excludes any cached/discounted
+   * portion). Provider-specific math:
+   *  - Anthropic returns `usage.input_tokens` unchanged — Anthropic's
+   *    `input_tokens` field already EXCLUDES cache_read (which is reported
+   *    as a separate field) and cache_creation is passed to Budget via its
+   *    own `cache_creation_input_tokens` field.
+   *  - OpenAI returns `usage.input_tokens - cache_read_tokens` — OpenAI's
+   *    `input_tokens` INCLUDES cached tokens as a subset (charged at the
+   *    discounted cache_read rate), so the full-rate portion is the
+   *    difference.
+   *
+   * Centralizing this on the provider keeps the runner's budget accounting
+   * vendor-neutral — the runner just calls this method and forwards the
+   * result to Budget as `input_tokens`.
+   *
+   * The asymmetry above also fixes a related cost-computation bug for
+   * OpenAI: `costFromUsage` charges `input_tokens * input_rate +
+   * cache_read_tokens * cache_read_rate`. Without the subtraction, the
+   * cached portion is double-charged (full rate + discounted rate). With
+   * the subtraction, the math matches OpenAI's actual billing model.
    */
-  billableInputTokensForBudget(usage: CanonicalUsage): number;
+  inputTokensFullRate(usage: CanonicalUsage): number;
 }

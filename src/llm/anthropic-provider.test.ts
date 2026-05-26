@@ -591,22 +591,27 @@ describe('AnthropicProvider', () => {
     expect(new AnthropicProvider('sk-test').id).toBe('anthropic');
   });
 
-  describe('billableInputTokensForBudget (canonical-usage method)', () => {
+  describe('inputTokensFullRate (canonical-usage method)', () => {
     const provider = new AnthropicProvider('sk-test');
 
-    it('sums input_tokens + cache_creation_tokens', () => {
+    // Anthropic's `input_tokens` already excludes cache_read and is the
+    // non-cached portion. cache_creation rides separately on the Budget
+    // accumulator's `cache_creation_input_tokens` field. So this method
+    // returns input_tokens unchanged regardless of cache_creation or
+    // cache_read; the per-model accumulator combines them downstream.
+    it('returns input_tokens unchanged when cache_creation is set', () => {
       expect(
-        provider.billableInputTokensForBudget({
+        provider.inputTokensFullRate({
           input_tokens: 100,
           output_tokens: 50,
           cache_creation_tokens: 50,
         }),
-      ).toBe(150);
+      ).toBe(100);
     });
 
-    it('excludes cache_read_tokens (PR #13 budget semantics)', () => {
+    it('returns input_tokens unchanged when cache_read is set (PR #13 budget semantics)', () => {
       expect(
-        provider.billableInputTokensForBudget({
+        provider.inputTokensFullRate({
           input_tokens: 100,
           output_tokens: 50,
           cache_read_tokens: 1000,
@@ -614,9 +619,9 @@ describe('AnthropicProvider', () => {
       ).toBe(100);
     });
 
-    it('treats missing cache_creation_tokens as 0', () => {
+    it('returns input_tokens unchanged when no cache fields are present', () => {
       expect(
-        provider.billableInputTokensForBudget({
+        provider.inputTokensFullRate({
           input_tokens: 42,
           output_tokens: 1,
         }),
