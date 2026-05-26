@@ -2,11 +2,29 @@ import type { PlantTemplate } from './types.js';
 import { awsAccessKeyTemplate } from './aws-access-key.js';
 import { sqlInjectionTemplate } from './sql-injection.js';
 import { vulnDepNpmTemplate } from './vuln-dep-npm.js';
+import { githubPatTemplate } from './github-pat.js';
+import { pemPrivateKeyTemplate } from './pem-private-key.js';
+import { pathTraversalTemplate } from './path-traversal.js';
+import { evalUserInputTemplate } from './eval-user-input.js';
+import { vulnDepPypiTemplate } from './vuln-dep-pypi.js';
+import { nPlusOneQueryTemplate } from './n-plus-one-query.js';
+import { offByOneLoopTemplate } from './off-by-one-loop.js';
+import { missingNullCheckTemplate } from './missing-null-check.js';
+import { syncInAsyncLoopTemplate } from './sync-in-async-loop.js';
 
 const TEMPLATES: ReadonlyArray<PlantTemplate> = [
   awsAccessKeyTemplate,
   sqlInjectionTemplate,
   vulnDepNpmTemplate,
+  githubPatTemplate,
+  pemPrivateKeyTemplate,
+  pathTraversalTemplate,
+  evalUserInputTemplate,
+  vulnDepPypiTemplate,
+  nPlusOneQueryTemplate,
+  offByOneLoopTemplate,
+  missingNullCheckTemplate,
+  syncInAsyncLoopTemplate,
 ];
 
 const BY_TYPE = new Map<string, PlantTemplate>(

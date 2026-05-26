@@ -1,0 +1,5 @@
+plants:
+  - type: off-by-one-loop
+    file: src/util/sum.ts
+  - type: missing-null-check
+    file: src/handlers/profile.ts

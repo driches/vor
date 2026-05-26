@@ -1,0 +1,5 @@
+plants:
+  - type: vuln-dep:npm
+    file: package-lock.json
+    package: lodash
+    version: "4.17.20"

@@ -1,0 +1,4 @@
+plants:
+  - type: secret:aws-access-key
+    file: src/config/aws.ts
+    line: 3

@@ -1,0 +1,11 @@
+plants:
+  - type: sql-injection
+    file: src/db/users.ts
+    line: 4
+    input_var: userId
+  - type: path-traversal
+    file: src/routes/files.ts
+    line: 7
+  - type: eval-user-input
+    file: src/util/dynamic.ts
+    line: 2

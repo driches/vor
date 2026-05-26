@@ -1,0 +1,14 @@
+plants:
+  # Three secrets in the same file. Each plant's `line` is the line in the
+  # file as it exists AFTER the prior plants — the runner re-reads between
+  # plants. AWS at line 1, then GitHub PAT at line 2 (post-AWS), then PEM
+  # block at line 3 (post-AWS+GH-PAT).
+  - type: secret:aws-access-key
+    file: src/secrets/loader.ts
+    line: 1
+  - type: secret:github-pat
+    file: src/secrets/loader.ts
+    line: 2
+  - type: secret:pem-private-key
+    file: src/secrets/loader.ts
+    line: 3

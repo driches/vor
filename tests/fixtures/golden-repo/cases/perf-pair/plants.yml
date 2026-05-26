@@ -1,0 +1,6 @@
+plants:
+  - type: n-plus-one-query
+    file: src/services/user.ts
+    line: 9
+  - type: sync-in-async-loop
+    file: src/jobs/batch.ts

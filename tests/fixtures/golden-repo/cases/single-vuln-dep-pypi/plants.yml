@@ -1,0 +1,5 @@
+plants:
+  - type: vuln-dep:pypi
+    file: requirements.txt
+    package: requests
+    version: "2.5.0"

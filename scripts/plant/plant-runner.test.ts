@@ -197,4 +197,114 @@ describe('runPlants', () => {
     await expect(runPlants(caseDir)).rejects.toThrow(/escapes/);
     rmSync(caseDir, { recursive: true });
   });
+
+  it('handles a multi-line PEM insert followed by an aws-key insert at a post-PEM line', async () => {
+    // Regression coverage for the multi-line insert contract. A PEM plant
+    // adds 6 lines to the file. A subsequent plant on the same file must
+    // reference a line in the POST-PEM coordinate space; the runner re-reads
+    // the file between plants so the second template sees the mutated state.
+    // If line accounting broke, the aws-key would land inside the PEM block
+    // (mangling the PEM markers) instead of after it.
+    const caseDir = mkdtempSync(join(tmpdir(), 'plant-runner-multiline-'));
+    mkdirSync(join(caseDir, 'before/src'), { recursive: true });
+    writeFileSync(
+      join(caseDir, 'before/src/secrets.ts'),
+      [
+        'export const config = {',
+        '  region: "us-east-1",',
+        '};',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      [
+        'plants:',
+        // PEM block goes ABOVE line 3 — adds 6 lines (declaration + 4 PEM
+        // markers + closing backtick line), so the original line 3 (`};`)
+        // moves to line 9 and the original line 4 (blank) moves to line 10.
+        '  - type: secret:pem-private-key',
+        '    file: src/secrets.ts',
+        '    line: 3',
+        // AWS key at line 10 — should land BETWEEN the PEM closer and the
+        // original blank line, NOT inside the PEM block. If offset
+        // accounting broke, this would corrupt the PEM markers.
+        '  - type: secret:aws-access-key',
+        '    file: src/secrets.ts',
+        '    line: 10',
+      ].join('\n'),
+    );
+    await runPlants(caseDir);
+
+    const mutated = readFileSync(join(caseDir, 'after/src/secrets.ts'), 'utf-8');
+    const lines = mutated.split('\n');
+    // PEM markers must remain intact (no AWS-key line spliced in between).
+    const beginIdx = lines.findIndex((l) => l === '-----BEGIN PRIVATE KEY-----');
+    const endIdx = lines.findIndex((l) => l === '-----END PRIVATE KEY-----');
+    expect(beginIdx).toBeGreaterThan(-1);
+    expect(endIdx).toBeGreaterThan(beginIdx);
+    // No AWS key line falls between header and footer.
+    for (let i = beginIdx; i <= endIdx; i++) {
+      expect(lines[i]).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    }
+    // The AWS key lands somewhere AFTER the PEM closer.
+    const awsIdx = lines.findIndex((l) => l.includes('AKIAIOSFODNN7EXAMPLE'));
+    expect(awsIdx).toBeGreaterThan(endIdx);
+
+    const truth = parseYaml(readFileSync(join(caseDir, 'truth.yml'), 'utf-8')) as {
+      truths: Array<Record<string, unknown>>;
+    };
+    expect(truth.truths).toHaveLength(2);
+    expect(truth.truths[0]!.bug_type).toBe('secret:pem-private-key');
+    expect(truth.truths[1]!.bug_type).toBe('secret:aws-access-key');
+    // The PEM truth's line_range covers the 4 PEM marker lines.
+    expect(truth.truths[0]!.line_range).toEqual([beginIdx + 1, endIdx + 1]);
+    // The AWS truth anchors at the line the user requested (10, in the
+    // post-PEM coordinate space) — that's also where the AWS key actually
+    // ended up.
+    expect(truth.truths[1]!.line_range).toEqual([awsIdx + 1, awsIdx + 1]);
+
+    rmSync(caseDir, { recursive: true });
+  });
+
+  it('applies a replace-anchored plant by swapping the marker line', async () => {
+    // Confirms the replace-anchor contract works inside the runner: the
+    // template finds `// PLANT_ANCHOR: off-by-one-loop` in the before/ file
+    // and swaps it for the buggy loop, then writes the result to after/.
+    const caseDir = mkdtempSync(join(tmpdir(), 'plant-runner-anchor-'));
+    mkdirSync(join(caseDir, 'before/src/util'), { recursive: true });
+    writeFileSync(
+      join(caseDir, 'before/src/util/sum.ts'),
+      [
+        'export function sumAll(arr: number[]): number {',
+        '  let sum = 0;',
+        '  // PLANT_ANCHOR: off-by-one-loop',
+        '  return sum;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(caseDir, 'plants.yml'),
+      [
+        'plants:',
+        '  - type: off-by-one-loop',
+        '    file: src/util/sum.ts',
+      ].join('\n'),
+    );
+    await runPlants(caseDir);
+
+    const mutated = readFileSync(join(caseDir, 'after/src/util/sum.ts'), 'utf-8');
+    expect(mutated).toContain('for (let i = 0; i <= arr.length; i++)');
+    expect(mutated).not.toContain('PLANT_ANCHOR');
+
+    const truth = parseYaml(readFileSync(join(caseDir, 'truth.yml'), 'utf-8')) as {
+      truths: Array<Record<string, unknown>>;
+    };
+    expect(truth.truths).toHaveLength(1);
+    expect(truth.truths[0]!.bug_type).toBe('off-by-one-loop');
+    expect(truth.truths[0]!.line_range).toEqual([3, 3]);
+
+    rmSync(caseDir, { recursive: true });
+  });
 });

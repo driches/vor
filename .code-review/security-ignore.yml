@@ -120,3 +120,58 @@ entries:
   - file: .code-review/security-ignore.yml
     rule: "secret:aws-access-key-id"
     reason: "Self-reference: this file's reason strings mention AKIAIOSFODNN7EXAMPLE (canonical test marker) when documenting suppression entries for other fixtures"
+
+  # ---------------------------------------------------------------
+  # eval harness v1.1 — new plant templates and their tests.
+  # Each template emits a fixture-matching secret string as a DEFAULT_VALUE
+  # constant so its `apply()` produces a scanner-detectable mutation. The
+  # constant lives in source; suppress the per-file scanner hit on this repo.
+  # ---------------------------------------------------------------
+  - file: scripts/plant/github-pat.ts
+    rule: "secret:github-pat-classic"
+    reason: "DEFAULT_VALUE is the placeholder ghp_aaaa…aaaa (36 a's) — emitted into after/ at plant time, not a real PAT"
+  - file: scripts/plant/github-pat.test.ts
+    rule: "secret:github-pat-classic"
+    reason: "Positive fixtures for the github-pat plant template (default value + custom-value assertion)"
+  - file: scripts/plant/pem-private-key.ts
+    rule: "secret:private-key-pem"
+    reason: "PEM_HEADER/PEM_FOOTER constants are the BEGIN/END markers the template emits; body is EXAMPLE…EXAMPLE"
+  - file: scripts/plant/pem-private-key.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Positive fixtures + range-coverage assertions for the pem-private-key plant template"
+  - file: scripts/plant/plant-runner.test.ts
+    rule: "secret:private-key-pem"
+    reason: "Regression test plants a PEM block then asserts no AWS-key line is spliced between the markers — assertion text contains the BEGIN marker string"
+
+  # ---------------------------------------------------------------
+  # eval harness v1.1 — vuln-dep:pypi fixtures pin vulnerable versions.
+  # The pin IS the planted bug; the OSV scanner correctly detects it.
+  # Use file+rule entries (NOT bare cve_id OR package-only, both of
+  # which silence findings repo-wide — including production code that
+  # might later pin the same version). dependency-cve.ts:881 sets
+  # rule_id = "osv:${vuln.id}", so we list each OSV advisory id explicitly
+  # alongside the specific fixture file path. Path match is exact (per
+  # ignore-list.ts:260: "v1: exact path match only").
+  #
+  # Two OSV ids per Flask CVE (GHSA + PYSEC); pytest CVE-2025-71176 only
+  # surfaced as GHSA on PR #19's scan — if a PYSEC alias lands later,
+  # add it here.
+  # ---------------------------------------------------------------
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:GHSA-m2qf-hxjv-5gpq"
+    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, vuln-dep:pypi fixture"
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:PYSEC-2023-62"
+    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, vuln-dep:pypi fixture"
+  - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
+    rule: "osv:GHSA-6w46-j5rx-g56g"
+    reason: "Pre-existing pytest@8.0.0 pin in vuln-dep:pypi fixture — OSV/GHSA finding for CVE-2025-71176"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:GHSA-m2qf-hxjv-5gpq"
+    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:PYSEC-2023-62"
+    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+  - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
+    rule: "osv:GHSA-6w46-j5rx-g56g"
+    reason: "Pre-existing pytest@8.0.0 pin in dependency-pair multi-plant fixture — OSV/GHSA finding for CVE-2025-71176"
