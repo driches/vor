@@ -21,7 +21,7 @@ inputs:
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-4.1, gpt-4o-mini, o4-mini, …). Default claude-sonnet-4-6.'
+    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (recommended gpt-5.4-mini; also gpt-5.4, gpt-5.5, gpt-4.1, o4-mini, …). Default claude-sonnet-4-6.'
     required: false
     default: 'claude-sonnet-4-6'
   max_turns:

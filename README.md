@@ -90,10 +90,10 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required for the default Claude models; omit entirely for OpenAI-only setups (the orchestrator picks the key matching the resolved provider). |
-| `openai_api_key` | no | — | OpenAI API key. Required when `model` is a GPT or o-series id (e.g. `gpt-4.1`, `gpt-4o-mini`, `o4-mini`). |
+| `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI id (recommended: `gpt-5.4-mini`; alternatives include `gpt-5.4`, `gpt-5.5`, `gpt-4.1`, `o4-mini`). |
 | `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted (`claude-*` → anthropic, `gpt-*`/`o<digit>*` → openai). |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Model ID. Claude options: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI options: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
+| `model` | no | `claude-sonnet-4-6` | Model ID. Claude options: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI recommendation: `gpt-5.4-mini` for cost/recall; larger `gpt-5.5` did not improve the current golden case enough to justify the cost. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
 | `config_path` | no | `.code-review.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
@@ -114,7 +114,7 @@ All fields optional. Defaults are sensible.
 
 ```yaml
 model: claude-sonnet-4-6  # Claude: claude-sonnet-4-6 | claude-haiku-4-5 | claude-opus-4-7
-                          # OpenAI: gpt-4.1 | gpt-4o-mini | o4-mini | …
+                          # OpenAI: gpt-5.4-mini (recommended) | gpt-5.4 | gpt-5.5 | gpt-4.1 | o4-mini | …
 # provider: openai        # optional — only needed when `model` doesn't match a known prefix
 max_turns: 40
 

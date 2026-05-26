@@ -1,0 +1,16 @@
+# Recommended OpenAI review model from the live golden comparison on
+# code-review-pr-6: matched 2/3 Codex findings at $0.073, while gpt-5.5
+# matched the same 2/3 at ~$0.785 and gpt-4.1 matched 0/3 at ~$0.305.
+model: gpt-5.4-mini
+max_turns: 30
+severity:
+  floor: minor
+  max_comments_per_file: 5
+  max_comments_total: 30
+providers:
+  openai:
+    reasoning_effort: low
+    text_verbosity: low
+budget:
+  max_input_tokens: 500000
+  max_output_tokens: 50000
