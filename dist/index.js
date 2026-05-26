@@ -55991,7 +55991,7 @@ function runCli3(files, deps) {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout + "\n" + stderr);
+      resolve3(stderr + "\n" + stdout);
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -56453,6 +56453,7 @@ function runCli6(files, deps) {
         "--config=auto",
         "--no-rewrite-rule-ids",
         "--disable-version-check",
+        "--metrics=off",
         ...files
       ],
       {

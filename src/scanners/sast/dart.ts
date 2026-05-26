@@ -161,13 +161,13 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      // Defensive: concatenate stdout AND stderr. `dart analyze
-      // --format=machine` documents stdout output, but the parseDartLine
-      // filter only accepts lines that match the pipe-delimited shape
-      // (other content returns null and is harmlessly skipped). Tools
-      // routing output to stderr on some versions or platforms then
-      // can't silently produce zero findings.
-      resolve(stdout + '\n' + stderr);
+      // `dart analyze --format=machine` actually emits its findings on
+      // STDERR — stdout is typically empty. We concatenate both defensively
+      // so future SDK versions that route output differently don't silently
+      // produce zero findings. The parseDartLine filter accepts only
+      // pipe-delimited lines that match the schema, so any non-finding
+      // content from either stream is harmlessly skipped.
+      resolve(stderr + '\n' + stdout);
     });
     child.on('error', (err) => {
       if (resolved) return;

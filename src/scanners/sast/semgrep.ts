@@ -146,7 +146,12 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // --config=auto pulls the appropriate ruleset for detected languages.
     // --quiet suppresses the human-readable summary that would corrupt the
     // JSON output. --no-rewrite-rule-ids keeps check_ids stable across
-    // runs for fingerprinting.
+    // runs for fingerprinting. --metrics=off suppresses semgrep's default
+    // telemetry beacon to semgrep.dev (separate from --disable-version-check,
+    // which only stops the version ping). Operators with strict egress
+    // controls or data-residency requirements need this off; the
+    // --config=auto rule fetch is already documented and accounted for in
+    // networkCalls, the metrics beacon was an undocumented additional call.
     const child = spawn(
       'semgrep',
       [
@@ -156,6 +161,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         '--config=auto',
         '--no-rewrite-rule-ids',
         '--disable-version-check',
+        '--metrics=off',
         ...files,
       ],
       {
