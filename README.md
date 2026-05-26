@@ -70,7 +70,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `anthropic_api_key` | yes | — | Anthropic API key. Store as a repo secret. Required for the default Claude models; can be a placeholder if you only run OpenAI models. |
+| `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required for the default Claude models; omit entirely for OpenAI-only setups (the orchestrator picks the key matching the resolved provider). |
 | `openai_api_key` | no | — | OpenAI API key. Required when `model` is a GPT or o-series id (e.g. `gpt-4.1`, `gpt-4o-mini`, `o4-mini`). |
 | `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted (`claude-*` → anthropic, `gpt-*`/`o<digit>*` → openai). |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |

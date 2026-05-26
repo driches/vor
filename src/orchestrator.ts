@@ -101,7 +101,28 @@ export interface OrchestratorOutput {
   dry_run: boolean;
 }
 
+/** Runtime-validate a `provider_override` string from an untrusted source
+ *  (env var, action input, programmatic caller). The `ProviderId` TS type
+ *  doesn't survive across the `as ProviderId | undefined` cast in `index.ts`,
+ *  so a typo like `open-ai` or `claude` would otherwise reach the
+ *  key-selection short-circuit and produce a misleading
+ *  `skipped_no_key_<typo>` outcome instead of failing fast.
+ *  (Codex P2 #3300632002.)
+ */
+function assertValidProviderOverride(value: string | undefined): asserts value is ProviderId | undefined {
+  if (value === undefined || value === 'anthropic' || value === 'openai') return;
+  throw new Error(
+    `Invalid provider_override "${value}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
+  );
+}
+
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
+  // Validate provider_override BEFORE anything else so a typo fails fast
+  // with a clear annotation instead of silently skipping the review with a
+  // synthetic ended_reason. Catches both env-var typos (INPUT_PROVIDER set
+  // to 'open-ai') and programmatic test mistakes that bypass the TS type.
+  assertValidProviderOverride(input.provider_override);
+
   // Skip empty keys to avoid emitting empty `::add-mask::` lines in CI.
   // `registerSecret` self-guards (length >= 8) but `logger.setSecret` does not
   // — passing an empty string produces a visible `::add-mask::` workflow

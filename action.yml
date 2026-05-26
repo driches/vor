@@ -8,8 +8,8 @@ branding:
 
 inputs:
   anthropic_api_key:
-    description: 'Anthropic API key. Required when using a Claude model (the default).'
-    required: true
+    description: 'Anthropic API key. Required when using a Claude model (the default). Optional for OpenAI-only setups.'
+    required: false
   openai_api_key:
     description: 'OpenAI API key. Required when using a GPT or o-series model.'
     required: false

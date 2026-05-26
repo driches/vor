@@ -1780,3 +1780,43 @@ describe('runOrchestrator — Scenario 8: OpenAI happy path', () => {
     expect(result.ended).toBe('summary_posted');
   });
 });
+
+// Scenario 9: provider_override is runtime-validated before any side effects.
+// Codex P2 #3300632002 — a typo'd INPUT_PROVIDER (cast to ProviderId in
+// index.ts without runtime guard) used to silently flow through to the
+// missing-key short-circuit and emit `ended: skipped_no_key_<typo>`. The
+// orchestrator now throws at entry, surfacing as setFailed in CI.
+describe('runOrchestrator — Scenario 9: provider_override runtime validation', () => {
+  it('throws on an unknown provider_override string (no API calls, no skip)', async () => {
+    const input = baseInput({
+      // Cast through unknown to bypass the TS ProviderId type — simulates
+      // what `process.env.INPUT_PROVIDER?.trim() as ProviderId | undefined`
+      // produces when the operator typoes the value.
+      provider_override: 'open-ai' as unknown as 'anthropic' | 'openai',
+    });
+
+    await expect(runOrchestrator(input)).rejects.toThrow(/Invalid provider_override "open-ai"/);
+  });
+
+  it('accepts "anthropic" and "openai" without error', async () => {
+    // Sanity guards: don't regress the valid path. We don't run the full
+    // orchestrator (would need agent mocks); just confirm the validation
+    // doesn't throw on the two valid values. The fork-safety check still
+    // fires because the keys are empty, but that's an `ended: skipped_no_key_*`
+    // outcome — not a thrown error.
+    const input = baseInput({
+      provider_override: 'anthropic',
+      anthropic_api_key: '',
+    });
+    const result = await runOrchestrator(input);
+    expect(result.ended).toBe('skipped_no_key_anthropic');
+
+    const input2 = baseInput({
+      provider_override: 'openai',
+      anthropic_api_key: '',
+      openai_api_key: '',
+    });
+    const result2 = await runOrchestrator(input2);
+    expect(result2.ended).toBe('skipped_no_key_openai');
+  });
+});
