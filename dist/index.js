@@ -56442,10 +56442,16 @@ function buildExportFinding(filePath, issue2, kind2) {
     severity,
     category,
     title: `[${ID5}/${ruleId}] ${truncate(what, 100)}`,
+    // NOTE: do NOT set `suggestion` here. GitHub renders ScanFinding.suggestion
+    // as a one-click "Apply suggestion" code-replacement block — clicking
+    // it overwrites the source line with the literal suggestion contents.
+    // A guidance comment like "// Remove the unused export" would delete
+    // the export declaration and leave only the comment, corrupting the
+    // file. dependency-cve.ts documents the same constraint. Keep the
+    // remediation guidance in the description (rendered as prose).
     description: `${what}
 
-Knip detects this via whole-project analysis. If \`${issue2.name}\` is intended as part of the public API, add it to your knip config's \`entry\` or \`ignoreExportsUsedInFile\`.`,
-    suggestion: kind2 === "type" ? `// Remove the unused type export, or move \`${issue2.name}\` to a non-exported declaration.` : `// Remove the unused export, or move \`${issue2.name}\` to a non-exported declaration if it's only used internally.`,
+Knip detects this via whole-project analysis. If \`${issue2.name}\` is intended as part of the public API, add it to your knip config's \`entry\` or \`ignoreExportsUsedInFile\`. To fix: remove the \`export\` keyword or delete the declaration if it's only used internally.`,
     confidence,
     evidence: { kind: "sast", cwe: [] },
     fingerprint
