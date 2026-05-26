@@ -79,7 +79,7 @@ export class OpenAIProvider implements LLMProvider {
       signal: opts.abortSignal,
     });
 
-    return await responsesResponseToCanonical(response);
+    return responsesResponseToCanonical(response);
   }
 
   /**
@@ -319,9 +319,9 @@ export function canonicalToolsToResponses(
  * `canonicalMessagesToResponsesInput` provider_state branch). Anthropic's
  * adapter leaves this undefined; OpenAI is the only consumer.
  */
-export async function responsesResponseToCanonical(
+export function responsesResponseToCanonical(
   response: OpenAI.Responses.Response,
-): Promise<CompleteResponse> {
+): CompleteResponse {
   let text = '';
   const tool_calls: CanonicalToolCall[] = [];
   let refused = false;
@@ -329,9 +329,15 @@ export async function responsesResponseToCanonical(
   for (const item of response.output) {
     if (item.type === 'message' && item.role === 'assistant') {
       // ResponseOutputMessage.content is Array<output_text | refusal>.
+      // Once a refusal lands in the same message, the refusal text is
+      // authoritative — both any prior `output_text` preamble AND any
+      // subsequent `output_text` blocks are discarded. Surfacing
+      // "preamble + [refused] ..." in canonical text would be confusing
+      // for downstream consumers (the runner logs it as the assistant's
+      // visible content). See PR #20 self-review minor #3300641271.
       for (const content of item.content) {
         if (content.type === 'output_text') {
-          text += content.text;
+          if (!refused) text += content.text;
         } else if (content.type === 'refusal') {
           refused = true;
           text = `[refused] ${content.refusal}`;
@@ -345,7 +351,13 @@ export async function responsesResponseToCanonical(
       try {
         args = JSON.parse(item.arguments) as Record<string, unknown>;
       } catch {
-        await logger.warn(
+        // Fire-and-forget warn: logger.warn returns Promise<void> that we
+        // intentionally don't await — the function stays synchronous so
+        // callers don't pay an async hop on the happy path (PR #20 self-
+        // review minor #3300641273). The warn flushes through @actions/core
+        // before the runner's next await; in the local-CLI path it's a
+        // console.warn that flushes synchronously.
+        void logger.warn(
           `[openai-provider] model=${response.model} produced malformed JSON for tool=${item.name} call_id=${item.call_id}; surfacing as empty-args call`,
         );
         args = {};

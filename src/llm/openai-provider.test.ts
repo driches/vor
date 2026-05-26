@@ -386,7 +386,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('extracts text from an output_text message and reports end_turn', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -406,7 +406,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('concatenates multiple output_text blocks in order', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -426,7 +426,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('extracts function_call items into tool_calls and maps stop_reason → tool_calls', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -447,7 +447,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('populates both text and tool_calls when both are present', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -468,7 +468,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('treats refusal as [refused]-prefixed text and forces stop_reason end_turn', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -486,8 +486,35 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('end_turn');
   });
 
+  it('discards an output_text preamble that precedes a refusal in the same message (PR #20 self-review #3300641271)', async () => {
+    // If a model emits [output_text("Sure, let me..."), refusal("Actually I can't")],
+    // the refusal is authoritative — surfacing "Sure, let me...[refused] Actually
+    // I can't" in canonical text would be confusing for the runner's logs.
+    // Refusal text becomes the only visible content.
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        output: [
+          {
+            type: 'message',
+            id: 'm1',
+            role: 'assistant',
+            status: 'completed',
+            content: [
+              { type: 'output_text', text: 'Sure, let me check…' },
+              { type: 'refusal', refusal: 'Actually I cannot help with that.' },
+              { type: 'output_text', text: 'trailing text should also be dropped' },
+            ],
+          },
+        ],
+        status: 'completed',
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    expect(result.text).toBe('[refused] Actually I cannot help with that.');
+    expect(result.stop_reason).toBe('end_turn');
+  });
+
   it('does NOT surface reasoning items in canonical text', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: [
           {
@@ -513,7 +540,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('surfaces a tool_call with empty args and emits logger.warn on malformed JSON', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         model: 'gpt-4.1',
         output: [
@@ -538,7 +565,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('maps incomplete + max_output_tokens to stop_reason max_tokens', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         status: 'incomplete',
         incomplete_details: { reason: 'max_output_tokens' },
@@ -548,7 +575,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('maps incomplete + content_filter (or any other reason) to stop_reason other', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         status: 'incomplete',
         incomplete_details: { reason: 'content_filter' },
@@ -558,14 +585,14 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('maps non-completed, non-incomplete statuses (e.g. failed/in_progress) to stop_reason other', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({ status: 'failed' } as unknown as Partial<OpenAI.Responses.Response>),
     );
     expect(result.stop_reason).toBe('other');
   });
 
   it('maps usage input_tokens / output_tokens and leaves cache fields undefined when 0', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 100,
@@ -584,7 +611,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('surfaces cache_read_tokens (from input_tokens_details.cached_tokens) when > 0', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 1000,
@@ -599,7 +626,7 @@ describe('responsesResponseToCanonical', () => {
   });
 
   it('surfaces reasoning_tokens (from output_tokens_details.reasoning_tokens) when > 0', async () => {
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         usage: {
           input_tokens: 100,
@@ -621,7 +648,7 @@ describe('responsesResponseToCanonical', () => {
       { type: 'reasoning', id: 'r1', summary: [], encrypted_content: 'X' },
       { type: 'function_call', call_id: 't1', name: 'x', arguments: '{}' },
     ];
-    const result = await responsesResponseToCanonical(
+    const result = responsesResponseToCanonical(
       fakeResponse({
         output: output as unknown as OpenAI.Responses.Response['output'],
       }),

@@ -56,13 +56,13 @@ export interface RunRecord {
      * `cache_creation_input_tokens`; OpenAI sets that to 0 and stamps
      * cached_tokens-as-subset into `cache_read_input_tokens`).
      *
-     * No reader of this field exists today. If a future reader is added
-     * (e.g. for cross-provider reporting), historical JSON records written
-     * before this field existed will have `provider === undefined` —
-     * coalesce to `'anthropic'` at the parse site, since all pre-OpenAI
-     * runs were Claude.
+     * Optional because historical JSON records (pre-OpenAI) lack this
+     * field — declaring it non-optional would be a type lie at the read
+     * boundary. New code that reads this field should coalesce to
+     * `'anthropic'` for undefined values (all pre-OpenAI runs were Claude).
+     * PR #20 self-review minor #3300641276.
      */
-    provider: ProviderId;
+    provider?: ProviderId;
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens: number;

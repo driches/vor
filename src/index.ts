@@ -14,13 +14,25 @@ async function main(): Promise<void> {
   const github_token = process.env.GITHUB_TOKEN?.trim() ?? '';
   const dry_run = (process.env.INPUT_DRY_RUN ?? 'false').toLowerCase() === 'true';
   const model_override = process.env.INPUT_MODEL?.trim() || undefined;
-  // The cast is safe: the orchestrator passes provider_override into the
-  // config schema's `provider` enum (or into createProvider's switch), both
-  // of which reject anything that isn't 'anthropic' | 'openai'. Treating the
-  // env var as opaque here keeps the validation in one place.
-  const provider_override = (process.env.INPUT_PROVIDER?.trim() || undefined) as
-    | ProviderId
-    | undefined;
+  // Validate INPUT_PROVIDER at the env-var boundary so a typo like
+  // `open-ai` fails with a clear error annotation instead of silently
+  // skipping the run later as `skipped_no_key_open-ai`. The orchestrator
+  // also runtime-validates `provider_override` as defense-in-depth for
+  // any programmatic caller — but the env-var path is the common one
+  // and deserves a dedicated, specific error message.
+  const raw_provider = process.env.INPUT_PROVIDER?.trim() || undefined;
+  if (
+    raw_provider !== undefined &&
+    raw_provider !== 'anthropic' &&
+    raw_provider !== 'openai'
+  ) {
+    await logger.error(
+      `Invalid INPUT_PROVIDER "${raw_provider}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const provider_override: ProviderId | undefined = raw_provider;
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
   const config_path = process.env.INPUT_CONFIG_PATH?.trim() || '.code-review.yml';
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
