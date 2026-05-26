@@ -1,4 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Hoisted state controlling the orchestrator mock below. The mock passes
+// through to the real `runOrchestrator` by default — every test in this file
+// keeps exercising the production path. Setting `nextRejection` makes the
+// next call throw instead, isolating the "evalRun re-throws" contract test
+// from the full async agent+scanner plumbing that intermittently wedges
+// vitest workers in CI. See https://github.com/driches/code-review/issues/30.
+const orchestratorState = vi.hoisted(() => ({
+  nextRejection: null as Error | null,
+}));
+
+vi.mock('../../src/orchestrator.js', async (importActual) => {
+  const actual = await importActual<typeof import('../../src/orchestrator.js')>();
+  return {
+    ...actual,
+    runOrchestrator: vi.fn(
+      async (input: Parameters<typeof actual.runOrchestrator>[0]) => {
+        if (orchestratorState.nextRejection !== null) {
+          const err = orchestratorState.nextRejection;
+          orchestratorState.nextRejection = null;
+          throw err;
+        }
+        return actual.runOrchestrator(input);
+      },
+    ),
+  };
+});
+
 import {
   evalRun,
   FakeProvider,
@@ -10,6 +38,14 @@ import type { LoadedCase } from './case-loader.js';
 import { DEFAULT_CONFIG } from '../../src/config/defaults.js';
 import type { ReviewConfig } from '../../src/config/types.js';
 import type { CompleteResponse } from '../../src/llm/types.js';
+
+afterEach(() => {
+  // Defense-in-depth: a test that sets `nextRejection` but never triggers
+  // the consuming evalRun would otherwise leak its rejection into the next
+  // test. The single test that uses this clears it on consumption, but
+  // pinning the invariant here keeps future authors from getting bitten.
+  orchestratorState.nextRejection = null;
+});
 
 const fakeCase: LoadedCase = {
   case_id: 'unit',
@@ -166,15 +202,25 @@ describe('evalRun', () => {
     // then flowed into scoring as a 0% recall result, making transient
     // API/infra failures look like real model regressions in the report.
     //
-    // We force a throw by handing the agent script an EMPTY array: the
-    // FakeProvider throws `agentScript exhausted` on the first turn,
-    // simulating an unexpected runtime failure deep in the orchestrator.
+    // The contract under test is purely evalRun's behavior: when
+    // runOrchestrator throws, evalRun MUST re-throw rather than convert
+    // the error into a synthetic `ended_reason: 'error: ...'`. We mock the
+    // orchestrator boundary (see top of file) to induce that throw
+    // directly. An earlier version of this test induced the rejection via
+    // an empty agentScript so the FakeProvider would throw deep inside the
+    // orchestrator's runAgent → Promise.allSettled → re-throw plumbing —
+    // that path intermittently wedged vitest workers in CI (see issue
+    // #30). Mocking at the function boundary tests the same property
+    // (no try/catch swallowing) without exercising the suspect async path.
     const minimalCase: LoadedCase = {
       case_id: 'propagation',
       files: [{ path: 'src/empty.ts', content: '// empty\n' }],
       beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
       truths: [],
     };
+    orchestratorState.nextRejection = new Error(
+      'agentScript exhausted — test did not script enough turns',
+    );
     await expect(
       evalRun({
         case: minimalCase,
@@ -183,7 +229,7 @@ describe('evalRun', () => {
           security: { ...DEFAULT_CONFIG.security, enabled: false },
         },
         apiKey: 'sk-ant-test',
-        agentScript: [], // empty → FakeProvider will throw on the first turn
+        agentScript: [],
       }),
     ).rejects.toThrow(/agentScript exhausted/);
   });
