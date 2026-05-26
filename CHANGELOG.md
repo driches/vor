@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OpenAI provider support.** The action now talks to OpenAI's Responses API (`/v1/responses`) in addition to Anthropic. Set `model: gpt-4.1` (or `gpt-4o`, `gpt-4o-mini`, `o4-mini`, etc.) in `.code-review.yml` and supply `openai_api_key` as an action input. Model id is sniffed to pick the provider (`claude-*` → Anthropic, `gpt-*`/`o<digit>`/`chatgpt-*` → OpenAI); explicit `provider: openai | anthropic` override is also supported.
+- **`LLMProvider` abstraction** in [src/llm/](src/llm/) — canonical message/tool/response types (`CanonicalMessage`, `CanonicalTool`, `CompleteOptions`, `CompleteResponse`, `CanonicalUsage`), `AnthropicProvider` and `OpenAIProvider` adapters, and a `createProvider({modelId, apiKey, providerHint?})` factory. The agent loop in [src/agent/runner.ts](src/agent/runner.ts) speaks only canonical vocabulary; vendor-specific concerns (Anthropic cache_control sliding window, OpenAI reasoning-item replay via `provider_state`, per-provider budget math) live inside their respective adapters.
+- **OpenAI Responses API specifics.** Stateless (`store: false`); reasoning-model safe via `include: ['reasoning.encrypted_content']` for `o*` ids and verbatim replay of `response.output[]` on subsequent turns; `temperature` automatically dropped for o-series (which reject it); flat function tool shape (`{type:'function', name, description, parameters, strict:false}`) rather than the Chat-Completions wrapped form.
+- **Three new OpenAI pipeline configs** for the eval harness: [configs/pipeline/gpt-4-1-only.yml](configs/pipeline/gpt-4-1-only.yml), [gpt-4o-mini-only.yml](configs/pipeline/gpt-4o-mini-only.yml), [o4-mini-only.yml](configs/pipeline/o4-mini-only.yml). Mirror the existing `{sonnet,haiku,opus}-only.yml` shape; ready for cross-provider F1/cost comparisons.
+- **Self-review workflow runs both providers via matrix.** [.github/workflows/self-review.yml](.github/workflows/self-review.yml) now spawns one job per `{claude-sonnet-4-6, gpt-4.1}` matrix entry on every PR (fail-fast: false). Both API keys are passed every run; the orchestrator skips gracefully via `skipped_no_key_${provider}` when the relevant secret isn't configured.
+- **`scripts/smoke-openai.ts`** — live-API smoke test exercising the 2-turn tool-use round-trip (tool_call → tool_result → final text) and the `provider_state` replay. Runs against `gpt-4o-mini` for <$0.001 per invocation.
+
+### Changed
+- **`src/util/pricing.ts`** — `ModelPricing.cache_creation` and `cache_read` are now optional (OpenAI rows have no `cache_creation` cost; cached writes are free). Added rows for `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`, `o4-mini`. `costFromUsage` guards the optional fields with `?? 0` so unknown-shape rows compute $0 instead of `NaN`.
+- **Eval harness migrated off SDK module mocks.** [scripts/eval/orchestrator-adapter.ts](scripts/eval/orchestrator-adapter.ts) previously did `vi.mock('@anthropic-ai/sdk', ...)` at module scope. It now uses `providerFactory: () => fakeProvider` injection through a new optional field on `OrchestratorInput` and `RunAgentInput`. The new `FakeProvider implements LLMProvider` accepts a canonical `CompleteResponse[]` script and works identically for any provider — no per-vendor mock duplication.
+- **`RunRecord.cost.provider: ProviderId`** added to persisted eval records. Historical records without this field default to `'anthropic'` at any future read site.
+- **`temperature` is now a `RunAgentInput` knob** with a single `DEFAULT_TEMPERATURE = 0.5` constant. Was previously hardcoded at three sites (runner + both adapters).
+- **`action.yml`**: top-level `name` is now "AI Code Review" (was "Claude Code Review"); `model` description mentions OpenAI ids; new `openai_api_key` (required: false) and `provider` (required: false) inputs; `OPENAI_API_KEY` + `INPUT_PROVIDER` env wiring added.
+- **Fork-safety check moved from `src/index.ts` into `src/orchestrator.ts`.** Now resolves the provider from config first, then checks for the *relevant* provider's key. New `ended` values: `skipped_no_key_anthropic` and `skipped_no_key_openai` (mirror the existing `skipped_draft` style).
+
+### Operator notes
+- **Existing Claude-only consumers are unaffected.** `anthropic_api_key` stays `required: true` in the action input contract; `DEFAULT_CONFIG.model` is still `claude-sonnet-4-6`.
+- **Worker delegation (`experimental.worker_delegation.enabled`) is Anthropic-only.** Pre-flight Haiku and the worker tool both call `@anthropic-ai/sdk` directly. When the resolved provider is OpenAI, the worker is silently disabled with a warn log rather than erroring the run — operators who want both will need to use a Claude `model:` value.
+- **OpenAI pricing values were sourced as of 2026-05.** Re-verify before each release; vendor rates shift.
+
 ## [0.4.0] - 2026-05-26
 
 ### Added — Static-first hybrid analysis (multi-language SAST)
