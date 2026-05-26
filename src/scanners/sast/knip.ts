@@ -97,7 +97,25 @@ export const knipLinter: LinterModule = {
       rawOutput = await runCli(bin, deps);
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('ENOENT') || msg.includes('not found')) {
+      // Multiple "binary not installed" signals across platforms:
+      //   - ENOENT: Node spawn (Unix and Windows without shell:true)
+      //   - "not found": POSIX shells when shell:true and binary missing
+      //   - "is not recognized": cmd.exe's English missing-command message
+      //     when knip's PATH fallback runs with shell:true on Windows
+      //   - "exited 9009": cmd.exe's exit code for "command not found"
+      //     (locale-independent — fires regardless of Windows language)
+      //   - "exited 127": POSIX `sh -c` exit code for "command not found"
+      //     (fires if shell:true on Unix and binary missing)
+      // The 9009/127 codes are the load-bearing signals; the substring
+      // matches cover edge cases where Node-wrapping the error obscures
+      // the exit code.
+      const isMissingBinary =
+        msg.includes('ENOENT') ||
+        msg.includes('not found') ||
+        msg.includes('is not recognized') ||
+        msg.includes('exited 9009') ||
+        msg.includes('exited 127');
+      if (isMissingBinary) {
         return { findings: [], errors: [], filesExamined: 0 };
       }
       errors.push({ message: `knip failed: ${msg}`, fatal: false });
