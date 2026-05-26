@@ -98,6 +98,15 @@ export interface SecurityConfig {
 
 export interface SastConfig extends ScannerConfig {
   semgrep?: SemgrepConfig;
+  /**
+   * Per-linter opt-out for the TypeScript compiler scanner. When the `tsc`
+   * block is omitted entirely, the linter is ON by default (matching the
+   * "scanners are enabled unless turned off" stance of the top-level
+   * `sast.enabled` flag). Set `{ enabled: false }` to disable tsc without
+   * disabling the rest of the sast fan-out (e.g. a repo that prefers to
+   * run tsc as its own CI step and doesn't want duplicate findings).
+   */
+  tsc?: { enabled?: boolean };
 }
 
 export interface SemgrepConfig {
