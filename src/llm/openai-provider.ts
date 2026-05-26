@@ -311,7 +311,12 @@ export function canonicalToolsToResponses(
  *  - `response.status === 'completed'` → `'end_turn'`
  *  - `response.status === 'incomplete'` with
  *    `incomplete_details.reason === 'max_output_tokens'` → `'max_tokens'`
- *  - Anything else (in_progress, failed, content_filter incomplete, …) →
+ *  - `response.status === 'incomplete'` with any other reason
+ *    (content_filter, …) → `'other'`
+ *  - `response.status === 'failed'` → THROWS (surfaces via runner's
+ *    AgentError wrap as `ended: 'error'`; avoids silently posting an
+ *    empty review when the API itself errored — Codex P1 #3303141995)
+ *  - Anything else (in_progress, queued, cancelled, future statuses) →
  *    `'other'`
  *  - Refusal forces `'end_turn'` regardless.
  *
@@ -412,7 +417,23 @@ export function responsesResponseToCanonical(
             ? 'max_tokens'
             : 'other';
         break;
+      case 'failed': {
+        // Provider-side generation failure. Throwing here surfaces via the
+        // runner's AgentError wrap as `ended: 'error'` instead of silently
+        // collapsing into `max_turns` (the runner's `toolCalls.length === 0`
+        // branch would otherwise post an empty/partial review and report
+        // success). Codex P1 #3303141995.
+        const errMsg = response.error?.message ?? 'unknown error';
+        const errCode = response.error?.code ? ` (code: ${response.error.code})` : '';
+        throw new Error(
+          `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`,
+        );
+      }
       default:
+        // `in_progress`, `queued`, `cancelled`, or any future status the SDK
+        // adds. Non-streaming requests shouldn't see these synchronously,
+        // but if one ever escapes, treat it as `'other'` so the runner can
+        // log + exit cleanly via the max_turns branch rather than crashing.
         stop_reason = 'other';
     }
   }

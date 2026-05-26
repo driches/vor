@@ -642,11 +642,45 @@ describe('responsesResponseToCanonical', () => {
     expect(result.stop_reason).toBe('other');
   });
 
-  it('maps non-completed, non-incomplete statuses (e.g. failed/in_progress) to stop_reason other', async () => {
-    const result = responsesResponseToCanonical(
-      fakeResponse({ status: 'failed' } as unknown as Partial<OpenAI.Responses.Response>),
-    );
-    expect(result.stop_reason).toBe('other');
+  it('throws on status=failed (Codex P1 #3303141995 — surfaces as runner ended=error)', async () => {
+    // Provider-side generation failure must surface as an error rather than
+    // silently collapse to max_turns. The runner's AgentError wrap turns
+    // thrown errors into `ended: 'error'`; without the throw, the runner's
+    // `stop_reason !== end_turn` + `toolCalls.length === 0` path would have
+    // reported a successful max_turns and posted an empty review.
+    expect(() =>
+      responsesResponseToCanonical(
+        fakeResponse({
+          output: [],
+          status: 'failed',
+          error: { code: 'rate_limit', message: 'rate limited' },
+        } as unknown as Partial<OpenAI.Responses.Response>),
+      ),
+    ).toThrow(/status=failed.*rate_limit.*rate limited/);
+  });
+
+  it('throws on status=failed with no error details (defensive — error field may be absent)', async () => {
+    expect(() =>
+      responsesResponseToCanonical(
+        fakeResponse({
+          output: [],
+          status: 'failed',
+        } as unknown as Partial<OpenAI.Responses.Response>),
+      ),
+    ).toThrow(/status=failed.*unknown error/);
+  });
+
+  it('maps non-completed, non-incomplete, non-failed statuses (in_progress, queued, cancelled) to stop_reason other', async () => {
+    // These shouldn't surface synchronously on a non-streaming request, but
+    // if a future SDK behavior surfaces them, treat as graceful termination
+    // (runner reports max_turns) rather than crashing. Only `failed` is the
+    // hard-error case.
+    for (const status of ['in_progress', 'queued', 'cancelled']) {
+      const result = responsesResponseToCanonical(
+        fakeResponse({ status } as unknown as Partial<OpenAI.Responses.Response>),
+      );
+      expect(result.stop_reason).toBe('other');
+    }
   });
 
   it('maps usage input_tokens / output_tokens and leaves cache fields undefined when 0', async () => {

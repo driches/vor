@@ -57628,6 +57628,13 @@ function responsesResponseToCanonical(response) {
       case "incomplete":
         stop_reason = response.incomplete_details?.reason === "max_output_tokens" ? "max_tokens" : "other";
         break;
+      case "failed": {
+        const errMsg = response.error?.message ?? "unknown error";
+        const errCode = response.error?.code ? ` (code: ${response.error.code})` : "";
+        throw new Error(
+          `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`
+        );
+      }
       default:
         stop_reason = "other";
     }
