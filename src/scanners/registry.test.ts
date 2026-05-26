@@ -69,6 +69,7 @@ function makeConfig(over: Partial<SecurityConfig> = {}): SecurityConfig {
       secrets: { enabled: true, include_generic_entropy: false },
       sast: { enabled: false },
       container_cve: { enabled: false },
+      coverage_delta: { enabled: false },
     },
     cache: { enabled: true },
     persistence: { enabled: false },
@@ -112,6 +113,7 @@ describe('buildEnabledScanners — security.enabled=false', () => {
           secrets: { enabled: true, include_generic_entropy: true },
           sast: { enabled: true },
           container_cve: { enabled: true },
+          coverage_delta: { enabled: true },
         },
       }),
     );
@@ -134,6 +136,7 @@ describe('buildEnabledScanners — all scanners disabled individually', () => {
           secrets: { enabled: false, include_generic_entropy: false },
           sast: { enabled: false },
           container_cve: { enabled: false },
+          coverage_delta: { enabled: false },
         },
       }),
     );
@@ -156,6 +159,7 @@ describe('buildEnabledScanners — secrets.include_generic_entropy threading', (
           secrets: { enabled: true, include_generic_entropy: true },
           sast: { enabled: false },
           container_cve: { enabled: false },
+          coverage_delta: { enabled: false },
         },
       }),
     );
@@ -183,6 +187,7 @@ describe('buildEnabledScanners — dependency_cve.osv_endpoint threading', () =>
           secrets: { enabled: false, include_generic_entropy: false },
           sast: { enabled: false },
           container_cve: { enabled: false },
+          coverage_delta: { enabled: false },
         },
       }),
     );
@@ -227,6 +232,7 @@ describe('buildEnabledScanners — factory overrides', () => {
           secrets: { enabled: false, include_generic_entropy: false },
           sast: { enabled: true },
           container_cve: { enabled: true },
+          coverage_delta: { enabled: false },
         },
       }),
       {

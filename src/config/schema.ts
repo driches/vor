@@ -39,6 +39,7 @@ const securitySchema = z.object({
     secrets: scannerCommon.extend({ include_generic_entropy: z.boolean() }),
     sast: sastSchema,
     container_cve: scannerCommon,
+    coverage_delta: scannerCommon,
   }),
   cache: z.object({ enabled: z.boolean() }),
   persistence: z.object({ enabled: z.boolean() }),

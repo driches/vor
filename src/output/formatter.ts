@@ -206,6 +206,7 @@ function formatScannerCountsLine(comments: readonly PostedComment[]): string | n
     ['secrets', 'secret', 'secrets'],
     ['sast', 'SAST', 'SAST'],
     ['container-cve', 'container CVE', 'container CVEs'],
+    ['coverage-delta', 'coverage gap', 'coverage gaps'],
   ];
   const breakdown = labels
     .map(([id, singular, plural]) => {

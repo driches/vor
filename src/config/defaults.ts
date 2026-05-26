@@ -95,6 +95,13 @@ export const DEFAULT_CONFIG: ReviewConfig = {
         tsc: { enabled: true },
       },
       container_cve: { enabled: false },
+      // coverage-delta runs the project's existing coverage tool (vitest /
+      // jest / pytest-cov) and emits a finding on every PR-added line that
+      // isn't exercised by the test suite. Opt-in by default — full coverage
+      // runs can be slow and require the project's test deps to be installed
+      // in the workspace. Enable via
+      // `security.scanners.coverage_delta.enabled: true`.
+      coverage_delta: { enabled: false },
     },
     cache: { enabled: true },
     persistence: { enabled: false },

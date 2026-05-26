@@ -91,6 +91,14 @@ export interface SecurityConfig {
     secrets: ScannerConfig & { include_generic_entropy: boolean };
     sast: SastConfig;
     container_cve: ScannerConfig;
+    /**
+     * Opt-in coverage-delta scanner. Runs the repo's existing test coverage
+     * tool (vitest / jest / pytest-cov) and emits a finding on every PR-added
+     * line that isn't exercised by the test suite. Opt-in (not default) because
+     * coverage runs can be slow and require the project's test deps to be
+     * installed in the workspace.
+     */
+    coverage_delta: ScannerConfig;
   };
   cache: { enabled: boolean };
   persistence: { enabled: boolean };

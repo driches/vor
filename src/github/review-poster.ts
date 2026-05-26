@@ -118,6 +118,8 @@ function renderProvenanceTag(c: PostedComment): string {
       return '\n\n_via SAST_';
     case 'container-cve':
       return '\n\n_via container scan_';
+    case 'coverage-delta':
+      return '\n\n_via coverage scan_';
     default: {
       // Exhaustiveness check: if a new ScannerId is added to the union
       // without updating this switch, TypeScript will error here at
