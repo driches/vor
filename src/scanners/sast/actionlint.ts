@@ -157,12 +157,17 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       },
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        // OS killed the process — partial output, reject clearly.
+        reject(new Error(`actionlint killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       // actionlint: 0 = clean, 1 = findings, >1 = runtime/config error.
-      if (code !== null && code > 1) {
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

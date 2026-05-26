@@ -296,12 +296,17 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       },
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        // OS killed the process — partial output, reject clearly.
+        reject(new Error(`knip killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       // Knip exits non-zero when it has findings. 1 = findings, >1 = config/runtime error.
-      if (code !== null && code > 1) {
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

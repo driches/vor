@@ -238,13 +238,18 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       },
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        // OS killed the process — partial output, reject clearly.
+        reject(new Error(`semgrep killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       // Semgrep exit codes: 0 = clean, 1 = findings, 2 = errors but partial
       // results, >2 = fatal. 0/1/2 produce parseable JSON.
-      if (code !== null && code > 2) {
+      if (code > 2) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

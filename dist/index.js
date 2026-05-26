@@ -55657,11 +55657,15 @@ function runCli(bin, files, deps) {
       // runCli would leak a listener for the lifetime of the scan run.
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      if (code !== null && code > 1) {
+      if (code === null) {
+        reject(new Error(`eslint killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
@@ -55831,11 +55835,15 @@ function runCli2(bin, files, deps) {
       },
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      if (code !== null && code !== 0) {
+      if (code === null) {
+        reject(new Error(`ruff killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
+      if (code !== 0) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
@@ -56009,12 +56017,16 @@ function runCli3(files, deps) {
       },
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        reject(new Error(`dart analyze killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
-      if (code !== null && code > 3) {
+      if (code > 3) {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
@@ -56165,11 +56177,15 @@ function runCli4(files, deps) {
       },
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      if (code !== null && code > 1) {
+      if (code === null) {
+        reject(new Error(`actionlint killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
@@ -56362,11 +56378,15 @@ function runCli5(bin, deps) {
       },
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      if (code !== null && code > 1) {
+      if (code === null) {
+        reject(new Error(`knip killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
@@ -56556,11 +56576,15 @@ function runCli6(files, deps) {
       },
       { once: true }
     );
-    child2.on("close", (code) => {
+    child2.on("close", (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      if (code !== null && code > 2) {
+      if (code === null) {
+        reject(new Error(`semgrep killed by signal ${signal ?? "unknown"}`));
+        return;
+      }
+      if (code > 2) {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8");
         reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

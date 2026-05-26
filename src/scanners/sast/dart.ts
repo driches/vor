@@ -176,15 +176,20 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       },
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        // OS killed the process — partial output, reject clearly.
+        reject(new Error(`dart analyze killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       const stderr = Buffer.concat(stderrChunks).toString('utf-8');
       // dart analyze: 0 = no issues, 1 = info-only, 2 = warnings, 3 = errors.
       // All four are "ran successfully and reported issues" — only treat
-      // codes >3 (or null) as runtime errors.
-      if (code !== null && code > 3) {
+      // codes >3 as runtime errors.
+      if (code > 3) {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }

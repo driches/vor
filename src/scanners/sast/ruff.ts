@@ -181,13 +181,18 @@ function runCli(
       },
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      if (code === null) {
+        // OS killed the process — partial output, reject clearly.
+        reject(new Error(`ruff killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       // --exit-zero means ruff returns 0 even with findings. Any non-zero
       // exit is a real error (bad args, config error, missing files).
-      if (code !== null && code !== 0) {
+      if (code !== 0) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;

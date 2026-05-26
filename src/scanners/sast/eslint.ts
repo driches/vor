@@ -170,12 +170,20 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
       // runCli would leak a listener for the lifetime of the scan run.
       { once: true },
     );
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      // code === null means the OS killed the process (OOM killer, runner
+      // shutdown, etc.) — stdout is likely truncated, so reject with a
+      // clear signal message rather than falling through to resolve and
+      // letting JSON.parse blow up with "Unexpected end of JSON input".
+      if (code === null) {
+        reject(new Error(`eslint killed by signal ${signal ?? 'unknown'}`));
+        return;
+      }
       // 0 = clean, 1 = findings (normal), >1 = config/runtime error.
-      if (code !== null && code > 1) {
+      if (code > 1) {
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
         reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
