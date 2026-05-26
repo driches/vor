@@ -1030,10 +1030,13 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
     // Each getVuln sleeps 50ms before returning a shaped vuln. If the calls
     // run serially the total cost is ~150ms; in parallel it's ~50ms.
     const SLEEP_MS = 50;
-    // 3 * 50ms = 150ms serial. Threshold sits ~20ms below serial so jitter
-    // (GC pauses, slow CI runners) doesn't cause flakes while still being
-    // unambiguously parallel (a serial run would be ≥150ms).
-    const PARALLEL_THRESHOLD_MS = 145;
+    // Threshold = 2× serial total (3 * 50ms = 150ms → 300ms) so a parallel
+    // run with 250ms+ of GC / scheduling jitter still passes, while a serial
+    // run (which adds 100ms PER additional dep on top of 150ms) blows past
+    // the cap immediately. The previous 145ms cap left only ~95ms of slack
+    // above perfect-parallel and flaked on busy CI runners (run 26454890305
+    // saw elapsed=156ms vs 145ms cap).
+    const PARALLEL_THRESHOLD_MS = 300;
     const osvClient: OsvClient = {
       queryBatch: vi.fn().mockResolvedValue(batchResp),
       getVuln: vi.fn().mockImplementation(async (id: string) => {
@@ -1057,8 +1060,10 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
 
     expect(osvClient.getVuln).toHaveBeenCalledTimes(3);
     expect(result.findings.length).toBeGreaterThanOrEqual(3);
-    // Parallel: should be < ~150ms (3 * 50ms serial). Threshold is generous
-    // to absorb CI jitter while still distinguishing parallel from serial.
+    // Parallel: should be < 300ms cap. A serial run would be ≥150ms baseline
+    // and scale linearly with the dep count — anything close to or above
+    // 300ms is unambiguously serial. The cap is intentionally above 150ms
+    // serial so CI jitter alone can't push us across the boundary.
     expect(elapsed).toBeLessThan(PARALLEL_THRESHOLD_MS);
   });
 });
