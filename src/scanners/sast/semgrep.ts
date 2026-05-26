@@ -188,13 +188,22 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
     // controls or data-residency requirements need this off; the
     // --config=auto rule fetch is already documented and accounted for in
     // networkCalls, the metrics beacon was an undocumented additional call.
-    // TODO(v0.4.1): expose `security.scanners.sast.semgrep_config` in
-    // .code-review.yml so operators in air-gapped or strict-egress
-    // environments can point at a local ruleset (e.g. `--config=p/default`
-    // shipped with semgrep itself, or `--config=./.semgrep.yml`) without
-    // disabling the whole SAST pipeline. Today the only opt-out is
-    // `security.scanners.sast.enabled: false`, which also kills the other
-    // five linters that have no network dependency.
+    // TODO(v0.4.1): two config keys needed for air-gapped/strict-egress
+    // operators, neither of which exists today.
+    //
+    // 1. `security.scanners.sast.semgrep_config` — point semgrep at a
+    //    local ruleset (e.g. `--config=p/default` shipped with semgrep
+    //    itself, or `--config=./.semgrep.yml`) so the --config=auto
+    //    network fetch is avoided entirely.
+    //
+    // 2. `security.scanners.sast.linters.semgrep.enabled: false` — a
+    //    per-linter escape hatch so an operator can disable JUST semgrep
+    //    without losing the other five linters (eslint/ruff/dart/
+    //    actionlint/knip), none of which make network calls.
+    //
+    // Today the only opt-out is `security.scanners.sast.enabled: false`,
+    // which is a sledgehammer that kills all 6 linters even though only
+    // semgrep has the network dependency.
     const child = spawn(
       'semgrep',
       [
