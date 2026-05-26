@@ -158,15 +158,19 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // provider is Anthropic — pre-flight Haiku and the worker tool both use
   // `@anthropic-ai/sdk` directly (hardcoded to Haiku). OpenAI consumers
   // get a warning and the worker is silently disabled for the run.
+  // Shared by both the WorkerClient and the pre-flight Haiku call below.
+  // One instance per run — same API key, same SDK defaults, same connection
+  // pool and HTTP agent. PR #20 self-review minor #3300755081.
   const workerConfig = input.deps.config.experimental.worker_delegation;
   let worker: WorkerClient | undefined;
+  let anthropicClient: Anthropic | undefined;
   if (workerConfig.enabled) {
     if (provider.id !== 'anthropic') {
       await logger.warn(
         `experimental.worker_delegation.enabled is true but resolved provider is ${provider.id}. Worker delegation is Anthropic-only; disabling for this run.`,
       );
     } else {
-      const anthropicClient = new Anthropic({ apiKey: input.apiKey });
+      anthropicClient = new Anthropic({ apiKey: input.apiKey });
       worker = new WorkerClient(anthropicClient, budget, workerConfig.worker_model);
     }
   }
@@ -206,15 +210,12 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   // or a very large diff) lands in 'budget_exceeded' instead of escaping
   // runAgent and turning into an orchestrator-level failure.
   let preflightBudgetExceeded = false;
-  if (worker !== undefined) {
+  if (worker !== undefined && anthropicClient !== undefined) {
     try {
-      // Pre-flight needs its own Anthropic client. Constructing here keeps
-      // the dependency local to the conditional pre-flight branch (a one-shot
-      // — sharing the worker's client would couple two independent code
-      // paths for negligible savings).
-      const preflightClient = new Anthropic({ apiKey: input.apiKey });
+      // Reuse the same Anthropic client the worker holds — same apiKey,
+      // same SDK defaults, no benefit to two separate connection pools.
       const analysis = await runPreflight({
-        client: preflightClient,
+        client: anthropicClient,
         budget,
         model: workerConfig.worker_model,
         prContext: input.deps.prContext,
@@ -261,7 +262,15 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
 
       const response = await provider.complete(messages, canonicalTools, {
         model: input.model,
-        maxOutputTokens: 8192,
+        // Forward the operator-configured budget. The Budget tracker uses the
+        // same value as its `max_output_tokens` ceiling, but it only catches
+        // overruns AFTER the API call returns — without this forward, the
+        // API itself silently caps every response at the hardcoded 8192 we
+        // used to pass, starving reasoning models (o-series can spend more
+        // than 8K tokens on internal reasoning alone before producing output)
+        // and ignoring any operator config bump. PR #20 self-review IMPORTANT
+        // #3300755063.
+        maxOutputTokens: input.maxOutputTokens,
         system: input.systemPrompt,
         // Centralized via DEFAULT_TEMPERATURE up top — see that constant's
         // JSDoc for the recall/cost history. The OpenAI adapter drops the

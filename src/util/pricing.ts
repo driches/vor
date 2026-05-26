@@ -40,6 +40,14 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gpt-4.1-nano':  { input: 0.1,  output: 0.4,  cache_read: 0.025 },
   'gpt-4o':        { input: 2.5,  output: 10,   cache_read: 1.25 },
   'gpt-4o-mini':   { input: 0.15, output: 0.6,  cache_read: 0.075 },
+  // o-series reasoning models. `inferProviderFromModel` routes any
+  // `/^o\d/` id to OpenAI, so o1/o3/o3-mini need pricing entries too —
+  // without them, production silently falls back to Sonnet rates (3–5×
+  // under-count) and the eval harness throws on a miss. PR #20 self-review
+  // IMPORTANT #3300755077.
+  'o1':            { input: 15,   output: 60,   cache_read: 7.5 },
+  'o3':            { input: 10,   output: 40,   cache_read: 2.5 },
+  'o3-mini':       { input: 1.1,  output: 4.4,  cache_read: 0.275 },
   'o4-mini':       { input: 1.1,  output: 4.4,  cache_read: 0.275 },
 };
 

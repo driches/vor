@@ -152,9 +152,12 @@ describe('runAgent', () => {
     const abortController = new AbortController();
     await runAgent({ ...baseInput(), abortController });
 
+    // maxOutputTokens forwards the operator-configured budget (default
+    // 100K in baseInput). PR #20 self-review #3300755088 caught the prior
+    // assertion pinning a hardcoded 8192 — which was the bug, not the spec.
     expect(provider.completeCalls[0]!.opts).toMatchObject({
       model: 'claude-sonnet-4-6',
-      maxOutputTokens: 8192,
+      maxOutputTokens: baseInput().maxOutputTokens,
       system: 'You are a code reviewer.',
       temperature: 0.5,
     });
