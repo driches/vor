@@ -24,7 +24,14 @@
 import { spawn } from 'node:child_process';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  filterShellSafePaths,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+} from './linter.js';
+import { logger } from '../../util/logger.js';
 
 const ID = 'semgrep';
 const TIMEOUT_MS = 180_000;
@@ -81,9 +88,26 @@ export const semgrepLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
 
+    // Option-confusion guard: a PR file named `--config=evil.yaml` or
+    // `--output=/tmp/exfil` would be parsed as a semgrep flag, not a
+    // target. shell:false here so we only need the leading-dash filter,
+    // not the metachar/quoting branch.
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f) => f.path),
+      false,
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `semgrep: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(targetFiles.map((f) => f.path), deps);
+      rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
       if (msg.includes('ENOENT') || msg.includes('not found')) {
@@ -129,9 +153,13 @@ export const semgrepLinter: LinterModule = {
       findings.push(buildFinding(changedFile.path, result, changedFile));
     }
 
-    // Successful invocation — semgrep made its --config=auto network
-    // call to fetch rules. Reported to the orchestrator for egress
-    // accounting.
+    // Successful invocation — conservatively count 1 network call. The
+    // `--config=auto` resolver MAY contact semgrep.dev to fetch rules,
+    // but warm runners hit the on-disk cache and never egress. We can't
+    // tell from the exit code which happened, so we count 1 to avoid
+    // undercounting on cold runners. Operators needing exact egress
+    // accounting should switch to `--config=<local-path>` and patch
+    // this metric to 0.
     return {
       findings,
       errors,
@@ -162,6 +190,11 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         '--no-rewrite-rule-ids',
         '--disable-version-check',
         '--metrics=off',
+        // End-of-options separator — defense in depth alongside the
+        // leading-dash filter above. If anything slips through (e.g. a
+        // future caller forgets to filter), `--` guarantees semgrep
+        // treats every following token as a target, not an option.
+        '--',
         ...files,
       ],
       {

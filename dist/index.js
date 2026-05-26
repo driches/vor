@@ -49050,7 +49050,7 @@ function buildSystemPrompt(input) {
   const sections = [BASE_PROMPT];
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
-  if (input.config.security.scanners.sast.enabled) {
+  if (input.config.security.enabled && input.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
@@ -55911,9 +55911,21 @@ var dartLinter = {
   },
   async run(deps, targetFiles) {
     const errors = [];
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f2) => f2.path),
+      false
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `dart: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
     let rawOutput;
     try {
-      rawOutput = await runCli3(targetFiles.map((f2) => f2.path), deps);
+      rawOutput = await runCli3(safe, deps);
     } catch (err) {
       const msg = err.message;
       if (msg.includes("ENOENT") || msg.includes("not found")) {
@@ -56068,9 +56080,21 @@ var actionlintLinter = {
   },
   async run(deps, targetFiles) {
     const errors = [];
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f2) => f2.path),
+      false
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `actionlint: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
     let rawOutput;
     try {
-      rawOutput = await runCli4(targetFiles.map((f2) => f2.path), deps);
+      rawOutput = await runCli4(safe, deps);
     } catch (err) {
       const msg = err.message;
       if (msg.includes("ENOENT") || msg.includes("not found")) {
@@ -56409,9 +56433,21 @@ var semgrepLinter = {
   },
   async run(deps, targetFiles) {
     const errors = [];
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f2) => f2.path),
+      false
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `semgrep: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
     let rawOutput;
     try {
-      rawOutput = await runCli6(targetFiles.map((f2) => f2.path), deps);
+      rawOutput = await runCli6(safe, deps);
     } catch (err) {
       const msg = err.message;
       if (msg.includes("ENOENT") || msg.includes("not found")) {
@@ -56466,6 +56502,11 @@ function runCli6(files, deps) {
         "--no-rewrite-rule-ids",
         "--disable-version-check",
         "--metrics=off",
+        // End-of-options separator — defense in depth alongside the
+        // leading-dash filter above. If anything slips through (e.g. a
+        // future caller forgets to filter), `--` guarantees semgrep
+        // treats every following token as a target, not an option.
+        "--",
         ...files
       ],
       {

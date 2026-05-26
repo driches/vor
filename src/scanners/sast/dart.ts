@@ -22,7 +22,14 @@
 import { spawn } from 'node:child_process';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  filterShellSafePaths,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+} from './linter.js';
+import { logger } from '../../util/logger.js';
 
 const ID = 'dart';
 const TIMEOUT_MS = 90_000;
@@ -49,9 +56,26 @@ export const dartLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
 
+    // Option-confusion guard. A PR file named `--fatal-infos`,
+    // `--format=json`, etc. would be parsed by `dart analyze` as a flag
+    // (changing exit codes or breaking the machine-format parser). shell:false
+    // here so only the leading-dash filter applies.
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f) => f.path),
+      false,
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `dart: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(targetFiles.map((f) => f.path), deps);
+      rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
       // ENOENT means the dart binary isn't on PATH — quiet skip for repos

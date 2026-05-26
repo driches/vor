@@ -28,10 +28,16 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   if (focus) sections.push(focus);
 
   // Tell the agent what static analysis is covering for it, so it
-  // doesn't waste turns redoing that work. Only emit when sast is
-  // actually enabled — otherwise repos that opted out would see a prompt
-  // that promises tools they don't have.
-  if (input.config.security.scanners.sast.enabled) {
+  // doesn't waste turns redoing that work. Gate on BOTH switches:
+  //   - security.enabled: master switch for the whole scanner pipeline.
+  //     When false, no scanner — including sast — runs.
+  //   - security.scanners.sast.enabled: per-scanner switch.
+  // Telling the model "linters are covering this" when the pipeline is
+  // disabled would suppress real findings the model would otherwise catch.
+  if (
+    input.config.security.enabled &&
+    input.config.security.scanners.sast.enabled
+  ) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
 

@@ -23,7 +23,14 @@
 import { spawn } from 'node:child_process';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
-import { buildLinterEnv, normalizeToolPath, type LinterModule, type LinterRun } from './linter.js';
+import {
+  buildLinterEnv,
+  filterShellSafePaths,
+  normalizeToolPath,
+  type LinterModule,
+  type LinterRun,
+} from './linter.js';
+import { logger } from '../../util/logger.js';
 
 const ID = 'actionlint';
 const TIMEOUT_MS = 30_000;
@@ -49,9 +56,27 @@ export const actionlintLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
 
+    // Option-confusion guard. A workflow file named `-foo.yml` would be
+    // parsed by actionlint as a flag. The WORKFLOW_PATH_RE on .applies()
+    // requires `.github/workflows/...` so the realistic attack surface is
+    // narrow, but we filter for consistency with the other linters.
+    // shell:false → only the leading-dash filter applies.
+    const { safe, dropped } = filterShellSafePaths(
+      targetFiles.map((f) => f.path),
+      false,
+    );
+    if (dropped.length > 0) {
+      await logger.warn(
+        `actionlint: skipped ${dropped.length} file(s) with leading-dash names: ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+      );
+    }
+    if (safe.length === 0) {
+      return { findings: [], errors: [], filesExamined: 0 };
+    }
+
     let rawOutput: string;
     try {
-      rawOutput = await runCli(targetFiles.map((f) => f.path), deps);
+      rawOutput = await runCli(safe, deps);
     } catch (err) {
       const msg = (err as Error).message;
       // Missing binary → quiet skip. Anything else → record error.
