@@ -67,9 +67,6 @@ export const knipLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
-    if (bin === null) {
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
 
     let rawOutput: string;
     try {
@@ -133,10 +130,12 @@ export const knipLinter: LinterModule = {
   },
 };
 
-function locateBin(workspaceDir: string): string | null {
+function locateBin(workspaceDir: string): string {
   const local = path.join(workspaceDir, 'node_modules', '.bin', 'knip');
   if (existsSync(local)) return local;
-  // PATH lookup — spawn will resolve.
+  // PATH lookup — spawn resolves; ENOENT is caught in the runCli caller
+  // and surfaces as a quiet skip (no knip installed). The return type
+  // is plain `string` to reflect that this never returns null.
   return 'knip';
 }
 
@@ -148,7 +147,7 @@ function runCli(bin: string, deps: ScannerDeps): Promise<string> {
     // The filter to PR-added lines happens in the orchestrator above.
     const child = spawn(bin, ['--reporter', 'json'], {
       cwd: deps.workspaceDir,
-      env: { PATH: process.env.PATH ?? '' },
+      env: { ...process.env },
     });
     let stdout = '';
     let stderr = '';

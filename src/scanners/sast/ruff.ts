@@ -125,7 +125,7 @@ function runCli(
       ['check', '--output-format=json', '--no-cache', '--exit-zero', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? '' },
+        env: { ...process.env },
       },
     );
     let stdout = '';

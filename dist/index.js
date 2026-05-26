@@ -55480,7 +55480,13 @@ function runCli(bin, files, deps) {
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? "" }
+        // Inherit full env. Earlier versions stripped to just PATH for
+        // blast-radius reasons, but that broke linters that read HOME
+        // (config cache), NODE_ENV/CI (plugin behavior), and repo-set
+        // vars that configure the lint behavior itself. Hardening
+        // sensitive vars (GITHUB_TOKEN, secrets) belongs at the action
+        // boundary, not here.
+        env: { ...process.env }
       }
     );
     let stdout = "";
@@ -55555,7 +55561,6 @@ function categorize(ruleId) {
   if (ruleId.includes("no-floating-promises") || ruleId.includes("no-misused-promises") || ruleId.includes("await-thenable")) {
     return "bug";
   }
-  if (ruleId.startsWith("@typescript-eslint/")) return "bug";
   return "readability";
 }
 function renderTitle(message) {
@@ -55642,7 +55647,7 @@ function runCli2(bin, files, deps) {
       ["check", "--output-format=json", "--no-cache", "--exit-zero", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? "" }
+        env: { ...process.env }
       }
     );
     let stdout = "";
@@ -55802,7 +55807,7 @@ function runCli3(files, deps) {
       ["analyze", "--format=machine", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? "" }
+        env: { ...process.env }
       }
     );
     let stdout = "";
@@ -55835,7 +55840,7 @@ function runCli3(files, deps) {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(stdout);
+      resolve3(stdout + "\n" + stderr);
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -55940,7 +55945,7 @@ function runCli4(files, deps) {
       ["-no-color", "-format", "{{json .}}", ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? "" }
+        env: { ...process.env }
       }
     );
     let stdout = "";
@@ -56042,9 +56047,6 @@ var knipLinter = {
   async run(deps, targetFiles) {
     const errors = [];
     const bin = locateBin2(deps.workspaceDir);
-    if (bin === null) {
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
     let rawOutput;
     try {
       rawOutput = await runCli5(bin, deps);
@@ -56106,7 +56108,7 @@ function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process7.spawn)(bin, ["--reporter", "json"], {
       cwd: deps.workspaceDir,
-      env: { PATH: process.env.PATH ?? "" }
+      env: { ...process.env }
     });
     let stdout = "";
     let stderr = "";
@@ -56263,7 +56265,7 @@ function runCli6(files, deps) {
       ],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? "" }
+        env: { ...process.env }
       }
     );
     let stdout = "";
@@ -56424,6 +56426,7 @@ async function orchestrate(deps) {
       });
     }
   }
+  const networkCalls = applicable.some((l2) => l2.id === "semgrep") ? 1 : 0;
   return {
     scanner: SCANNER_ID3,
     findings,
@@ -56431,7 +56434,7 @@ async function orchestrate(deps) {
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,
-      network_calls: 0,
+      network_calls: networkCalls,
       cache_hits: 0
     }
   };

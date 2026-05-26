@@ -96,7 +96,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       ['-no-color', '-format', '{{json .}}', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? '' },
+        env: { ...process.env },
       },
     );
     let stdout = '';

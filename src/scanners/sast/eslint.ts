@@ -92,7 +92,13 @@ function runCli(bin: string, files: string[], deps: ScannerDeps): Promise<string
       ['--format', 'json', '--no-error-on-unmatched-pattern', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? '' },
+        // Inherit full env. Earlier versions stripped to just PATH for
+        // blast-radius reasons, but that broke linters that read HOME
+        // (config cache), NODE_ENV/CI (plugin behavior), and repo-set
+        // vars that configure the lint behavior itself. Hardening
+        // sensitive vars (GITHUB_TOKEN, secrets) belongs at the action
+        // boundary, not here.
+        env: { ...process.env },
       },
     );
     let stdout = '';
@@ -194,7 +200,11 @@ function categorize(ruleId: string): Category {
   ) {
     return 'bug';
   }
-  if (ruleId.startsWith('@typescript-eslint/')) return 'bug';
+  // Don't catch-all @typescript-eslint/* to 'bug' — most of them are
+  // style/type rules (no-explicit-any, explicit-function-return-type,
+  // naming-convention) where 'readability' is the honest category. The
+  // small set of @typescript-eslint promise rules that ARE bug-shaped
+  // are matched above this line.
   return 'readability';
 }
 

@@ -119,6 +119,14 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     }
   }
 
+  // semgrep --config=auto pulls its ruleset from semgrep.dev on every
+  // invocation. Count it under network_calls so cost/security telemetry
+  // and air-gapped/strict-egress operators see the egress accurately —
+  // network_calls is documented as "best-effort logical network ops"
+  // (see ScannerMetrics doc) so we count linter invocations that
+  // actually go out to a registry. Other linters are local-only.
+  const networkCalls = applicable.some((l) => l.id === 'semgrep') ? 1 : 0;
+
   return {
     scanner: SCANNER_ID,
     findings,
@@ -126,7 +134,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,
-      network_calls: 0,
+      network_calls: networkCalls,
       cache_hits: 0,
     },
   };

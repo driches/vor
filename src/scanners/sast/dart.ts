@@ -120,7 +120,7 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
       ['analyze', '--format=machine', ...files],
       {
         cwd: deps.workspaceDir,
-        env: { PATH: process.env.PATH ?? '' },
+        env: { ...process.env },
       },
     );
     let stdout = '';
@@ -157,7 +157,13 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
         reject(new Error(`dart analyze exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve(stdout);
+      // Defensive: concatenate stdout AND stderr. `dart analyze
+      // --format=machine` documents stdout output, but the parseDartLine
+      // filter only accepts lines that match the pipe-delimited shape
+      // (other content returns null and is harmlessly skipped). Tools
+      // routing output to stderr on some versions or platforms then
+      // can't silently produce zero findings.
+      resolve(stdout + '\n' + stderr);
     });
     child.on('error', (err) => {
       if (resolved) return;
