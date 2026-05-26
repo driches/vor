@@ -1,0 +1,12 @@
+# Low-cost OpenAI floor. Mirror of haiku-only — accept lower recall for
+# cheaper per-PR cost. Cache_read rate (~50% discount) makes this further
+# attractive on cached prefixes (PR diffs + repo context).
+model: gpt-4o-mini
+max_turns: 40
+severity:
+  floor: minor
+  max_comments_per_file: 5
+  max_comments_total: 30
+budget:
+  max_input_tokens: 500000
+  max_output_tokens: 50000

@@ -54,7 +54,118 @@ describe('pricingForModel', () => {
       'claude-opus-4-6',
       'claude-opus-4-7',
       'claude-sonnet-4-6',
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'gpt-4.1-nano',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'o1',
+      'o1-mini',
+      'o1-preview',
+      'o3',
+      'o3-mini',
+      'o4-mini',
     ]);
+  });
+
+  it('prices GPT-4.1 at $2/$8 input/output with $0.5 cache read and no cache creation cost', () => {
+    const p = pricingForModel('gpt-4.1');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(2);
+    expect(p!.output).toBe(8);
+    expect(p!.cache_read).toBe(0.5);
+    // OpenAI cached prompt writes are free; cache_creation stays undefined.
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices GPT-4.1-mini at $0.4/$1.6 with $0.1 cache read', () => {
+    const p = pricingForModel('gpt-4.1-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(0.4);
+    expect(p!.output).toBe(1.6);
+    expect(p!.cache_read).toBe(0.1);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices GPT-4.1-nano at $0.1/$0.4 with $0.025 cache read', () => {
+    const p = pricingForModel('gpt-4.1-nano');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(0.1);
+    expect(p!.output).toBe(0.4);
+    expect(p!.cache_read).toBe(0.025);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices GPT-4o at $2.5/$10 with $1.25 cache read', () => {
+    const p = pricingForModel('gpt-4o');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(2.5);
+    expect(p!.output).toBe(10);
+    expect(p!.cache_read).toBe(1.25);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices GPT-4o-mini at $0.15/$0.6 with $0.075 cache read', () => {
+    const p = pricingForModel('gpt-4o-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(0.15);
+    expect(p!.output).toBe(0.6);
+    expect(p!.cache_read).toBe(0.075);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o4-mini at $1.1/$4.4 with $0.275 cache read', () => {
+    const p = pricingForModel('o4-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(1.1);
+    expect(p!.output).toBe(4.4);
+    expect(p!.cache_read).toBe(0.275);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o1 at $15/$60 with $7.5 cache read', () => {
+    const p = pricingForModel('o1');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(15);
+    expect(p!.output).toBe(60);
+    expect(p!.cache_read).toBe(7.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o1-mini at $3/$12 with $1.5 cache read', () => {
+    const p = pricingForModel('o1-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(3);
+    expect(p!.output).toBe(12);
+    expect(p!.cache_read).toBe(1.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o1-preview at $15/$60 with $7.5 cache read (same tier as o1)', () => {
+    const p = pricingForModel('o1-preview');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(15);
+    expect(p!.output).toBe(60);
+    expect(p!.cache_read).toBe(7.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o3 at $10/$40 with $2.5 cache read', () => {
+    const p = pricingForModel('o3');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(10);
+    expect(p!.output).toBe(40);
+    expect(p!.cache_read).toBe(2.5);
+    expect(p!.cache_creation).toBeUndefined();
+  });
+
+  it('prices o3-mini at $1.1/$4.4 with $0.275 cache read (same tier as o4-mini)', () => {
+    const p = pricingForModel('o3-mini');
+    expect(p).toBeDefined();
+    expect(p!.input).toBe(1.1);
+    expect(p!.output).toBe(4.4);
+    expect(p!.cache_read).toBe(0.275);
+    expect(p!.cache_creation).toBeUndefined();
   });
 });
 

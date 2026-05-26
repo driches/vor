@@ -125,6 +125,66 @@ vi.mock('@anthropic-ai/sdk', () => {
 });
 
 // -----------------------------------------------------------------
+// vi.mock — openai
+// -----------------------------------------------------------------
+//
+// Mirror of the Anthropic mock above so the OpenAI-path tests (added in
+// Task 5) can drive the same orchestrator end-to-end without a real network
+// hit. The OpenAI happy-path test enqueues onto `openaiScript`; tests that
+// stay on the Anthropic path never touch this queue.
+interface OpenAIScriptResponse {
+  output: Array<Record<string, unknown>>;
+  status: 'completed' | 'incomplete' | 'failed';
+}
+
+const openaiScript: OpenAIScriptResponse[] = [];
+// Captured constructor arg per `new OpenAI({ apiKey })`. The OpenAI no-key
+// test asserts this NEVER got called (orchestrator short-circuited before
+// instantiating the provider).
+const openaiCtorCalls: Array<{ apiKey: string }> = [];
+
+vi.mock('openai', () => {
+  class FakeOpenAI {
+    public responses = {
+      create: vi.fn(async () => {
+        const next = openaiScript.shift();
+        if (!next) {
+          throw new Error('openaiScript exhausted — test did not script enough turns');
+        }
+        return {
+          id: 'resp_test',
+          object: 'response',
+          created_at: 0,
+          error: null,
+          incomplete_details: null,
+          instructions: null,
+          metadata: null,
+          model: 'gpt-4.1',
+          output: next.output,
+          parallel_tool_calls: false,
+          temperature: null,
+          tool_choice: 'auto',
+          tools: [],
+          top_p: null,
+          status: next.status,
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            input_tokens_details: { cached_tokens: 0 },
+            output_tokens_details: { reasoning_tokens: 0 },
+          },
+        };
+      }),
+    };
+    constructor(opts: { apiKey: string }) {
+      openaiCtorCalls.push({ apiKey: opts.apiKey });
+    }
+  }
+  return { default: FakeOpenAI };
+});
+
+// -----------------------------------------------------------------
 // vi.mock — @octokit/rest
 // -----------------------------------------------------------------
 //
@@ -307,6 +367,10 @@ function baseInput(over: Partial<OrchestratorInput> = {}): OrchestratorInput {
     repo: 'test',
     pull_number: 1,
     anthropic_api_key: 'sk-ant-test',
+    // OpenAI key empty by default — every pre-Task-5 test assumed
+    // Anthropic-only and the fork-safety check only inspects the key for
+    // the resolved provider.
+    openai_api_key: '',
     github_token: 'ghs_test',
     config_path: '.code-review.yml',
     dry_run: false,
@@ -379,6 +443,8 @@ function scriptSummaryOnly(
 
 beforeEach(() => {
   agentScript.length = 0;
+  openaiScript.length = 0;
+  openaiCtorCalls.length = 0;
   octokitState.diff = '';
   octokitState.filesApi = [];
   octokitState.pullData = makePullData();
@@ -1580,5 +1646,177 @@ describe('runOrchestrator — Scenario 5: security.enabled=false skips all scann
     expect(call.comments[0]!.path).toBe('src/app.ts');
     expect(call.body).not.toContain('Security:');
     expect(result.comment_count).toBe(1);
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario 6: Fork-PR safety — no Anthropic key with the default
+// claude-sonnet-4-6 model short-circuits before the agent runs.
+//
+// This is the moved-from-index.ts fork-safety check. The orchestrator must
+// not throw, must not invoke runAgent (no Anthropic SDK call), and must
+// return ended='skipped_no_key_anthropic' so telemetry can distinguish from
+// 'skipped_draft'.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 6: fork-safety on missing Anthropic key', () => {
+  it('skips cleanly when anthropic_api_key is empty and the resolved provider is Anthropic', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    // No config file → loader returns DEFAULT_CONFIG → model claude-sonnet-4-6
+    // → inferProviderFromModel('claude-sonnet-4-6') → 'anthropic'.
+
+    const result = await runOrchestrator(
+      baseInput({ anthropic_api_key: '', openai_api_key: '' }),
+    );
+
+    expect(result.ended).toBe('skipped_no_key_anthropic');
+    expect(result.comment_count).toBe(0);
+    expect(result.cost_usd).toBe(0);
+    // No review was posted (the orchestrator returned before postReview).
+    expect(octokitState.createReviewCalls).toHaveLength(0);
+    // Agent was never invoked — the Anthropic SDK mock's createSpy stays at 0.
+    expect(agentScript.length).toBe(0); // unchanged from beforeEach reset
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario 7: OpenAI fork-safety — Anthropic key present, OpenAI key absent,
+// config selects an OpenAI model. The orchestrator must pick OpenAI based on
+// model inference, see no OPENAI key, and skip with ended='skipped_no_key_openai'.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 7: fork-safety on missing OpenAI key', () => {
+  it('skips cleanly when the config selects an OpenAI model and openai_api_key is empty', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'model: gpt-4.1',
+        'security:',
+        '  enabled: false',
+      ].join('\n'),
+    );
+
+    const result = await runOrchestrator(
+      baseInput({ anthropic_api_key: 'sk-ant-test', openai_api_key: '' }),
+    );
+
+    expect(result.ended).toBe('skipped_no_key_openai');
+    expect(result.comment_count).toBe(0);
+    expect(octokitState.createReviewCalls).toHaveLength(0);
+    // OpenAI SDK was never instantiated — orchestrator short-circuited before
+    // createProvider() ran.
+    expect(openaiCtorCalls).toHaveLength(0);
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario 8: OpenAI happy path — config picks gpt-4.1, openai_api_key is
+// supplied. The orchestrator resolves provider=openai, instantiates the
+// OpenAI SDK with the OpenAI key (NOT the Anthropic one), drives the agent
+// through one summary turn, and posts the review.
+//
+// Key assertions:
+//   - The OpenAI SDK constructor saw `openai_api_key`, NOT `anthropic_api_key`.
+//   - `responses.create` was called (proving we routed through the OpenAI
+//     provider, not the Anthropic one).
+//   - The review was posted successfully.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 8: OpenAI happy path', () => {
+  it('routes through the OpenAI provider when config selects a GPT model and the key is present', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set(
+      '.code-review.yml',
+      [
+        'model: gpt-4.1',
+        'security:',
+        '  enabled: false', // keep the test focused on the LLM path
+      ].join('\n'),
+    );
+
+    // One OpenAI turn: function_call for post_summary, then completion. The
+    // runner sees stop_reason='tool_calls' (mapped from function_call output),
+    // executes the summary tool, and then `aggregator.hasSummary()` ends the
+    // loop.
+    openaiScript.push({
+      output: [
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'post_summary',
+          arguments: JSON.stringify({
+            strengths: ['Clear and focused changes that are easy to follow.'],
+            assessment: 'comment',
+            assessment_reasoning: 'Small observations; nothing blocking the merge here.',
+          }),
+        },
+      ],
+      status: 'completed',
+    });
+
+    const result = await runOrchestrator(
+      baseInput({
+        anthropic_api_key: 'sk-ant-test-NOT-USED',
+        openai_api_key: 'sk-openai-test',
+      }),
+    );
+
+    // OpenAI SDK was constructed exactly once, with the OPENAI key.
+    expect(openaiCtorCalls).toHaveLength(1);
+    expect(openaiCtorCalls[0]!.apiKey).toBe('sk-openai-test');
+    // Sanity: the Anthropic key was NOT what we handed to OpenAI.
+    expect(openaiCtorCalls[0]!.apiKey).not.toBe('sk-ant-test-NOT-USED');
+
+    // The review was posted (proves the agent reached summary_posted via the
+    // OpenAI path).
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    expect(result.ended).toBe('summary_posted');
+  });
+});
+
+// Scenario 9: provider_override is runtime-validated before any side effects.
+// Codex P2 #3300632002 — a typo'd INPUT_PROVIDER (cast to ProviderId in
+// index.ts without runtime guard) used to silently flow through to the
+// missing-key short-circuit and emit `ended: skipped_no_key_<typo>`. The
+// orchestrator now throws at entry, surfacing as setFailed in CI.
+describe('runOrchestrator — Scenario 9: provider_override runtime validation', () => {
+  it('throws on an unknown provider_override string (no API calls, no skip)', async () => {
+    const input = baseInput({
+      // Cast through unknown to bypass the TS ProviderId type — simulates
+      // what `process.env.INPUT_PROVIDER?.trim() as ProviderId | undefined`
+      // produces when the operator typoes the value.
+      provider_override: 'open-ai' as unknown as 'anthropic' | 'openai',
+    });
+
+    await expect(runOrchestrator(input)).rejects.toThrow(/Invalid provider_override "open-ai"/);
+  });
+
+  it('accepts "anthropic" and "openai" without error', async () => {
+    // Sanity guards: don't regress the valid path. We don't run the full
+    // orchestrator (would need agent mocks); just confirm the validation
+    // doesn't throw on the two valid values. The fork-safety check still
+    // fires because the keys are empty, but that's an `ended: skipped_no_key_*`
+    // outcome — not a thrown error.
+    const input = baseInput({
+      provider_override: 'anthropic',
+      anthropic_api_key: '',
+    });
+    const result = await runOrchestrator(input);
+    expect(result.ended).toBe('skipped_no_key_anthropic');
+
+    const input2 = baseInput({
+      provider_override: 'openai',
+      anthropic_api_key: '',
+      openai_api_key: '',
+    });
+    const result2 = await runOrchestrator(input2);
+    expect(result2.ended).toBe('skipped_no_key_openai');
   });
 });

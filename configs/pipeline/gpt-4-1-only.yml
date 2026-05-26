@@ -1,0 +1,12 @@
+# OpenAI baseline. Same turn budget as sonnet — GPT-4.1 typically resolves
+# investigations in similar turn counts but at lower cost. Use as the
+# OpenAI reference for cross-provider F1 comparisons.
+model: gpt-4.1
+max_turns: 40
+severity:
+  floor: minor
+  max_comments_per_file: 5
+  max_comments_total: 30
+budget:
+  max_input_tokens: 500000
+  max_output_tokens: 50000

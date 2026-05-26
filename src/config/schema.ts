@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
 const eventSchema = z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
+const providerSchema = z.enum(['anthropic', 'openai']);
 
 const scannerCommon = z.object({
   enabled: z.boolean(),
@@ -35,6 +36,7 @@ const experimentalSchema = z.object({
 export const configSchema = z
   .object({
     model: z.string().min(1),
+    provider: providerSchema.optional(),
     max_turns: z.number().int().positive().max(200),
 
     exclude: z.object({

@@ -11,6 +11,7 @@
  */
 import type { PostedComment, Severity, Category } from '../../src/types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
+import type { ProviderId } from '../../src/llm/types.js';
 
 /**
  * One entry in a case's `plants.yml` — what the case author wants planted.
@@ -49,9 +50,23 @@ export interface RunRecord {
   timestamp: string;
   config_resolved: ReviewConfig;
   cost: {
+    /**
+     * Provider that produced this cost record. Marks which billing model
+     * the other fields were computed against (Anthropic includes
+     * `cache_creation_input_tokens`; OpenAI sets that to 0 and stamps
+     * cached_tokens-as-subset into `cache_read_input_tokens`).
+     *
+     * Optional because historical JSON records (pre-OpenAI) lack this
+     * field — declaring it non-optional would be a type lie at the read
+     * boundary. New code that reads this field should coalesce to
+     * `'anthropic'` for undefined values (all pre-OpenAI runs were Claude).
+     * PR #20 self-review minor #3300641276.
+     */
+    provider?: ProviderId;
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens: number;
+    /** Anthropic-only; always 0 for OpenAI (cache writes are free there). */
     cache_creation_input_tokens: number;
     cost_usd: number;
     turns: number;

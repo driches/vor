@@ -16,6 +16,7 @@ import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
 import { dismissPriorAgentReviews } from './github/prior-reviews.js';
 import { postReview } from './github/review-poster.js';
+import { inferProviderFromModel, type LLMProvider, type ProviderId } from './llm/index.js';
 import { ReviewAggregator } from './output/aggregator.js';
 import { logDryRunReview } from './output/dry-run-logger.js';
 import { filterComments } from './output/filter.js';
@@ -63,12 +64,32 @@ export interface OrchestratorInput {
   repo: string;
   pull_number: number;
   anthropic_api_key: string;
+  /** OpenAI API key. Empty string when not configured (fork-PR / Claude-only setups). */
+  openai_api_key: string;
   github_token: string;
   model_override?: string;
+  /**
+   * Explicit provider routing override sourced from action.yml's `provider`
+   * input (env var `INPUT_PROVIDER`). Flat to match `model_override` — each
+   * has independent provenance from the action inputs.
+   */
+  provider_override?: ProviderId;
   max_turns_override?: number;
   config_path: string;
   dry_run: boolean;
   workspace_dir: string;
+  /**
+   * Optional override forwarded to `runAgent`. Production omits this and the
+   * runner uses the real `createProvider`. The eval harness
+   * (`scripts/eval/orchestrator-adapter.ts`) passes a stub here so it can
+   * script per-turn provider responses without mocking `@anthropic-ai/sdk`
+   * or `openai` at module scope. See `RunAgentInput.providerFactory`.
+   */
+  providerFactory?: (input: {
+    modelId: string;
+    apiKey: string;
+    providerHint?: ProviderId;
+  }) => LLMProvider;
 }
 
 export interface OrchestratorOutput {
@@ -80,11 +101,43 @@ export interface OrchestratorOutput {
   dry_run: boolean;
 }
 
+/** Runtime-validate a `provider_override` string from an untrusted source
+ *  (env var, action input, programmatic caller). The `ProviderId` TS type
+ *  doesn't survive across the `as ProviderId | undefined` cast in `index.ts`,
+ *  so a typo like `open-ai` or `claude` would otherwise reach the
+ *  key-selection short-circuit and produce a misleading
+ *  `skipped_no_key_<typo>` outcome instead of failing fast.
+ *  (Codex P2 #3300632002.)
+ */
+function assertValidProviderOverride(value: string | undefined): asserts value is ProviderId | undefined {
+  if (value === undefined || value === 'anthropic' || value === 'openai') return;
+  throw new Error(
+    `Invalid provider_override "${value}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
+  );
+}
+
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
-  registerSecret(input.anthropic_api_key);
+  // Validate provider_override BEFORE anything else so a typo fails fast
+  // with a clear annotation instead of silently skipping the review with a
+  // synthetic ended_reason. Catches both env-var typos (INPUT_PROVIDER set
+  // to 'open-ai') and programmatic test mistakes that bypass the TS type.
+  assertValidProviderOverride(input.provider_override);
+
+  // Skip empty keys to avoid emitting empty `::add-mask::` lines in CI.
+  // `registerSecret` self-guards (length >= 8) but `logger.setSecret` does not
+  // — passing an empty string produces a visible `::add-mask::` workflow
+  // command in the GitHub Actions log. The OpenAI key is empty in
+  // Anthropic-only setups (and vice versa), so we gate both calls per key.
   registerSecret(input.github_token);
-  await logger.setSecret(input.anthropic_api_key);
   await logger.setSecret(input.github_token);
+  if (input.anthropic_api_key) {
+    registerSecret(input.anthropic_api_key);
+    await logger.setSecret(input.anthropic_api_key);
+  }
+  if (input.openai_api_key) {
+    registerSecret(input.openai_api_key);
+    await logger.setSecret(input.openai_api_key);
+  }
 
   await logger.info(
     `Starting code review for ${input.owner}/${input.repo}#${input.pull_number}` +
@@ -120,9 +173,44 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   const config = await loadConfig(input, fileReader, prContext.metadata.head_sha);
   if (input.model_override) config.model = input.model_override;
   if (input.max_turns_override) config.max_turns = input.max_turns_override;
+  // Note: we deliberately do NOT mutate `config.provider = input.provider_override`
+  // here. The precedence chain below handles override-wins-over-config; mutating
+  // would also make any post-resolution reader of `config.provider` see the
+  // override value rather than what the operator's `.code-review.yml` actually
+  // contained, which would be a silent source of confusion. PR #20 self-review
+  // minor #3300684743.
+
+  // Resolve the provider AFTER config is finalized so we know which API key
+  // matters. Precedence: input.provider_override > config.provider > inferred
+  // from model id. inferProviderFromModel throws on an unknown model prefix —
+  // that surfaces as an orchestrator failure, which is the right loud signal.
+  const resolvedProvider: ProviderId =
+    input.provider_override ?? config.provider ?? inferProviderFromModel(config.model);
+  const apiKey =
+    resolvedProvider === 'anthropic' ? input.anthropic_api_key : input.openai_api_key;
+
+  // Fork-PR safety: a PR opened from a fork doesn't see the upstream secrets,
+  // so the resolved-provider's API key is empty. Exit cleanly (no failure)
+  // with a notice so reviewers see why no review appeared. Mirrors the
+  // 'skipped_draft' shape above; informative `ended` suffix lets telemetry
+  // distinguish the two missing-key paths.
+  if (!apiKey) {
+    await logger.notice(
+      `No API key set for provider ${resolvedProvider} (model ${config.model}). ` +
+        `Skipping review (this is expected on PRs from forks unless you have ` +
+        `configured pull_request_target with explicit security review).`,
+    );
+    return {
+      comment_count: 0,
+      ended: `skipped_no_key_${resolvedProvider}`,
+      turns: 0,
+      cost_usd: 0,
+      dry_run: input.dry_run,
+    };
+  }
 
   await logger.info(
-    `Config: model=${config.model}, max_turns=${config.max_turns}, ` +
+    `Config: model=${config.model}, provider=${resolvedProvider}, max_turns=${config.max_turns}, ` +
       `severity_floor=${config.severity.floor}, sticky=${config.review.sticky}, ` +
       `event=${config.review.event}`,
   );
@@ -222,7 +310,17 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     maxTurns: config.max_turns,
     maxInputTokens: config.budget.max_input_tokens,
     maxOutputTokens: config.budget.max_output_tokens,
-    apiKey: input.anthropic_api_key,
+    apiKey,
+    // Always pass the resolved provider — same string we already computed
+    // above. Skips one redundant inferProviderFromModel() call inside the
+    // runner and pins routing even for model ids that match no known prefix
+    // (where the runner's inference would throw).
+    providerHint: resolvedProvider,
+    // Forward an optional providerFactory override. Production callers omit
+    // this; the eval harness injects a scripted FakeProvider here.
+    ...(input.providerFactory !== undefined
+      ? { providerFactory: input.providerFactory }
+      : {}),
   });
   const scannerPromise = runScanners(scanners, scannerDeps);
 

@@ -30,6 +30,7 @@ function truth(over: Partial<TruthEntry> = {}): TruthEntry {
 }
 
 const cost: RunRecord['cost'] = {
+  provider: 'anthropic',
   input_tokens: 100,
   output_tokens: 50,
   cache_read_input_tokens: 0,

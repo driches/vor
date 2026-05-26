@@ -2,14 +2,20 @@
  * Drive the existing src/orchestrator.runOrchestrator against a LoadedCase
  * instead of a real GitHub PR.
  *
- * Strategy: vi.mock the @octokit/rest and @anthropic-ai/sdk modules at module
- * scope so the orchestrator's createOctokit + runAgent get controllable stubs.
- * The case's `files[]` are served via the mocked `repos.getContent` and a
- * synthesized unified diff is served via `pulls.get(mediaType:'diff')`.
+ * Strategy (Task 6):
+ *   - The orchestrator's `providerFactory` input lets us inject a scripted
+ *     `FakeProvider` (implements LLMProvider) without mocking
+ *     `@anthropic-ai/sdk` or `openai` at module scope. Same shape works for
+ *     any provider — Anthropic, OpenAI, or a future addition — no per-vendor
+ *     mock duplication.
+ *   - `@octokit/rest` and its plugins still get mocked at module scope because
+ *     they're orthogonal to LLM provider plumbing: the case's `files[]` are
+ *     served via the mocked `repos.getContent` and a synthesized unified diff
+ *     is served via `pulls.get(mediaType:'diff')`.
  *
- * CAUTION: this file installs vi.mock at module scope. It is TEST-ONLY —
- * importing from production code would replace those modules globally. Only
- * import from scripts/eval/*.test.ts.
+ * CAUTION: this file installs vi.mock at module scope for octokit only. It is
+ * TEST-ONLY — importing from production code would replace those modules
+ * globally. Only import from scripts/eval/*.test.ts.
  */
 import { vi } from 'vitest';
 import { createPatch } from 'diff';
@@ -24,6 +30,17 @@ import {
   CATEGORIES,
 } from '../../src/types.js';
 import { MODEL_PRICING } from '../../src/util/pricing.js';
+import {
+  inferProviderFromModel,
+  inputTokensFullRateFor,
+  type CanonicalMessage,
+  type CanonicalTool,
+  type CanonicalUsage,
+  type CompleteOptions,
+  type CompleteResponse,
+  type LLMProvider,
+  type ProviderId,
+} from '../../src/llm/index.js';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
   'critical',
@@ -51,24 +68,18 @@ function computeCostUsd(cost: AdapterState['costAccum'], model: string): number 
         `or fix the model name in your pipeline config.`,
     );
   }
+  // `cache_creation` / `cache_read` are optional on ModelPricing now that
+  // OpenAI rows landed (OpenAI cache writes are free). Guard with `?? 0` so
+  // a missing rate contributes nothing instead of NaN-poisoning the report.
   return (
     (cost.input_tokens * pricing.input) / 1_000_000 +
     (cost.output_tokens * pricing.output) / 1_000_000 +
-    (cost.cache_creation_input_tokens * pricing.cache_creation) / 1_000_000 +
-    (cost.cache_read_input_tokens * pricing.cache_read) / 1_000_000
+    (cost.cache_creation_input_tokens * (pricing.cache_creation ?? 0)) / 1_000_000 +
+    (cost.cache_read_input_tokens * (pricing.cache_read ?? 0)) / 1_000_000
   );
 }
 
-interface AgentTurnResponse {
-  content: Array<
-    | { type: 'text'; text: string }
-    | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  >;
-  stop_reason: 'end_turn' | 'tool_use';
-}
-
 interface AdapterState {
-  agentScript: AgentTurnResponse[];
   caseFiles: Map<string, string>;
   caseDiff: string;
   filesApi: Array<{ filename: string; changes: number; patch: string | null | undefined }>;
@@ -90,7 +101,6 @@ interface AdapterState {
 // as a known limitation rather than fixing speculatively. See PR #10
 // comment 3294915014.
 const state: AdapterState = {
-  agentScript: [],
   caseFiles: new Map(),
   caseDiff: '',
   filesApi: [],
@@ -108,40 +118,61 @@ const state: AdapterState = {
 // safe for parallel evalRun calls — fail fast rather than silently corrupting.
 let runActive = false;
 
-vi.mock('@anthropic-ai/sdk', () => {
-  class FakeAnthropic {
-    public messages = {
-      create: vi.fn(async () => {
-        state.costAccum.turns += 1;
-        state.costAccum.input_tokens += 100;
-        state.costAccum.output_tokens += 50;
-        const next = state.agentScript.shift();
-        if (!next) {
-          throw new Error('agentScript exhausted — test did not script enough turns');
-        }
-        return {
-          id: 'msg_eval',
-          type: 'message',
-          role: 'assistant',
-          model: 'claude-test',
-          content: next.content,
-          stop_reason: next.stop_reason,
-          stop_sequence: null,
-          usage: {
-            input_tokens: 100,
-            output_tokens: 50,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 0,
-          },
-        };
-      }),
-    };
-    constructor(_opts: { apiKey: string }) {
-      // no-op
-    }
+/**
+ * Scripted provider for the eval harness. Pops one canonical response per
+ * `complete()` call and accumulates usage into the module-scope `state.costAccum`
+ * so the existing per-model `computeCostUsd` pass keeps working unchanged.
+ *
+ * The `id` field is set per-run based on the resolved provider id for the
+ * configured model — the runner reads `provider.id` for logging only, but
+ * keeping it accurate avoids confusing eval-side debug output.
+ */
+export class FakeProvider implements LLMProvider {
+  readonly id: ProviderId;
+  private readonly script: CompleteResponse[];
+  public completeCalls = 0;
+  constructor(id: ProviderId, script: CompleteResponse[]) {
+    this.id = id;
+    // Copy so each evalRun gets a fresh, mutable queue and external callers
+    // can't drain ours by reusing the array.
+    this.script = [...script];
   }
-  return { default: FakeAnthropic };
-});
+  async complete(
+    _messages: CanonicalMessage[],
+    _tools: CanonicalTool[],
+    _opts: CompleteOptions,
+  ): Promise<CompleteResponse> {
+    this.completeCalls += 1;
+    const next = this.script.shift();
+    if (!next) {
+      throw new Error('agentScript exhausted — test did not script enough turns');
+    }
+    // Mirror the per-turn token accumulation the old SDK mock did, with the
+    // same provider-aware input normalization the runner applies via
+    // `inputTokensFullRate`. Without this, an OpenAI script with non-zero
+    // cache_read_tokens would double-charge the cached portion in
+    // `computeCostUsd` (which bills `input_tokens * input_rate +
+    // cache_read_input_tokens * cache_read_rate`), mis-ranking configs by
+    // cost on cache-heavy runs. Codex P2 #3300723609 — same shape as the
+    // runner bug fixed in cb3c820, just in the eval accumulator this time.
+    state.costAccum.turns += 1;
+    state.costAccum.input_tokens += this.inputTokensFullRate(next.usage);
+    state.costAccum.output_tokens += next.usage.output_tokens;
+    state.costAccum.cache_read_input_tokens += next.usage.cache_read_tokens ?? 0;
+    state.costAccum.cache_creation_input_tokens += next.usage.cache_creation_tokens ?? 0;
+    return next;
+  }
+  /**
+   * Delegates to the shared `inputTokensFullRateFor` helper so the eval
+   * harness, the runner, the real adapters, and any test FakeProvider
+   * all share one formula. Without this, a future change to the rule
+   * (e.g. a third provider) would need to touch four call sites in
+   * lockstep — PR #20 self-review #3300871789.
+   */
+  inputTokensFullRate(usage: CanonicalUsage): number {
+    return inputTokensFullRateFor(this.id, usage);
+  }
+}
 
 vi.mock('@octokit/rest', () => {
   class FakeOctokit {
@@ -212,14 +243,24 @@ vi.mock('@octokit/rest', () => {
 vi.mock('@octokit/plugin-retry', () => ({ retry: {} }));
 vi.mock('@octokit/plugin-throttling', () => ({ throttling: {} }));
 
-// Import runOrchestrator AFTER the mocks above are registered.
+// Import runOrchestrator AFTER the octokit mocks above are registered.
 import { runOrchestrator } from '../../src/orchestrator.js';
 
 export interface EvalRunInput {
   case: LoadedCase;
   config: ReviewConfig;
-  anthropicApiKey: string;
-  agentScript: AgentTurnResponse[];
+  /**
+   * API key for the resolved provider. The adapter looks at
+   * `config.model` (and `config.provider` override if present) to figure
+   * out which provider this key belongs to and routes it accordingly.
+   */
+  apiKey: string;
+  /**
+   * One canonical response per turn the agent will take. Provider-agnostic —
+   * the eval harness drives the runner via an injected `FakeProvider`, not
+   * via per-vendor SDK mocks.
+   */
+  agentScript: CompleteResponse[];
 }
 
 export interface EvalRunOutput {
@@ -249,8 +290,15 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
   }
   runActive = true;
   try {
+    // Resolve the provider once so we know which side of the apiKey slot to
+    // populate and which provider id to stamp on the FakeProvider. Same
+    // resolution rules as the production orchestrator: explicit
+    // `config.provider` override wins; otherwise infer from the model id.
+    const providerId: ProviderId =
+      input.config.provider ?? inferProviderFromModel(input.config.model);
+    const fake = new FakeProvider(providerId, input.agentScript);
+
     // Reset shared state for this run.
-    state.agentScript = [...input.agentScript];
     state.caseFiles = new Map(input.case.files.map((f) => [f.path, f.content]));
     const { diff, filesApi } = synthesizeDiff(input.case);
     state.caseDiff = diff;
@@ -267,7 +315,22 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
     // serve a serialized form of the supplied config so the orchestrator picks
     // up exactly what the test asked for.
-    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
+    //
+    // Force-disable `experimental.worker_delegation` for the eval-run
+    // sandbox: the providerFactory injection only stubs `provider.complete()`
+    // on the MAIN agent loop. The pre-flight Haiku call and the
+    // worker_check_usage_claim tool both construct their own real
+    // `new Anthropic({ apiKey })` instances inside runAgent — meaning a
+    // case config with worker_delegation.enabled = true would hit the live
+    // Anthropic API (or fail outright with the dummy `sk-ant-test` key),
+    // bypassing the sandbox and skewing eval results. We deep-clone the
+    // config first so the caller's object isn't mutated. Codex P2
+    // #3300812876.
+    const sandboxedConfig: ReviewConfig = JSON.parse(
+      JSON.stringify(input.config),
+    ) as ReviewConfig;
+    sandboxedConfig.experimental.worker_delegation.enabled = false;
+    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(sandboxedConfig));
 
     const wallStart = Date.now();
     // Do NOT swallow runOrchestrator exceptions. Converting them into a
@@ -282,11 +345,19 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       owner: 'eval',
       repo: 'eval',
       pull_number: 1,
-      anthropic_api_key: input.anthropicApiKey,
+      // Only populate the slot that matches the resolved provider. The other
+      // stays empty — the orchestrator's fork-safety check would otherwise
+      // trip if the wrong key were placed where the model expects it.
+      anthropic_api_key: providerId === 'anthropic' ? input.apiKey : '',
+      openai_api_key: providerId === 'openai' ? input.apiKey : '',
       github_token: 'gh-test',
       config_path: '.code-review.yml',
       dry_run: false,
       workspace_dir: '/tmp/eval',
+      // Inject the scripted FakeProvider. The orchestrator forwards this to
+      // runAgent which uses it instead of `createProvider`. Real vendor SDKs
+      // are never instantiated in eval runs.
+      providerFactory: () => fake,
     });
     const endedReason = out.ended;
     const wall_ms = Math.max(1, Date.now() - wallStart);
@@ -305,6 +376,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     return {
       findings,
       cost: {
+        provider: providerId,
         ...state.costAccum,
         cost_usd: computeCostUsd(state.costAccum, input.config.model),
         wall_ms,

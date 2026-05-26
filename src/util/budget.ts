@@ -64,7 +64,7 @@ export class Budget {
    * counts BILLABLE input (non-cached input + cache_creation) across all
    * models, NOT cache reads — cache_read is billed at 0.1× and counting it
    * would make the default cap fire on turn 1 of any cached run. See
-   * billableInputTokensForBudget in runner.ts for the asymmetry rationale.
+   * inputTokensFullRate in runner.ts for the asymmetry rationale.
    *
    * Checks run BEFORE the mutation so a thrown BudgetError leaves state
    * untouched. Preserves the invariant "throw iff cap exceeded, otherwise

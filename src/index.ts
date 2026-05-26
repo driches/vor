@@ -4,26 +4,42 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import type { ProviderId } from './llm/types.js';
 import { runOrchestrator } from './orchestrator.js';
 import { logger } from './util/logger.js';
 
 async function main(): Promise<void> {
   const anthropic_api_key = process.env.ANTHROPIC_API_KEY?.trim() ?? '';
+  const openai_api_key = process.env.OPENAI_API_KEY?.trim() ?? '';
   const github_token = process.env.GITHUB_TOKEN?.trim() ?? '';
   const dry_run = (process.env.INPUT_DRY_RUN ?? 'false').toLowerCase() === 'true';
   const model_override = process.env.INPUT_MODEL?.trim() || undefined;
+  // Validate INPUT_PROVIDER at the env-var boundary so a typo like
+  // `open-ai` fails with a clear error annotation instead of silently
+  // skipping the run later as `skipped_no_key_open-ai`. The orchestrator
+  // also runtime-validates `provider_override` as defense-in-depth for
+  // any programmatic caller — but the env-var path is the common one
+  // and deserves a dedicated, specific error message.
+  const raw_provider = process.env.INPUT_PROVIDER?.trim() || undefined;
+  if (
+    raw_provider !== undefined &&
+    raw_provider !== 'anthropic' &&
+    raw_provider !== 'openai'
+  ) {
+    await logger.error(
+      `Invalid INPUT_PROVIDER "${raw_provider}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const provider_override: ProviderId | undefined = raw_provider;
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
   const config_path = process.env.INPUT_CONFIG_PATH?.trim() || '.code-review.yml';
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
 
-  // Fork-PR safety: no key → exit 0 with a clear message.
-  if (!anthropic_api_key) {
-    await logger.notice(
-      'ANTHROPIC_API_KEY is not set. Skipping review (this is expected on PRs from forks ' +
-        'unless you have configured pull_request_target with explicit security review).',
-    );
-    return;
-  }
+  // Fork-PR safety lives in the orchestrator now (it has to wait until config
+  // is loaded so it knows which provider's key matters). github_token still
+  // gets checked early — it's needed regardless of provider.
   if (!github_token) {
     await logger.error('GITHUB_TOKEN is not set. Cannot fetch PR or post review.');
     process.exitCode = 1;
@@ -70,8 +86,10 @@ async function main(): Promise<void> {
       repo,
       pull_number,
       anthropic_api_key,
+      openai_api_key,
       github_token,
       ...(model_override !== undefined ? { model_override } : {}),
+      ...(provider_override !== undefined ? { provider_override } : {}),
       ...(max_turns_override !== undefined ? { max_turns_override } : {}),
       config_path,
       dry_run,

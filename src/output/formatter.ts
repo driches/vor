@@ -156,6 +156,8 @@ function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): stri
   const reasons: Record<RunAgentResult['ended'], string> = {
     summary_posted: '', // Unreachable: we only call this when summary is missing.
     max_turns: 'the model stopped replying before calling `post_summary`',
+    output_truncated:
+      'the response hit the per-request output token cap mid-stream (consider raising `budget.max_output_tokens`)',
     budget_exceeded: 'the run exceeded a configured budget (turns or tokens)',
     aborted: 'the agent run was aborted',
     error: 'the agent run errored out',

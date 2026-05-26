@@ -1,7 +1,15 @@
+import type { ProviderId } from '../llm/types.js';
 import type { Severity, ReviewEvent } from '../types.js';
 
 export interface ReviewConfig {
   model: string;
+  /**
+   * Explicit LLM provider override. When omitted, the provider is inferred
+   * from `model` (`claude-*` → anthropic, `gpt-*` / `o<digit>*` / `chatgpt-*`
+   * → openai). Set this when using a model id that doesn't match a known
+   * prefix.
+   */
+  provider?: ProviderId;
   max_turns: number;
 
   exclude: {
