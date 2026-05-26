@@ -24,6 +24,11 @@ const semgrepSchema = z.object({
 
 const sastSchema = scannerCommon.extend({
   semgrep: semgrepSchema.optional(),
+  // tsc gets an explicit per-linter opt-out (the rest of the SAST linters
+  // quietly no-op when their binary isn't installed; tsc's binary is
+  // present in most npm-install'd workspaces, so operators may legitimately
+  // want it OFF without disabling all of sast).
+  tsc: z.object({ enabled: z.boolean().optional() }).optional(),
 });
 
 const securitySchema = z.object({

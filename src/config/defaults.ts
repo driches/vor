@@ -83,9 +83,16 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       // rule pack under `.code-review/semgrep-rules/` (N+1, sync-in-async,
       // raw SQL, missing auth). When the directory is absent, semgrep is
       // configured exactly as before — no behavior change for old configs.
+      //
+      // tsc subflag (default on) runs `tsc --noEmit` against the project
+      // when tsconfig.json + node_modules/.bin/tsc are both present. Opt
+      // out per-repo via `security.scanners.sast.tsc.enabled: false` (the
+      // top-level `sast.enabled: false` flag still disables it along with
+      // every other linter).
       sast: {
         enabled: true,
         semgrep: { custom_rules_path: '.code-review/semgrep-rules' },
+        tsc: { enabled: true },
       },
       container_cve: { enabled: false },
     },

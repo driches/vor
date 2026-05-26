@@ -44,6 +44,7 @@ import { dartLinter } from './sast/dart.js';
 import { actionlintLinter } from './sast/actionlint.js';
 import { knipLinter } from './sast/knip.js';
 import { semgrepLinter } from './sast/semgrep.js';
+import { tscLinter } from './sast/tsc.js';
 import type { LinterModule } from './sast/linter.js';
 
 const SCANNER_ID: ScannerId = 'sast';
@@ -59,6 +60,7 @@ const LINTERS: readonly LinterModule[] = [
   actionlintLinter,
   knipLinter,
   semgrepLinter,
+  tscLinter,
 ];
 
 /**
