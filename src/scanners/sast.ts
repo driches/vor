@@ -90,27 +90,27 @@ export const sastScannerStub: Scanner = createSastScanner();
 
 async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
   const startTime = Date.now();
-  const applicable = LINTERS.filter((l) => l.applies(deps.changedFiles));
+  // Pre-filter once: removed files don't exist in the checked-out HEAD
+  // and shouldn't influence linter activation or selection. Both the
+  // applicable check and the per-linter target filter below operate on
+  // this set, so a PR that only DELETES TS/JS files won't trigger any
+  // linter — including knip, which ignores the file list and always
+  // does whole-project analysis (no point in spending its budget when
+  // no reviewable findings can result).
+  const liveFiles = deps.changedFiles.filter((f) => f.status !== 'removed');
+  const applicable = LINTERS.filter((l) => l.applies(liveFiles));
   if (applicable.length === 0) {
     return emptyResult(SCANNER_ID, Date.now() - startTime);
   }
 
-  // For each applicable linter, filter changedFiles to JUST its scope
-  // (so ESLint isn't invoked on .py files, ruff isn't invoked on .ts
-  // files, etc.). The per-linter `applies()` is the predicate.
-  //
-  // Drop `status: 'removed'` entries before handing to a linter. Removed
-  // paths don't exist in the checked-out HEAD; CLIs like ruff, dart, and
-  // actionlint treat missing targets as runtime errors and would fail the
-  // whole linter run — meaning a PR that deletes one .py and edits another
-  // would lose Python coverage on the edited file too.
+  // For each applicable linter, filter to JUST its scope (so ESLint isn't
+  // invoked on .py files, ruff isn't invoked on .ts files, etc.). The
+  // per-linter `applies()` is the predicate.
   const runs = await Promise.allSettled(
     applicable.map((linter) =>
       linter.run(
         deps,
-        deps.changedFiles.filter(
-          (f) => f.status !== 'removed' && linter.applies([f]),
-        ),
+        liveFiles.filter((f) => linter.applies([f])),
       ),
     ),
   );

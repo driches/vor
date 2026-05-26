@@ -56691,7 +56691,8 @@ function createSastScanner() {
 var sastScannerStub = createSastScanner();
 async function orchestrate(deps) {
   const startTime = Date.now();
-  const applicable = LINTERS.filter((l2) => l2.applies(deps.changedFiles));
+  const liveFiles = deps.changedFiles.filter((f2) => f2.status !== "removed");
+  const applicable = LINTERS.filter((l2) => l2.applies(liveFiles));
   if (applicable.length === 0) {
     return emptyResult(SCANNER_ID3, Date.now() - startTime);
   }
@@ -56699,9 +56700,7 @@ async function orchestrate(deps) {
     applicable.map(
       (linter) => linter.run(
         deps,
-        deps.changedFiles.filter(
-          (f2) => f2.status !== "removed" && linter.applies([f2])
-        )
+        liveFiles.filter((f2) => linter.applies([f2]))
       )
     )
   );
