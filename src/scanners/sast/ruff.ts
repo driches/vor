@@ -132,11 +132,15 @@ function locateBin(workspaceDir: string): ResolvedBinary {
     path.join(workspaceDir, 'node_modules', '.bin', 'ruff'),
   ]);
   if (ws !== null) return ws;
-  // PATH-resolved is just 'ruff' — Node's spawn honors PATHEXT on
-  // Windows for bare-name lookups, so this works on both platforms.
-  // ENOENT here is caught by runCli's error handler and becomes a
-  // quiet skip.
-  return { path: 'ruff', needsShell: false };
+  // PATH-resolved is just 'ruff'. On Windows, global pip installs land
+  // as `ruff.cmd` shims that Node's libuv `spawn` with `shell: false`
+  // cannot execute — it can only resolve `.exe` for bare names. Force
+  // shell:true on Windows so cmd.exe honors PATHEXT and finds the shim.
+  // Mirrors the knip.ts PATH-fallback decision and the same Codex P2
+  // fix from earlier in this PR. ENOENT here is caught by runCli's
+  // error handler and becomes a quiet skip.
+  const isWindows = process.platform === 'win32';
+  return { path: 'ruff', needsShell: isWindows };
 }
 
 function runCli(

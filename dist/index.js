@@ -55690,7 +55690,7 @@ function buildFinding2(filePath, message, changedFile) {
   const severity = message.severity === 2 ? "important" : message.severity === 1 ? "minor" : "nit";
   const category = categorize(message.ruleId ?? "unknown");
   const confidence = "high";
-  const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
+  const fingerprint = `${ID}:${message.ruleId ?? "unknown"}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
   const endLine = message.endLine;
@@ -55803,7 +55803,8 @@ function locateBin(workspaceDir) {
     import_node_path8.default.join(workspaceDir, "node_modules", ".bin", "ruff")
   ]);
   if (ws !== null) return ws;
-  return { path: "ruff", needsShell: false };
+  const isWindows2 = process.platform === "win32";
+  return { path: "ruff", needsShell: isWindows2 };
 }
 function runCli2(bin, files, deps) {
   return new Promise((resolve3, reject) => {

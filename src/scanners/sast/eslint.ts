@@ -227,7 +227,12 @@ function buildFinding(
     message.severity === 2 ? 'important' : message.severity === 1 ? 'minor' : 'nit';
   const category: Category = categorize(message.ruleId ?? 'unknown');
   const confidence: Confidence = 'high';
-  const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
+  // Use the same `?? 'unknown'` coalescence as rule_id (further down)
+  // so the dedup keys stay consistent. Parse errors set ruleId:null,
+  // and a literal `'null'` segment in the fingerprint would cause the
+  // file_path+line+rule_id dedup key to disagree with the fingerprint
+  // key — risking duplicate posts of the same parse error.
+  const fingerprint = `${ID}:${message.ruleId ?? 'unknown'}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
   // Anchor the finding to the START line (the line ESLint actually
