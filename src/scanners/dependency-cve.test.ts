@@ -1027,13 +1027,24 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
       ],
     };
 
-    // Each getVuln sleeps 50ms before returning a shaped vuln. If the calls
-    // run serially the total cost is ~150ms; in parallel it's ~50ms.
-    const SLEEP_MS = 50;
-    // 3 * 50ms = 150ms serial. Threshold sits ~20ms below serial so jitter
-    // (GC pauses, slow CI runners) doesn't cause flakes while still being
-    // unambiguously parallel (a serial run would be ≥150ms).
-    const PARALLEL_THRESHOLD_MS = 145;
+    // Each getVuln sleeps SLEEP_MS before returning. Serial cost is
+    // 3 × SLEEP_MS; parallel cost is ~SLEEP_MS. Threshold sits between the
+    // two with real headroom on both sides.
+    //
+    // SLEEP_MS = 200, THRESHOLD = 400 means:
+    //   parallel baseline ≈ 200ms, +200ms jitter slack before tripping
+    //   serial baseline = 600ms, -200ms below the cap is impossible
+    //
+    // The PR #28 history is instructive: the original cap (145ms above
+    // a 50ms sleep) was 95ms above perfect-parallel and 5ms below serial,
+    // which made it both flake-prone AND tight. The first proposed fix
+    // (bump to 300ms) absorbed jitter but accepted serial (150ms < 300ms)
+    // — Codex flagged correctly. The second attempt (concurrency probe
+    // with a 200ms safety timer) caught regressions deterministically but
+    // hung CI workers twice in a row on the same SHA, so we're back to a
+    // timing assertion with fixture sizes that give it real margin.
+    const SLEEP_MS = 200;
+    const PARALLEL_THRESHOLD_MS = 400;
     const osvClient: OsvClient = {
       queryBatch: vi.fn().mockResolvedValue(batchResp),
       getVuln: vi.fn().mockImplementation(async (id: string) => {
@@ -1057,8 +1068,9 @@ describe('createDependencyCveScanner — parallel getVuln', () => {
 
     expect(osvClient.getVuln).toHaveBeenCalledTimes(3);
     expect(result.findings.length).toBeGreaterThanOrEqual(3);
-    // Parallel: should be < ~150ms (3 * 50ms serial). Threshold is generous
-    // to absorb CI jitter while still distinguishing parallel from serial.
+    // A serial run is 600ms (3 × 200ms) — well above the 400ms cap, with
+    // no plausible CI jitter that closes the 200ms gap. A parallel run is
+    // ~200ms with 200ms of jitter slack before tripping the cap.
     expect(elapsed).toBeLessThan(PARALLEL_THRESHOLD_MS);
   });
 });
