@@ -55503,7 +55503,7 @@ var SHELL_UNSAFE_FILENAME_CHARS = /[&|;<>()$`"'\\!*?~%^\t\n\r]/;
 function isShellSafePath(p2) {
   return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
 }
-var MAX_LINTER_STDOUT_BYTES = 50 * 1024 * 1024;
+var MAX_LINTER_STDOUT_BYTES = 200 * 1024 * 1024;
 function filterShellSafePaths(paths, needsShell) {
   const safe = [];
   const dropped = [];
