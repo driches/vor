@@ -145,9 +145,13 @@ async function runOne(
   }
 
   const timeoutController = new AbortController();
+  // Scanner-specific override wins over the runner-wide default. sast
+  // declares a longer budget because it bundles semgrep, which downloads
+  // rules and scans cross-language and can take >60s on big repos.
+  const effectiveTimeoutMs = scanner.timeoutMs ?? opts.perScannerTimeoutMs;
   const timer = setTimeout(
     () => timeoutController.abort(),
-    opts.perScannerTimeoutMs,
+    effectiveTimeoutMs,
   );
   const combinedSignal = anySignal(deps.signal, timeoutController.signal);
   const scopedDeps: ScannerDeps = { ...deps, signal: combinedSignal };
@@ -181,7 +185,7 @@ async function runOne(
     // but the message format is different so the run summary can attribute
     // correctly.
     if (timeoutController.signal.aborted) {
-      const message = `scanner ${scanner.id} timed out after ${opts.perScannerTimeoutMs}ms`;
+      const message = `scanner ${scanner.id} timed out after ${effectiveTimeoutMs}ms`;
       void opts.logger.warn(message);
       return errorResult(scanner.id, started, message);
     }

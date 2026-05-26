@@ -56275,7 +56275,8 @@ function locateBin2(workspaceDir) {
     import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "knip")
   ]);
   if (ws !== null) return ws;
-  return { path: "knip", needsShell: false };
+  const isWindows2 = process.platform === "win32";
+  return { path: "knip", needsShell: isWindows2 };
 }
 function runCli5(bin, deps) {
   return new Promise((resolve3, reject) => {
@@ -56580,9 +56581,11 @@ var LINTERS = [
   knipLinter,
   semgrepLinter
 ];
+var SAST_TIMEOUT_MS = 18e4;
 function createSastScanner() {
   return {
     id: SCANNER_ID3,
+    timeoutMs: SAST_TIMEOUT_MS,
     applies(files) {
       return LINTERS.some((l2) => l2.applies(files));
     },
@@ -56724,9 +56727,10 @@ async function runOne(scanner, deps, opts) {
     return emptyResult(scanner.id, Date.now() - started);
   }
   const timeoutController = new AbortController();
+  const effectiveTimeoutMs = scanner.timeoutMs ?? opts.perScannerTimeoutMs;
   const timer = setTimeout(
     () => timeoutController.abort(),
-    opts.perScannerTimeoutMs
+    effectiveTimeoutMs
   );
   const combinedSignal = anySignal(deps.signal, timeoutController.signal);
   const scopedDeps = { ...deps, signal: combinedSignal };
@@ -56745,7 +56749,7 @@ async function runOne(scanner, deps, opts) {
     return await Promise.race([scanner.scan(scopedDeps), abortPromise]);
   } catch (err) {
     if (timeoutController.signal.aborted) {
-      const message2 = `scanner ${scanner.id} timed out after ${opts.perScannerTimeoutMs}ms`;
+      const message2 = `scanner ${scanner.id} timed out after ${effectiveTimeoutMs}ms`;
       void opts.logger.warn(message2);
       return errorResult(scanner.id, started, message2);
     }

@@ -23,6 +23,15 @@ export interface Scanner {
   /** Cheap pre-check; skip scan() entirely when this returns false. */
   applies(files: readonly ChangedFile[]): boolean;
   scan(deps: ScannerDeps): Promise<ScanResult>;
+  /**
+   * Optional per-scanner timeout override. The runner uses this in place of
+   * `DEFAULT_PER_SCANNER_TIMEOUT_MS` when set. Useful for scanners that
+   * legitimately need a longer budget (e.g. `sast` runs semgrep with
+   * `--config=auto`, which downloads rules and scans across languages and
+   * can exceed the 60s default on large repos). Leave unset to inherit
+   * the runner default.
+   */
+  readonly timeoutMs?: number;
 }
 
 /**

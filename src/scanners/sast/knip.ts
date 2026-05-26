@@ -177,10 +177,16 @@ function locateBin(workspaceDir: string): ResolvedBinary {
     path.join(workspaceDir, 'node_modules', '.bin', 'knip'),
   ]);
   if (ws !== null) return ws;
-  // PATH lookup — Node's spawn honors PATHEXT on Windows for bare-name
-  // lookups. ENOENT here is caught by runCli and surfaces as a quiet
-  // skip (no knip installed).
-  return { path: 'knip', needsShell: false };
+  // PATH lookup. On Windows, global npm installs land as `knip.cmd` shims —
+  // Node's libuv `spawn` with `shell: false` only resolves `.exe` for bare
+  // names; it cannot execute `.cmd`/`.bat` directly and ENOENTs silently.
+  // Force shell:true on Windows so cmd.exe honors PATHEXT and finds the
+  // shim. No file paths are passed in argv (we run `knip --reporter json`
+  // with no file targets), so the shell:true path has no filename-driven
+  // injection surface here — but if that ever changes, filterShellSafePaths
+  // is available the same way ruff/eslint use it.
+  const isWindows = process.platform === 'win32';
+  return { path: 'knip', needsShell: isWindows };
 }
 
 function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {

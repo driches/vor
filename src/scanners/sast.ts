@@ -61,9 +61,19 @@ const LINTERS: readonly LinterModule[] = [
   semgrepLinter,
 ];
 
+/**
+ * Extended timeout because the bundled semgrep linter runs `--config=auto`,
+ * which downloads its ruleset on first invocation and then scans across
+ * every detected language. On a sizable monorepo that easily exceeds the
+ * 60s runner default and would otherwise be aborted before producing
+ * findings — see semgrep.ts TIMEOUT_MS for the linter-internal cap.
+ */
+const SAST_TIMEOUT_MS = 180_000;
+
 export function createSastScanner(): Scanner {
   return {
     id: SCANNER_ID,
+    timeoutMs: SAST_TIMEOUT_MS,
     applies(files: readonly ChangedFile[]): boolean {
       return LINTERS.some((l) => l.applies(files));
     },
