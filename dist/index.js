@@ -49067,38 +49067,21 @@ function buildSystemPrompt(input) {
 }
 var STATIC_ANALYSIS_SECTION = `# Static analysis runs in parallel
 
-This repo runs language-appropriate static tools alongside your review. They produce findings independently and you DO NOT see their output, but they catch the deterministic stuff:
+This repo runs language-appropriate static tools alongside your review (you don't see their output, but they post findings independently): ESLint and knip for TS/JS, ruff for Python, dart analyze for Dart/Flutter, actionlint for GitHub Actions workflows, and Semgrep with the auto-detected ruleset for cross-language security and bug patterns. They handle the deterministic stuff well \u2014 type errors, unused exports, common security anti-patterns, lint violations.
 
-- **TypeScript/JavaScript**: ESLint (rule violations), knip (unused exports / types / duplicates)
-- **Python**: ruff (style, common bugs, security with the S-rules)
-- **Dart / Flutter**: dart analyze (compile + analyzer warnings)
-- **GitHub Actions workflows**: actionlint (expression errors, schema, runner labels)
-- **All popular languages**: Semgrep with --config=auto (security anti-patterns \u2014 SQL injection, XSS, hardcoded secrets, command injection \u2014 plus common bug patterns and code smells)
+**Where your judgment adds the most value** (these are things linters can't express):
 
-**What this means for your turns:**
+- **Semantic correctness** \u2014 does this code actually do what its name claims? Is the business logic right?
+- **Design coherence** \u2014 does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
+- **Architectural concerns** \u2014 tight coupling, circular dependencies waiting to happen, bypassing an existing layer.
+- **Concurrency** \u2014 race conditions, missing locks, ordering assumptions, unhandled cancellation.
+- **Public API changes** \u2014 breaking a contract used by multiple callers, removing a field someone depends on.
+- **Missing tests on new core logic** \u2014 where would a regression silently slip through?
+- **Edge cases linters can't model** \u2014 null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc.
 
-DO NOT spend turns on:
-- Unused variables, unused exports, unused imports \u2014 knip/eslint/ruff handle this
-- Missing return types, no-explicit-any, no-floating-promises \u2014 eslint
-- "Is this function called anywhere?" via grep \u2014 knip and the AST tools answer this directly
-- Hardcoded secrets, SQL string concatenation, command injection, common XSS \u2014 semgrep
-- GitHub Actions workflow YAML syntax / schema / runner-label errors \u2014 actionlint
-- "Did the author forget to await this Promise?" \u2014 eslint's no-floating-promises catches it
-- Common Python idioms / style \u2014 ruff
-- Standard Flutter / Dart lints \u2014 dart analyze
+Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) \u2014 flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
 
-DO spend your turns on:
-- **Semantic correctness**: does this code actually do what its name claims? Is the business logic right?
-- **Design coherence**: does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
-- **Architectural concerns**: is this introducing tight coupling? A circular dep waiting to happen? Bypassing an existing layer?
-- **Concurrency / threading**: race conditions, missing locks, ordering assumptions, unhandled cancellation
-- **Public API changes**: breaking a contract used by multiple callers, removing a field someone depends on
-- **Missing tests on new core logic**: where would a regression silently slip through?
-- **Edge cases linters can't model**: null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc
-
-**Caveat (read this):** Static tools may not be installed in every workspace. Each linter quietly no-ops when its binary is missing. If you SEE an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) \u2014 STILL FLAG IT as a safety net. Just don't make lint-style issues your investigation focus.
-
-**Verification discipline is unchanged.** When you do find something semantic to post, you still read the bytes via \`read_file_at_ref\` before posting critical or important findings. Static analysis doesn't bypass that \u2014 it changes WHERE you spend your turns, not whether you verify.`;
+**Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
 var BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal
@@ -55437,10 +55420,8 @@ var import_node_path7 = __toESM(require("node:path"), 1);
 // src/scanners/sast/linter.ts
 var import_node_path6 = __toESM(require("node:path"), 1);
 function normalizeToolPath(workspaceDir, toolPath) {
-  if (import_node_path6.default.isAbsolute(toolPath)) {
-    return import_node_path6.default.relative(workspaceDir, toolPath);
-  }
-  return import_node_path6.default.normalize(toolPath);
+  const normalized = import_node_path6.default.isAbsolute(toolPath) ? import_node_path6.default.relative(workspaceDir, toolPath) : import_node_path6.default.normalize(toolPath);
+  return normalized.split(import_node_path6.default.sep).join("/");
 }
 
 // src/scanners/sast/eslint.ts
@@ -55486,7 +55467,7 @@ var eslintLinter = {
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
         if (message.ruleId === null) continue;
-        findings.push(buildFinding2(changedFile.path, message));
+        findings.push(buildFinding2(changedFile.path, message, changedFile));
       }
     }
     return { findings, errors, filesExamined: targetFiles.length };
@@ -55542,19 +55523,21 @@ function runCli(bin, files, deps) {
     });
   });
 }
-function buildFinding2(filePath, message) {
+function buildFinding2(filePath, message, changedFile) {
   const severity = message.severity === 2 ? "important" : "minor";
   const category = categorize(message.ruleId ?? "unknown");
   const confidence = "high";
   const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
+  const endLine = message.endLine;
+  const useRange = endLine !== void 0 && endLine > message.line && changedFile.added_lines.has(endLine);
   return {
     scanner: "sast",
     rule_id: `${ID}/${message.ruleId ?? "unknown"}`,
     file_path: filePath,
-    line: message.line,
-    ...message.endLine !== void 0 && message.endLine > message.line ? { start_line: message.line, line: message.endLine } : {},
+    line: useRange ? endLine : message.line,
+    ...useRange ? { start_line: message.line } : {},
     severity,
     category,
     title,
@@ -56260,7 +56243,7 @@ var semgrepLinter = {
       const changedFile = deps.changedFiles.find((f2) => f2.path === relPath);
       if (changedFile === void 0) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
-      findings.push(buildFinding6(changedFile.path, result));
+      findings.push(buildFinding6(changedFile.path, result, changedFile));
     }
     return { findings, errors, filesExamined: targetFiles.length };
   }
@@ -56323,21 +56306,22 @@ function runCli6(files, deps) {
     });
   });
 }
-function buildFinding6(filePath, result) {
+function buildFinding6(filePath, result, changedFile) {
   const severity = severityFromSemgrep(result.extra.severity);
   const category = categorize5(result);
   const confidence = "high";
   const fingerprint = `${ID6}:${result.check_id}:${filePath}:${result.start.line}`;
-  const line = result.start.line;
+  const startLine = result.start.line;
   const endLine = result.end?.line;
+  const useRange = endLine !== void 0 && endLine > startLine && changedFile.added_lines.has(endLine);
   const cweRaw = result.extra.metadata?.cwe;
   const cwe = Array.isArray(cweRaw) ? cweRaw : cweRaw !== void 0 ? [cweRaw] : [];
   return {
     scanner: "sast",
     rule_id: `${ID6}/${result.check_id}`,
     file_path: filePath,
-    line,
-    ...endLine !== void 0 && endLine > line ? { start_line: line, line: endLine } : {},
+    line: useRange ? endLine : startLine,
+    ...useRange ? { start_line: startLine } : {},
     severity,
     category,
     title: renderTitle5(result),

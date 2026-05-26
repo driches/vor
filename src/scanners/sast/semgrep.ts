@@ -96,7 +96,7 @@ export const semgrepLinter: LinterModule = {
       const changedFile = deps.changedFiles.find((f) => f.path === relPath);
       if (changedFile === undefined) continue;
       if (!changedFile.added_lines.has(result.start.line)) continue;
-      findings.push(buildFinding(changedFile.path, result));
+      findings.push(buildFinding(changedFile.path, result, changedFile));
     }
 
     return { findings, errors, filesExamined: targetFiles.length };
@@ -169,23 +169,33 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
   });
 }
 
-function buildFinding(filePath: string, result: SemgrepResult): ScanFinding {
+function buildFinding(
+  filePath: string,
+  result: SemgrepResult,
+  changedFile: { added_lines: ReadonlySet<number> },
+): ScanFinding {
   const severity: Severity = severityFromSemgrep(result.extra.severity);
   const category: Category = categorize(result);
   const confidence: Confidence = 'high';
   const fingerprint = `${ID}:${result.check_id}:${filePath}:${result.start.line}`;
-  const line = result.start.line;
+  const startLine = result.start.line;
   const endLine = result.end?.line;
+  // Anchor on the START line. Only attach a multi-line range when BOTH
+  // endpoints are reviewable; otherwise the validator would drop the
+  // finding for a violation that starts on an added line but extends
+  // into context lines.
+  const useRange =
+    endLine !== undefined &&
+    endLine > startLine &&
+    changedFile.added_lines.has(endLine);
   const cweRaw = result.extra.metadata?.cwe;
   const cwe = Array.isArray(cweRaw) ? cweRaw : cweRaw !== undefined ? [cweRaw] : [];
   return {
     scanner: 'sast',
     rule_id: `${ID}/${result.check_id}`,
     file_path: filePath,
-    line,
-    ...(endLine !== undefined && endLine > line
-      ? { start_line: line, line: endLine }
-      : {}),
+    line: useRange ? endLine : startLine,
+    ...(useRange ? { start_line: startLine } : {}),
     severity,
     category,
     title: renderTitle(result),

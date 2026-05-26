@@ -69,38 +69,21 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
  */
 const STATIC_ANALYSIS_SECTION = `# Static analysis runs in parallel
 
-This repo runs language-appropriate static tools alongside your review. They produce findings independently and you DO NOT see their output, but they catch the deterministic stuff:
+This repo runs language-appropriate static tools alongside your review (you don't see their output, but they post findings independently): ESLint and knip for TS/JS, ruff for Python, dart analyze for Dart/Flutter, actionlint for GitHub Actions workflows, and Semgrep with the auto-detected ruleset for cross-language security and bug patterns. They handle the deterministic stuff well — type errors, unused exports, common security anti-patterns, lint violations.
 
-- **TypeScript/JavaScript**: ESLint (rule violations), knip (unused exports / types / duplicates)
-- **Python**: ruff (style, common bugs, security with the S-rules)
-- **Dart / Flutter**: dart analyze (compile + analyzer warnings)
-- **GitHub Actions workflows**: actionlint (expression errors, schema, runner labels)
-- **All popular languages**: Semgrep with --config=auto (security anti-patterns — SQL injection, XSS, hardcoded secrets, command injection — plus common bug patterns and code smells)
+**Where your judgment adds the most value** (these are things linters can't express):
 
-**What this means for your turns:**
+- **Semantic correctness** — does this code actually do what its name claims? Is the business logic right?
+- **Design coherence** — does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
+- **Architectural concerns** — tight coupling, circular dependencies waiting to happen, bypassing an existing layer.
+- **Concurrency** — race conditions, missing locks, ordering assumptions, unhandled cancellation.
+- **Public API changes** — breaking a contract used by multiple callers, removing a field someone depends on.
+- **Missing tests on new core logic** — where would a regression silently slip through?
+- **Edge cases linters can't model** — null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc.
 
-DO NOT spend turns on:
-- Unused variables, unused exports, unused imports — knip/eslint/ruff handle this
-- Missing return types, no-explicit-any, no-floating-promises — eslint
-- "Is this function called anywhere?" via grep — knip and the AST tools answer this directly
-- Hardcoded secrets, SQL string concatenation, command injection, common XSS — semgrep
-- GitHub Actions workflow YAML syntax / schema / runner-label errors — actionlint
-- "Did the author forget to await this Promise?" — eslint's no-floating-promises catches it
-- Common Python idioms / style — ruff
-- Standard Flutter / Dart lints — dart analyze
+Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
 
-DO spend your turns on:
-- **Semantic correctness**: does this code actually do what its name claims? Is the business logic right?
-- **Design coherence**: does this fit how the rest of the codebase is structured? Is the abstraction at the right level?
-- **Architectural concerns**: is this introducing tight coupling? A circular dep waiting to happen? Bypassing an existing layer?
-- **Concurrency / threading**: race conditions, missing locks, ordering assumptions, unhandled cancellation
-- **Public API changes**: breaking a contract used by multiple callers, removing a field someone depends on
-- **Missing tests on new core logic**: where would a regression silently slip through?
-- **Edge cases linters can't model**: null handling on the unhappy path, off-by-one in a custom path-prefix check, integer overflow in a domain-specific calc
-
-**Caveat (read this):** Static tools may not be installed in every workspace. Each linter quietly no-ops when its binary is missing. If you SEE an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — STILL FLAG IT as a safety net. Just don't make lint-style issues your investigation focus.
-
-**Verification discipline is unchanged.** When you do find something semantic to post, you still read the bytes via \`read_file_at_ref\` before posting critical or important findings. Static analysis doesn't bypass that — it changes WHERE you spend your turns, not whether you verify.`;
+**Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
 
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.

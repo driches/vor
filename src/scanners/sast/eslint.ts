@@ -77,7 +77,7 @@ export const eslintLinter: LinterModule = {
       for (const message of fileResult.messages) {
         if (!changedFile.added_lines.has(message.line)) continue;
         if (message.ruleId === null) continue;
-        findings.push(buildFinding(changedFile.path, message));
+        findings.push(buildFinding(changedFile.path, message, changedFile));
       }
     }
 
@@ -138,21 +138,36 @@ function runCli(bin: string, files: string[], deps: ScannerDeps): Promise<string
   });
 }
 
-function buildFinding(filePath: string, message: EslintMessage): ScanFinding {
+function buildFinding(
+  filePath: string,
+  message: EslintMessage,
+  changedFile: { added_lines: ReadonlySet<number> },
+): ScanFinding {
   const severity: Severity = message.severity === 2 ? 'important' : 'minor';
   const category: Category = categorize(message.ruleId ?? 'unknown');
   const confidence: Confidence = 'high';
   const fingerprint = `${ID}:${message.ruleId}:${filePath}:${message.line}`;
   const title = renderTitle(message);
   const description = renderDescription(message);
+  // Anchor the finding to the START line (the line ESLint actually
+  // emitted). Pre-fix, we overwrote `line` with `endLine` when both
+  // were present — but the validator requires both endpoints to be
+  // reviewable, so a violation spanning into a non-added line would
+  // get silently dropped even though the start line is a valid comment
+  // target. Only attach a multi-line range when BOTH endpoints are in
+  // `added_lines`; otherwise post on the start line as a single-line
+  // comment.
+  const endLine = message.endLine;
+  const useRange =
+    endLine !== undefined &&
+    endLine > message.line &&
+    changedFile.added_lines.has(endLine);
   return {
     scanner: 'sast',
     rule_id: `${ID}/${message.ruleId ?? 'unknown'}`,
     file_path: filePath,
-    line: message.line,
-    ...(message.endLine !== undefined && message.endLine > message.line
-      ? { start_line: message.line, line: message.endLine }
-      : {}),
+    line: useRange ? endLine : message.line,
+    ...(useRange ? { start_line: message.line } : {}),
     severity,
     category,
     title,

@@ -55,13 +55,17 @@ export interface LinterRun {
  * instead of re-deriving the same logic and re-introducing the same bug.
  */
 export function normalizeToolPath(workspaceDir: string, toolPath: string): string {
-  if (path.isAbsolute(toolPath)) {
-    return path.relative(workspaceDir, toolPath);
-  }
-  // Relative paths from linters are already in the shape we want, but
-  // normalize away any redundant `./` prefixes or doubled separators so
-  // the `===` lookup against changedFiles is byte-stable.
-  return path.normalize(toolPath);
+  const normalized = path.isAbsolute(toolPath)
+    ? path.relative(workspaceDir, toolPath)
+    : path.normalize(toolPath);
+  // ALWAYS return POSIX-style forward-slash separators. `changedFiles`
+  // is keyed by paths that come out of `git diff`, which uses '/'
+  // regardless of platform. `path.relative` and `path.normalize` use
+  // OS-native separators — on Windows they'd return `src\\foo.ts`, the
+  // `===` lookup would miss every time, and EVERY sast finding would
+  // be silently dropped on Windows runners. Convert here so the helper
+  // is the single source of truth for path shape.
+  return normalized.split(path.sep).join('/');
 }
 
 export interface LinterModule {
