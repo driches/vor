@@ -241,26 +241,61 @@ export function isShellSafePath(p: string): boolean {
 }
 
 /**
- * Filter a path list to only the entries that are safe to pass to a
- * shell-enabled spawn. When `needsShell` is true (Windows .cmd shim),
- * any path with shell metacharacters is dropped to avoid command
- * injection via attacker-chosen filenames in the PR diff. Returns the
- * filtered list AND the dropped paths so the caller can log a warning.
+ * Filter a path list and return entries safe to pass to spawn's argv.
+ *
+ * Two threat classes the PR-filename attack surface produces:
+ *
+ *   1. **Option-confusion** (both shell modes). A file named `--evil=value`
+ *      reaches the linter's CLI parser as a flag instead of a file
+ *      argument. ESLint, ruff, semgrep, dart, actionlint all accept
+ *      arbitrary flags at the same position files appear — at best the
+ *      linter silently skips real files; at worst the attacker changes
+ *      output destination or rule loading. Reject all leading-dash paths.
+ *
+ *   2. **Shell-token splitting & injection** (needsShell=true only). When
+ *      `shell: true`, Node concatenates argv into one command line that
+ *      cmd.exe (or sh) re-tokenizes on whitespace and metacharacters.
+ *      A path `foo bar.ts` becomes two tokens. A path `foo & whoami` is
+ *      command injection. We DROP metachar paths and WRAP the survivors
+ *      in double quotes so cmd.exe treats them as single tokens. The
+ *      metachar regex already excludes `"` and `\\`, so the simple wrap
+ *      can't be escaped from.
+ *
+ * Returns both the cleaned arg list (in the form spawn should receive)
+ * AND the rejected raw paths so the caller can log a warning.
  */
 export function filterShellSafePaths(
   paths: readonly string[],
   needsShell: boolean,
 ): { safe: string[]; dropped: string[] } {
-  if (!needsShell) {
-    // shell:false means Node passes args directly to execve — no shell
-    // parsing, no injection risk via filenames.
-    return { safe: [...paths], dropped: [] };
-  }
   const safe: string[] = [];
   const dropped: string[] = [];
   for (const p of paths) {
-    if (isShellSafePath(p)) safe.push(p);
-    else dropped.push(p);
+    if (p.length === 0) {
+      dropped.push(p);
+      continue;
+    }
+    // Option-confusion guard. A real source file in a repo never starts
+    // with `-`; if a PR adds one, refuse to feed it to the linter rather
+    // than risk it being parsed as a CLI flag. Applies in BOTH shell modes.
+    if (p.startsWith('-')) {
+      dropped.push(p);
+      continue;
+    }
+    if (needsShell) {
+      // shell:true: drop paths with cmd.exe / POSIX-shell metachars, and
+      // quote everything else so internal spaces don't split into tokens.
+      if (!isShellSafePath(p)) {
+        dropped.push(p);
+        continue;
+      }
+      safe.push(`"${p}"`);
+    } else {
+      // shell:false: Node passes argv directly to execve; no tokenizing
+      // happens. The leading-dash filter above is the only thing needed
+      // and the path passes through unmodified.
+      safe.push(p);
+    }
   }
   return { safe, dropped };
 }

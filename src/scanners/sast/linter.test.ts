@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeToolPath } from './linter.js';
+import { filterShellSafePaths, normalizeToolPath } from './linter.js';
 
 describe('normalizeToolPath', () => {
   // Codex P1 regression test: ruff/knip/semgrep/actionlint emit
@@ -48,5 +48,63 @@ describe('normalizeToolPath', () => {
     expect(normalizeToolPath('/work/repo', '/work/repo/src/a/b/c.ts')).toBe(
       'src/a/b/c.ts',
     );
+  });
+});
+
+describe('filterShellSafePaths', () => {
+  // Codex P1 regression test: PR-controlled filenames flow into spawn
+  // argv. Without filtering: leading-dash paths become CLI flags (both
+  // shell modes), and shell-mode raw paths split tokens on spaces and
+  // can carry metacharacter injection.
+
+  describe('non-shell mode', () => {
+    it('passes plain paths through unchanged', () => {
+      const r = filterShellSafePaths(['src/foo.ts', 'lib/bar.py'], false);
+      expect(r.safe).toEqual(['src/foo.ts', 'lib/bar.py']);
+      expect(r.dropped).toEqual([]);
+    });
+
+    it('drops leading-dash paths (option-confusion guard)', () => {
+      const r = filterShellSafePaths(['src/foo.ts', '--evil=value', '-rf'], false);
+      expect(r.safe).toEqual(['src/foo.ts']);
+      expect(r.dropped).toEqual(['--evil=value', '-rf']);
+    });
+
+    it('passes spaces and other characters through in non-shell mode', () => {
+      // Node passes argv directly to execve when shell:false — no tokenizing.
+      const r = filterShellSafePaths(['src/my file.ts'], false);
+      expect(r.safe).toEqual(['src/my file.ts']);
+      expect(r.dropped).toEqual([]);
+    });
+  });
+
+  describe('shell mode (Windows .cmd shim)', () => {
+    it('quotes spaces so cmd.exe treats them as one token', () => {
+      const r = filterShellSafePaths(['src/my file.ts'], true);
+      expect(r.safe).toEqual(['"src/my file.ts"']);
+      expect(r.dropped).toEqual([]);
+    });
+
+    it('drops shell metacharacter paths', () => {
+      const r = filterShellSafePaths(
+        ['src/foo.ts', 'src/evil & whoami.ts', 'src/$(cat etc.ts)'],
+        true,
+      );
+      expect(r.safe).toEqual(['"src/foo.ts"']);
+      expect(r.dropped).toContain('src/evil & whoami.ts');
+      expect(r.dropped).toContain('src/$(cat etc.ts)');
+    });
+
+    it('drops leading-dash paths even in shell mode', () => {
+      const r = filterShellSafePaths(['--evil=value', 'src/foo.ts'], true);
+      expect(r.safe).toEqual(['"src/foo.ts"']);
+      expect(r.dropped).toEqual(['--evil=value']);
+    });
+
+    it('drops empty strings', () => {
+      const r = filterShellSafePaths(['', 'src/foo.ts'], true);
+      expect(r.safe).toEqual(['"src/foo.ts"']);
+      expect(r.dropped).toEqual(['']);
+    });
   });
 });

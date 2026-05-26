@@ -55504,14 +55504,26 @@ function isShellSafePath(p2) {
   return !SHELL_UNSAFE_FILENAME_CHARS.test(p2);
 }
 function filterShellSafePaths(paths, needsShell) {
-  if (!needsShell) {
-    return { safe: [...paths], dropped: [] };
-  }
   const safe = [];
   const dropped = [];
   for (const p2 of paths) {
-    if (isShellSafePath(p2)) safe.push(p2);
-    else dropped.push(p2);
+    if (p2.length === 0) {
+      dropped.push(p2);
+      continue;
+    }
+    if (p2.startsWith("-")) {
+      dropped.push(p2);
+      continue;
+    }
+    if (needsShell) {
+      if (!isShellSafePath(p2)) {
+        dropped.push(p2);
+        continue;
+      }
+      safe.push(`"${p2}"`);
+    } else {
+      safe.push(p2);
+    }
   }
   return { safe, dropped };
 }
