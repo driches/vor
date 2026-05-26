@@ -1,21 +1,24 @@
 name: Self Review (dogfood)
 
+# Manual-only trigger. The pull_request auto-trigger was disabled after
+# v0.4.0 merge because the review loop was generating too many false-
+# positive findings (hallucinated ESLint flag removals, contradictory
+# knip exit-code claims, etc.) and the iteration churn outweighed the
+# bug-catching value. Re-enable by adding `pull_request:` back to `on:`
+# once we have better grounding discipline in the review prompt.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
 
 permissions:
   contents: read
   pull-requests: write
 
-# Cancel in-progress runs for the same PR when a new commit lands.
-concurrency:
-  group: self-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
