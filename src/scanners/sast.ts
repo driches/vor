@@ -98,11 +98,19 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
   // For each applicable linter, filter changedFiles to JUST its scope
   // (so ESLint isn't invoked on .py files, ruff isn't invoked on .ts
   // files, etc.). The per-linter `applies()` is the predicate.
+  //
+  // Drop `status: 'removed'` entries before handing to a linter. Removed
+  // paths don't exist in the checked-out HEAD; CLIs like ruff, dart, and
+  // actionlint treat missing targets as runtime errors and would fail the
+  // whole linter run — meaning a PR that deletes one .py and edits another
+  // would lose Python coverage on the edited file too.
   const runs = await Promise.allSettled(
     applicable.map((linter) =>
       linter.run(
         deps,
-        deps.changedFiles.filter((f) => linter.applies([f])),
+        deps.changedFiles.filter(
+          (f) => f.status !== 'removed' && linter.applies([f]),
+        ),
       ),
     ),
   );

@@ -56698,7 +56698,9 @@ async function orchestrate(deps) {
     applicable.map(
       (linter) => linter.run(
         deps,
-        deps.changedFiles.filter((f2) => linter.applies([f2]))
+        deps.changedFiles.filter(
+          (f2) => f2.status !== "removed" && linter.applies([f2])
+        )
       )
     )
   );
