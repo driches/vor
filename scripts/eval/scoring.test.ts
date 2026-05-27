@@ -98,6 +98,24 @@ describe('scoreRun', () => {
     expect(result.fp).toBe(1);
   });
 
+  it('treats race-condition as compatible with sync-in-async-loop truth', () => {
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [
+        truth({
+          bug_type: 'sync-in-async-loop',
+          category: ['performance', 'bug', 'error-handling'],
+        }),
+      ],
+      findings: [finding({ category: 'race-condition' })],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fn).toBe(0);
+    expect(result.fp).toBe(0);
+  });
+
   it('different file → FN', () => {
     const result = scoreRun({
       case_id: 'c',
