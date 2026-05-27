@@ -77,8 +77,18 @@ rules:
                 await $Y;
                 ...
               }
+      # Suppression for fan-out via Promise.all has to mirror BOTH declarators
+      # the inner pattern-either accepts; otherwise a `let` loop containing
+      # `await Promise.all(...)` still matches and false-positives. Codex
+      # caught this on PR #33 — fix is just to add the let variant.
       - pattern-not-inside: |
           for (const $X of $XS) {
+            ...
+            await Promise.all(...);
+            ...
+          }
+      - pattern-not-inside: |
+          for (let $X of $XS) {
             ...
             await Promise.all(...);
             ...
