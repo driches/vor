@@ -90,6 +90,22 @@ export interface ExperimentalConfig {
    * off — opt in per repo via `.code-review.yml`.
    */
   worker_delegation: WorkerDelegationConfig;
+  /**
+   * Inject deterministic scanner findings into the agent's user prompt
+   * BEFORE its loop starts. Pre-scanner findings appear as a structured
+   * list in the prompt with explicit instruction not to re-investigate or
+   * re-flag them. Goal: cut agent turns + cost (less duplicate work) AND
+   * raise accuracy (agent focuses on what scanners can't catch).
+   *
+   * Trade-off: orchestration becomes sequential (scanners-then-agent)
+   * instead of parallel, adding ~scanner-duration wall-clock latency to
+   * the agent's start. The cost win has to dominate that for the flag to
+   * be worth flipping on.
+   *
+   * Default `false`. Opt in via .code-review.yml. A/B comparison via
+   * `npm run local-review` is the recommended way to validate.
+   */
+  scanner_findings_in_user_prompt: boolean;
 }
 
 export interface WorkerDelegationConfig {

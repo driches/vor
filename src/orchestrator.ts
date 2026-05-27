@@ -29,7 +29,7 @@ import { dedupKeptScannerComments } from './scanners/dedup.js';
 import { IgnoreList } from './scanners/ignore-list.js';
 import { buildEnabledScanners } from './scanners/registry.js';
 import { runScanners } from './scanners/runner.js';
-import type { ScannerDeps } from './scanners/types.js';
+import type { ScanFinding, ScannerDeps } from './scanners/types.js';
 import { validateScanFinding } from './scanners/validate.js';
 import { SEVERITY_RANK } from './types.js';
 import type { ScannerId, Severity } from './types.js';
@@ -251,12 +251,28 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
-  const userPromptBase = buildUserPrompt({
-    owner: input.owner,
-    repo: input.repo,
-    pull_number: input.pull_number,
-  });
-  const userPrompt = scopeNotice ? `${scopeNotice}\n\n${userPromptBase}` : userPromptBase;
+  // The user prompt is FINALIZED below, after deciding whether to inject
+  // scanner findings. If the experimental flag is OFF we use the empty-
+  // findings form immediately (current behavior). If ON we wait for the
+  // scanners to settle and rebuild with their output.
+  const buildPrompt = (findings: ReadonlyArray<ScanFinding> = []): string => {
+    const base = buildUserPrompt({
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      ...(findings.length > 0
+        ? {
+            scanner_findings: findings,
+            // Share the post-filter cap with the prompt so we don't render
+            // a 1000-entry coverage-delta list the orchestrator would
+            // truncate anyway. Codex P2 #3311267539.
+            max_scanner_findings: config.severity.max_comments_total,
+          }
+        : {}),
+    });
+    return scopeNotice ? `${scopeNotice}\n\n${base}` : base;
+  };
+  let userPrompt = buildPrompt();
 
   // Load the security ignore list at HEAD. Always returns a usable instance —
   // malformed YAML / missing file degrades to an empty list inside .load().
@@ -301,20 +317,33 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     signal: orchestratorAbort.signal,
   };
 
-  // Fire agent + scanners in parallel. The runner is error-isolated, so a
-  // scanner failure cannot reject the scan branch. The agent itself can throw,
-  // and we let that propagate — but we use Promise.allSettled so a thrown
-  // agent doesn't leave in-flight scanner network calls running as detached
-  // tasks (they'd live until the 60s scanner timeout). Surfaces partial
-  // scanner results in logs even on agent failure.
-  //
-  // Pairing with `orchestratorAbort`: allSettled lets the scanner branch
-  // FINISH (success or natural error) before we ditch the run, and the abort
-  // below lets us actively cancel any still-in-flight scanner work in the
-  // narrow window between agent rejection and the scanner branch settling.
-  // Without the abort, a long-running scanner could keep doing useful network
-  // I/O after we've already decided to throw the agent error away.
-  const agentPromise =
+  // Build the agent invocation as a thunk so we can call it AFTER scanners
+  // settle (when the experimental flag is on) and re-use the same wiring
+  // in the parallel path.
+  const makeAgentPromise = (
+    finalUserPrompt: string,
+  ): Promise<{
+    ended:
+      | 'summary_posted'
+      | 'max_turns'
+      | 'output_truncated'
+      | 'budget_exceeded'
+      | 'aborted'
+      | 'error';
+    turns: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    perModelCost: Array<{
+      model: string;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+    }>;
+    error?: string;
+  }> =>
     agentScope.prContext.files.length === 0
       ? Promise.resolve({
           ended: 'summary_posted' as const,
@@ -338,7 +367,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
             runContext: createRunContext(),
           },
           systemPrompt,
-          userPrompt,
+          userPrompt: finalUserPrompt,
           model: config.model,
           maxTurns: config.max_turns,
           maxInputTokens: config.budget.max_input_tokens,
@@ -356,23 +385,56 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
             ? { providerFactory: input.providerFactory }
             : {}),
         });
-  const scannerPromise = runScanners(scanners, scannerDeps);
 
-  // Fire the abort the moment the agent rejects — synchronously, before we
-  // even reach `await Promise.allSettled(...)` below. Without this, the abort
-  // can ONLY fire after the await tuple resolves, which means the scanner
-  // branch has already settled (or hit its own per-scanner timeout) and the
-  // signal can no longer cancel anything in flight. Attaching the .catch
-  // here doesn't change rejection semantics — allSettled never propagates
-  // rejection — but it gives us the synchronous side-effect we need.
-  agentPromise.catch(() => {
-    orchestratorAbort.abort();
-  });
+  const injectFindings = config.experimental.scanner_findings_in_user_prompt;
+  let agentOutcome: PromiseSettledResult<Awaited<ReturnType<typeof makeAgentPromise>>>;
+  let scanOutcome: PromiseSettledResult<Awaited<ReturnType<typeof runScanners>>>;
 
-  const [agentOutcome, scanOutcome] = await Promise.allSettled([
-    agentPromise,
-    scannerPromise,
-  ]);
+  if (injectFindings) {
+    // Sequential mode: scanners first, inject findings into user prompt,
+    // then run agent. Adds wall-clock latency (~scanner duration) but the
+    // agent sees what's already covered so it should skip redundant work
+    // and focus on what scanners can't catch. Opt-in via
+    // `experimental.scanner_findings_in_user_prompt: true`.
+    await logger.info(
+      'Mode: sequential (scanner_findings_in_user_prompt=true). Awaiting scanners before launching agent.',
+    );
+    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
+      (r) => r[0]!,
+    );
+    const findings =
+      scanOutcome.status === 'fulfilled' ? scanOutcome.value.findings : [];
+    await logger.info(
+      `Scanners settled: ${findings.length} finding(s) will be injected into the agent's user prompt.`,
+    );
+    userPrompt = buildPrompt(findings);
+    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(
+      (r) => r[0]!,
+    );
+  } else {
+    // Parallel mode (default): fire agent + scanners concurrently and let
+    // them settle independently. Lower wall-clock latency; agent never sees
+    // scanner output. See above comments for the abort / Promise.allSettled
+    // pairing.
+    const agentPromise = makeAgentPromise(userPrompt);
+    const scannerPromise = runScanners(scanners, scannerDeps);
+
+    // Fire the abort the moment the agent rejects — synchronously, before we
+    // even reach `await Promise.allSettled(...)` below. Without this, the abort
+    // can ONLY fire after the await tuple resolves, which means the scanner
+    // branch has already settled (or hit its own per-scanner timeout) and the
+    // signal can no longer cancel anything in flight. Attaching the .catch
+    // here doesn't change rejection semantics — allSettled never propagates
+    // rejection — but it gives us the synchronous side-effect we need.
+    agentPromise.catch(() => {
+      orchestratorAbort.abort();
+    });
+
+    [agentOutcome, scanOutcome] = await Promise.allSettled([
+      agentPromise,
+      scannerPromise,
+    ]);
+  }
   if (agentOutcome.status === 'rejected') {
     if (scanOutcome.status === 'fulfilled') {
       await logger.info(

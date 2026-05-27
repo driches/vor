@@ -51,6 +51,7 @@ const experimentalSchema = z.object({
     enabled: z.boolean(),
     worker_model: z.string().min(1),
   }),
+  scanner_findings_in_user_prompt: z.boolean(),
 });
 
 const providerConfigSchema = z.object({

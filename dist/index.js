@@ -59480,12 +59480,62 @@ _(${files.length - sections.length + 1} additional context file(s) omitted due t
 
 // src/agent/user-prompt.ts
 function buildUserPrompt(input) {
-  return [
+  const parts = [
     `Review pull request #${input.pull_number} in ${input.owner}/${input.repo}.`,
-    "",
+    ""
+  ];
+  const findings = input.scanner_findings ?? [];
+  if (findings.length > 0) {
+    parts.push(
+      renderScannerFindings(findings, input.max_scanner_findings ?? MAX_INJECTED_FINDINGS_DEFAULT)
+    );
+    parts.push("");
+  }
+  parts.push(
     "Start by calling get_pr_metadata, then read_repo_context_file, then list_changed_files.",
     "Work through the changes and post each finding via post_inline_comment. End with post_summary."
-  ].join("\n");
+  );
+  return parts.join("\n");
+}
+var MAX_INJECTED_FINDINGS_DEFAULT = 30;
+function renderScannerFindings(findings, maxFindings = MAX_INJECTED_FINDINGS_DEFAULT) {
+  const severityRank = {
+    critical: 0,
+    important: 1,
+    minor: 2,
+    nit: 3
+  };
+  const sorted = [...findings].sort((a2, b2) => {
+    const r2 = (severityRank[a2.severity] ?? 99) - (severityRank[b2.severity] ?? 99);
+    if (r2 !== 0) return r2;
+    if (a2.file_path !== b2.file_path) return a2.file_path.localeCompare(b2.file_path);
+    return a2.line - b2.line;
+  });
+  const capped = sorted.slice(0, Math.max(0, maxFindings));
+  const truncated = sorted.length - capped.length;
+  const lines = [];
+  const header = truncated > 0 ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) \u2014 already detected, will post independently` : `## Deterministic scanner findings (${findings.length}) \u2014 already detected, will post independently`;
+  lines.push(
+    header,
+    "",
+    "Scanners ran BEFORE you. The findings below are already on their way to the PR \u2014 you do NOT need to investigate, verify, or re-flag them. Treat them as covered.",
+    "",
+    "Your job is what scanners CAN'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn't match a pattern. Spend your turns there.",
+    ""
+  );
+  for (const f2 of capped) {
+    const title = f2.title.length > 120 ? `${f2.title.slice(0, 117)}...` : f2.title;
+    lines.push(
+      `- [${f2.severity}] \`${f2.file_path}:${f2.line}\` \u2014 ${f2.scanner}/${f2.rule_id}: ${title}`
+    );
+  }
+  if (truncated > 0) {
+    lines.push(
+      "",
+      `(${truncated} additional lower-severity scanner finding(s) omitted from this block \u2014 they'll still be posted by the scanner pipeline subject to the configured cap.)`
+    );
+  }
+  return lines.join("\n");
 }
 
 // src/config/loader.ts
@@ -59591,7 +59641,10 @@ var DEFAULT_CONFIG = {
     worker_delegation: {
       enabled: false,
       worker_model: "claude-haiku-4-5"
-    }
+    },
+    // Default off — sequential ordering trades wall-clock for the chance
+    // at a cost cut; needs A/B data per repo before flipping on.
+    scanner_findings_in_user_prompt: false
   }
 };
 
@@ -59641,7 +59694,8 @@ var experimentalSchema = external_exports.object({
   worker_delegation: external_exports.object({
     enabled: external_exports.boolean(),
     worker_model: external_exports.string().min(1)
-  })
+  }),
+  scanner_findings_in_user_prompt: external_exports.boolean()
 });
 var providerConfigSchema = external_exports.object({
   openai: external_exports.object({
@@ -68047,14 +68101,24 @@ async function runOrchestrator(input) {
     );
   }
   const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
-  const userPromptBase = buildUserPrompt({
-    owner: input.owner,
-    repo: input.repo,
-    pull_number: input.pull_number
-  });
-  const userPrompt = scopeNotice ? `${scopeNotice}
+  const buildPrompt = (findings = []) => {
+    const base = buildUserPrompt({
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      ...findings.length > 0 ? {
+        scanner_findings: findings,
+        // Share the post-filter cap with the prompt so we don't render
+        // a 1000-entry coverage-delta list the orchestrator would
+        // truncate anyway. Codex P2 #3311267539.
+        max_scanner_findings: config.severity.max_comments_total
+      } : {}
+    });
+    return scopeNotice ? `${scopeNotice}
 
-${userPromptBase}` : userPromptBase;
+${base}` : base;
+  };
+  let userPrompt = buildPrompt();
   const ignoreList = await IgnoreList.load(fileReader, {
     owner: input.owner,
     repo: input.repo,
@@ -68084,7 +68148,7 @@ ${userPromptBase}` : userPromptBase;
     config: config.security,
     signal: orchestratorAbort.signal
   };
-  const agentPromise = agentScope.prContext.files.length === 0 ? Promise.resolve({
+  const makeAgentPromise = (finalUserPrompt) => agentScope.prContext.files.length === 0 ? Promise.resolve({
     ended: "summary_posted",
     turns: 0,
     inputTokens: 0,
@@ -68105,7 +68169,7 @@ ${userPromptBase}` : userPromptBase;
       runContext: createRunContext()
     },
     systemPrompt,
-    userPrompt,
+    userPrompt: finalUserPrompt,
     model: config.model,
     maxTurns: config.max_turns,
     maxInputTokens: config.budget.max_input_tokens,
@@ -68121,14 +68185,35 @@ ${userPromptBase}` : userPromptBase;
     // this; the eval harness injects a scripted FakeProvider here.
     ...input.providerFactory !== void 0 ? { providerFactory: input.providerFactory } : {}
   });
-  const scannerPromise = runScanners(scanners, scannerDeps);
-  agentPromise.catch(() => {
-    orchestratorAbort.abort();
-  });
-  const [agentOutcome, scanOutcome] = await Promise.allSettled([
-    agentPromise,
-    scannerPromise
-  ]);
+  const injectFindings = config.experimental.scanner_findings_in_user_prompt;
+  let agentOutcome;
+  let scanOutcome;
+  if (injectFindings) {
+    await logger.info(
+      "Mode: sequential (scanner_findings_in_user_prompt=true). Awaiting scanners before launching agent."
+    );
+    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
+      (r2) => r2[0]
+    );
+    const findings = scanOutcome.status === "fulfilled" ? scanOutcome.value.findings : [];
+    await logger.info(
+      `Scanners settled: ${findings.length} finding(s) will be injected into the agent's user prompt.`
+    );
+    userPrompt = buildPrompt(findings);
+    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(
+      (r2) => r2[0]
+    );
+  } else {
+    const agentPromise = makeAgentPromise(userPrompt);
+    const scannerPromise = runScanners(scanners, scannerDeps);
+    agentPromise.catch(() => {
+      orchestratorAbort.abort();
+    });
+    [agentOutcome, scanOutcome] = await Promise.allSettled([
+      agentPromise,
+      scannerPromise
+    ]);
+  }
   if (agentOutcome.status === "rejected") {
     if (scanOutcome.status === "fulfilled") {
       await logger.info(

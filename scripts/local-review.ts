@@ -24,6 +24,7 @@ import type { Octokit } from '@octokit/rest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { runOrchestrator } from '../src/orchestrator.js';
 
 interface Args {
@@ -33,6 +34,14 @@ interface Args {
   output: string;
   configPath: string;
   model?: string;
+  /**
+   * When true, the FakeOctokit's `repos.getContent` for `.code-review.yml`
+   * returns a synthetic YAML overriding `experimental.scanner_findings_in_user_prompt`
+   * to `true` instead of whatever's at HEAD. Lets you A/B the flag without
+   * committing config changes. The override is shallow — any other keys at
+   * HEAD's `.code-review.yml` are ignored.
+   */
+  scannerFindingsInUserPrompt: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -47,6 +56,7 @@ function parseArgs(argv: readonly string[]): Args {
     workspace: a('--workspace', process.cwd())!,
     output: a('--output', `.code-review/local-runs/${ts}.json`)!,
     configPath: a('--config', '.code-review.yml')!,
+    scannerFindingsInUserPrompt: argv.includes('--scanner-findings-in-user-prompt'),
     ...(a('--model') !== undefined ? { model: a('--model') } : {}),
   };
 }
@@ -129,6 +139,48 @@ function getFileContent(workspace: string, ref: string, path: string): string | 
   }
 }
 
+/**
+ * Deep-merge `experimental.scanner_findings_in_user_prompt: true` into the
+ * repo's existing `.code-review.yml` content rather than emitting a minimal
+ * YAML that masks it. Returns YAML text ready to serve from the FakeOctokit.
+ *
+ * `existingYaml` may be `null` (no committed config), in which case the
+ * output contains only the experimental key.
+ */
+function mergeScannerFindingsFlag(existingYaml: string | null): string {
+  let parsed: Record<string, unknown> = {};
+  if (existingYaml && existingYaml.trim().length > 0) {
+    try {
+      const raw = parseYaml(existingYaml);
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        parsed = raw as Record<string, unknown>;
+      }
+    } catch {
+      // Malformed existing YAML — fall back to empty. The orchestrator's
+      // config loader will surface the parse failure on its own when it
+      // reads the merged output.
+    }
+  }
+  const experimental = (parsed['experimental'] as Record<string, unknown>) ?? {};
+  experimental['scanner_findings_in_user_prompt'] = true;
+  parsed['experimental'] = experimental;
+  return stringifyYaml(parsed);
+}
+
+/** Count top-level keys in a YAML document for log-line context. Returns 0
+ *  when parsing fails — purely informational. */
+function countTopLevelKeys(yaml: string): number {
+  try {
+    const raw = parseYaml(yaml);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return Object.keys(raw).length;
+    }
+  } catch {
+    /* swallow */
+  }
+  return 0;
+}
+
 function unifiedDiff(workspace: string, base: string, head: string): string {
   return git(
     ['diff', '--no-color', '--unified=3', `${base}..${head}`],
@@ -179,6 +231,12 @@ function buildFakeOctokit(opts: {
     additions: number;
     deletions: number;
   };
+  /**
+   * Path → synthetic content overrides for `repos.getContent`. Used by the
+   * CLI to inject a different `.code-review.yml` than the one committed at
+   * HEAD, so flags can be A/B tested without git churn.
+   */
+  contentOverrides: Map<string, string>;
 }): Octokit {
   // GitHub's listFiles shape has `filename`, `status`, `additions`, `deletions`,
   // `changes`, `patch` (per-file diff). The orchestrator only needs filename +
@@ -235,8 +293,11 @@ function buildFakeOctokit(opts: {
       },
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
+          // Honor explicit overrides first — used by the CLI to inject a
+          // synthetic `.code-review.yml` without committing config changes.
+          const override = opts.contentOverrides.get(args.path);
           const ref = args.ref ?? opts.headSha;
-          const content = getFileContent(opts.workspace, ref, args.path);
+          const content = override ?? getFileContent(opts.workspace, ref, args.path);
           if (content === null) {
             const err = Object.assign(new Error('Not Found'), { status: 404 });
             throw err;
@@ -290,6 +351,23 @@ async function main(): Promise<void> {
       `${files.length} file(s), +${totalAdditions}/-${totalDeletions}, workspace=${args.workspace}`,
   );
 
+  // Build the content-override map. Today: only the experimental flag
+  // for scanner-findings-in-user-prompt. We MERGE into the repo's real
+  // `.code-review.yml` rather than emit a minimal stub — otherwise the
+  // A/B run would also flip every unrelated setting the repo configured
+  // (model, severity floor, exclude paths, enabled scanners) back to
+  // defaults, and the comparison would no longer isolate this flag.
+  // Codex P2 #3311267562 on PR #36.
+  const contentOverrides = new Map<string, string>();
+  if (args.scannerFindingsInUserPrompt) {
+    const existingYaml = getFileContent(args.workspace, headSha, args.configPath);
+    contentOverrides.set(args.configPath, mergeScannerFindingsFlag(existingYaml));
+    console.error(
+      `local-review: injecting scanner_findings_in_user_prompt=true via merged ${args.configPath}` +
+        (existingYaml ? ` (preserving ${countTopLevelKeys(existingYaml)} existing top-level key(s))` : ''),
+    );
+  }
+
   const fakeOctokit = buildFakeOctokit({
     workspace: args.workspace,
     baseSha,
@@ -303,6 +381,7 @@ async function main(): Promise<void> {
       additions: totalAdditions,
       deletions: totalDeletions,
     },
+    contentOverrides,
   });
 
   const result = await runOrchestrator({
