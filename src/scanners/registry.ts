@@ -29,6 +29,9 @@ import { createSecretsScanner } from './secrets.js';
 import { sastScannerStub } from './sast.js';
 import { containerScannerStub } from './container.js';
 import { createCoverageDeltaScanner } from './coverage-delta.js';
+import { createDebrisScanner } from './debris.js';
+import { createMigrationSafetyScanner } from './migration-safety.js';
+import { createDependencyHygieneScanner } from './dependency-hygiene.js';
 import { createOsvClient } from './osv-client.js';
 
 /**
@@ -115,6 +118,26 @@ export function buildEnabledScanners(
   if (config.scanners.coverage_delta.enabled) {
     const factory: () => Scanner =
       overrides['coverage-delta'] ?? (() => createCoverageDeltaScanner());
+    out.push(factory());
+  }
+
+  // Custom zero-dependency scanners (debris, migration-safety,
+  // dependency-hygiene). On by default — purely local line/manifest analysis,
+  // no network, no external binary.
+  if (config.scanners.debris.enabled) {
+    const factory: () => Scanner = overrides.debris ?? (() => createDebrisScanner());
+    out.push(factory());
+  }
+
+  if (config.scanners.migration_safety.enabled) {
+    const factory: () => Scanner =
+      overrides['migration-safety'] ?? (() => createMigrationSafetyScanner());
+    out.push(factory());
+  }
+
+  if (config.scanners.dependency_hygiene.enabled) {
+    const factory: () => Scanner =
+      overrides['dependency-hygiene'] ?? (() => createDependencyHygieneScanner());
     out.push(factory());
   }
 

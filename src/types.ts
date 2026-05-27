@@ -49,7 +49,10 @@ export type ScannerId =
   | 'secrets'
   | 'sast'
   | 'container-cve'
-  | 'coverage-delta';
+  | 'coverage-delta'
+  | 'debris'
+  | 'migration-safety'
+  | 'dependency-hygiene';
 
 /**
  * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;

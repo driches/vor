@@ -119,6 +119,30 @@ export type ScanEvidence =
   | { kind: 'secret'; masked_match: string; pattern_id: string }
   | { kind: 'sast'; cwe?: string[] }
   | {
+      /** Left-behind development artifact (merge marker, debugger, focused test, …). */
+      kind: 'debris';
+      /** The debris rule that fired (e.g. `merge-conflict`, `debugger`). */
+      rule: string;
+      /** Short, truncated excerpt of the offending line for context. */
+      snippet: string;
+    }
+  | {
+      /** Risky DDL in a database migration (drop, truncate, non-defaulted NOT NULL, …). */
+      kind: 'migration';
+      /** Truncated excerpt of the offending statement. */
+      statement: string;
+    }
+  | {
+      /** Supply-chain hygiene signal on a dependency manifest. */
+      kind: 'dependency';
+      /** What was flagged: `lockfile-drift`, `unpinned-range`, `non-registry-source`. */
+      issue: string;
+      /** Manifest-declared package name when the issue is dep-specific. */
+      package?: string;
+      /** The raw version/spec string that triggered the finding, when applicable. */
+      spec?: string;
+    }
+  | {
       kind: 'container';
       base_image: string;
       tag: string;
