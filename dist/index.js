@@ -63659,7 +63659,13 @@ function createOctokit(opts) {
         return true;
       }
     },
-    retry: { doNotRetry: ["400", "401", "403", "404", "422"] }
+    // `@octokit/plugin-retry` compares `error.status` (a number) against
+    // these entries with `Array.prototype.includes`, which uses strict
+    // equality — strings don't match numeric statuses. Passing numbers
+    // ensures 4xx errors actually short-circuit retries; with strings the
+    // plugin retries 404s 3 extra times, wasting API quota on every
+    // missing optional file (.code-review.yml, AGENTS.md, CLAUDE.md).
+    retry: { doNotRetry: [400, 401, 403, 404, 422] }
   });
 }
 
