@@ -61,7 +61,19 @@ export function injectScannerFindingsFlag(existingYaml: string | null): FlagInje
       // when the orchestrator parses our merged output.
     }
   }
-  const experimental = (parsed['experimental'] as Record<string, unknown>) ?? {};
+  // The `experimental` key may legitimately be missing, OR a repo may have
+  // written something parseable-but-wrong-shape (e.g. `experimental: false`
+  // or `experimental: "yes"`). The production config loader tolerates that
+  // and falls back to defaults; matching that here keeps the flag from
+  // turning an otherwise-runnable case into a per-case failure. Codex P2
+  // #3313098982.
+  const existing = parsed['experimental'];
+  const experimental: Record<string, unknown> =
+    existing !== null &&
+    typeof existing === 'object' &&
+    !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
   experimental['scanner_findings_in_user_prompt'] = true;
   parsed['experimental'] = experimental;
   const mergedYaml = stringifyYaml(parsed);
