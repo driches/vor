@@ -145,6 +145,37 @@ function unifiedDiff(workspace: string, base: string, head: string): string {
   );
 }
 
+/**
+ * Per-file patch in the GitHub Files API shape. The orchestrator (and
+ * pr-context.ts specifically) treats `apiFile.patch == null` as "binary
+ * file" and skips it from SAST scanners. Without per-file patches the
+ * scanners never see ANY file's contents — they all skip as binary.
+ *
+ * GitHub's Files API returns just the hunk body without the `--- a/...`
+ * `+++ b/...` `diff --git` headers; we strip those here to match.
+ */
+function perFilePatch(
+  workspace: string,
+  base: string,
+  head: string,
+  path: string,
+): string | null {
+  try {
+    const raw = git(
+      ['diff', '--no-color', '--unified=3', `${base}..${head}`, '--', path],
+      workspace,
+    );
+    if (!raw.trim()) return null;
+    // Drop the `diff --git`, `index`, `---`, `+++` header lines so the
+    // remainder matches what GitHub's listFiles `patch` field contains.
+    const lines = raw.split('\n');
+    const firstHunk = lines.findIndex((l) => l.startsWith('@@'));
+    return firstHunk < 0 ? null : lines.slice(firstHunk).join('\n');
+  } catch {
+    return null;
+  }
+}
+
 function authorFromHead(workspace: string): string {
   try {
     return git(['log', '-1', '--format=%aN', 'HEAD'], workspace).trim();
@@ -199,6 +230,11 @@ function buildFakeOctokit(opts: {
   // `changes`, `patch` (per-file diff). The orchestrator only needs filename +
   // status + additions/deletions for its accounting. Per-file patch is read
   // separately from the unified diff via the diff fetcher.
+  // Critical: include the per-file `patch` field. pr-context.ts treats
+  // `apiFile.patch == null` as binary, which makes SAST scanners skip the
+  // file entirely (semgrep.applies() filters out is_binary files). Without
+  // this, the scanner pipeline produces zero findings even when semgrep's
+  // own CLI catches issues in the file.
   const fileApi = opts.files.map((f) => ({
     filename: f.path,
     status: f.status,
@@ -207,6 +243,7 @@ function buildFakeOctokit(opts: {
     changes: f.additions + f.deletions,
     previous_filename: f.previous_path,
     sha: opts.headSha,
+    patch: perFilePatch(opts.workspace, opts.baseSha, opts.headSha, f.path),
   }));
 
   const notImplemented = (method: string) =>

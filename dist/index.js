@@ -67005,7 +67005,15 @@ function runCli6(files, deps, customRulesPath) {
       ...customRulesPath !== null ? ["--config", customRulesPath] : [],
       "--no-rewrite-rule-ids",
       "--disable-version-check",
-      "--metrics=off",
+      // Note: cannot pass `--metrics=off` here. Semgrep 1.150+ rejects
+      // `--config=auto` + `--metrics=off` as incompatible at startup
+      // (`Cannot create auto config when metrics are off`) and exits
+      // with no JSON output. The orchestrator then sees empty stdout
+      // → JSON.parse throws → the WHOLE semgrep linter fails for
+      // every PR. Operators with strict egress requirements should
+      // disable semgrep via `security.scanners.sast.enabled: false`
+      // or (future v0.5) `linters.semgrep.enabled: false` rather than
+      // trying to combine these flags.
       // End-of-options separator — defense in depth alongside the
       // leading-dash filter above. If anything slips through (e.g. a
       // future caller forgets to filter), `--` guarantees semgrep
