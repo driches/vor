@@ -68058,7 +68058,8 @@ async function runOrchestrator(input) {
       ended: "skipped_draft",
       turns: 0,
       cost_usd: 0,
-      dry_run: input.dry_run
+      dry_run: input.dry_run,
+      kept_comments: []
     };
   }
   const fileReader = new FileReader(octokit);
@@ -68076,7 +68077,8 @@ async function runOrchestrator(input) {
       ended: `skipped_no_key_${resolvedProvider}`,
       turns: 0,
       cost_usd: 0,
-      dry_run: input.dry_run
+      dry_run: input.dry_run,
+      kept_comments: []
     };
   }
   await logger.info(
@@ -68314,7 +68316,8 @@ ${base}` : base;
       ended: result.ended,
       turns: result.turns,
       cost_usd: result.costUsd,
-      dry_run: true
+      dry_run: true,
+      kept_comments: filtered.kept
     };
   }
   if (config.review.sticky) {
@@ -68347,7 +68350,8 @@ ${base}` : base;
     ended: result.ended,
     turns: result.turns,
     cost_usd: result.costUsd,
-    dry_run: false
+    dry_run: false,
+    kept_comments: filtered.kept
   };
 }
 async function loadConfig(input, fileReader, headSha) {
