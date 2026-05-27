@@ -204,11 +204,15 @@ If your PR description reads like a marketing post, rewrite it. Reviewers want t
 
 ### Dogfooding
 
-Every PR runs the action against itself via [`.github/workflows/self-review.yml`](.github/workflows/self-review.yml). When that review fires:
+Self-review on this repo is **manual** ([`.github/workflows/self-review.yml`](.github/workflows/self-review.yml) is `workflow_dispatch` only — the auto-trigger on `pull_request` was disabled to prevent feedback loops on prompt-iteration PRs). A maintainer dispatches a review on PRs that touch the prompt, tools, or scanners — and on anything else where the dogfood signal is worth the credits.
+
+When a self-review does fire on your PR:
 
 - **Read it.** Even if the finding looks wrong, treat it as a signal the code is misleading enough to confuse an agent.
 - **Reply in the thread.** Either fix what's flagged, or explain why it's wrong. Don't ignore it.
 - **If the finding is a false positive**, that's also useful — open a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so the prompt / scanner gets calibrated.
+
+To run a self-review yourself, ask a maintainer to dispatch it: `gh workflow run self-review.yml -f pr_number=<your-PR> -R driches/code-review`. The job posts a review on the PR within a few minutes.
 
 If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell — investigate before merging.
 

@@ -95,10 +95,9 @@ This pattern keeps the codebase self-documenting about *why* non-obvious decisio
 
 ### Dogfooding
 
-Every PR runs the action against itself via [`.github/workflows/self-review.yml`](.github/workflows/self-review.yml) (`uses: ./`). That gives us:
+Self-review is **manual** ([`.github/workflows/self-review.yml`](.github/workflows/self-review.yml) is `workflow_dispatch` only — the auto-trigger on `pull_request` was disabled to prevent feedback loops on prompt-iteration PRs). A maintainer dispatches one on PRs that touch the prompt, tools, or scanners — and on anything else where dogfooding the change is worth the credits.
 
-- A real review on your PR before merge
-- A corpus of real reviews we can compare across changes to evaluate prompt quality
+To run one yourself, ask a maintainer to dispatch: `gh workflow run self-review.yml -f pr_number=<your-PR> -R driches/code-review`. The job posts a review on the PR within a few minutes.
 
 **If the self-review flags something, read it.** It's not a CI gate, but it usually catches at least one thing worth thinking about. Push back in the thread if you disagree, or file a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so calibration improves.
 
