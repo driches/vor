@@ -60,18 +60,34 @@ rules:
       category: performance
       cwe: CWE-1050
     patterns:
-      - pattern: |
-          for (... of $XS) {
-            ...
-            await $X;
-            ...
-          }
-      - pattern-not-inside: |
-          for (... of $XS) {
-            ...
-            await Promise.all(...);
-            ...
-          }
+      # Semgrep's JS parser requires an explicit declarator for `for...of`
+      # (you can't use `...` as the declarator slot — it tries to parse as
+      # JS and rejects it as a syntax error). Cover the two common cases
+      # (const, let); `var` for-of is vanishingly rare in modern code.
+      - pattern-either:
+          - pattern: |
+              for (const $X of $XS) {
+                ...
+                await $Y;
+                ...
+              }
+          - pattern: |
+              for (let $X of $XS) {
+                ...
+                await $Y;
+                ...
+              }
+      # Suppress only the SPECIFIC matched await when its target is
+      # Promise.all(...). The earlier `pattern-not-inside` approach
+      # suppressed the entire loop on any `await Promise.all(...)`
+      # appearance, which silently swallowed mixed loops that did both
+      # a serial `await db.find(...)` AND a `Promise.all(...)` fan-out
+      # — exactly the N+1 we want to flag. Codex caught the false-
+      # negative on PR #33.
+      - metavariable-pattern:
+          metavariable: $Y
+          patterns:
+            - pattern-not: Promise.all(...)
 
   - id: code-review.n-plus-one.await-in-while-loop
     message: |
