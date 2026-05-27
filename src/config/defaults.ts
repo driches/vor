@@ -102,6 +102,14 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       // in the workspace. Enable via
       // `security.scanners.coverage_delta.enabled: true`.
       coverage_delta: { enabled: false },
+      // debris, migration-safety, and dependency-hygiene are custom,
+      // zero-dependency scanners that only inspect PR-added lines (and, for
+      // dependency-hygiene, the manifest at HEAD). They make no network
+      // calls and spawn no external binaries, so they're on by default —
+      // opt out per-repo via `security.scanners.<name>.enabled: false`.
+      debris: { enabled: true },
+      migration_safety: { enabled: true },
+      dependency_hygiene: { enabled: true },
     },
     cache: { enabled: true },
     persistence: { enabled: false },

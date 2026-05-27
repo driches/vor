@@ -135,6 +135,28 @@ export interface SecurityConfig {
      * installed in the workspace.
      */
     coverage_delta: ScannerConfig;
+    /**
+     * Custom, zero-dependency scanner that flags left-behind development
+     * artifacts on PR-added lines: merge-conflict markers, `debugger`/
+     * `breakpoint()` statements, focused tests (`.only`), and stray
+     * console/debug logging. Pure line analysis — no network, no external
+     * binary — so it's on by default.
+     */
+    debris: ScannerConfig;
+    /**
+     * Custom scanner that flags risky DDL in database migration files
+     * (DROP TABLE/COLUMN, TRUNCATE, DROP DATABASE, and adding a NOT NULL
+     * column without a DEFAULT). Heuristic line analysis over migration
+     * paths (`**​/migrations/**`, `*.sql`, framework dirs). On by default.
+     */
+    migration_safety: ScannerConfig;
+    /**
+     * Custom supply-chain hygiene scanner. Flags lockfile drift (a manifest
+     * dependency change with no corresponding lockfile update), newly
+     * introduced unpinned/loose version ranges, and dependencies sourced
+     * from non-registry locations (git/url/file). No network. On by default.
+     */
+    dependency_hygiene: ScannerConfig;
   };
   cache: { enabled: boolean };
   persistence: { enabled: boolean };

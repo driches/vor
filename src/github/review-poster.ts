@@ -120,6 +120,12 @@ function renderProvenanceTag(c: PostedComment): string {
       return '\n\n_via container scan_';
     case 'coverage-delta':
       return '\n\n_via coverage scan_';
+    case 'debris':
+      return '\n\n_via debris scan_';
+    case 'migration-safety':
+      return '\n\n_via migration safety scan_';
+    case 'dependency-hygiene':
+      return '\n\n_via dependency hygiene scan_';
     default: {
       // Exhaustiveness check: if a new ScannerId is added to the union
       // without updating this switch, TypeScript will error here at
