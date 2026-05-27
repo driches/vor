@@ -34,6 +34,7 @@ import { compare, type CompareResult } from '../../src/eval/compare.js';
 import { fromPostedComment, type NormalizedFinding } from '../../src/eval/finding.js';
 import { ensureRepoSnapshot, type CaseMeta } from '../../src/eval/local-deps.js';
 import { injectScannerFindingsFlag } from './flag-injection.js';
+import { assertOutsidePublicRepo } from './golden-path-guard.js';
 
 interface Args {
   goldenRepo: string;
@@ -293,6 +294,15 @@ async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<C
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // Refuse to run if either the dataset path OR the output destination
+  // points into this public repo. The captured eval emits a JSON report
+  // whose `cases[].comparison` contains normalized Codex finding bodies
+  // and `raw` blobs from real captured reviews — leaking those into the
+  // public worktree is exactly what the existing `golden:eval` guard
+  // protects against. Codex P2 #3311625847.
+  assertOutsidePublicRepo(args.goldenRepo, 'GOLDEN_REPO_PATH');
+  assertOutsidePublicRepo(args.output, '--output');
+
   const casesRoot = resolve(args.goldenRepo, 'cases');
   const cases = listCapturedCases(casesRoot, args.caseFilter);
   if (cases.length === 0) {

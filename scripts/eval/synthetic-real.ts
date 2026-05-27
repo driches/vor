@@ -42,6 +42,7 @@ import { runOrchestrator } from '../../src/orchestrator.js';
 import { loadCase } from './case-loader.js';
 import { synthesizeDiff } from './diff-synthesis.js';
 import { injectScannerFindingsFlag } from './flag-injection.js';
+import { assertOutsidePublicRepo } from './golden-path-guard.js';
 import { scoreRun } from './scoring.js';
 
 interface Args {
@@ -257,13 +258,17 @@ async function runOne(
   const fileBytes = new Map(c.files.map((f) => [f.path, f.content]));
   const beforeBytes = new Map(c.beforeFiles.map((f) => [f.path, f.content]));
 
-  // Synthetic cases have no committed `.code-review.yml` to merge into, so
-  // we feed the helper a null baseline. The helper still round-trips through
-  // the real loader, which lets us warn when the flag has no effect on the
-  // current branch's schema.
+  // A synthetic case may ship its own `after/.code-review.yml` to tune
+  // severity/excludes/enabled-scanners for that specific case. Read it
+  // from the loaded case bytes and merge the experimental flag on top
+  // rather than emit a minimal stub — otherwise --scanner-findings-in-
+  // user-prompt would silently flip every unrelated setting back to
+  // defaults during the A/B run. Codex P2 #3311625841 (companion to the
+  // captured-real fix that did the same merge from `git show`).
   let configOverride: string | undefined;
   if (args.scannerFindingsInUserPrompt) {
-    const inj = injectScannerFindingsFlag(null);
+    const existingYaml = fileBytes.get('.code-review.yml') ?? null;
+    const inj = injectScannerFindingsFlag(existingYaml);
     configOverride = inj.mergedYaml;
     if (!inj.effective) {
       console.error(
@@ -370,6 +375,15 @@ async function runOne(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // Apply the same privacy posture as captured-real: refuse to run if
+  // either the dataset path or the output destination is inside the
+  // public repo. Synthetic-case reports include `kept_comments` and
+  // scoring outcomes — generally less sensitive than captured Codex
+  // bodies, but the rule keeps the eval suite consistent so a future
+  // mode that emits real findings can't accidentally weaken it.
+  assertOutsidePublicRepo(args.goldenRepo, 'GOLDEN_REPO_PATH');
+  assertOutsidePublicRepo(args.output, '--output');
+
   const casesRoot = resolve(args.goldenRepo, 'cases');
   const cases = listSyntheticCases(casesRoot, args.caseFilter);
   if (cases.length === 0) {
