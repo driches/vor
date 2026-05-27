@@ -108,7 +108,13 @@ function materializeSyntheticWorkspace(
   cpSync(afterDir, workDir, { recursive: true });
   const gitOpts = { cwd: workDir, stdio: 'ignore' } as const;
   execFileSync('git', ['init', '-q', '-b', 'synthetic'], gitOpts);
-  execFileSync('git', ['add', '-A'], gitOpts);
+  // `-f` so any `.gitignore` shipped in `after/` doesn't cause `git add` to
+  // skip its own committed fixtures (e.g. `.env`, generated test inputs).
+  // The synthesized diff/files-API expose every file in `after/`, so the
+  // materialized commit MUST match that set — otherwise the agent's
+  // `grep_repo_at_ref` searches a different tree than what's in the PR.
+  // Codex P2 #3311540085.
+  execFileSync('git', ['add', '-A', '-f'], gitOpts);
   // Inline identity so the local user's `git config` isn't required to
   // produce a commit. The committed tree is the `after/` snapshot — the
   // tool only needs SOME ref to grep against.
