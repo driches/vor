@@ -23,7 +23,7 @@
  * is typically $0.40-$0.80 total per A/B side.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -105,8 +105,12 @@ function loadCapturedArtifacts(caseDir: string): CapturedArtifacts {
 }
 
 function gitShow(repoDir: string, ref: string, path: string): string | null {
+  // Use the argv form so paths containing spaces or shell metacharacters
+  // (a-repo can legitimately have `src/foo bar.ts` or paths the agent
+  // requests through tool calls) don't get word-split or interpreted by
+  // the shell. Codex P2 #3311351356 on PR #34.
   try {
-    return execSync(`git show ${ref}:${path}`, {
+    return execFileSync('git', ['show', `${ref}:${path}`], {
       cwd: repoDir,
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf-8',
