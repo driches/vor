@@ -24,7 +24,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { Octokit } from '@octokit/rest';
@@ -32,7 +32,7 @@ import type { PostedComment } from '../../src/types.js';
 import { runOrchestrator } from '../../src/orchestrator.js';
 import { compare, type CompareResult } from '../../src/eval/compare.js';
 import { fromPostedComment, type NormalizedFinding } from '../../src/eval/finding.js';
-import type { CaseMeta } from '../../src/eval/local-deps.js';
+import { ensureRepoSnapshot, type CaseMeta } from '../../src/eval/local-deps.js';
 import { injectScannerFindingsFlag } from './flag-injection.js';
 
 interface Args {
@@ -67,16 +67,18 @@ function listCapturedCases(casesRoot: string, filter?: string): string[] {
   const all = readdirSync(casesRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name);
-  // Captured = has meta.yml + pr.json + files.json + diff.patch + repo/.
+  // Captured = has the committed artifacts (meta.yml + pr.json + files.json
+  // + diff.patch). `repo/` is intentionally gitignored in the golden dataset
+  // — on a fresh checkout it's missing, so requiring it here would exclude
+  // every otherwise-valid case. `runOne()` calls `ensureRepoSnapshot()` to
+  // clone the source repo at the captured head SHA before `git show` reads.
   const captured = all.filter((id) => {
     const dir = resolve(casesRoot, id);
     return (
       existsSync(resolve(dir, 'meta.yml')) &&
       existsSync(resolve(dir, 'pr.json')) &&
       existsSync(resolve(dir, 'files.json')) &&
-      existsSync(resolve(dir, 'diff.patch')) &&
-      existsSync(resolve(dir, 'repo')) &&
-      statSync(resolve(dir, 'repo')).isDirectory()
+      existsSync(resolve(dir, 'diff.patch'))
     );
   });
   return filter ? captured.filter((id) => id === filter) : captured;
@@ -191,6 +193,12 @@ interface CaseResult {
 async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<CaseResult> {
   const caseDir = resolve(goldenRepo, 'cases', caseId);
   const repoDir = resolve(caseDir, 'repo');
+  // Auto-restore the source-code snapshot when missing. The golden dataset
+  // gitignores `cases/*/repo/` to keep private code out of the dataset repo,
+  // so on a fresh checkout `repo/` doesn't exist yet. Mirrors what
+  // `golden:eval` does at the top of its per-case loop. Requires GH_TOKEN
+  // / GITHUB_TOKEN in env when cloning is needed.
+  await ensureRepoSnapshot({ caseDir });
   const artifacts = loadCapturedArtifacts(caseDir);
 
   // When the flag is requested, merge the experimental key INTO the repo's
@@ -282,11 +290,14 @@ async function main(): Promise<void> {
   );
 
   const results: CaseResult[] = [];
+  const failures: Array<{ case_id: string; error: string }> = [];
   for (const caseId of cases) {
     try {
       results.push(await runOne(caseId, args.goldenRepo, args));
     } catch (err) {
-      console.error(`  ERROR on ${caseId}: ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      console.error(`  ERROR on ${caseId}: ${msg}`);
+      failures.push({ case_id: caseId, error: msg });
     }
   }
 
@@ -301,6 +312,10 @@ async function main(): Promise<void> {
     );
   }
   console.error(`\n  TOTAL: ${totalTurns}t  $${totalCost.toFixed(4)} across ${results.length} case(s)`);
+  if (failures.length > 0) {
+    console.error(`\n  FAILED: ${failures.length} case(s)`);
+    for (const f of failures) console.error(`    ${f.case_id}: ${f.error}`);
+  }
 
   const outPath = resolve(args.output);
   mkdirSync(dirname(outPath), { recursive: true });
@@ -314,12 +329,17 @@ async function main(): Promise<void> {
         total_cost_usd: totalCost,
         total_turns: totalTurns,
         cases: results,
+        failures,
       },
       null,
       2,
     ),
   );
   console.error(`\nReport: ${outPath}`);
+  // Exit non-zero if ANY requested case failed to run — totals over only
+  // successful cases would otherwise make a partial eval look like a clean
+  // pass in automation. Codex P2 #3311303341 on PR #34.
+  if (failures.length > 0) process.exit(1);
 }
 
 main().catch((err: Error) => {

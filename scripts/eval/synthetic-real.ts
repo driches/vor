@@ -286,11 +286,14 @@ async function main(): Promise<void> {
   );
 
   const results: CaseResult[] = [];
+  const failures: Array<{ case_id: string; error: string }> = [];
   for (const caseId of cases) {
     try {
       results.push(await runOne(caseId, args.goldenRepo, args));
     } catch (err) {
-      console.error(`  ERROR on ${caseId}: ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      console.error(`  ERROR on ${caseId}: ${msg}`);
+      failures.push({ case_id: caseId, error: msg });
     }
   }
 
@@ -319,6 +322,10 @@ async function main(): Promise<void> {
       `R=${overallRecall.toFixed(2)}  P=${overallPrecision.toFixed(2)} ` +
       `across ${results.length} case(s)`,
   );
+  if (failures.length > 0) {
+    console.error(`\n  FAILED: ${failures.length} case(s)`);
+    for (const f of failures) console.error(`    ${f.case_id}: ${f.error}`);
+  }
 
   const outPath = resolve(args.output);
   mkdirSync(dirname(outPath), { recursive: true });
@@ -332,12 +339,17 @@ async function main(): Promise<void> {
         total_cost_usd: totalCost,
         total_turns: totalTurns,
         cases: results,
+        failures,
       },
       null,
       2,
     ),
   );
   console.error(`\nReport: ${outPath}`);
+  // Exit non-zero if ANY requested case failed to run. The totals over only
+  // successful cases would otherwise make a partial eval look like a clean
+  // pass in automation — Codex P2 #3311303341 on PR #34.
+  if (failures.length > 0) process.exit(1);
 }
 
 main().catch((err: Error) => {
