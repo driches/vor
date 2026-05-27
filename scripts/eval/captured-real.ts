@@ -257,6 +257,18 @@ async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<C
     octokitFactory: () => fakeOctokit,
   });
 
+  // Reject the orchestrator's "skipped" outcomes. The entry-level OR check
+  // can't tell which provider the case's model resolves to; if the resolved
+  // provider's key is missing, runOrchestrator returns ended=skipped_no_key_*
+  // with zero cost / zero findings, which would silently look like a clean
+  // eval. Same for draft-PR / fork-skip edges. Codex P2 #3311419655.
+  if (result.ended.startsWith('skipped_')) {
+    throw new Error(
+      `orchestrator returned ${result.ended} — no review actually ran. ` +
+        `Check that the API key for the resolved provider (model=${args.model ?? 'snapshot config'}) is set.`,
+    );
+  }
+
   const oursNormalized = result.kept_comments.map((c: PostedComment) => fromPostedComment(c));
   const comparison = compare({
     ours: oursNormalized,

@@ -236,9 +236,30 @@ async function runOne(
     ...(args.maxTurns !== undefined ? { max_turns_override: args.maxTurns } : {}),
     config_path: '.code-review.yml',
     dry_run: true,
-    workspace_dir: process.cwd(),
+    // SAST scanners shell out from `workspace_dir` to locate `node_modules/.bin`
+    // tools and to resolve relative paths in scanner output. Pointing this at
+    // `process.cwd()` makes them run against the code-review checkout instead
+    // of the case's planted files, corrupting precision/recall. The case's
+    // `after/` snapshot is the synthetic PR's "workspace". Codex P2 #3311419662.
+    workspace_dir: resolve(goldenRepo, 'cases', caseId, 'after'),
     octokitFactory: () => fakeOctokit,
   });
+
+  // Reject the orchestrator's "skipped" outcomes. The entry-level OR check
+  // (at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY is set) can't tell
+  // which provider the model resolves to inside the orchestrator. When the
+  // resolved provider's key is empty (e.g. `--model gpt-5-mini` with only
+  // ANTHROPIC_API_KEY exported), runOrchestrator returns ended=skipped_no_key_*
+  // with zero cost / zero findings — without this check, the harness would
+  // record a successful eval, masking a misconfigured run. Same applies to
+  // draft-PR skips, which don't apply here but cost nothing to guard against.
+  // Codex P2 #3311419655.
+  if (result.ended.startsWith('skipped_')) {
+    throw new Error(
+      `orchestrator returned ${result.ended} — no review actually ran. ` +
+        `Check that the API key for the resolved provider (model=${args.model ?? 'default'}) is set.`,
+    );
+  }
 
   // OrchestratorOutput now exposes `kept_comments` directly (added so eval
   // harnesses don't need a side channel into the aggregator).
