@@ -59486,7 +59486,9 @@ function buildUserPrompt(input) {
   ];
   const findings = input.scanner_findings ?? [];
   if (findings.length > 0) {
-    parts.push(renderScannerFindings(findings));
+    parts.push(
+      renderScannerFindings(findings, input.max_scanner_findings ?? MAX_INJECTED_FINDINGS_DEFAULT)
+    );
     parts.push("");
   }
   parts.push(
@@ -59495,7 +59497,8 @@ function buildUserPrompt(input) {
   );
   return parts.join("\n");
 }
-function renderScannerFindings(findings) {
+var MAX_INJECTED_FINDINGS_DEFAULT = 30;
+function renderScannerFindings(findings, maxFindings = MAX_INJECTED_FINDINGS_DEFAULT) {
   const severityRank = {
     critical: 0,
     important: 1,
@@ -59508,19 +59511,28 @@ function renderScannerFindings(findings) {
     if (a2.file_path !== b2.file_path) return a2.file_path.localeCompare(b2.file_path);
     return a2.line - b2.line;
   });
+  const capped = sorted.slice(0, Math.max(0, maxFindings));
+  const truncated = sorted.length - capped.length;
   const lines = [];
+  const header = truncated > 0 ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) \u2014 already detected, will post independently` : `## Deterministic scanner findings (${findings.length}) \u2014 already detected, will post independently`;
   lines.push(
-    `## Deterministic scanner findings (${findings.length}) \u2014 already detected, will post independently`,
+    header,
     "",
     "Scanners ran BEFORE you. The findings below are already on their way to the PR \u2014 you do NOT need to investigate, verify, or re-flag them. Treat them as covered.",
     "",
     "Your job is what scanners CAN'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn't match a pattern. Spend your turns there.",
     ""
   );
-  for (const f2 of sorted) {
+  for (const f2 of capped) {
     const title = f2.title.length > 120 ? `${f2.title.slice(0, 117)}...` : f2.title;
     lines.push(
       `- [${f2.severity}] \`${f2.file_path}:${f2.line}\` \u2014 ${f2.scanner}/${f2.rule_id}: ${title}`
+    );
+  }
+  if (truncated > 0) {
+    lines.push(
+      "",
+      `(${truncated} additional lower-severity scanner finding(s) omitted from this block \u2014 they'll still be posted by the scanner pipeline subject to the configured cap.)`
     );
   }
   return lines.join("\n");
@@ -68094,7 +68106,13 @@ async function runOrchestrator(input) {
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
-      ...findings.length > 0 ? { scanner_findings: findings } : {}
+      ...findings.length > 0 ? {
+        scanner_findings: findings,
+        // Share the post-filter cap with the prompt so we don't render
+        // a 1000-entry coverage-delta list the orchestrator would
+        // truncate anyway. Codex P2 #3311267539.
+        max_scanner_findings: config.severity.max_comments_total
+      } : {}
     });
     return scopeNotice ? `${scopeNotice}
 

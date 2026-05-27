@@ -260,7 +260,15 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
-      ...(findings.length > 0 ? { scanner_findings: findings } : {}),
+      ...(findings.length > 0
+        ? {
+            scanner_findings: findings,
+            // Share the post-filter cap with the prompt so we don't render
+            // a 1000-entry coverage-delta list the orchestrator would
+            // truncate anyway. Codex P2 #3311267539.
+            max_scanner_findings: config.severity.max_comments_total,
+          }
+        : {}),
     });
     return scopeNotice ? `${scopeNotice}\n\n${base}` : base;
   };

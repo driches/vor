@@ -14,6 +14,15 @@ export function buildUserPrompt(input: {
   repo: string;
   pull_number: number;
   scanner_findings?: ReadonlyArray<ScanFinding>;
+  /**
+   * Cap on the number of scanner findings rendered into the prompt. The
+   * orchestrator passes `severity.max_comments_total` here — findings that
+   * couldn't survive the post-filter cap can't legitimately be cited as
+   * "already detected" anyway, and rendering them would bloat the agent's
+   * first input (a coverage-delta run on a big PR can emit thousands).
+   * When omitted, falls back to `MAX_INJECTED_FINDINGS_DEFAULT`.
+   */
+  max_scanner_findings?: number;
 }): string {
   const parts: string[] = [
     `Review pull request #${input.pull_number} in ${input.owner}/${input.repo}.`,
@@ -22,7 +31,9 @@ export function buildUserPrompt(input: {
 
   const findings = input.scanner_findings ?? [];
   if (findings.length > 0) {
-    parts.push(renderScannerFindings(findings));
+    parts.push(
+      renderScannerFindings(findings, input.max_scanner_findings ?? MAX_INJECTED_FINDINGS_DEFAULT),
+    );
     parts.push('');
   }
 
@@ -32,6 +43,13 @@ export function buildUserPrompt(input: {
   );
   return parts.join('\n');
 }
+
+/**
+ * Fallback cap when no per-run budget is provided. 30 matches the default
+ * `severity.max_comments_total` so flag-ON behavior is consistent end-to-end
+ * even if a caller (test, alt entry-point) doesn't pass an explicit cap.
+ */
+const MAX_INJECTED_FINDINGS_DEFAULT = 30;
 
 /**
  * Render deterministic scanner findings as a block the agent can scan in a
@@ -54,6 +72,7 @@ export function buildUserPrompt(input: {
  */
 export function renderScannerFindings(
   findings: ReadonlyArray<ScanFinding>,
+  maxFindings: number = MAX_INJECTED_FINDINGS_DEFAULT,
 ): string {
   const severityRank: Record<string, number> = {
     critical: 0,
@@ -68,19 +87,37 @@ export function renderScannerFindings(
     return a.line - b.line;
   });
 
+  // Cap before rendering so the prompt stays bounded regardless of scanner
+  // output size. coverage-delta in particular can emit one finding per
+  // uncovered added line — a 2000-line PR with low coverage could produce
+  // thousands of entries. Severity-sorted, so the cap keeps the most
+  // important ones. Codex P2 #3311267539 on PR #36.
+  const capped = sorted.slice(0, Math.max(0, maxFindings));
+  const truncated = sorted.length - capped.length;
+
   const lines: string[] = [];
+  const header =
+    truncated > 0
+      ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) — already detected, will post independently`
+      : `## Deterministic scanner findings (${findings.length}) — already detected, will post independently`;
   lines.push(
-    `## Deterministic scanner findings (${findings.length}) — already detected, will post independently`,
+    header,
     '',
     "Scanners ran BEFORE you. The findings below are already on their way to the PR — you do NOT need to investigate, verify, or re-flag them. Treat them as covered.",
     '',
     'Your job is what scanners CAN\'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn\'t match a pattern. Spend your turns there.',
     '',
   );
-  for (const f of sorted) {
+  for (const f of capped) {
     const title = f.title.length > 120 ? `${f.title.slice(0, 117)}...` : f.title;
     lines.push(
       `- [${f.severity}] \`${f.file_path}:${f.line}\` — ${f.scanner}/${f.rule_id}: ${title}`,
+    );
+  }
+  if (truncated > 0) {
+    lines.push(
+      '',
+      `(${truncated} additional lower-severity scanner finding(s) omitted from this block — they'll still be posted by the scanner pipeline subject to the configured cap.)`,
     );
   }
   return lines.join('\n');

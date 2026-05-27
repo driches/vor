@@ -24,6 +24,7 @@ import type { Octokit } from '@octokit/rest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { runOrchestrator } from '../src/orchestrator.js';
 
 interface Args {
@@ -136,6 +137,48 @@ function getFileContent(workspace: string, ref: string, path: string): string | 
   } catch {
     return null; // file doesn't exist at this ref (added/removed)
   }
+}
+
+/**
+ * Deep-merge `experimental.scanner_findings_in_user_prompt: true` into the
+ * repo's existing `.code-review.yml` content rather than emitting a minimal
+ * YAML that masks it. Returns YAML text ready to serve from the FakeOctokit.
+ *
+ * `existingYaml` may be `null` (no committed config), in which case the
+ * output contains only the experimental key.
+ */
+function mergeScannerFindingsFlag(existingYaml: string | null): string {
+  let parsed: Record<string, unknown> = {};
+  if (existingYaml && existingYaml.trim().length > 0) {
+    try {
+      const raw = parseYaml(existingYaml);
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        parsed = raw as Record<string, unknown>;
+      }
+    } catch {
+      // Malformed existing YAML — fall back to empty. The orchestrator's
+      // config loader will surface the parse failure on its own when it
+      // reads the merged output.
+    }
+  }
+  const experimental = (parsed['experimental'] as Record<string, unknown>) ?? {};
+  experimental['scanner_findings_in_user_prompt'] = true;
+  parsed['experimental'] = experimental;
+  return stringifyYaml(parsed);
+}
+
+/** Count top-level keys in a YAML document for log-line context. Returns 0
+ *  when parsing fails — purely informational. */
+function countTopLevelKeys(yaml: string): number {
+  try {
+    const raw = parseYaml(yaml);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return Object.keys(raw).length;
+    }
+  } catch {
+    /* swallow */
+  }
+  return 0;
 }
 
 function unifiedDiff(workspace: string, base: string, head: string): string {
@@ -309,16 +352,19 @@ async function main(): Promise<void> {
   );
 
   // Build the content-override map. Today: only the experimental flag
-  // for scanner-findings-in-user-prompt. The override is a minimal YAML
-  // snippet — the orchestrator's loadConfig deep-merges it into defaults.
+  // for scanner-findings-in-user-prompt. We MERGE into the repo's real
+  // `.code-review.yml` rather than emit a minimal stub — otherwise the
+  // A/B run would also flip every unrelated setting the repo configured
+  // (model, severity floor, exclude paths, enabled scanners) back to
+  // defaults, and the comparison would no longer isolate this flag.
+  // Codex P2 #3311267562 on PR #36.
   const contentOverrides = new Map<string, string>();
   if (args.scannerFindingsInUserPrompt) {
-    contentOverrides.set(
-      args.configPath,
-      `experimental:\n  scanner_findings_in_user_prompt: true\n`,
-    );
+    const existingYaml = getFileContent(args.workspace, headSha, args.configPath);
+    contentOverrides.set(args.configPath, mergeScannerFindingsFlag(existingYaml));
     console.error(
-      `local-review: injecting scanner_findings_in_user_prompt=true via synthetic ${args.configPath}`,
+      `local-review: injecting scanner_findings_in_user_prompt=true via merged ${args.configPath}` +
+        (existingYaml ? ` (preserving ${countTopLevelKeys(existingYaml)} existing top-level key(s))` : ''),
     );
   }
 
