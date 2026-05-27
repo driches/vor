@@ -23,8 +23,19 @@
  * the 5 synthetic cases at Sonnet defaults cost ~$2-5 per pass.
  */
 
-import { existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import type { PostedComment } from '../../src/types.js';
 import { runOrchestrator } from '../../src/orchestrator.js';
@@ -75,6 +86,47 @@ function listSyntheticCases(casesRoot: string, filter?: string): string[] {
     );
   });
   return filter ? synthetic.filter((id) => id === filter) : synthetic;
+}
+
+/**
+ * Materialize the case's `after/` snapshot as a temporary git checkout so
+ * the agent's `grep_repo_at_ref` tool (which shells out to `git grep` from
+ * `workspaceDir`) actually works. Without this, every grep call against a
+ * synthetic case fails with "not a git repository" and the agent silently
+ * loses its caller / pattern-search capability mid-eval. Codex P2 #3311481416.
+ *
+ * Pointing the orchestrator at the raw `after/` directory broke this; pointing
+ * it back at `process.cwd()` broke scanners (they shell out for binaries from
+ * `workspace_dir`). Materializing a per-case temp checkout satisfies both.
+ */
+function materializeSyntheticWorkspace(
+  goldenRepo: string,
+  caseId: string,
+): { dir: string; cleanup: () => void } {
+  const afterDir = resolve(goldenRepo, 'cases', caseId, 'after');
+  const workDir = mkdtempSync(join(tmpdir(), `synthetic-eval-${caseId}-`));
+  cpSync(afterDir, workDir, { recursive: true });
+  const gitOpts = { cwd: workDir, stdio: 'ignore' } as const;
+  execFileSync('git', ['init', '-q', '-b', 'synthetic'], gitOpts);
+  execFileSync('git', ['add', '-A'], gitOpts);
+  // Inline identity so the local user's `git config` isn't required to
+  // produce a commit. The committed tree is the `after/` snapshot — the
+  // tool only needs SOME ref to grep against.
+  execFileSync(
+    'git',
+    ['-c', 'user.email=eval@local', '-c', 'user.name=synthetic-eval', 'commit', '-q', '-m', 'synthetic'],
+    gitOpts,
+  );
+  return {
+    dir: workDir,
+    cleanup: () => {
+      try {
+        rmSync(workDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; orphans under tmpdir() are harmless.
+      }
+    },
+  };
 }
 
 /**
@@ -225,71 +277,80 @@ async function runOne(
 
   console.error(`\n=== ${caseId} (${filesApi.length} file(s), ${c.truths.length} truth(s)) ===`);
 
-  const result = await runOrchestrator({
-    owner: 'synthetic',
-    repo: caseId,
-    pull_number: 1,
-    anthropic_api_key: anthropicKey,
-    openai_api_key: openaiKey,
-    github_token: 'synthetic-eval-placeholder',
-    ...(args.model !== undefined ? { model_override: args.model } : {}),
-    ...(args.maxTurns !== undefined ? { max_turns_override: args.maxTurns } : {}),
-    config_path: '.code-review.yml',
-    dry_run: true,
-    // SAST scanners shell out from `workspace_dir` to locate `node_modules/.bin`
-    // tools and to resolve relative paths in scanner output. Pointing this at
-    // `process.cwd()` makes them run against the code-review checkout instead
-    // of the case's planted files, corrupting precision/recall. The case's
-    // `after/` snapshot is the synthetic PR's "workspace". Codex P2 #3311419662.
-    workspace_dir: resolve(goldenRepo, 'cases', caseId, 'after'),
-    octokitFactory: () => fakeOctokit,
-  });
+  // The materialized workspace satisfies BOTH constraints the orchestrator
+  // imposes on `workspace_dir`:
+  //   - SAST scanners shell out from here to locate `node_modules/.bin` and
+  //     to resolve relative paths in scanner output, so it has to be a real
+  //     directory containing the case's planted files (not `process.cwd()`,
+  //     which is the code-review checkout).
+  //   - The agent's `grep_repo_at_ref` tool runs `git grep` from here, so
+  //     the directory has to be a git repository (not the raw `after/`
+  //     snapshot, which isn't). Codex P2 #3311481416.
+  const workspace = materializeSyntheticWorkspace(goldenRepo, caseId);
+  try {
+    const result = await runOrchestrator({
+      owner: 'synthetic',
+      repo: caseId,
+      pull_number: 1,
+      anthropic_api_key: anthropicKey,
+      openai_api_key: openaiKey,
+      github_token: 'synthetic-eval-placeholder',
+      ...(args.model !== undefined ? { model_override: args.model } : {}),
+      ...(args.maxTurns !== undefined ? { max_turns_override: args.maxTurns } : {}),
+      config_path: '.code-review.yml',
+      dry_run: true,
+      workspace_dir: workspace.dir,
+      octokitFactory: () => fakeOctokit,
+    });
 
-  // Reject the orchestrator's "skipped" outcomes. The entry-level OR check
-  // (at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY is set) can't tell
-  // which provider the model resolves to inside the orchestrator. When the
-  // resolved provider's key is empty (e.g. `--model gpt-5-mini` with only
-  // ANTHROPIC_API_KEY exported), runOrchestrator returns ended=skipped_no_key_*
-  // with zero cost / zero findings — without this check, the harness would
-  // record a successful eval, masking a misconfigured run. Same applies to
-  // draft-PR skips, which don't apply here but cost nothing to guard against.
-  // Codex P2 #3311419655.
-  if (result.ended.startsWith('skipped_')) {
-    throw new Error(
-      `orchestrator returned ${result.ended} — no review actually ran. ` +
-        `Check that the API key for the resolved provider (model=${args.model ?? 'default'}) is set.`,
-    );
-  }
+    // Reject the orchestrator's "skipped" outcomes. The entry-level OR check
+    // (at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY is set) can't tell
+    // which provider the model resolves to inside the orchestrator. When the
+    // resolved provider's key is empty (e.g. `--model gpt-5-mini` with only
+    // ANTHROPIC_API_KEY exported), runOrchestrator returns ended=skipped_no_key_*
+    // with zero cost / zero findings — without this check, the harness would
+    // record a successful eval, masking a misconfigured run. Same applies to
+    // draft-PR skips, which don't apply here but cost nothing to guard against.
+    // Codex P2 #3311419655.
+    if (result.ended.startsWith('skipped_')) {
+      throw new Error(
+        `orchestrator returned ${result.ended} — no review actually ran. ` +
+          `Check that the API key for the resolved provider (model=${args.model ?? 'default'}) is set.`,
+      );
+    }
 
-  // OrchestratorOutput now exposes `kept_comments` directly (added so eval
-  // harnesses don't need a side channel into the aggregator).
-  const kept = result.kept_comments;
-  const score = scoreRun({
-    case_id: caseId,
-    config_name: args.model ?? 'default',
-    truths: c.truths,
-    findings: kept,
-    cost: {
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-      turns: result.turns,
+    // OrchestratorOutput now exposes `kept_comments` directly (added so eval
+    // harnesses don't need a side channel into the aggregator).
+    const kept = result.kept_comments;
+    const score = scoreRun({
+      case_id: caseId,
+      config_name: args.model ?? 'default',
+      truths: c.truths,
+      findings: kept,
+      cost: {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        turns: result.turns,
+        cost_usd: result.cost_usd,
+        wall_ms: 0,
+        ended_reason: result.ended,
+      },
+    });
+
+    return {
+      case_id: caseId,
+      truth_count: c.truths.length,
       cost_usd: result.cost_usd,
-      wall_ms: 0,
-      ended_reason: result.ended,
-    },
-  });
-
-  return {
-    case_id: caseId,
-    truth_count: c.truths.length,
-    cost_usd: result.cost_usd,
-    turns: result.turns,
-    ended: result.ended,
-    kept_comments: kept,
-    score,
-  };
+      turns: result.turns,
+      ended: result.ended,
+      kept_comments: kept,
+      score,
+    };
+  } finally {
+    workspace.cleanup();
+  }
 }
 
 async function main(): Promise<void> {
