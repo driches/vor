@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-05-27
+## [0.5.1] - 2026-05-27
+
+### Fixed
+- **Self-review workflow now forwards `pr_number` to the action.** The dispatch workflow (`.github/workflows/self-review.yml`) accepted a `pr_number` input but never passed it through to the action's `pr_number` parameter, so manual `gh workflow run self-review.yml -f pr_number=N` invocations failed to locate the target PR. Fixing the wiring is otherwise a one-line change — no orchestrator / agent behavior change.
+
+
 
 ### Added
 - **`experimental.scanner_findings_in_user_prompt` flag** (opt-in, default false). When enabled, the orchestrator runs scanners FIRST, then injects their findings as a structured list at the top of the agent's user prompt before the agent loop starts. The prompt block tells the agent "these are already detected — don't re-investigate or re-flag, focus your turns on semantic / design / architectural concerns scanners can't catch." Goal: cut agent turns + cost (less duplicate work) AND raise accuracy (agent focuses on what scanners can't catch). Trade-off: orchestration becomes sequential (scanners-then-agent) instead of parallel, adding ~scanner-duration wall-clock latency. A/B comparison via `npm run local-review -- --scanner-findings-in-user-prompt` is the recommended way to validate per-repo before flipping on. Renderer is in [src/agent/user-prompt.ts](src/agent/user-prompt.ts:`renderScannerFindings`); orchestrator gate is in [src/orchestrator.ts](src/orchestrator.ts) under `injectFindings`.
