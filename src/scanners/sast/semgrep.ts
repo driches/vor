@@ -179,19 +179,24 @@ export const semgrepLinter: LinterModule = {
       findings.push(buildFinding(changedFile.path, result, changedFile));
     }
 
-    // Count 1 network call for any run that reached the JSON-parse stage —
-    // exit 0/1/2 all indicate semgrep attempted the `--config=auto` rule
-    // fetch (warm runners hit the on-disk cache and don't actually egress,
-    // but we can't tell from the exit code which happened, so we count
-    // the attempt). Exit 2 specifically means "errors but partial results"
-    // — still counts because rules were fetched before scanning began.
-    // Operators needing exact egress accounting should switch to
-    // `--config=<local-path>` (see TODO in runCli below).
+    // Count 2 network calls for any run that reached the JSON-parse stage:
+    //   1. `--config=auto` rule fetch from the semgrep registry
+    //   2. semgrep's default metrics POST (sent on any registry-pulling run)
+    //
+    // Both happen on every successful semgrep invocation. Warm runners hit
+    // the on-disk rule cache for (1) and skip actual egress, but we can't
+    // tell from the exit code which path the binary took, so we count the
+    // attempt. The metrics call was previously suppressed via `--metrics=off`
+    // — that flag was removed because semgrep 1.150+ rejects it alongside
+    // `--config=auto` (PR #33). Exit 2 specifically means "errors but
+    // partial results" — still counts because rules were fetched before
+    // scanning began. Operators needing exact egress accounting should
+    // switch to `--config=<local-path>` (see TODO in runCli below).
     return {
       findings,
       errors,
       filesExamined: targetFiles.length,
-      networkCalls: 1,
+      networkCalls: 2,
     };
   },
 };
@@ -245,12 +250,17 @@ function runCli(
     // log noise. The JSON results go to stdout regardless; --quiet does
     // not affect the JSON stream (those are separate file descriptors).
     // --no-rewrite-rule-ids keeps check_ids stable across runs for
-    // fingerprinting. --metrics=off suppresses semgrep's default
-    // telemetry beacon to semgrep.dev (separate from --disable-version-check,
-    // which only stops the version ping). Operators with strict egress
-    // controls or data-residency requirements need this off; the
-    // --config=auto rule fetch is already documented and accounted for in
-    // networkCalls, the metrics beacon was an undocumented additional call.
+    // fingerprinting.
+    //
+    // Note on metrics: we used to pass `--metrics=off` to suppress
+    // semgrep's default telemetry beacon. Semgrep 1.150+ rejects that
+    // flag alongside `--config=auto` ("Cannot create auto config when
+    // metrics are off"), so the whole linter would silently fail on
+    // every PR (see PR #33). Each successful run now does TWO network
+    // calls (registry rule fetch + metrics POST) — both are accounted
+    // for in the `networkCalls: 2` field below. Operators with strict
+    // data-residency requirements should disable semgrep entirely via
+    // `security.scanners.sast.enabled: false`.
     //
     // Custom rules: semgrep accepts MULTIPLE `--config` flags and merges
     // them into a single rule set. When `custom_rules_path` is set AND

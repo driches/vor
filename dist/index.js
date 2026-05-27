@@ -66927,7 +66927,7 @@ var semgrepLinter = {
       findings,
       errors,
       filesExamined: targetFiles.length,
-      networkCalls: 1
+      networkCalls: 2
     };
   }
 };

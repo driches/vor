@@ -77,22 +77,17 @@ rules:
                 await $Y;
                 ...
               }
-      # Suppression for fan-out via Promise.all has to mirror BOTH declarators
-      # the inner pattern-either accepts; otherwise a `let` loop containing
-      # `await Promise.all(...)` still matches and false-positives. Codex
-      # caught this on PR #33 — fix is just to add the let variant.
-      - pattern-not-inside: |
-          for (const $X of $XS) {
-            ...
-            await Promise.all(...);
-            ...
-          }
-      - pattern-not-inside: |
-          for (let $X of $XS) {
-            ...
-            await Promise.all(...);
-            ...
-          }
+      # Suppress only the SPECIFIC matched await when its target is
+      # Promise.all(...). The earlier `pattern-not-inside` approach
+      # suppressed the entire loop on any `await Promise.all(...)`
+      # appearance, which silently swallowed mixed loops that did both
+      # a serial `await db.find(...)` AND a `Promise.all(...)` fan-out
+      # — exactly the N+1 we want to flag. Codex caught the false-
+      # negative on PR #33.
+      - metavariable-pattern:
+          metavariable: $Y
+          patterns:
+            - pattern-not: Promise.all(...)
 
   - id: code-review.n-plus-one.await-in-while-loop
     message: |
