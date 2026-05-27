@@ -33,6 +33,7 @@ import { runOrchestrator } from '../../src/orchestrator.js';
 import { compare, type CompareResult } from '../../src/eval/compare.js';
 import { fromPostedComment, type NormalizedFinding } from '../../src/eval/finding.js';
 import type { CaseMeta } from '../../src/eval/local-deps.js';
+import { injectScannerFindingsFlag } from './flag-injection.js';
 
 interface Args {
   goldenRepo: string;
@@ -129,7 +130,15 @@ function buildFakeOctokit(opts: {
           }
           return { data: artifacts.prData };
         },
-        listFiles: async () => ({ data: artifacts.filesData }),
+        // Real `fetchPRFiles` paginates until a page returns fewer than 100
+        // entries. Honor `page` / `per_page` so captured PRs with many files
+        // (or `per_page < total`) don't loop forever.
+        listFiles: async (args: { page?: number; per_page?: number } = {}) => {
+          const perPage = args.per_page ?? 30;
+          const page = args.page ?? 1;
+          const start = (page - 1) * perPage;
+          return { data: artifacts.filesData.slice(start, start + perPage) };
+        },
         listReviews: async () => ({ data: [] }),
         createReview: async () => ({ data: { id: 0 } }),
         dismissReview: async () => ({ data: {} }),
@@ -184,9 +193,26 @@ async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<C
   const repoDir = resolve(caseDir, 'repo');
   const artifacts = loadCapturedArtifacts(caseDir);
 
-  const configOverride = args.scannerFindingsInUserPrompt
-    ? `experimental:\n  scanner_findings_in_user_prompt: true\n`
-    : undefined;
+  // When the flag is requested, merge the experimental key INTO the repo's
+  // real `.code-review.yml` rather than replacing it. Codex caught this on
+  // PR #34: the earlier behavior overwrote everything (severity floor,
+  // exclude paths, scanner enables) the repo had configured. Plus the
+  // round-trip through the real loader lets us warn when the flag has no
+  // schema-level effect on the current branch.
+  let configOverride: string | undefined;
+  if (args.scannerFindingsInUserPrompt) {
+    const existingYaml = gitShow(repoDir, artifacts.meta.head_sha, '.code-review.yml');
+    const inj = injectScannerFindingsFlag(existingYaml);
+    configOverride = inj.mergedYaml;
+    if (!inj.effective) {
+      console.error(
+        `  WARN: --scanner-findings-in-user-prompt requested but the current branch's ` +
+          `config schema does not expose 'experimental.scanner_findings_in_user_prompt'. ` +
+          `The flag is being stripped by Zod and the run is identical to flag-OFF. ` +
+          `Land the flag implementation (PR #36) before A/B-ing on this branch.`,
+      );
+    }
+  }
 
   const fakeOctokit = buildFakeOctokit({
     artifacts,

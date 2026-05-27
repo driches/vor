@@ -30,6 +30,7 @@ import type { PostedComment } from '../../src/types.js';
 import { runOrchestrator } from '../../src/orchestrator.js';
 import { loadCase } from './case-loader.js';
 import { synthesizeDiff } from './diff-synthesis.js';
+import { injectScannerFindingsFlag } from './flag-injection.js';
 import { scoreRun } from './scoring.js';
 
 interface Args {
@@ -112,17 +113,27 @@ function buildFakeOctokit(opts: {
             },
           };
         },
-        listFiles: async () => ({
-          data: opts.filesApi.map((f) => ({
-            filename: f.filename,
-            status: 'added',
-            additions: f.changes,
-            deletions: 0,
-            changes: f.changes,
-            sha: 'synthhead',
-            patch: f.patch,
-          })),
-        }),
+        // Real `fetchPRFiles` paginates until a page returns fewer than 100
+        // entries. A naive fake that returns the full list on every page
+        // would loop forever on synthetic cases with >=100 files. Honor
+        // `page` / `per_page` so the loop terminates.
+        listFiles: async (args: { page?: number; per_page?: number } = {}) => {
+          const perPage = args.per_page ?? 30;
+          const page = args.page ?? 1;
+          const start = (page - 1) * perPage;
+          const slice = opts.filesApi.slice(start, start + perPage);
+          return {
+            data: slice.map((f) => ({
+              filename: f.filename,
+              status: 'added',
+              additions: f.changes,
+              deletions: 0,
+              changes: f.changes,
+              sha: 'synthhead',
+              patch: f.patch,
+            })),
+          };
+        },
         listReviews: async () => ({ data: [] }),
         createReview: async () => ({ data: { id: 0 } }),
         dismissReview: async () => ({ data: {} }),
@@ -179,9 +190,23 @@ async function runOne(
   const fileBytes = new Map(c.files.map((f) => [f.path, f.content]));
   const beforeBytes = new Map(c.beforeFiles.map((f) => [f.path, f.content]));
 
-  const configOverride = args.scannerFindingsInUserPrompt
-    ? `experimental:\n  scanner_findings_in_user_prompt: true\n`
-    : undefined;
+  // Synthetic cases have no committed `.code-review.yml` to merge into, so
+  // we feed the helper a null baseline. The helper still round-trips through
+  // the real loader, which lets us warn when the flag has no effect on the
+  // current branch's schema.
+  let configOverride: string | undefined;
+  if (args.scannerFindingsInUserPrompt) {
+    const inj = injectScannerFindingsFlag(null);
+    configOverride = inj.mergedYaml;
+    if (!inj.effective) {
+      console.error(
+        `  WARN: --scanner-findings-in-user-prompt requested but the current branch's ` +
+          `config schema does not expose 'experimental.scanner_findings_in_user_prompt'. ` +
+          `The flag is being stripped by Zod and the run is identical to flag-OFF. ` +
+          `Land the flag implementation (PR #36) before A/B-ing on this branch.`,
+      );
+    }
+  }
 
   const fakeOctokit = buildFakeOctokit({
     diff,
