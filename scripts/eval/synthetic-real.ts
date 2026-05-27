@@ -120,7 +120,16 @@ function materializeSyntheticWorkspace(
   // tool only needs SOME ref to grep against.
   execFileSync(
     'git',
-    ['-c', 'user.email=eval@local', '-c', 'user.name=synthetic-eval', 'commit', '-q', '-m', 'synthetic'],
+    // `--allow-empty` so a deletion-only case (empty `after/` snapshot, which
+    // `synthesizeDiff` already supports) still produces the HEAD ref that
+    // `grep_repo_at_ref` needs. Without it `git commit` exits non-zero and
+    // the entire eval case fails before the orchestrator ever runs.
+    // Codex P2 #3311582726.
+    [
+      '-c', 'user.email=eval@local',
+      '-c', 'user.name=synthetic-eval',
+      'commit', '-q', '--allow-empty', '-m', 'synthetic',
+    ],
     gitOpts,
   );
   return {
