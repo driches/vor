@@ -174,6 +174,65 @@ describe('createDependencyHygieneScanner — scan()', () => {
     expect(result.findings.map((f) => f.rule_id)).toEqual(['dependency-hygiene:lockfile-drift']);
   });
 
+  it('reports drift when a dependency is REMOVED without a lockfile update', async () => {
+    const diff = [
+      'diff --git a/package.json b/package.json',
+      'index 1111111..2222222 100644',
+      '--- a/package.json',
+      '+++ b/package.json',
+      '@@ -3,5 +3,4 @@',
+      '   "dependencies": {',
+      '     "lodash": "^4.17.21",',
+      '-    "removed-dep": "^1.0.0",',
+      '     "loose": "^2.0.0"',
+      '   }',
+    ].join('\n');
+    // HEAD manifest (post-removal) — parses fine; removal is seen via the diff.
+    const headContent = [
+      '{',
+      '  "name": "demo",',
+      '  "dependencies": {',
+      '    "lodash": "^4.17.21",',
+      '    "loose": "^2.0.0"',
+      '  }',
+      '}',
+    ].join('\n');
+    const file = makeChangedFile({
+      path: 'package.json',
+      reviewable_lines: [[3, 7]],
+      added_lines: new Set(), // pure removal — no added dependency line
+      head_line_text: new Map(),
+    });
+    const deps = makeScannerDeps(headContent, { changedFiles: [file], diff });
+    const result = await createDependencyHygieneScanner().scan(deps);
+    const drift = result.findings.find((f) => f.rule_id === 'dependency-hygiene:lockfile-drift');
+    expect(drift).toBeDefined();
+    expect(drift!.line).toBe(3); // attached to the first reviewable context line
+  });
+
+  it('does not treat a removed non-dependency field (version) as drift', async () => {
+    const diff = [
+      'diff --git a/package.json b/package.json',
+      'index 1111111..2222222 100644',
+      '--- a/package.json',
+      '+++ b/package.json',
+      '@@ -2,3 +2,2 @@',
+      '   "name": "demo",',
+      '-  "version": "1.0.0",',
+      '   "dependencies": {',
+    ].join('\n');
+    const headContent = ['{', '  "name": "demo",', '  "dependencies": {}', '}'].join('\n');
+    const file = makeChangedFile({
+      path: 'package.json',
+      reviewable_lines: [[2, 4]],
+      added_lines: new Set(),
+      head_line_text: new Map(),
+    });
+    const deps = makeScannerDeps(headContent, { changedFiles: [file], diff });
+    const result = await createDependencyHygieneScanner().scan(deps);
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('records a non-fatal error path gracefully on malformed JSON', async () => {
     const { file } = makeManifest(['{ not json'], [1]);
     const deps = makeScannerDeps('{ not json', { changedFiles: [file] });

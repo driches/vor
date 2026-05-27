@@ -99,12 +99,20 @@ describe('createDebrisScanner — scan()', () => {
     expect(result.findings[0]!.severity).toBe('critical');
   });
 
-  it('flags a focused test (.only)', async () => {
+  it('flags a focused test (.only) in a test file', async () => {
     const deps = makeScannerDeps({
       changedFiles: [makeFileWithLines('src/foo.test.ts', ["describe.only('x', () => {})"])],
     });
     const result = await createDebrisScanner().scan(deps);
     expect(result.findings.map((f) => f.rule_id)).toContain('debris:focused-test');
+  });
+
+  it('does NOT flag a production function named fit() in non-test code', async () => {
+    const deps = makeScannerDeps({
+      changedFiles: [makeFileWithLines('src/geometry.ts', ['const p = fit(model, data);'])],
+    });
+    const result = await createDebrisScanner().scan(deps);
+    expect(result.findings.map((f) => f.rule_id)).not.toContain('debris:focused-test');
   });
 
   it('flags a leftover debugger statement', async () => {

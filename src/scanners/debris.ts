@@ -103,6 +103,11 @@ export const DEFAULT_DEBRIS_RULES: readonly DebrisRule[] = [
     // `describe.only` / `it.only` / `test.only` / `context.only`, plus the
     // Jasmine/Jest globals `fdescribe` / `fit`. These silently skip every
     // OTHER test in the file, so CI goes green while coverage quietly drops.
+    //
+    // Gated to test files: focused tests only matter to a test runner (which
+    // loads test files), and the bare `fit(` / `fdescribe(` alternatives are
+    // ordinary identifiers in production code — e.g. a `fit(model, data)`
+    // call in `src/geometry.ts` must NOT be flagged.
     id: 'focused-test',
     pattern: /\b(?:describe|context|it|test)\.only\s*\(|\b(?:fdescribe|fit)\s*\(/g,
     severity: 'important',
@@ -113,7 +118,7 @@ export const DEFAULT_DEBRIS_RULES: readonly DebrisRule[] = [
       'A focused test (`.only`, `fdescribe`, or `fit`) was added. Test runners execute ONLY ' +
       'focused tests and silently skip every other test in the file, so CI can pass while most ' +
       'of the suite never runs. Remove the focus before merging.',
-    appliesTo: isJsTs,
+    appliesTo: (f) => isJsTs(f) && isTest(f),
   },
   {
     // Require the trailing `;` to avoid matching the word "debugger" in prose

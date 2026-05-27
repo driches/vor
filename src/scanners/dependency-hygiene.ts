@@ -26,6 +26,7 @@
  */
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import parseDiff from 'parse-diff';
 import { logger as defaultLogger } from '../util/logger.js';
 import type {
   Scanner,
@@ -103,6 +104,76 @@ function lockfileCoversManifest(lockPath: string, manifestPath: string): boolean
 }
 
 /**
+ * Top-level package.json fields that are NOT dependency maps but whose values
+ * can look version-shaped (`"version": "1.0.0"`, `engines.node: ">=18"`). A
+ * removed line with one of these keys must not be mistaken for a dependency
+ * removal.
+ */
+const NON_DEPENDENCY_KEYS = new Set([
+  'name',
+  'version',
+  'license',
+  'type',
+  'main',
+  'module',
+  'types',
+  'typings',
+  'private',
+  'packageManager',
+  'node',
+  'npm',
+  'yarn',
+  'pnpm',
+]);
+
+/**
+ * Shape of a dependency spec: a caret/tilde range, a comparator, an exact or
+ * wildcard version, or a known source/protocol prefix. Used to tell a removed
+ * dependency line apart from a removed script (`"build": "tsc --noEmit"`),
+ * whose value is a command and won't match.
+ */
+const DEPENDENCY_SPEC_SHAPE =
+  /^(?:[\^~]|[<>]=?|=|\d|\*|x$|latest$|git|github:|gitlab:|bitbucket:|https?:|file:|npm:|workspace:|link:)/i;
+
+/**
+ * Manifest paths from which this PR REMOVED a dependency line. The added-lines
+ * walk in `scan()` can't see deletions, so a PR that drops a dependency from
+ * `package.json` without updating the lockfile would otherwise escape drift
+ * detection. We parse the diff's `del` lines, keeping only those that look
+ * like a real dependency entry (key not in {@link NON_DEPENDENCY_KEYS}, value
+ * {@link DEPENDENCY_SPEC_SHAPE}-shaped) to avoid flagging removed
+ * version/engines/script fields.
+ */
+function manifestsWithRemovedDependency(diff: string): Set<string> {
+  const out = new Set<string>();
+  if (diff.length === 0) return out;
+  let parsed: ReturnType<typeof parseDiff>;
+  try {
+    parsed = parseDiff(diff);
+  } catch {
+    return out;
+  }
+  for (const f of parsed) {
+    const p = f.to && f.to !== '/dev/null' ? f.to : (f.from ?? '');
+    if (path.basename(p) !== MANIFEST_BASENAME) continue;
+    for (const chunk of f.chunks) {
+      for (const change of chunk.changes) {
+        if (change.type !== 'del') continue;
+        const m = JSON_PAIR_RE.exec(change.content.slice(1)); // strip leading '-'
+        if (m === null) continue;
+        const key = m[1]!;
+        const spec = m[2]!;
+        if (NON_DEPENDENCY_KEYS.has(key)) continue;
+        if (!DEPENDENCY_SPEC_SHAPE.test(spec.trim())) continue;
+        out.add(p);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Classify a version spec. Returns the rule id to fire, or null when the spec
  * is a normal pinned/caret/tilde range that needs no comment.
  */
@@ -167,6 +238,7 @@ export function createDependencyHygieneScanner(
       let files_examined = 0;
 
       const changedLockfiles = deps.changedFiles.filter(isLockfile);
+      const removedDepManifests = manifestsWithRemovedDependency(deps.diff);
 
       for (const file of deps.changedFiles) {
         if (!isManifest(file)) continue;
@@ -224,27 +296,34 @@ export function createDependencyHygieneScanner(
           pushUnlessIgnored(finding, deps, findings, log, 'dependency-hygiene');
         }
 
-        // lockfile-drift: dependency lines changed but no lockfile covering
-        // THIS manifest (same dir or an ancestor) was updated in the PR.
+        // lockfile-drift: a dependency was added, changed, OR removed but no
+        // lockfile covering THIS manifest (same dir or an ancestor) was
+        // updated in the PR. Removals can't be seen via added_lines, so they
+        // come from the diff (see manifestsWithRemovedDependency).
         const lockfileCovered = changedLockfiles.some((lf) =>
           lockfileCoversManifest(lf.path, file.path),
         );
-        if (firstChangedDepLine !== undefined && !lockfileCovered) {
+        // Attach to the first changed dependency line when we have one; for a
+        // pure removal there's no added line, so fall back to the first
+        // reviewable (context) line of the hunk so the comment still posts.
+        const driftLine = firstChangedDepLine ?? file.reviewable_lines[0]?.[0];
+        const depChanged = firstChangedDepLine !== undefined || removedDepManifests.has(file.path);
+        if (depChanged && !lockfileCovered && driftLine !== undefined) {
           const rule_id = 'dependency-hygiene:lockfile-drift';
           const finding: ScanFinding = {
             scanner: SCANNER_ID,
             rule_id,
             file_path: file.path,
-            line: firstChangedDepLine,
+            line: driftLine,
             severity: 'minor',
             category: 'bug',
             confidence: 'medium',
             title: `Dependency change without a lockfile update (${path.basename(file.path)})`,
             description:
-              'This PR changes a dependency in `package.json` but does not update a lockfile ' +
-              '(`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`). `npm ci` and reproducible ' +
-              'installs require the lockfile to match the manifest — run your package manager ' +
-              'install and commit the updated lockfile.',
+              'This PR adds, changes, or removes a dependency in `package.json` but does not update ' +
+              'a lockfile (`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`). `npm ci` and ' +
+              'reproducible installs require the lockfile to match the manifest — run your package ' +
+              'manager install and commit the updated lockfile.',
             evidence: { kind: 'dependency', issue: 'lockfile-drift' },
             fingerprint: fingerprintOf(rule_id, file.path, 'drift'),
           };

@@ -67852,6 +67852,11 @@ var DEFAULT_DEBRIS_RULES = [
     // `describe.only` / `it.only` / `test.only` / `context.only`, plus the
     // Jasmine/Jest globals `fdescribe` / `fit`. These silently skip every
     // OTHER test in the file, so CI goes green while coverage quietly drops.
+    //
+    // Gated to test files: focused tests only matter to a test runner (which
+    // loads test files), and the bare `fit(` / `fdescribe(` alternatives are
+    // ordinary identifiers in production code — e.g. a `fit(model, data)`
+    // call in `src/geometry.ts` must NOT be flagged.
     id: "focused-test",
     pattern: /\b(?:describe|context|it|test)\.only\s*\(|\b(?:fdescribe|fit)\s*\(/g,
     severity: "important",
@@ -67859,7 +67864,7 @@ var DEFAULT_DEBRIS_RULES = [
     confidence: "high",
     title: "Focused test will skip the rest of the suite",
     description: "A focused test (`.only`, `fdescribe`, or `fit`) was added. Test runners execute ONLY focused tests and silently skip every other test in the file, so CI can pass while most of the suite never runs. Remove the focus before merging.",
-    appliesTo: isJsTs
+    appliesTo: (f2) => isJsTs(f2) && isTest(f2)
   },
   {
     // Require the trailing `;` to avoid matching the word "debugger" in prose
@@ -68151,6 +68156,7 @@ function buildMetrics4(started, files_examined) {
 // src/scanners/dependency-hygiene.ts
 var import_node_crypto5 = require("node:crypto");
 var import_node_path15 = __toESM(require("node:path"), 1);
+var import_parse_diff2 = __toESM(require_parse_diff(), 1);
 var SCANNER_ID7 = "dependency-hygiene";
 var MANIFEST_BASENAME = "package.json";
 var LOCKFILE_BASENAMES = /* @__PURE__ */ new Set([
@@ -68182,6 +68188,51 @@ function lockfileCoversManifest(lockPath, manifestPath) {
   if (lockDir === "") return true;
   const manifestDir = dirOf(manifestPath);
   return manifestDir === lockDir || manifestDir.startsWith(`${lockDir}/`);
+}
+var NON_DEPENDENCY_KEYS = /* @__PURE__ */ new Set([
+  "name",
+  "version",
+  "license",
+  "type",
+  "main",
+  "module",
+  "types",
+  "typings",
+  "private",
+  "packageManager",
+  "node",
+  "npm",
+  "yarn",
+  "pnpm"
+]);
+var DEPENDENCY_SPEC_SHAPE = /^(?:[\^~]|[<>]=?|=|\d|\*|x$|latest$|git|github:|gitlab:|bitbucket:|https?:|file:|npm:|workspace:|link:)/i;
+function manifestsWithRemovedDependency(diff) {
+  const out = /* @__PURE__ */ new Set();
+  if (diff.length === 0) return out;
+  let parsed;
+  try {
+    parsed = (0, import_parse_diff2.default)(diff);
+  } catch {
+    return out;
+  }
+  for (const f2 of parsed) {
+    const p2 = f2.to && f2.to !== "/dev/null" ? f2.to : f2.from ?? "";
+    if (import_node_path15.default.basename(p2) !== MANIFEST_BASENAME) continue;
+    for (const chunk2 of f2.chunks) {
+      for (const change of chunk2.changes) {
+        if (change.type !== "del") continue;
+        const m2 = JSON_PAIR_RE.exec(change.content.slice(1));
+        if (m2 === null) continue;
+        const key = m2[1];
+        const spec = m2[2];
+        if (NON_DEPENDENCY_KEYS.has(key)) continue;
+        if (!DEPENDENCY_SPEC_SHAPE.test(spec.trim())) continue;
+        out.add(p2);
+        break;
+      }
+    }
+  }
+  return out;
 }
 function classifySpec(spec) {
   const s2 = spec.trim();
@@ -68227,6 +68278,7 @@ function createDependencyHygieneScanner(options = {}) {
       const findings = [];
       let files_examined = 0;
       const changedLockfiles = deps.changedFiles.filter(isLockfile);
+      const removedDepManifests = manifestsWithRemovedDependency(deps.diff);
       for (const file of deps.changedFiles) {
         if (!isManifest(file)) continue;
         let content;
@@ -68276,18 +68328,20 @@ function createDependencyHygieneScanner(options = {}) {
         const lockfileCovered = changedLockfiles.some(
           (lf) => lockfileCoversManifest(lf.path, file.path)
         );
-        if (firstChangedDepLine !== void 0 && !lockfileCovered) {
+        const driftLine = firstChangedDepLine ?? file.reviewable_lines[0]?.[0];
+        const depChanged = firstChangedDepLine !== void 0 || removedDepManifests.has(file.path);
+        if (depChanged && !lockfileCovered && driftLine !== void 0) {
           const rule_id = "dependency-hygiene:lockfile-drift";
           const finding = {
             scanner: SCANNER_ID7,
             rule_id,
             file_path: file.path,
-            line: firstChangedDepLine,
+            line: driftLine,
             severity: "minor",
             category: "bug",
             confidence: "medium",
             title: `Dependency change without a lockfile update (${import_node_path15.default.basename(file.path)})`,
-            description: "This PR changes a dependency in `package.json` but does not update a lockfile (`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`). `npm ci` and reproducible installs require the lockfile to match the manifest \u2014 run your package manager install and commit the updated lockfile.",
+            description: "This PR adds, changes, or removes a dependency in `package.json` but does not update a lockfile (`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`). `npm ci` and reproducible installs require the lockfile to match the manifest \u2014 run your package manager install and commit the updated lockfile.",
             evidence: { kind: "dependency", issue: "lockfile-drift" },
             fingerprint: fingerprintOf5(rule_id, file.path, "drift")
           };
