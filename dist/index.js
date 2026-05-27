@@ -58233,7 +58233,8 @@ function makePostInlineCommentTool(deps) {
       confidence: external_exports.enum(["high", "medium", "low"]).default("high").describe("Your confidence in the finding. Mark medium/low if you are unsure.")
     },
     async (args) => {
-      if ((args.severity === "critical" || args.severity === "important") && !args.suggestion) {
+      const normalizedSuggestion = typeof args.suggestion === "string" ? normalizeSuggestion(args.suggestion) : void 0;
+      if ((args.severity === "critical" || args.severity === "important") && !normalizedSuggestion) {
         return jsonResult({
           accepted: false,
           reason: `severity '${args.severity}' requires a suggestion`,
@@ -58262,7 +58263,7 @@ function makePostInlineCommentTool(deps) {
           category: args.category,
           title: args.title,
           why_it_matters: args.why_it_matters,
-          ...args.suggestion !== void 0 ? { suggestion: args.suggestion } : {},
+          ...normalizedSuggestion !== void 0 ? { suggestion: normalizedSuggestion } : {},
           confidence
         },
         {
@@ -58295,7 +58296,7 @@ function makePostInlineCommentTool(deps) {
         category: args.category,
         title: args.title,
         why_it_matters: args.why_it_matters,
-        ...args.suggestion !== void 0 ? { suggestion: args.suggestion } : {},
+        ...normalizedSuggestion !== void 0 ? { suggestion: normalizedSuggestion } : {},
         confidence
       });
       return jsonResult({
@@ -58305,6 +58306,11 @@ function makePostInlineCommentTool(deps) {
       });
     }
   );
+}
+function normalizeSuggestion(raw) {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:suggestion|[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```$/);
+  return (fenced?.[1] ?? raw).replace(/\s+$/g, "");
 }
 
 // src/tools/post-summary.ts
@@ -59514,11 +59520,11 @@ function renderScannerFindings(findings, maxFindings = MAX_INJECTED_FINDINGS_DEF
   const capped = sorted.slice(0, Math.max(0, maxFindings));
   const truncated = sorted.length - capped.length;
   const lines = [];
-  const header = truncated > 0 ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) \u2014 already detected, will post independently` : `## Deterministic scanner findings (${findings.length}) \u2014 already detected, will post independently`;
+  const header = truncated > 0 ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) \u2014 already detected, scanner pipeline handles these` : `## Deterministic scanner findings (${findings.length}) \u2014 already detected, scanner pipeline handles these`;
   lines.push(
     header,
     "",
-    "Scanners ran BEFORE you. The findings below are already on their way to the PR \u2014 you do NOT need to investigate, verify, or re-flag them. Treat them as covered.",
+    "Scanners ran BEFORE you. The findings below are eligible to post through the scanner pipeline (subject to final caps/dedup) \u2014 you do NOT need to investigate, verify, or re-flag them. Treat them as covered unless you find a distinct semantic issue nearby.",
     "",
     "Your job is what scanners CAN'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn't match a pattern. Spend your turns there.",
     ""
@@ -68653,6 +68659,19 @@ function scannerMinSeverity(id, cfg) {
   const key = SCANNER_CONFIG_KEY[id];
   return cfg.scanners[key].min_severity;
 }
+function filterScannerFindingsForPrompt(findings, config, changedFiles) {
+  const changedFilesMap = new Map(changedFiles.map((f2) => [f2.path, f2]));
+  return findings.filter((finding) => {
+    if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[config.severity.floor]) {
+      return false;
+    }
+    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    if (scannerFloor !== void 0 && SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]) {
+      return false;
+    }
+    return validateScanFinding(finding, { changedFiles: changedFilesMap }).ok;
+  });
+}
 function assertValidProviderOverride(value) {
   if (value === void 0 || value === "anthropic" || value === "openai") return;
   throw new Error(
@@ -68831,9 +68850,14 @@ ${base}` : base;
     scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
       (r2) => r2[0]
     );
-    const findings = scanOutcome.status === "fulfilled" ? scanOutcome.value.findings : [];
+    const rawFindings = scanOutcome.status === "fulfilled" ? scanOutcome.value.findings : [];
+    const findings = filterScannerFindingsForPrompt(
+      rawFindings,
+      config,
+      prContext.files
+    );
     await logger.info(
-      `Scanners settled: ${findings.length} finding(s) will be injected into the agent's user prompt.`
+      `Scanners settled: ${findings.length}/${rawFindings.length} eligible finding(s) will be injected into the agent's user prompt.`
     );
     userPrompt = buildPrompt(findings);
     agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(

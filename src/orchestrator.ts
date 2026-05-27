@@ -32,7 +32,7 @@ import { runScanners } from './scanners/runner.js';
 import type { ScanFinding, ScannerDeps } from './scanners/types.js';
 import { validateScanFinding } from './scanners/validate.js';
 import { SEVERITY_RANK } from './types.js';
-import type { PostedComment, ScannerId, Severity } from './types.js';
+import type { ChangedFile, PostedComment, ScannerId, Severity } from './types.js';
 import { registerSecret } from './util/secrets.js';
 import { logger } from './util/logger.js';
 
@@ -63,6 +63,27 @@ function scannerMinSeverity(
 ): Severity | undefined {
   const key = SCANNER_CONFIG_KEY[id];
   return cfg.scanners[key].min_severity;
+}
+
+function filterScannerFindingsForPrompt(
+  findings: readonly ScanFinding[],
+  config: ReviewConfig,
+  changedFiles: readonly ChangedFile[],
+): ScanFinding[] {
+  const changedFilesMap = new Map(changedFiles.map((f) => [f.path, f]));
+  return findings.filter((finding) => {
+    if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[config.severity.floor]) {
+      return false;
+    }
+    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    if (
+      scannerFloor !== undefined &&
+      SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]
+    ) {
+      return false;
+    }
+    return validateScanFinding(finding, { changedFiles: changedFilesMap }).ok;
+  });
 }
 
 export interface OrchestratorInput {
@@ -416,10 +437,15 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
       (r) => r[0]!,
     );
-    const findings =
+    const rawFindings =
       scanOutcome.status === 'fulfilled' ? scanOutcome.value.findings : [];
+    const findings = filterScannerFindingsForPrompt(
+      rawFindings,
+      config,
+      prContext.files,
+    );
     await logger.info(
-      `Scanners settled: ${findings.length} finding(s) will be injected into the agent's user prompt.`,
+      `Scanners settled: ${findings.length}/${rawFindings.length} eligible finding(s) will be injected into the agent's user prompt.`,
     );
     userPrompt = buildPrompt(findings);
     agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(

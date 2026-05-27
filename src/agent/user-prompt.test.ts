@@ -27,6 +27,7 @@ describe('renderScannerFindings', () => {
     ];
     const out = renderScannerFindings(findings, 30);
     expect(out).toContain('(3) — already detected');
+    expect(out).toContain('scanner pipeline handles these');
     expect(out).toContain('`src/foo.ts:1`');
     expect(out).toContain('`src/foo.ts:2`');
     expect(out).toContain('`src/foo.ts:3`');

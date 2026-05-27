@@ -30,7 +30,7 @@ export const syncInAsyncLoopTemplate: PlantTemplate = {
         line_range: [line, line] as const,
         bug_type: 'sync-in-async-loop',
         severity: 'important',
-        category: ['performance', 'bug', 'error-handling'] as const,
+        category: ['performance', 'bug', 'error-handling', 'race-condition'] as const,
       },
     };
   },

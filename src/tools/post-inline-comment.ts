@@ -66,8 +66,15 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
         .describe('Your confidence in the finding. Mark medium/low if you are unsure.'),
     },
     async (args) => {
+      const normalizedSuggestion =
+        typeof args.suggestion === 'string'
+          ? normalizeSuggestion(args.suggestion)
+          : undefined;
       // Schema-level invariant: suggestion required for high severity
-      if ((args.severity === 'critical' || args.severity === 'important') && !args.suggestion) {
+      if (
+        (args.severity === 'critical' || args.severity === 'important') &&
+        !normalizedSuggestion
+      ) {
         return jsonResult({
           accepted: false,
           reason: `severity '${args.severity}' requires a suggestion`,
@@ -126,7 +133,7 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
           category: args.category as Category,
           title: args.title,
           why_it_matters: args.why_it_matters,
-          ...(args.suggestion !== undefined ? { suggestion: args.suggestion } : {}),
+          ...(normalizedSuggestion !== undefined ? { suggestion: normalizedSuggestion } : {}),
           confidence,
         },
         {
@@ -163,7 +170,7 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
         category: args.category as Category,
         title: args.title,
         why_it_matters: args.why_it_matters,
-        ...(args.suggestion !== undefined ? { suggestion: args.suggestion } : {}),
+        ...(normalizedSuggestion !== undefined ? { suggestion: normalizedSuggestion } : {}),
         confidence,
       });
       return jsonResult({
@@ -173,4 +180,16 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
       });
     },
   );
+}
+
+/**
+ * Models sometimes include a full Markdown fence in the `suggestion` field even
+ * though the review renderer wraps that field in its own ```suggestion block.
+ * Strip one outer fence so GitHub receives a valid one-click suggestion rather
+ * than nested fences rendered as literal text.
+ */
+export function normalizeSuggestion(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:suggestion|[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```$/);
+  return (fenced?.[1] ?? raw).replace(/\s+$/g, '');
 }

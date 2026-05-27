@@ -23,7 +23,7 @@ describe('syncInAsyncLoopTemplate', () => {
       line_range: [2, 2],
       bug_type: 'sync-in-async-loop',
       severity: 'important',
-      category: ['performance', 'bug', 'error-handling'],
+      category: ['performance', 'bug', 'error-handling', 'race-condition'],
     });
   });
 
