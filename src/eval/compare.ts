@@ -7,7 +7,8 @@
  * Matching algorithm (greedy nearest-match):
  *   1. Annotate each finding with `hunk_id` derived from the unified diff.
  *   2. For each Codex finding, find the closest Ours finding in the same
- *      hunk; if none, fall back to ±lineTolerance on the same file path.
+ *      hunk, but only within `hunkLineTolerance`; if none, fall back to
+ *      ±lineTolerance on the same file path.
  *   3. The closest unmatched Ours finding wins.
  *   4. Remaining Ours findings = `our_only`. Remaining Codex = `codex_only`.
  *
@@ -28,6 +29,8 @@ export interface CompareInput {
   diff: string;
   /** Maximum line distance for a fallback line-based match. Default 3. */
   lineTolerance?: number;
+  /** Maximum line distance for same-hunk matches. Default 25. */
+  hunkLineTolerance?: number;
 }
 
 export interface MatchedPair {
@@ -61,6 +64,7 @@ export interface CompareResult {
 
 export function compare(input: CompareInput): CompareResult {
   const lineTolerance = input.lineTolerance ?? 3;
+  const hunkLineTolerance = input.hunkLineTolerance ?? 25;
   const hunkIndex = buildHunkIndex(input.diff);
   const ours = annotateHunks(input.ours, hunkIndex);
   const codex = annotateHunks(input.codex, hunkIndex);
@@ -80,6 +84,7 @@ export function compare(input: CompareInput): CompareResult {
       for (const entry of candidates) {
         if (entry.f.hunk_id !== cFinding.hunk_id) continue;
         const dist = Math.abs(entry.f.line - cFinding.line);
+        if (dist > hunkLineTolerance) continue;
         if (!best || dist < best.dist) best = { entry, dist, how: 'hunk' };
       }
     }

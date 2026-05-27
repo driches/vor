@@ -10,7 +10,7 @@
  *     tolerance on either side. F's range is [F.start_line ?? F.line, F.line];
  *     T's range is T.line_range. Overlap test:
  *       findingStart <= truthEnd + slack  AND  findingEnd >= truthStart - slack
- *   - F.category ∈ T.category   (the truth declares the compatible category set)
+ *   - F.category is compatible with T.category / T.bug_type
  *
  * Each truth is matched at most once. We solve maximum bipartite matching by
  * augmenting paths so the result is order-independent and does not undercount
@@ -63,7 +63,7 @@ export function scoreRun(input: ScoreInput): ScoreResult {
         finding.side === 'RIGHT' &&
         finding.file_path === truth.file &&
         overlaps &&
-        truth.category.includes(finding.category);
+        categoryMatches(truth, finding);
       row.push(ok);
     }
     compat.push(row);
@@ -129,4 +129,16 @@ export function scoreRun(input: ScoreInput): ScoreResult {
     unaligned: [...unaligned],
     cost: input.cost,
   };
+}
+
+function categoryMatches(truth: TruthEntry, finding: PostedComment): boolean {
+  if (truth.category.includes(finding.category)) return true;
+  // `Array.forEach(async ...)` is both async-control-flow and race behavior:
+  // the outer function returns before the inner awaits settle. Treat an LLM's
+  // `race-condition` categorization as compatible with the existing planted
+  // truth files, which predate that category in their allowed set.
+  if (truth.bug_type === 'sync-in-async-loop' && finding.category === 'race-condition') {
+    return true;
+  }
+  return false;
 }
