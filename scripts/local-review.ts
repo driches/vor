@@ -161,7 +161,19 @@ function mergeScannerFindingsFlag(existingYaml: string | null): string {
       // reads the merged output.
     }
   }
-  const experimental = (parsed['experimental'] as Record<string, unknown>) ?? {};
+  // Tolerate a `.code-review.yml` that wrote `experimental: false` or some
+  // other parseable-but-wrong-shape value. The production config loader
+  // falls back to defaults in that case; doing the same here keeps the CLI
+  // from crashing when the user pairs `--scanner-findings-in-user-prompt`
+  // with a malformed but otherwise runnable repo config. Same guard
+  // pattern as `scripts/eval/flag-injection.ts`. Codex P2 #3313098982.
+  const existing = parsed['experimental'];
+  const experimental: Record<string, unknown> =
+    existing !== null &&
+    typeof existing === 'object' &&
+    !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
   experimental['scanner_findings_in_user_prompt'] = true;
   parsed['experimental'] = experimental;
   return stringifyYaml(parsed);

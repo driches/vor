@@ -32,7 +32,7 @@ import { runScanners } from './scanners/runner.js';
 import type { ScanFinding, ScannerDeps } from './scanners/types.js';
 import { validateScanFinding } from './scanners/validate.js';
 import { SEVERITY_RANK } from './types.js';
-import type { ScannerId, Severity } from './types.js';
+import type { PostedComment, ScannerId, Severity } from './types.js';
 import { registerSecret } from './util/secrets.js';
 import { logger } from './util/logger.js';
 
@@ -110,6 +110,15 @@ export interface OrchestratorOutput {
   turns: number;
   cost_usd: number;
   dry_run: boolean;
+  /**
+   * The kept inline comments after filtering / aggregation / dedup. Populated
+   * on every code-path that actually produced a review (live post + dry run).
+   * Empty on early-exit paths (draft PR, missing API key, etc.).
+   *
+   * Exposed so eval harnesses can score the post-filter findings against a
+   * ground-truth set without needing a side channel into the aggregator.
+   */
+  kept_comments: ReadonlyArray<PostedComment>;
 }
 
 /** Runtime-validate a `provider_override` string from an untrusted source
@@ -178,6 +187,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       turns: 0,
       cost_usd: 0,
       dry_run: input.dry_run,
+      kept_comments: [],
     };
   }
 
@@ -219,6 +229,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       turns: 0,
       cost_usd: 0,
       dry_run: input.dry_run,
+      kept_comments: [],
     };
   }
 
@@ -596,6 +607,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       turns: result.turns,
       cost_usd: result.costUsd,
       dry_run: true,
+      kept_comments: filtered.kept,
     };
   }
 
@@ -635,6 +647,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     turns: result.turns,
     cost_usd: result.costUsd,
     dry_run: false,
+    kept_comments: filtered.kept,
   };
 }
 
