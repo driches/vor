@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makePostInlineCommentTool } from './post-inline-comment.js';
+import { makePostInlineCommentTool, normalizeSuggestion } from './post-inline-comment.js';
 import { buildFakeDeps, callTool, getResultJson, makeFile } from './test-helpers.js';
 
 describe('post_inline_comment tool', () => {
@@ -173,5 +173,35 @@ describe('post_inline_comment tool', () => {
     const stored = deps.aggregator.acceptedComments[0]!;
     expect(stored.side).toBe('LEFT');
     expect(stored.confidence).toBe('medium');
+  });
+
+  it('strips an accidental outer ```suggestion fence from suggestion input', async () => {
+    const deps = buildFakeDeps({ files: [makeFile()] });
+    const tool = makePostInlineCommentTool(deps);
+    const result = await callTool(tool, {
+      severity: 'important',
+      file_path: 'src/foo.ts',
+      line: 10,
+      category: 'bug',
+      title: 'Fix the loop bound here',
+      why_it_matters: 'The current loop reads past the end and returns NaN.',
+      suggestion: '```suggestion\nfor (let i = 0; i < arr.length; i++) { sum += arr[i]; }\n```',
+    });
+
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+    expect(deps.aggregator.acceptedComments[0]!.suggestion).toBe(
+      'for (let i = 0; i < arr.length; i++) { sum += arr[i]; }',
+    );
+  });
+});
+
+describe('normalizeSuggestion', () => {
+  it('passes plain replacement code through', () => {
+    expect(normalizeSuggestion('const x = 1;\n')).toBe('const x = 1;');
+  });
+
+  it('strips generic code fences too', () => {
+    expect(normalizeSuggestion('```ts\nconst x = 2;\n```')).toBe('const x = 2;');
   });
 });

@@ -57,8 +57,8 @@ const MAX_INJECTED_FINDINGS_DEFAULT = 30;
  * finding gets one line; long titles/descriptions are truncated.
  *
  * Framing rules (these reflect what we expect Sonnet to internalize):
- *   - "Already detected" — not "candidate". The findings are being posted
- *     independently of the agent's review.
+ *   - "Already detected" — not "candidate". The findings are eligible to be
+ *     posted independently of the agent's review, subject to final caps/dedup.
  *   - Explicit "do not re-flag" instruction. Without this, Sonnet often
  *     re-investigates and re-posts what scanners caught.
  *   - "Focus on what scanners can't catch" — names the semantic / design /
@@ -98,12 +98,12 @@ export function renderScannerFindings(
   const lines: string[] = [];
   const header =
     truncated > 0
-      ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) — already detected, will post independently`
-      : `## Deterministic scanner findings (${findings.length}) — already detected, will post independently`;
+      ? `## Deterministic scanner findings (${capped.length} shown / ${findings.length} total) — already detected, scanner pipeline handles these`
+      : `## Deterministic scanner findings (${findings.length}) — already detected, scanner pipeline handles these`;
   lines.push(
     header,
     '',
-    "Scanners ran BEFORE you. The findings below are already on their way to the PR — you do NOT need to investigate, verify, or re-flag them. Treat them as covered.",
+    'Scanners ran BEFORE you. The findings below are eligible to post through the scanner pipeline (subject to final caps/dedup) — you do NOT need to investigate, verify, or re-flag them. Treat them as covered unless you find a distinct semantic issue nearby.',
     '',
     'Your job is what scanners CAN\'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn\'t match a pattern. Spend your turns there.',
     '',
