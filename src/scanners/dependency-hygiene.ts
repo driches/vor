@@ -75,6 +75,33 @@ function isLockfile(file: ChangedFile): boolean {
   return LOCKFILE_BASENAMES.has(path.basename(file.path));
 }
 
+/** POSIX directory of a repo-relative path; `''` for a root-level file. */
+function dirOf(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i === -1 ? '' : p.slice(0, i);
+}
+
+/**
+ * Does a changed lockfile cover the given manifest? A lockfile covers a
+ * manifest when it sits in the same directory OR an ancestor directory:
+ *
+ *   - A standalone package keeps its lockfile alongside `package.json`.
+ *   - npm/yarn/pnpm workspaces keep a SINGLE lockfile at the repo root that
+ *     covers every nested `package.json`, so a root lockfile (dir `''`)
+ *     covers all manifests.
+ *
+ * Scoping per-manifest (rather than a repo-wide "any lockfile touched"
+ * boolean) means that, in a monorepo, changing `packages/api/package.json`
+ * while only `examples/package-lock.json` is touched still reports drift for
+ * `packages/api` — the unrelated lockfile doesn't suppress it.
+ */
+function lockfileCoversManifest(lockPath: string, manifestPath: string): boolean {
+  const lockDir = dirOf(lockPath);
+  if (lockDir === '') return true; // root lockfile covers every manifest
+  const manifestDir = dirOf(manifestPath);
+  return manifestDir === lockDir || manifestDir.startsWith(`${lockDir}/`);
+}
+
 /**
  * Classify a version spec. Returns the rule id to fire, or null when the spec
  * is a normal pinned/caret/tilde range that needs no comment.
@@ -139,7 +166,7 @@ export function createDependencyHygieneScanner(
       const findings: ScanFinding[] = [];
       let files_examined = 0;
 
-      const lockfileTouched = deps.changedFiles.some(isLockfile);
+      const changedLockfiles = deps.changedFiles.filter(isLockfile);
 
       for (const file of deps.changedFiles) {
         if (!isManifest(file)) continue;
@@ -197,8 +224,12 @@ export function createDependencyHygieneScanner(
           pushUnlessIgnored(finding, deps, findings, log, 'dependency-hygiene');
         }
 
-        // lockfile-drift: dependency lines changed but no lockfile in the PR.
-        if (firstChangedDepLine !== undefined && !lockfileTouched) {
+        // lockfile-drift: dependency lines changed but no lockfile covering
+        // THIS manifest (same dir or an ancestor) was updated in the PR.
+        const lockfileCovered = changedLockfiles.some((lf) =>
+          lockfileCoversManifest(lf.path, file.path),
+        );
+        if (firstChangedDepLine !== undefined && !lockfileCovered) {
           const rule_id = 'dependency-hygiene:lockfile-drift';
           const finding: ScanFinding = {
             scanner: SCANNER_ID,

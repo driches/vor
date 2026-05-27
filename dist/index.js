@@ -68173,6 +68173,16 @@ function isManifest(file) {
 function isLockfile(file) {
   return LOCKFILE_BASENAMES.has(import_node_path15.default.basename(file.path));
 }
+function dirOf(p2) {
+  const i2 = p2.lastIndexOf("/");
+  return i2 === -1 ? "" : p2.slice(0, i2);
+}
+function lockfileCoversManifest(lockPath, manifestPath) {
+  const lockDir = dirOf(lockPath);
+  if (lockDir === "") return true;
+  const manifestDir = dirOf(manifestPath);
+  return manifestDir === lockDir || manifestDir.startsWith(`${lockDir}/`);
+}
 function classifySpec(spec) {
   const s2 = spec.trim();
   if (NON_REGISTRY_SPEC_RE.test(s2)) return "non-registry-source";
@@ -68216,7 +68226,7 @@ function createDependencyHygieneScanner(options = {}) {
       const errors = [];
       const findings = [];
       let files_examined = 0;
-      const lockfileTouched = deps.changedFiles.some(isLockfile);
+      const changedLockfiles = deps.changedFiles.filter(isLockfile);
       for (const file of deps.changedFiles) {
         if (!isManifest(file)) continue;
         let content;
@@ -68263,7 +68273,10 @@ function createDependencyHygieneScanner(options = {}) {
           const finding = buildSpecFinding(file.path, lineNo, name, spec, kind2);
           pushUnlessIgnored(finding, deps, findings, log2, "dependency-hygiene");
         }
-        if (firstChangedDepLine !== void 0 && !lockfileTouched) {
+        const lockfileCovered = changedLockfiles.some(
+          (lf) => lockfileCoversManifest(lf.path, file.path)
+        );
+        if (firstChangedDepLine !== void 0 && !lockfileCovered) {
           const rule_id = "dependency-hygiene:lockfile-drift";
           const finding = {
             scanner: SCANNER_ID7,

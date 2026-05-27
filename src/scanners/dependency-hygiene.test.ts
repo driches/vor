@@ -131,6 +131,31 @@ describe('createDependencyHygieneScanner — scan()', () => {
     );
   });
 
+  it('reports drift in a monorepo when only an unrelated lockfile is touched', async () => {
+    const { file, content } = makeManifest(MANIFEST_LINES, [5, 6, 7], {
+      path: 'packages/api/package.json',
+    });
+    const unrelatedLock = makeChangedFile({
+      path: 'examples/package-lock.json',
+      language: 'json',
+    });
+    const deps = makeScannerDeps(content, { changedFiles: [file, unrelatedLock] });
+    const result = await createDependencyHygieneScanner().scan(deps);
+    expect(result.findings.map((f) => f.rule_id)).toContain('dependency-hygiene:lockfile-drift');
+  });
+
+  it('treats a root lockfile as covering a nested workspace manifest', async () => {
+    const { file, content } = makeManifest(MANIFEST_LINES, [5, 6, 7], {
+      path: 'packages/api/package.json',
+    });
+    const rootLock = makeChangedFile({ path: 'pnpm-lock.yaml', language: 'yaml' });
+    const deps = makeScannerDeps(content, { changedFiles: [file, rootLock] });
+    const result = await createDependencyHygieneScanner().scan(deps);
+    expect(result.findings.map((f) => f.rule_id)).not.toContain(
+      'dependency-hygiene:lockfile-drift',
+    );
+  });
+
   it('does not flag dependency lines that are unchanged (not added)', async () => {
     // Only the version line (3) is added — no dependency lines changed.
     const { file, content } = makeManifest(MANIFEST_LINES, [3]);
