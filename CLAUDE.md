@@ -37,7 +37,7 @@ The short list above won't catch most of the ways a contribution can be off-patt
 - Architecture invariants (the orchestrator owns the flow; scanners are deterministic; tools validate before they take effect)
 - What "done" means, including how to use the eval harnesses to verify behavior changes
 - PR + commit + dogfooding conventions
-- How to receive code review (including from Codex on this repo)
+- How to receive code review (from auto-reviewer bots, humans, or self-review)
 - The full list of patterns that auto-reject
 
 If you're about to write a comment that says *what* the code does instead of *why*, stop and read AGENTS.md §1 first.

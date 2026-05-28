@@ -4,7 +4,7 @@ Thanks for thinking about contributing. This is a small project — issues, PRs,
 
 By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-> **Using an AI assistant to write the code?** Read **[AGENTS.md](AGENTS.md)** first. Same rules apply whether the keystrokes came from you or from Claude / Codex / Copilot — but the bar on "agentic fluff" (filler comments, decorative emoji, unverified claims of "tested and passing") is set explicitly there because that's where AI contributions most often go wrong. PRs that include any of those patterns get reverted.
+> **Using an AI assistant to write the code?** Read **[AGENTS.md](AGENTS.md)** first. Same rules apply whether the keystrokes came from you or from Claude / Copilot / Cursor — but the bar on "agentic fluff" (filler comments, decorative emoji, unverified claims of "tested and passing") is set explicitly there because that's where AI contributions most often go wrong. PRs that include any of those patterns get reverted.
 
 ## Getting started
 
@@ -84,16 +84,14 @@ Substantive expectations — types, comments, error handling, logging, architect
 
 ### Receiving review feedback
 
-This repo currently has OpenAI's Codex reviewer (`chatgpt-codex-connector[bot]`) configured to auto-review every PR (separate from our manually-dispatched self-review described below). When Codex — or a human reviewer, or our own self-review — leaves comments, treat them the same way:
+Reviews come from a few sources: any auto-reviewer bot configured on the repo, human reviewers, and our own manually-dispatched self-review (described below). Whatever the source, treat the comments the same way:
 
 1. Read the comment in full before responding
 2. Decide if you agree. If not, explain why in the thread (cite the line, name the wrong premise) — reviewers can be wrong, but disagreement needs evidence
-3. If you fix it, the commit message should reference the comment ID (`Codex P2 #3311224941`)
+3. If you fix it, the commit message should reference the comment ID (e.g. `addressing #42 (review)`)
 4. Reply on the thread with what you changed (or why you didn't). Resolve the thread.
 
-This pattern keeps the codebase self-documenting about *why* non-obvious decisions were made.
-
-If the Codex auto-review is ever disabled on this repo, the workflow above still applies to whatever review fires — it's about the response pattern, not about which bot is leaving the comments.
+This pattern keeps the codebase self-documenting about *why* non-obvious decisions were made. It's about the response pattern, not about which bot or person is leaving the comments.
 
 ### Dogfooding
 

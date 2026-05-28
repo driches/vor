@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   4. Search-and-replace `code-review\.` → `vor.` in any `# nosem:` comments or `.vor/security-ignore.yml` rule matchers.
   5. Optionally delete prior bot review threads on open PRs so the new run doesn't post duplicates.
 
+### Docs
+- **README and supporting docs refocused around multi-provider support.** The copy no longer frames Vor as an Anthropic-first tool — Anthropic Claude and OpenAI (GPT / o-series, including `gpt-5-codex`) are now presented as peer providers. Quick start gains an OpenAI snippet alongside the Claude one, and the inputs table documents that bare `codex-*` model ids need an explicit `provider: openai`. References comparing the product to OpenAI's Codex PR-reviewer (`chatgpt-codex-connector[bot]`) were removed; the "receiving review feedback" guidance in AGENTS.md / CONTRIBUTING.md is now phrased for any auto-reviewer bot rather than naming a specific one. SECURITY.md now covers both API keys and SDKs. (The eval-harness Codex baseline in `docs/golden-dataset.md` is unchanged — it describes real functionality.)
+
 ## [0.5.2] - 2026-05-27
 
 ### Fixed
