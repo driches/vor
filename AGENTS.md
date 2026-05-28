@@ -129,17 +129,19 @@ The eval harnesses ([`scripts/eval/synthetic-real.ts`](scripts/eval/synthetic-re
 A PR is mergeable when ALL of these are true. Run them locally before pushing, and again after any change in the PR review cycle:
 
 ```sh
+npm run lint              # eslint, zero errors
 npx tsc --noEmit          # zero errors
 npm test -- --run         # 1000+ tests, all passing
-npm run build             # bundles src/ → dist/index.js
-npm run verify-dist       # dist/ in sync with src/ AND no eval/* leakage
+npm run verify-dist       # rebuilds + checks dist/ in sync with src/ AND no eval/* leakage
 ```
+
+`verify-dist` rebuilds internally and fails if the committed `dist/index.js` is stale, so you don't need a separate `npm run build` step before it. If `verify-dist` fails, run `npm run build` and commit the regenerated bundle.
 
 If you changed user-facing behavior, ALSO:
 
 - Update `CHANGELOG.md` under `## [Unreleased]`. Cite measurements if you have them. "−15% cost on synthetic eval" is more useful than "improved performance."
 
-CI runs the same four commands. If CI fails on something that passes locally, it's a real problem — investigate, don't just re-trigger.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same four commands in the same order. If CI fails on something that passes locally, it's a real problem — investigate, don't just re-trigger.
 
 ### The "tests pass" trap
 

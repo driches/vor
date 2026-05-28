@@ -13,10 +13,10 @@ By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 ```sh
 nvm use            # node 20
 npm install
+npm run lint       # eslint
 npm run typecheck
 npm test
-npm run build      # bundles src/ → dist/index.js via esbuild
-npm run verify-dist
+npm run verify-dist  # rebuilds src/ → dist/index.js and checks they match
 ```
 
 If `verify-dist` fails, the committed `dist/` is out of sync with `src/`. Run `npm run build` and commit the regenerated bundle.
@@ -65,10 +65,10 @@ Don't over-engineer this for trivial changes — `fix typo` is fine for a typo.
 The [PR template](.github/PULL_REQUEST_TEMPLATE.md) has the full list. In short, all four must be green locally before requesting review:
 
 ```sh
+npm run lint
 npx tsc --noEmit
 npm test -- --run
-npm run build
-npm run verify-dist
+npm run verify-dist   # rebuilds internally; no separate build step needed
 ```
 
 User-facing changes also need a `CHANGELOG.md` entry under `## [Unreleased]`. Cite measurements if you have them (cost, recall, latency).

@@ -19,10 +19,10 @@ Before you write a single line:
 A PR is mergeable when all four of these are green locally:
 
 ```sh
+npm run lint
 npx tsc --noEmit
 npm test -- --run
-npm run build
-npm run verify-dist
+npm run verify-dist     # rebuilds internally and checks dist/ is in sync
 ```
 
 User-facing changes also need a `CHANGELOG.md` entry under `## [Unreleased]`.
