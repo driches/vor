@@ -46,7 +46,6 @@ export default defineConfig({
             { label: 'Contributing guide', link: '/contributing/' },
             { label: 'AI agent guide', link: '/ai-agent-guide/' },
             { label: 'Code of Conduct', link: '/code-of-conduct/' },
-            { label: 'Evaluation harness', link: '/evaluation/' },
           ],
         },
       ],
