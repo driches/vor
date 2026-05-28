@@ -19,7 +19,7 @@ const result = await build({
   metafile: true,
   logLevel: 'info',
   banner: {
-    js: '#!/usr/bin/env node\n// driches/code-review — built bundle (do not edit by hand)',
+    js: '#!/usr/bin/env node\n// driches/vor — built bundle (do not edit by hand)',
   },
   external: [],
 });

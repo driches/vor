@@ -21,7 +21,7 @@ Thanks for sending a PR! A couple of things to know:
 - [ ] `npm test -- --run` passes
 - [ ] `npm run verify-dist` passes (rebuilds internally; required whenever `src/` changed)
 - [ ] `CHANGELOG.md` updated under `## [Unreleased]` (only required for user-facing changes)
-- [ ] If this touches the agent prompt, tools, or scanners, I've asked a maintainer to dispatch self-review (`gh workflow run self-review.yml --ref <branch> -f pr_number=<N> -R driches/code-review`) and addressed any regressions
+- [ ] If this touches the agent prompt, tools, or scanners, I've asked a maintainer to dispatch self-review (`gh workflow run self-review.yml --ref <branch> -f pr_number=<N> -R driches/vor`) and addressed any regressions
 
 ## Notes for reviewers
 

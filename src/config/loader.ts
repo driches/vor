@@ -35,7 +35,7 @@ export function loadConfigFromString(yaml: string | null | undefined): ReviewCon
   try {
     parsed = parseYaml(yaml);
   } catch (err) {
-    void logger.warn(`Failed to parse .code-review.yml: ${(err as Error).message}. Using defaults.`);
+    void logger.warn(`Failed to parse .vor.yml: ${(err as Error).message}. Using defaults.`);
     return DEFAULT_CONFIG;
   }
 
@@ -48,7 +48,7 @@ export function loadConfigFromString(yaml: string | null | undefined): ReviewCon
     const errMsg = result.error.issues
       .map((i) => `${i.path.join('.')}: ${i.message}`)
       .join('; ');
-    void logger.warn(`.code-review.yml validation failed: ${errMsg}. Using defaults.`);
+    void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
     return DEFAULT_CONFIG;
   }
 

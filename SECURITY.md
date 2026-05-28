@@ -15,7 +15,7 @@ Once `v1.0.0` ships, the previous major will receive security fixes for six mont
 
 **Please do not open a public issue.**
 
-The preferred channel is **[GitHub Security Advisories](https://github.com/driches/code-review/security/advisories/new)** — this lets us collaborate on a fix privately and coordinate disclosure.
+The preferred channel is **[GitHub Security Advisories](https://github.com/driches/vor/security/advisories/new)** — this lets us collaborate on a fix privately and coordinate disclosure.
 
 If that's not workable, email **doug@richesfamily.ca**. PGP key available on request.
 
@@ -39,7 +39,7 @@ Anything that could leak those secrets, escalate the token's permissions, exfilt
 
 - Issues in `@anthropic-ai/sdk`, `@octokit/*`, or other dependencies — please report those upstream. We'll bump versions promptly once a fix is released.
 - Issues that require an attacker to already have write access to the repo running the action.
-- Review-quality issues (the agent missed something, or flagged something wrong) — those belong in the [review-quality template](https://github.com/driches/code-review/issues/new?template=review_quality.yml).
+- Review-quality issues (the agent missed something, or flagged something wrong) — those belong in the [review-quality template](https://github.com/driches/vor/issues/new?template=review_quality.yml).
 
 ## Response
 

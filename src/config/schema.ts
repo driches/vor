@@ -16,7 +16,7 @@ const semgrepSchema = z.object({
   // here would reject perfectly valid absolute paths on Windows.
   //
   // The empty string is allowed and acts as an explicit opt-out: it
-  // bypasses the default `.code-review/semgrep-rules` directory without
+  // bypasses the default `.vor/semgrep-rules` directory without
   // forcing the operator to also disable the entire sast scanner. The
   // resolver in semgrep.ts treats unset, empty, and missing-on-disk
   // identically — all three forward only `--config=auto`.
@@ -68,7 +68,7 @@ const providerConfigSchema = z.object({
 });
 
 /**
- * Zod schema for `.code-review.yml`. All fields optional; missing values are
+ * Zod schema for `.vor.yml`. All fields optional; missing values are
  * merged from DEFAULT_CONFIG by the loader.
  */
 export const configSchema = z

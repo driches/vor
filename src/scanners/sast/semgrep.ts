@@ -109,7 +109,7 @@ export const semgrepLinter: LinterModule = {
     }
 
     // Resolve the optional custom-rules directory. The config layer
-    // defaults this to '.code-review/semgrep-rules'; we only forward it to
+    // defaults this to '.vor/semgrep-rules'; we only forward it to
     // semgrep when something actually exists at the resolved path so that
     // unset-or-absent stays a true no-op (no extra `--config` flag, no
     // semgrep error). Existence is checked, not readability — if the path

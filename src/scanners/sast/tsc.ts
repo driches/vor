@@ -19,8 +19,7 @@
  *      strictness.
  *
  * Quiet skip when either activation gate fails — many TS repos don't run
- * tsc as a CI step (some rely on the bundler), and that's not a code-review
- * failure.
+ * tsc as a CI step (some rely on the bundler), and that's not a Vor failure.
  *
  * Whole-project: tsc reads tsconfig.json and analyzes its `include` set;
  * we don't pass file argv (passing files explicitly causes tsc to IGNORE
@@ -115,7 +114,7 @@ export const tscLinter: LinterModule = {
     // Per-linter opt-out. Default ON when the field is omitted (matches
     // the "scanners are enabled unless turned off" stance of the top-level
     // `sast.enabled` flag). Operators who want to disable tsc per-repo
-    // set `security.scanners.sast.tsc.enabled: false` in `.code-review.yml`.
+    // set `security.scanners.sast.tsc.enabled: false` in `.vor.yml`.
     const tscConfig = deps.config.scanners.sast.tsc;
     if (tscConfig?.enabled === false) {
       return { findings: [], errors: [], filesExamined: 0 };

@@ -14,7 +14,7 @@
  *   2. PATH-resolved `knip` (system or runner-image install)
  *
  * Quiet skip when neither resolves — most repos don't run knip and
- * that's not a code-review failure.
+ * that's not a Vor failure.
  *
  * Output format: knip --reporter json emits:
  *   { files: [...], dependencies: [...], exports: { "src/foo.ts": [{name, line, col, type}, ...] }, ... }

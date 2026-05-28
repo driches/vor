@@ -3,7 +3,7 @@
  * changed TS/JS files.
  *
  * Activation: requires `node_modules/.bin/eslint` in the workspace.
- * GitHub Actions workflows that `npm ci` before the code-review step have
+ * GitHub Actions workflows that `npm ci` before the Vor step have
  * this; bare checkouts don't. When absent, returns empty quietly — not a
  * scanner error.
  *

@@ -352,7 +352,7 @@ Create `scripts/eval/config-loader.ts`:
  * ReviewConfig (with all defaults filled in).
  *
  * Reuses the existing Zod partial-merge plumbing in src/config/loader.ts so
- * the schema stays in lockstep with how production `.code-review.yml` files
+ * the schema stays in lockstep with how production `.vor.yml` files
  * are loaded.
  */
 import { readFileSync } from 'node:fs';
@@ -1706,11 +1706,11 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     turns: 0,
   };
 
-  // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
+  // The orchestrator's loadConfig will look for .vor.yml at HEAD; we
   // serve a serialized form of the supplied config so the orchestrator picks
   // up exactly what the test asked for. (Re-uses the same loader path as a
   // production run — no special-casing.)
-  state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(input.config));
+  state.caseFiles.set('.vor.yml', serializeConfigAsYaml(input.config));
 
   const wallStart = Date.now();
   let endedReason = 'summary_posted';
@@ -1721,7 +1721,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       pull_number: 1,
       anthropic_api_key: input.anthropicApiKey,
       github_token: 'gh-test',
-      config_path: '.code-review.yml',
+      config_path: '.vor.yml',
       dry_run: false,
       workspace_dir: '/tmp/eval',
     });
@@ -1766,7 +1766,7 @@ function synthesizeDiff(c: LoadedCase): string {
   // can parse.
   const chunks: string[] = [];
   for (const f of c.files) {
-    if (f.path === '.code-review.yml') continue;
+    if (f.path === '.vor.yml') continue;
     const lineCount = f.content.split('\n').length;
     chunks.push(`diff --git a/${f.path} b/${f.path}`);
     chunks.push('new file mode 100644');

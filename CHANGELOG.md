@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+- **Project renamed: `code-review` → `vor`.** New name comes from the Norse goddess Vór, "from whom nothing can be hidden." The rename touches every external surface:
+  - **npm package**: `@driches/code-review` → `@driches/vor`. The old package is deprecated; install `@driches/vor` going forward.
+  - **GitHub repo**: `driches/code-review` → `driches/vor`. Action references should change from `uses: driches/code-review@v0` to `uses: driches/vor@v0`. GitHub's automatic redirect will keep old `uses:` lines working temporarily, but pin to the new name.
+  - **Config file**: `.code-review.yml` → `.vor.yml`. **Hard rename — no fallback.** Rename your config file when upgrading; the loader no longer looks for `.code-review.yml`.
+  - **Security ignore + bundled rules**: `.code-review/security-ignore.yml` → `.vor/security-ignore.yml`; `.code-review/semgrep-rules/` → `.vor/semgrep-rules/`. The action's `security.ignore_file` and `security.scanners.sast.semgrep.custom_rules_path` defaults updated accordingly. Rename the directory in consumer repos when upgrading.
+  - **Semgrep rule IDs**: `code-review.n-plus-one.*`, `code-review.raw-sql-concat.*`, `code-review.sync-in-async.*`, `code-review.missing-auth-middleware.*` → `vor.*`. Any `# nosem: code-review.foo` suppression comments or `rule:` matchers in your `.vor/security-ignore.yml` must be updated to the new `vor.*` prefix.
+  - **PR comment marker**: The `<!-- driches/code-review: agent-review v1 -->` HTML marker that lets the bot identify and update its own prior review threads is now `<!-- driches/vor: agent-review v1 -->`. After upgrading, comments left by previous versions won't be recognized as prior reviews — the bot will leave them in place and start a new review thread. Either manually delete the old comments or accept the one-time duplicate.
+  - **Workflow file convention**: `.github/workflows/code-review.yml` is now suggested as `.github/workflows/vor.yml` in the README. Your existing file keeps working; only the suggested filename in docs changed.
+
+  Migration checklist for a consumer repo:
+  1. Update `uses:` to `driches/vor@v0`.
+  2. `git mv .code-review.yml .vor.yml` (if present).
+  3. `git mv .code-review .vor` (if present).
+  4. Search-and-replace `code-review\.` → `vor.` in any `# nosem:` comments or `.vor/security-ignore.yml` rule matchers.
+  5. Optionally delete prior bot review threads on open PRs so the new run doesn't post duplicates.
+
 ## [0.5.2] - 2026-05-27
 
 ### Fixed

@@ -89,7 +89,7 @@ export interface RunAgentInput {
    * infer from the model id (`claude-*` → anthropic, `gpt-*`/`o<digit>` →
    * openai). Set when operator config wants to force a provider against the
    * inferred default — e.g. routing a `claude-*` id through a compatibility
-   * shim, or pinning explicit provider selection in `.code-review.yml`.
+   * shim, or pinning explicit provider selection in `.vor.yml`.
    */
   providerHint?: ProviderId;
   /**

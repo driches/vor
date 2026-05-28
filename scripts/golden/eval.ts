@@ -1,5 +1,5 @@
 /**
- * Run the code-review agent against captured cases and produce a comparison
+ * Run the Vor agent against captured cases and produce a comparison
  * report against Codex's stored findings.
  *
  *   npm run golden:eval -- --case <case-id>
@@ -18,7 +18,7 @@
  * refuses to run if GOLDEN_REPO_PATH points anywhere inside this public repo.
  *
  * Required env: ANTHROPIC_API_KEY for Claude models, OPENAI_API_KEY for OpenAI models.
- * Honors: GOLDEN_REPO_PATH (default: ../code-review-golden).
+ * Honors: GOLDEN_REPO_PATH (default: ../vor-golden).
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -53,7 +53,7 @@ interface Args {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const goldenRoot = resolve(process.env.GOLDEN_REPO_PATH ?? '../code-review-golden');
+  const goldenRoot = resolve(process.env.GOLDEN_REPO_PATH ?? '../vor-golden');
   assertGoldenPathSafe(goldenRoot);
 
   const casesRoot = resolve(goldenRoot, 'cases');
@@ -333,7 +333,7 @@ Usage:
   npm run golden:eval -- --all [--filter <regex>]
 
 Optional:
-  --model <name>      Override the model from .code-review.yml
+  --model <name>      Override the model from .vor.yml
   --max-turns <N>     Override the agent's max turn count
 
 Required env:
@@ -341,7 +341,7 @@ Required env:
   OPENAI_API_KEY    — used for OpenAI models.
 
 Honors:
-  GOLDEN_REPO_PATH — case + report root (default: ../code-review-golden).
+  GOLDEN_REPO_PATH — case + report root (default: ../vor-golden).
 `;
 
 await main().catch((err: Error) => {

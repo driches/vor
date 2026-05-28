@@ -74,7 +74,7 @@ function makeDeps(over: Partial<ScannerDeps> & {
     signal: new AbortController().signal,
     config: {
       enabled: true,
-      ignore_file: '.code-review/security-ignore.yml',
+      ignore_file: '.vor/security-ignore.yml',
       scanners: {
         dependency_cve: { enabled: false },
         secrets: { enabled: false, include_generic_entropy: false },
@@ -105,7 +105,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
   it('passes --config <abs_path> when the configured path exists on disk', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'semgrep-custom-rules-'));
     try {
-      const rulesDir = join(workspace, '.code-review/semgrep-rules');
+      const rulesDir = join(workspace, '.vor/semgrep-rules');
       mkdirSync(rulesDir, { recursive: true });
       writeFileSync(
         join(rulesDir, 'placeholder.yml'),
@@ -115,7 +115,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
 
       const deps = makeDeps({
         workspaceDir: workspace,
-        customRulesPath: '.code-review/semgrep-rules',
+        customRulesPath: '.vor/semgrep-rules',
       });
 
       const result = await semgrepLinter.run(deps, [makeFile()]);
@@ -134,7 +134,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
       expect(configIdx).toBeGreaterThanOrEqual(0);
       const customPathArg = call.args[configIdx + 1]!;
       // Absolute path resolution (relative input resolves against workspaceDir).
-      expect(customPathArg.endsWith('.code-review/semgrep-rules')).toBe(true);
+      expect(customPathArg.endsWith('.vor/semgrep-rules')).toBe(true);
       expect(customPathArg.startsWith('/')).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
@@ -147,7 +147,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
       const deps = makeDeps({
         workspaceDir: workspace,
         // Path is set, but the directory was never created.
-        customRulesPath: '.code-review/semgrep-rules',
+        customRulesPath: '.vor/semgrep-rules',
       });
 
       const result = await semgrepLinter.run(deps, [makeFile()]);
@@ -203,9 +203,9 @@ describe('semgrepLinter — custom_rules_path integration', () => {
   it('emits custom-rule findings ONLY for PR-added lines', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'semgrep-added-lines-'));
     try {
-      mkdirSync(join(workspace, '.code-review/semgrep-rules'), { recursive: true });
+      mkdirSync(join(workspace, '.vor/semgrep-rules'), { recursive: true });
       writeFileSync(
-        join(workspace, '.code-review/semgrep-rules/dummy.yml'),
+        join(workspace, '.vor/semgrep-rules/dummy.yml'),
         'rules: []\n',
         'utf-8',
       );
@@ -218,7 +218,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
         stdout: JSON.stringify({
           results: [
             {
-              check_id: 'code-review.n-plus-one.await-in-for-loop',
+              check_id: 'vor.n-plus-one.await-in-for-loop',
               path: 'src/foo.ts',
               start: { line: 3, col: 1 },
               end: { line: 3, col: 20 },
@@ -229,7 +229,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
               },
             },
             {
-              check_id: 'code-review.n-plus-one.await-in-for-loop',
+              check_id: 'vor.n-plus-one.await-in-for-loop',
               path: 'src/foo.ts',
               start: { line: 99, col: 1 },
               end: { line: 99, col: 20 },
@@ -247,7 +247,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
 
       const deps = makeDeps({
         workspaceDir: workspace,
-        customRulesPath: '.code-review/semgrep-rules',
+        customRulesPath: '.vor/semgrep-rules',
       });
 
       const result = await semgrepLinter.run(deps, [
@@ -260,7 +260,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0]!.line).toBe(3);
       expect(result.findings[0]!.rule_id).toBe(
-        'semgrep/code-review.n-plus-one.await-in-for-loop',
+        'semgrep/vor.n-plus-one.await-in-for-loop',
       );
       expect(result.findings[0]!.scanner).toBe('sast');
       // WARNING from a custom rule maps to "minor", as for any other
@@ -315,16 +315,16 @@ describe('resolveCustomRulesPath', () => {
   it('returns the absolute resolved path when the relative directory exists', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'semgrep-resolve-rel-'));
     try {
-      mkdirSync(join(workspace, 'rules/code-review'), { recursive: true });
+      mkdirSync(join(workspace, 'rules/vor'), { recursive: true });
       const deps = makeDeps({
         workspaceDir: workspace,
-        customRulesPath: 'rules/code-review',
+        customRulesPath: 'rules/vor',
       });
       const result = await resolveCustomRulesPath(deps);
       expect(result).not.toBeNull();
       // Absolute, anchored at workspace.
       expect(result!.startsWith(workspace)).toBe(true);
-      expect(result!.endsWith('rules/code-review')).toBe(true);
+      expect(result!.endsWith('rules/vor')).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

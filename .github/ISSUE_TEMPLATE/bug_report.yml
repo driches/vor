@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for taking the time to file a bug. Please fill out as much as you can — the more detail, the faster we can fix it.
 
-        If your issue is about **review quality** (the AI flagged something wrong, missed something important, or its severity was off), please use the [Review quality feedback](https://github.com/driches/code-review/issues/new?template=review_quality.yml) template instead. We track those separately because they feed prompt tuning.
+        If your issue is about **review quality** (the AI flagged something wrong, missed something important, or its severity was off), please use the [Review quality feedback](https://github.com/driches/vor/issues/new?template=review_quality.yml) template instead. We track those separately because they feed prompt tuning.
 
   - type: input
     id: action_version
@@ -56,17 +56,17 @@ body:
     id: workflow_snippet
     attributes:
       label: Workflow snippet
-      description: The `.github/workflows/code-review.yml` (or equivalent) that triggered the run. Redact secrets.
+      description: The `.github/workflows/vor.yml` (or equivalent) that triggered the run. Redact secrets.
       render: yaml
       placeholder: |
-        - uses: driches/code-review@v0
+        - uses: driches/vor@v0
           with:
             anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
   - type: textarea
     id: config
     attributes:
-      label: Your `.code-review.yml` (if any)
+      label: Your `.vor.yml` (if any)
       description: Paste it here. Redact anything sensitive.
       render: yaml
 
@@ -82,5 +82,5 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: "I searched [open](https://github.com/driches/code-review/issues) and [closed](https://github.com/driches/code-review/issues?q=is%3Aissue+is%3Aclosed) issues and didn't find a duplicate."
+        - label: "I searched [open](https://github.com/driches/vor/issues) and [closed](https://github.com/driches/vor/issues?q=is%3Aissue+is%3Aclosed) issues and didn't find a duplicate."
           required: true

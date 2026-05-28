@@ -87,7 +87,7 @@ export interface ExperimentalConfig {
    * `bar` have one caller?) to a cheap Haiku worker via the
    * `worker_check_usage_claim` tool. Sonnet still verifies the bytes itself
    * before posting critical/important findings (validator-enforced). Default
-   * off — opt in per repo via `.code-review.yml`.
+   * off — opt in per repo via `.vor.yml`.
    */
   worker_delegation: WorkerDelegationConfig;
   /**
@@ -102,7 +102,7 @@ export interface ExperimentalConfig {
    * the agent's start. The cost win has to dominate that for the flag to
    * be worth flipping on.
    *
-   * Default `false`. Opt in via .code-review.yml. A/B comparison via
+   * Default `false`. Opt in via .vor.yml. A/B comparison via
    * `npm run local-review` is the recommended way to validate.
    */
   scanner_findings_in_user_prompt: boolean;
@@ -185,7 +185,7 @@ export interface SemgrepConfig {
    *
    * Resolves silently when the path is unset OR is configured but missing
    * on disk — repos that don't ship rules just get the default ruleset.
-   * Defaults to `'.code-review/semgrep-rules'`, which is the conventional
+   * Defaults to `'.vor/semgrep-rules'`, which is the conventional
    * location the action's bundled rule pack ships at.
    */
   custom_rules_path?: string;

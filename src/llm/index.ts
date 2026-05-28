@@ -13,7 +13,7 @@ export * from './types.js';
 
 /**
  * Best-effort provider inference from a model id. Used when the user does
- * not set `provider:` explicitly in `.code-review.yml` — most users won't.
+ * not set `provider:` explicitly in `.vor.yml` — most users won't.
  *
  * Recognized prefixes:
  *  - `claude-*` → Anthropic
@@ -28,7 +28,7 @@ export function inferProviderFromModel(model: string): ProviderId {
   if (model.startsWith('claude-')) return 'anthropic';
   if (/^(gpt-|o\d|chatgpt-)/.test(model)) return 'openai';
   throw new Error(
-    `Cannot infer provider from model "${model}". Set 'provider:' explicitly in .code-review.yml.`,
+    `Cannot infer provider from model "${model}". Set 'provider:' explicitly in .vor.yml.`,
   );
 }
 

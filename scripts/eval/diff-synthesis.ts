@@ -30,10 +30,10 @@ export function synthesizeDiff(c: LoadedCase): SynthesizedDiff {
   // CVE scanners don't see it as a "+" line and don't bias precision/recall.
   const beforeByPath = new Map(c.beforeFiles.map((f) => [f.path, f.content]));
   const afterByPath = new Map(c.files.map((f) => [f.path, f.content]));
-  // `.code-review.yml` is adapter-internal (we inject it for config plumbing);
+  // `.vor.yml` is adapter-internal (we inject it for config plumbing);
   // it must not appear in the diff or the orchestrator will try to review it.
-  beforeByPath.delete('.code-review.yml');
-  afterByPath.delete('.code-review.yml');
+  beforeByPath.delete('.vor.yml');
+  afterByPath.delete('.vor.yml');
 
   // Sort merged paths so the synthesized diff is fully lexicographic. Set
   // preserves insertion order; we sort to keep ordering deterministic across

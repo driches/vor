@@ -7,7 +7,7 @@
  *
  * That has two problems Codex caught on PR #34:
  *
- *  1. It MASKS the repository's real `.code-review.yml`. Anything else the
+ *  1. It MASKS the repository's real `.vor.yml`. Anything else the
  *     repo configured (severity floor, exclude paths, scanner enable flags)
  *     is silently lost when the FakeOctokit serves the synthetic file instead
  *     of the real one.
@@ -27,7 +27,7 @@ import { loadConfigFromString } from '../../src/config/loader.js';
 import type { ReviewConfig } from '../../src/config/types.js';
 
 export interface FlagInjectionResult {
-  /** Merged YAML to serve from the FakeOctokit's `.code-review.yml` path. */
+  /** Merged YAML to serve from the FakeOctokit's `.vor.yml` path. */
   mergedYaml: string;
   /** Whether the resulting `ReviewConfig` actually has the flag set. */
   effective: boolean;
@@ -41,7 +41,7 @@ export interface FlagInjectionResult {
  * flag so the caller can warn loudly when the flag had no schema-level
  * effect.
  *
- * `existingYaml` may be `null` (no `.code-review.yml` in the repo) — in that
+ * `existingYaml` may be `null` (no `.vor.yml` in the repo) — in that
  * case the merge produces a YAML containing only the experimental key.
  */
 export function injectScannerFindingsFlag(existingYaml: string | null): FlagInjectionResult {

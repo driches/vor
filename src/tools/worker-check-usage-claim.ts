@@ -115,7 +115,7 @@ export function makeWorkerCheckUsageClaimTool(deps: ToolDeps) {
         return jsonResult({
           ok: false,
           error: 'worker delegation is not enabled in this run',
-          hint: 'Set experimental.worker_delegation.enabled = true in .code-review.yml to use this tool.',
+          hint: 'Set experimental.worker_delegation.enabled = true in .vor.yml to use this tool.',
         });
       }
 

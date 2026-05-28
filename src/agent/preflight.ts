@@ -184,7 +184,7 @@ export async function runPreflight(input: {
  * Why we render the FULL changed-file list (not just the candidates):
  * earlier iterations showed Sonnet treats the candidate list as exhaustive
  * — files not on the list got skipped, and real findings in those files
- * were missed (e.g. discover.ts:127 N+1 on `code-review-pr-6`, Iter 2).
+ * were missed (e.g. discover.ts:127 N+1 on `vor-pr-6`, Iter 2).
  * By listing every changed file with a "candidate" or "no candidates
  * flagged" annotation, an unflagged file still appears in the prompt and
  * gets investigated rather than silently dropped. The cost-shift win

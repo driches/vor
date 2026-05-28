@@ -35,11 +35,11 @@ interface Args {
   configPath: string;
   model?: string;
   /**
-   * When true, the FakeOctokit's `repos.getContent` for `.code-review.yml`
+   * When true, the FakeOctokit's `repos.getContent` for `.vor.yml`
    * returns a synthetic YAML overriding `experimental.scanner_findings_in_user_prompt`
    * to `true` instead of whatever's at HEAD. Lets you A/B the flag without
    * committing config changes. The override is shallow — any other keys at
-   * HEAD's `.code-review.yml` are ignored.
+   * HEAD's `.vor.yml` are ignored.
    */
   scannerFindingsInUserPrompt: boolean;
 }
@@ -54,8 +54,8 @@ function parseArgs(argv: readonly string[]): Args {
     base: a('--base', 'origin/main')!,
     head: a('--head', 'HEAD')!,
     workspace: a('--workspace', process.cwd())!,
-    output: a('--output', `.code-review/local-runs/${ts}.json`)!,
-    configPath: a('--config', '.code-review.yml')!,
+    output: a('--output', `.vor/local-runs/${ts}.json`)!,
+    configPath: a('--config', '.vor.yml')!,
     scannerFindingsInUserPrompt: argv.includes('--scanner-findings-in-user-prompt'),
     ...(a('--model') !== undefined ? { model: a('--model') } : {}),
   };
@@ -141,7 +141,7 @@ function getFileContent(workspace: string, ref: string, path: string): string | 
 
 /**
  * Deep-merge `experimental.scanner_findings_in_user_prompt: true` into the
- * repo's existing `.code-review.yml` content rather than emitting a minimal
+ * repo's existing `.vor.yml` content rather than emitting a minimal
  * YAML that masks it. Returns YAML text ready to serve from the FakeOctokit.
  *
  * `existingYaml` may be `null` (no committed config), in which case the
@@ -161,7 +161,7 @@ function mergeScannerFindingsFlag(existingYaml: string | null): string {
       // reads the merged output.
     }
   }
-  // Tolerate a `.code-review.yml` that wrote `experimental: false` or some
+  // Tolerate a `.vor.yml` that wrote `experimental: false` or some
   // other parseable-but-wrong-shape value. The production config loader
   // falls back to defaults in that case; doing the same here keeps the CLI
   // from crashing when the user pairs `--scanner-findings-in-user-prompt`
@@ -245,7 +245,7 @@ function buildFakeOctokit(opts: {
   };
   /**
    * Path → synthetic content overrides for `repos.getContent`. Used by the
-   * CLI to inject a different `.code-review.yml` than the one committed at
+   * CLI to inject a different `.vor.yml` than the one committed at
    * HEAD, so flags can be A/B tested without git churn.
    */
   contentOverrides: Map<string, string>;
@@ -306,7 +306,7 @@ function buildFakeOctokit(opts: {
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
           // Honor explicit overrides first — used by the CLI to inject a
-          // synthetic `.code-review.yml` without committing config changes.
+          // synthetic `.vor.yml` without committing config changes.
           const override = opts.contentOverrides.get(args.path);
           const ref = args.ref ?? opts.headSha;
           const content = override ?? getFileContent(opts.workspace, ref, args.path);
@@ -365,7 +365,7 @@ async function main(): Promise<void> {
 
   // Build the content-override map. Today: only the experimental flag
   // for scanner-findings-in-user-prompt. We MERGE into the repo's real
-  // `.code-review.yml` rather than emit a minimal stub — otherwise the
+  // `.vor.yml` rather than emit a minimal stub — otherwise the
   // A/B run would also flip every unrelated setting the repo configured
   // (model, severity floor, exclude paths, enabled scanners) back to
   // defaults, and the comparison would no longer isolate this flag.

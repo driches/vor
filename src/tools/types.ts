@@ -57,7 +57,7 @@ export function jsonResult(value: unknown): {
 export const REPO_CONTEXT_FILES = [
   'CLAUDE.md',
   'AGENTS.md',
-  '.code-review.yml',
+  '.vor.yml',
   'package.json',
   'tsconfig.json',
   'README.md',

@@ -130,7 +130,7 @@ function makeDeps(
 ): ScannerDeps {
   const config: SecurityConfig = {
     enabled: true,
-    ignore_file: '.code-review/security-ignore.yml',
+    ignore_file: '.vor/security-ignore.yml',
     scanners: {
       dependency_cve: { enabled: true },
       secrets: { enabled: true, include_generic_entropy: false },

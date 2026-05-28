@@ -1,5 +1,5 @@
 /**
- * Suppression list loaded from `.code-review/security-ignore.yml` (or whatever
+ * Suppression list loaded from `.vor/security-ignore.yml` (or whatever
  * path the user configured under `security.ignore_file`). Each entry targets a
  * specific class of scanner finding (CVE id, GHSA id, vulnerable package
  * range, or file+rule for secrets / SAST hits) and carries a required

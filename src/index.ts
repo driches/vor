@@ -34,14 +34,14 @@ async function main(): Promise<void> {
   }
   const provider_override: ProviderId | undefined = raw_provider;
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
-  const config_path = process.env.INPUT_CONFIG_PATH?.trim() || '.code-review.yml';
+  const config_path = process.env.INPUT_CONFIG_PATH?.trim() || '.vor.yml';
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
 
   // Manual-only trigger guard. This action is intentionally restricted
   // to manual / programmatic invocation (workflow_dispatch, schedule,
   // repository_dispatch, push). Auto-triggering on every pull_request
   // event historically caused tight review-iteration loops that produced
-  // more noise than signal (see commit history of driches/code-review
+  // more noise than signal (see commit history of driches/vor
   // for the false-positive pattern that motivated this guard).
   //
   // Opt out by setting `allow_auto_trigger: 'true'` in the action input

@@ -117,7 +117,7 @@ entries:
   # this file — reason strings above reference the canonical AKIA marker
   # when documenting why other test fixtures need suppression.
   # ---------------------------------------------------------------
-  - file: .code-review/security-ignore.yml
+  - file: .vor/security-ignore.yml
     rule: "secret:aws-access-key-id"
     reason: "Self-reference: this file's reason strings mention AKIAIOSFODNN7EXAMPLE (canonical test marker) when documenting suppression entries for other fixtures"
 

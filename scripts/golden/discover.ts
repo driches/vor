@@ -1,6 +1,6 @@
 /**
  * Discover PRs across an owner's repos that have BOTH a Codex review and a
- * driches/code-review review — i.e., PRs that are eligible for golden-dataset
+ * driches/vor review — i.e., PRs that are eligible for golden-dataset
  * capture.
  *
  *   npm run golden:discover -- \
@@ -8,7 +8,7 @@
  *     [--bot chatgpt-codex-connector[bot]] \
  *     [--lookback-days 7] \
  *     [--repo-filter '^orbit'] \
- *     [--golden-path /path/to/code-review-golden] \
+ *     [--golden-path /path/to/vor-golden] \
  *     [--limit 50]
  *
  * Output: JSON array on stdout, one entry per eligible PR:
@@ -237,7 +237,7 @@ Options:
   --bot <login>         Codex bot user.login (default: chatgpt-codex-connector[bot]).
   --lookback-days <N>   Only consider PRs updated in the last N days (default: 7).
   --repo-filter <re>    Limit to repo names matching this regex.
-  --golden-path <path>  Path to code-review-golden so already-captured cases are skipped.
+  --golden-path <path>  Path to vor-golden so already-captured cases are skipped.
   --state <s>           PR state: merged | closed | all (default: merged).
   --limit <N>           Stop after finding N candidates (default: 50).
   -v, --verbose         Log progress to stderr.

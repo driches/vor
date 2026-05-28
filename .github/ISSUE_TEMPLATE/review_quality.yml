@@ -8,7 +8,7 @@ body:
       value: |
         These reports directly improve the system prompt and severity calibration. The more concrete the example (with a public link), the more useful it is.
 
-        For action crashes, malformed reviews, or things that look like bugs (not opinions), use the [Bug report](https://github.com/driches/code-review/issues/new?template=bug_report.yml) template instead.
+        For action crashes, malformed reviews, or things that look like bugs (not opinions), use the [Bug report](https://github.com/driches/vor/issues/new?template=bug_report.yml) template instead.
 
   - type: input
     id: pr_link
@@ -61,6 +61,6 @@ body:
   - type: textarea
     id: config
     attributes:
-      label: "`.code-review.yml` in use"
+      label: "`.vor.yml` in use"
       description: Especially the `focus`, `severity`, and `prompt.additions` sections.
       render: yaml

@@ -3,7 +3,7 @@
  * ReviewConfig (with all defaults filled in).
  *
  * Reuses the existing Zod schema + deepMerge from src/config so the schema
- * stays in lockstep with how production `.code-review.yml` files are loaded.
+ * stays in lockstep with how production `.vor.yml` files are loaded.
  *
  * Unlike `loadConfigFromString` (which silently falls back to defaults on
  * parse/schema errors so production reviews don't crash on a malformed user

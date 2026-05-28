@@ -149,7 +149,7 @@ security:
     // Default semgrep block is preserved (custom_rules_path falls back to
     // the bundled rule pack location).
     expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe(
-      '.code-review/semgrep-rules',
+      '.vor/semgrep-rules',
     );
   });
 
@@ -212,14 +212,14 @@ describe('provider-specific config', () => {
 providers:
   openai:
     service_tier: flex
-    prompt_cache_key: driches/code-review
+    prompt_cache_key: driches/vor
     prompt_cache_retention: 24h
     reasoning_effort: low
     text_verbosity: low
 `);
     expect(cfg.providers.openai).toEqual({
       service_tier: 'flex',
-      prompt_cache_key: 'driches/code-review',
+      prompt_cache_key: 'driches/vor',
       prompt_cache_retention: '24h',
       reasoning_effort: 'low',
       text_verbosity: 'low',

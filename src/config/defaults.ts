@@ -1,10 +1,10 @@
 import type { ReviewConfig } from './types.js';
 
 /**
- * Defaults applied when no .code-review.yml is present.
+ * Defaults applied when no .vor.yml is present.
  * Sonnet 4.6 is the recall-default; consumers wanting cheaper review (with
  * lower recall, validated via `npm run golden:eval`) opt into Haiku 4.5 via
- * `model:` in their `.code-review.yml`. COMMENT-only (no auto-block), sticky reviews.
+ * `model:` in their `.vor.yml`. COMMENT-only (no auto-block), sticky reviews.
  */
 export const DEFAULT_CONFIG: ReviewConfig = {
   model: 'claude-sonnet-4-6',
@@ -69,7 +69,7 @@ export const DEFAULT_CONFIG: ReviewConfig = {
 
   security: {
     enabled: true,
-    ignore_file: '.code-review/security-ignore.yml',
+    ignore_file: '.vor/security-ignore.yml',
     scanners: {
       dependency_cve: { enabled: true },
       secrets: { enabled: true, include_generic_entropy: false },
@@ -80,7 +80,7 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       //
       // v0.4.1 adds an opt-in custom Semgrep ruleset alongside the
       // existing `--config=auto`. The default path points at the bundled
-      // rule pack under `.code-review/semgrep-rules/` (N+1, sync-in-async,
+      // rule pack under `.vor/semgrep-rules/` (N+1, sync-in-async,
       // raw SQL, missing auth). When the directory is absent, semgrep is
       // configured exactly as before — no behavior change for old configs.
       //
@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       // every other linter).
       sast: {
         enabled: true,
-        semgrep: { custom_rules_path: '.code-review/semgrep-rules' },
+        semgrep: { custom_rules_path: '.vor/semgrep-rules' },
         tsc: { enabled: true },
       },
       container_cve: { enabled: false },

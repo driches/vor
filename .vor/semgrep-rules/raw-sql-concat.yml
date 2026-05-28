@@ -15,13 +15,13 @@
 #
 # Caveats: matches the SYNTACTIC shape, not actual attack reachability.
 # True positives on test fixtures and migration scripts should be
-# suppressed via .code-review/security-ignore.yml.
+# suppressed via .vor/security-ignore.yml.
 #
 # To suppress: rule id is e.g.
-# "sast:semgrep/code-review.raw-sql-concat.string-plus".
+# "sast:semgrep/vor.raw-sql-concat.string-plus".
 
 rules:
-  - id: code-review.raw-sql-concat.string-plus
+  - id: vor.raw-sql-concat.string-plus
     message: |
       SQL query built by string concatenation. This is the canonical
       SQL injection shape. Use a parameterized query (`?` / `$1`
@@ -54,7 +54,7 @@ rules:
       - pattern: |
           "DELETE " + $X
 
-  - id: code-review.raw-sql-concat.template-literal
+  - id: vor.raw-sql-concat.template-literal
     message: |
       SQL query built by template-literal interpolation. The `${x}`
       placeholders are SUBSTITUTED into the string before reaching
@@ -84,7 +84,7 @@ rules:
       - pattern: |
           `WHERE ${$X}`
 
-  - id: code-review.raw-sql-concat.python-fstring
+  - id: vor.raw-sql-concat.python-fstring
     message: |
       SQL query built by f-string interpolation. The interpolated
       values are substituted before the cursor sees the SQL — the
@@ -108,7 +108,7 @@ rules:
       - pattern: |
           f"WHERE {$X}"
 
-  - id: code-review.raw-sql-concat.python-percent
+  - id: vor.raw-sql-concat.python-percent
     message: |
       SQL query built by `%`-format / `.format()`. Driver-level
       parameterization (`cursor.execute(sql, params)` with `%s`

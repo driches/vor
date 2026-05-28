@@ -12,7 +12,7 @@
  * For each case it:
  *   1. `loadCase()` + `synthesizeDiff()` → diff + files API shape
  *   2. Constructs a FakeOctokit serving those bytes (same pattern as
- *      `scripts/local-review.ts`, plus a synthetic `.code-review.yml`
+ *      `scripts/local-review.ts`, plus a synthetic `.vor.yml`
  *      injection point for flag A/B testing)
  *   3. `runOrchestrator()` with `dry_run: true` and NO `providerFactory` so
  *      the real provider (Anthropic or OpenAI per the model id) runs
@@ -60,7 +60,7 @@ function parseArgs(argv: readonly string[]): Args {
     return i >= 0 ? argv[i + 1] : def;
   };
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const goldenRepo = process.env.GOLDEN_REPO_PATH ?? '../code-review-golden';
+  const goldenRepo = process.env.GOLDEN_REPO_PATH ?? '../vor-golden';
   const maxTurnsRaw = a('--max-turns');
   return {
     goldenRepo: resolve(goldenRepo),
@@ -208,8 +208,8 @@ function buildFakeOctokit(opts: {
       },
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
-          // .code-review.yml override (for A/B flag injection)
-          if (args.path === '.code-review.yml' && opts.configOverride !== undefined) {
+          // .vor.yml override (for A/B flag injection)
+          if (args.path === '.vor.yml' && opts.configOverride !== undefined) {
             return {
               data: {
                 type: 'file',
@@ -258,7 +258,7 @@ async function runOne(
   const fileBytes = new Map(c.files.map((f) => [f.path, f.content]));
   const beforeBytes = new Map(c.beforeFiles.map((f) => [f.path, f.content]));
 
-  // A synthetic case may ship its own `after/.code-review.yml` to tune
+  // A synthetic case may ship its own `after/.vor.yml` to tune
   // severity/excludes/enabled-scanners for that specific case. Read it
   // from the loaded case bytes and merge the experimental flag on top
   // rather than emit a minimal stub — otherwise --scanner-findings-in-
@@ -267,7 +267,7 @@ async function runOne(
   // captured-real fix that did the same merge from `git show`).
   let configOverride: string | undefined;
   if (args.scannerFindingsInUserPrompt) {
-    const existingYaml = fileBytes.get('.code-review.yml') ?? null;
+    const existingYaml = fileBytes.get('.vor.yml') ?? null;
     const inj = injectScannerFindingsFlag(existingYaml);
     configOverride = inj.mergedYaml;
     if (!inj.effective) {
@@ -302,7 +302,7 @@ async function runOne(
   //   - SAST scanners shell out from here to locate `node_modules/.bin` and
   //     to resolve relative paths in scanner output, so it has to be a real
   //     directory containing the case's planted files (not `process.cwd()`,
-  //     which is the code-review checkout).
+  //     which is the Vor checkout).
   //   - The agent's `grep_repo_at_ref` tool runs `git grep` from here, so
   //     the directory has to be a git repository (not the raw `after/`
   //     snapshot, which isn't). Codex P2 #3311481416.
@@ -317,7 +317,7 @@ async function runOne(
       github_token: 'synthetic-eval-placeholder',
       ...(args.model !== undefined ? { model_override: args.model } : {}),
       ...(args.maxTurns !== undefined ? { max_turns_override: args.maxTurns } : {}),
-      config_path: '.code-review.yml',
+      config_path: '.vor.yml',
       dry_run: true,
       workspace_dir: workspace.dir,
       octokitFactory: () => fakeOctokit,

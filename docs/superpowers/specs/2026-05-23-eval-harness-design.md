@@ -2,7 +2,7 @@
 
 ## Context
 
-The code-review action currently runs as a single Sonnet 4.6 agent loop on every PR. A recent dogfood run cost ~$2.36 and hit the 40-turn cap with only 3 comments on a 63-file PR. Two related concerns:
+The Vor action currently runs as a single Sonnet 4.6 agent loop on every PR. A recent dogfood run cost ~$2.36 and hit the 40-turn cap with only 3 comments on a 63-file PR. Two related concerns:
 
 1. **Cost-per-PR** is not sustainable for an always-on review on large repos. We want roughly the same review quality at a fraction of the cost.
 2. **We can't tell which model strategy is cheaper without a fair comparison.** Anecdotal "Haiku felt fast" isn't a basis for production decisions.
@@ -24,7 +24,7 @@ The harness in this spec MUST leave room for Phase B without pre-declaring its s
 
 ### 1. Pipeline configs (`configs/pipeline/*.yml`)
 
-New top-level directory in this repo. Each YAML is a named config that the harness can invoke. Schema is a thin subset of the existing `ReviewConfig` shape (same Zod partial-merge as `.code-review.yml`):
+New top-level directory in this repo. Each YAML is a named config that the harness can invoke. Schema is a thin subset of the existing `ReviewConfig` shape (same Zod partial-merge as `.vor.yml`):
 
 ```yaml
 # configs/pipeline/sonnet-only.yml — baseline, identical to current production default
@@ -222,7 +222,7 @@ configs/pipeline/*.yml ──▶ scripts/eval.ts ──▶ runs/<ts>-<cfg>.json
 
 ## Operational notes
 
-- The golden corpus lives in a separate repo so it can grow independently and stay private if needed. Default path lookup: `~/code/code-review-golden` or `$GOLDEN_REPO_PATH`.
+- The golden corpus lives in a separate repo so it can grow independently and stay private if needed. Default path lookup: `~/code/vor-golden` or `$GOLDEN_REPO_PATH`.
 - Each `golden:eval` run is real-money: it calls Anthropic. Eval should never run automatically on PRs to *this* repo; it's a manual command.
 - The harness assumes `runOrchestrator` is callable with a synthetic input — no PR number, no GitHub API. v1 implementation will need a small adapter that fakes `prContext` from `after/` and routes `createReview` to a capture array instead of hitting GitHub. The existing `orchestrator.test.ts` already mocks all this; the adapter generalizes that mocking layer.
 

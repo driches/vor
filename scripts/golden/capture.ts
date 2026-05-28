@@ -18,7 +18,7 @@
  *   7. Run the chosen BotConfig normalizer → codex/normalized.json.
  *
  * Required env: GH_TOKEN or GITHUB_TOKEN with read access to source repo.
- * Honors:    GOLDEN_REPO_PATH (default: ../code-review-golden).
+ * Honors:    GOLDEN_REPO_PATH (default: ../vor-golden).
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const { owner, repo, pull_number } = parsePR(args.pr);
 
-  const goldenRoot = resolve(process.env.GOLDEN_REPO_PATH ?? '../code-review-golden');
+  const goldenRoot = resolve(process.env.GOLDEN_REPO_PATH ?? '../vor-golden');
   const caseDir = resolve(goldenRoot, 'cases', args.caseId);
   if (existsSync(caseDir)) {
     if (!args.force) {
@@ -239,7 +239,7 @@ Required env:
   GH_TOKEN or GITHUB_TOKEN — must have read access to the source repo.
 
 Honors:
-  GOLDEN_REPO_PATH — destination root (default: ../code-review-golden).
+  GOLDEN_REPO_PATH — destination root (default: ../vor-golden).
 
 Bot names:
   codex (default), coderabbit, or any literal GitHub bot login.

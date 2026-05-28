@@ -1,13 +1,13 @@
 {
-  "name": "@driches/code-review",
+  "name": "@driches/vor",
   "version": "0.5.2",
-  "description": "AI code review GitHub Action — inline comments via Claude Agent SDK",
+  "description": "Vor — AI code review GitHub Action with inline comments and parallel vulnerability scanning, via Claude or OpenAI",
   "license": "MIT",
   "author": "Doug Riches",
-  "homepage": "https://github.com/driches/code-review",
+  "homepage": "https://github.com/driches/vor",
   "repository": {
     "type": "git",
-    "url": "https://github.com/driches/code-review.git"
+    "url": "https://github.com/driches/vor.git"
   },
   "type": "module",
   "engines": {

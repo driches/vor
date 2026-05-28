@@ -372,7 +372,7 @@ function baseInput(over: Partial<OrchestratorInput> = {}): OrchestratorInput {
     // the resolved provider.
     openai_api_key: '',
     github_token: 'ghs_test',
-    config_path: '.code-review.yml',
+    config_path: '.vor.yml',
     dry_run: false,
     workspace_dir: '/tmp/workspace-does-not-exist',
     ...over,
@@ -484,7 +484,7 @@ describe('runOrchestrator — Scenario 1: happy path with AI + scanner findings'
     // Disable dependency-cve so OSV isn't probed — secrets is enough to
     // generate a scanner finding for this scenario.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -563,7 +563,7 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
     octokitState.filesApi = base.filesApi;
     // Disable dep-cve, leave secrets on.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -635,7 +635,7 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
       '+++ b/examples/smoke-test-bad-code.ts',
       '@@ -0,0 +1,22 @@',
       '+/**',
-      '+ * Smoke-test fixture for the code-review action.',
+      '+ * Smoke-test fixture for the vor action.',
       '+ */',
       '+',
       '+// Bug 1: hardcoded credential.',
@@ -662,7 +662,7 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
       { filename: 'examples/smoke-test-bad-code.ts', changes: 22, patch: smokeDiff },
     ];
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -825,7 +825,7 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
     // per-file cap = 2 and 3 AI comments → the lowest-severity ('minor') one
     // is the one that loses. The two 'important' ones survive.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1014,7 +1014,7 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
     // per-file cap = 5 so 4 critical AI + scanner fit; AI-50 (important) gets
     // pushed out by sort-by-severity-desc.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1246,7 +1246,7 @@ describe('runOrchestrator — Scenario 3: dependency-cve happy path', () => {
 
     // Enable dep-cve, disable secrets so we isolate the dep-cve trigger.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1364,7 +1364,7 @@ describe('runOrchestrator — Scenario 4: scanner error does not block AI review
       ].join('\n'),
     );
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1461,7 +1461,7 @@ describe('runOrchestrator — parallel execution of agent and scanners', () => {
       ].join('\n'),
     );
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1550,7 +1550,7 @@ describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner si
       ].join('\n'),
     );
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: true',
@@ -1619,7 +1619,7 @@ describe('runOrchestrator — Scenario 5: security.enabled=false skips all scann
     // Same diff as Scenario 1 — would normally trigger secrets — but the
     // master switch is off.
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'security:',
         '  enabled: false',
@@ -1705,7 +1705,7 @@ describe('runOrchestrator — Scenario 7: fork-safety on missing OpenAI key', ()
     octokitState.diff = base.diff;
     octokitState.filesApi = base.filesApi;
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'model: gpt-4.1',
         'security:',
@@ -1745,7 +1745,7 @@ describe('runOrchestrator — Scenario 8: OpenAI happy path', () => {
     octokitState.diff = base.diff;
     octokitState.filesApi = base.filesApi;
     octokitState.contents.set(
-      '.code-review.yml',
+      '.vor.yml',
       [
         'model: gpt-4.1',
         'security:',
