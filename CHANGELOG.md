@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Documentation site at [driches.github.io/vor](https://driches.github.io/vor/).** An Astro + Starlight site with a marketing landing page (feature grid, copy-paste quickstart, example-review mockup) plus the full docs set. Built from `site/`. Content stays in sync automatically: `site/scripts/sync-docs.ts` pulls the canonical root markdown (README, CHANGELOG, SECURITY, SUPPORT, CONTRIBUTING, AGENTS, CODE_OF_CONDUCT, golden-dataset) into the docs collection at build time — the repo root remains the single source of truth, so the site can't drift. Deployed by `.github/workflows/pages.yml` on pushes that touch the site or any synced source file. No change to the action or published package.
+- **Documentation site at [driches.github.io/vor](https://driches.github.io/vor/).** An Astro + Starlight site with a marketing landing page (feature grid, copy-paste quickstart, example-review mockup) plus the full docs set. Built from `site/`. Content stays in sync automatically: `site/scripts/sync-docs.ts` pulls the canonical root markdown (README, CHANGELOG, SECURITY, SUPPORT, CONTRIBUTING, AGENTS, CODE_OF_CONDUCT) into the docs collection at build time — the repo root remains the single source of truth, so the site can't drift. Deployed by `.github/workflows/pages.yml` on pushes that touch the site or any synced source file. No change to the action or published package.
 
 ### Changed (BREAKING)
 - **Project renamed: `code-review` → `vor`.** New name comes from the Norse goddess Vór, "from whom nothing can be hidden." The rename touches every external surface:

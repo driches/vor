@@ -75,12 +75,6 @@ const PAGES: Page[] = [
     title: 'Code of Conduct',
     description: 'Community standards and reporting procedures.',
   },
-  {
-    src: 'docs/golden-dataset.md',
-    out: 'evaluation.md',
-    title: 'Evaluation harness',
-    description: 'The golden-dataset evaluation workflow used to measure review quality.',
-  },
 ];
 
 /** Maps a repo-root source path to its on-site route (with base prefix). */
