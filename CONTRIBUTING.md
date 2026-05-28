@@ -84,7 +84,7 @@ Substantive expectations — types, comments, error handling, logging, architect
 
 ### Receiving review feedback
 
-Codex reviews every PR to this repo. Treat its comments the same as a human reviewer's:
+This repo currently has OpenAI's Codex reviewer (`chatgpt-codex-connector[bot]`) configured to auto-review every PR (separate from our manually-dispatched self-review described below). When Codex — or a human reviewer, or our own self-review — leaves comments, treat them the same way:
 
 1. Read the comment in full before responding
 2. Decide if you agree. If not, explain why in the thread (cite the line, name the wrong premise) — reviewers can be wrong, but disagreement needs evidence
@@ -92,6 +92,8 @@ Codex reviews every PR to this repo. Treat its comments the same as a human revi
 4. Reply on the thread with what you changed (or why you didn't). Resolve the thread.
 
 This pattern keeps the codebase self-documenting about *why* non-obvious decisions were made.
+
+If the Codex auto-review is ever disabled on this repo, the workflow above still applies to whatever review fires — it's about the response pattern, not about which bot is leaving the comments.
 
 ### Dogfooding
 

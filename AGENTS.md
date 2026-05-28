@@ -233,7 +233,7 @@ If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell �
 
 ## 5. Receiving review feedback
 
-Reviewers (human or Codex) will leave comments. The expected response pattern:
+This repo currently has OpenAI's Codex reviewer (`chatgpt-codex-connector[bot]`) configured to auto-review every PR — that's a repo-level integration on the OpenAI side, separate from the manually-dispatched self-review described in §4. Reviewers (Codex, human, or our own self-review when dispatched) will leave comments. The expected response pattern:
 
 1. **Read the comment in full** before responding. Don't pattern-match on the first sentence.
 2. **Decide if you agree.** If you don't, explain why in the thread — quote the line, cite where the reviewer's premise is wrong. Reviewers can be wrong. Disagreement with evidence is welcome; capitulation isn't.
