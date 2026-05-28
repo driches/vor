@@ -46,6 +46,19 @@ main:has(.ccr-landing) h1#_top {
   --ccr-max: 60rem;
 }
 
+/* Starlight's markdown content adds a top margin to adjacent siblings
+   (`* + *`). Inside our grid/flex rows that pushes every item except the
+   first one down, bottom-aligning cards and leaving ragged tops. Reset it on
+   our own layout containers so the grid gap is the only spacing. */
+.ccr-features > *,
+.ccr-langs > *,
+.ccr-why > *,
+.ccr-actions > *,
+.ccr-trust > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 .ccr-section {
   margin-inline: auto;
   max-width: var(--ccr-max);
@@ -152,6 +165,7 @@ main:has(.ccr-landing) h1#_top {
 .ccr-features {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-auto-rows: 1fr; /* equal-height rows so every card matches */
   gap: 1rem;
 }
 .ccr-feature {
@@ -174,6 +188,33 @@ main:has(.ccr-landing) h1#_top {
 }
 .ccr-feature h3 { font-size: 1.02rem; margin: 0 0 0.35rem; font-weight: 600; }
 .ccr-feature p { margin: 0; font-size: 0.9rem; color: var(--sl-color-gray-3); line-height: 1.5; }
+
+/* Supported languages / stack */
+.ccr-langs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 0.75rem;
+}
+.ccr-lang {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.7rem;
+  padding: 0.9rem 1rem;
+  background: var(--sl-color-black);
+}
+.ccr-lang h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+  border-bottom: none;
+}
+.ccr-lang p { margin: 0; font-size: 0.85rem; color: var(--sl-color-gray-3); line-height: 1.5; }
+.ccr-lang code {
+  font-size: 0.8em;
+  background: var(--sl-color-gray-6);
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+}
 
 /* Code / setup block wrapper */
 .ccr-setup { margin-top: 1.5rem; }
