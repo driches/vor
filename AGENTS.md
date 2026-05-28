@@ -272,9 +272,9 @@ The action ships findings to users. Don't pad why-it-matters paragraphs with thr
 
 ---
 
-## 7. The self-review will check you
+## 7. When the self-review runs, it checks you
 
-The same action this repo *produces* runs on PRs to this repo. It will catch:
+Self-review is manually dispatched (see §4 — Dogfooding), not on every PR. When a maintainer does dispatch it against your branch (or you ask one to), the same action this repo *produces* will run against your code. It catches:
 
 - TypeScript errors (`tsc` scanner)
 - Lint violations (`eslint`, `ruff`, `dart analyze`, `actionlint`, depending on file type)
@@ -284,7 +284,9 @@ The same action this repo *produces* runs on PRs to this repo. It will catch:
 - Coverage gaps (opt-in)
 - Plus semantic findings the agent decides are worth surfacing
 
-If the self-review on your PR flags something obvious you "didn't see" while writing the code, that's a signal the code is doing something non-obvious. Add a comment explaining why, or restructure the code so it's no longer surprising.
+If a dispatched self-review flags something obvious you "didn't see" while writing the code, that's a signal the code is doing something non-obvious. Add a comment explaining why, or restructure the code so it's no longer surprising.
+
+For PRs that touch the prompt, tools, or scanners, get a self-review dispatched against the PR branch (`--ref <PR-head-branch>`) before merge — the local `npm run lint / tsc / test / verify-dist` quartet can't verify "does the agent still find security bugs," and CI doesn't run the eval harnesses. See §3 for the eval-harness commands when you need stronger evidence.
 
 ---
 
