@@ -15,9 +15,9 @@
   <a href="https://github.com/driches/vor/discussions"><img src="https://img.shields.io/github/discussions/driches/vor" alt="Discussions"></a>
 </p>
 
-> AI-powered PR code review GitHub Action **with parallel vulnerability scanning**. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude — and now flags known CVEs in your lockfiles and hardcoded secrets in your diff alongside the AI's findings, in the same review.
+> AI-powered PR code review GitHub Action **with parallel vulnerability scanning**. Runs on the LLM provider you choose — **Anthropic Claude or OpenAI (GPT / o-series)** — and posts inline review comments with concrete code suggestions, anchored to real lines in the diff, plus flags known CVEs in your lockfiles and hardcoded secrets in your diff alongside the AI's findings, in the same review.
 
-Built on the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) with a custom tool-use loop. The agent has access to a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) and **no built-in filesystem/shell access**. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
+Provider-agnostic by design: a custom tool-use loop drives the model over a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) with **no built-in filesystem/shell access** — the same loop talks to Anthropic via [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) and to OpenAI via the Responses API. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
 
 In parallel with the AI review, two deterministic scanners run:
 
@@ -55,6 +55,18 @@ jobs:
           pr_number: ${{ inputs.pr_number }}
 ```
 
+Prefer OpenAI? Swap the key and set a `model` — everything else is identical:
+
+```yaml
+      - uses: driches/vor@v0
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4.1            # or o4-mini, gpt-5-codex, …
+          pr_number: ${{ inputs.pr_number }}
+```
+
+The provider is inferred from the `model` id (`claude-*` → Anthropic, `gpt-*`/`o<digit>*`/`chatgpt-*` → OpenAI), so you only supply the API key for the provider you're using.
+
 Trigger a review by hand: **Actions → Vor → Run workflow → enter PR number**. A sticky review appears within a few minutes; re-run to refresh against the new HEAD.
 
 ### Why manual-only?
@@ -89,15 +101,17 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required for the default Claude models; omit entirely for OpenAI-only setups (the orchestrator picks the key matching the resolved provider). |
-| `openai_api_key` | no | — | OpenAI API key. Required when `model` is a GPT or o-series id (e.g. `gpt-4.1`, `gpt-4o-mini`, `o4-mini`). |
-| `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted (`claude-*` → anthropic, `gpt-*`/`o<digit>*` → openai). |
+| `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required when the resolved provider is Anthropic (the default model is a Claude model); omit for OpenAI-only setups. The orchestrator picks the key matching the resolved provider. |
+| `openai_api_key` | no | — | OpenAI API key. Required when the resolved provider is OpenAI (e.g. `model` is `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, `gpt-5-codex`). |
+| `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted (`claude-*` → anthropic, `gpt-*`/`o<digit>*`/`chatgpt-*` → openai). |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Model ID. Claude options: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI options: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
+| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, `gpt-5-codex`, etc. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
+
+> **Codex models:** OpenAI ids prefixed `gpt-` (e.g. `gpt-5-codex`) are inferred automatically. A bare `codex-*` id isn't matched by the prefix rules above — set `provider: openai` explicitly for those.
 
 ## Outputs
 
@@ -238,7 +252,7 @@ If the ignore file is missing, malformed, or fails schema validation, the action
 6. Every `post_inline_comment` runs through a validator. On rejection (line outside diff, missing suggestion for high severity, duplicate, etc.), the agent gets a structured `{ reason, hint }` so it can correct and retry.
 7. After `post_summary`, the action filters by severity floor + per-file/global caps, dismisses any prior reviews from this agent on the PR (sticky), and posts a single review via `octokit.pulls.createReview`.
 
-## Why this works when "ask Claude to review the PR" doesn't
+## Why this works when "ask the AI to review the PR" doesn't
 
 The three failure modes that previous attempts kept hitting:
 

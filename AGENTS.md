@@ -2,7 +2,7 @@
 
 **Canonical guidelines for AI agents (and humans) contributing to `driches/vor`.**
 
-If you are an AI assistant — Claude, Codex, Copilot, Cursor, anything — read this file before touching the codebase. `CLAUDE.md` and similar tool-specific files point here.
+If you are an AI assistant — Claude, Copilot, Cursor, anything — read this file before touching the codebase. `CLAUDE.md` and similar tool-specific files point here.
 
 This is an open-source project. Sloppy contributions waste maintainer time and degrade the codebase. The bar is set here in writing so there's no ambiguity about what will and won't be merged.
 
@@ -57,8 +57,8 @@ When you fix something a reviewer flagged, cite the review:
 
 ```ts
 // `pattern-not-inside` only matched const-declared loops, so a let-declared
-// `for...of` with `await Promise.all(...)` was a false-positive. Codex P2
-// #3307880754.
+// `for...of` with `await Promise.all(...)` was a false-positive.
+// addressing #42 (review).
 ```
 
 This makes the codebase self-documenting about *why* a non-obvious decision was made. Future readers (human or agent) can trace the history without `git blame`-ing every line.
@@ -233,14 +233,14 @@ If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell �
 
 ## 5. Receiving review feedback
 
-This repo currently has OpenAI's Codex reviewer (`chatgpt-codex-connector[bot]`) configured to auto-review every PR — that's a repo-level integration on the OpenAI side, separate from the manually-dispatched self-review described in §4. Reviewers (Codex, human, or our own self-review when dispatched) will leave comments. The expected response pattern:
+Reviews on this repo come from a few sources: any auto-reviewer bot configured on the repo, human reviewers, and our own manually-dispatched self-review (§4). Whatever the source, the expected response pattern is the same:
 
 1. **Read the comment in full** before responding. Don't pattern-match on the first sentence.
 2. **Decide if you agree.** If you don't, explain why in the thread — quote the line, cite where the reviewer's premise is wrong. Reviewers can be wrong. Disagreement with evidence is welcome; capitulation isn't.
-3. **If you fix it**, the commit message should reference the comment ID (`Codex P2 #3311224941`, `addressing #42 (review)`). The fix-commit's body should explain what changed, not just "addressed review."
+3. **If you fix it**, the commit message should reference the comment ID (e.g. `addressing #42 (review)`). The fix-commit's body should explain what changed, not just "addressed review."
 4. **Reply on the thread** with a one-liner: what you changed (or why you didn't). Then resolve the thread.
 
-We track Codex review IDs in commit messages so the codebase is self-documenting about which decisions came from which reviewer.
+We track review comment IDs in commit messages so the codebase is self-documenting about which decisions came from which review.
 
 ---
 

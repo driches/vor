@@ -23,13 +23,13 @@ If that's not workable, email **doug@richesfamily.ca**. PGP key available on req
 
 - A description of the issue and its impact.
 - Steps to reproduce, or a proof-of-concept if you have one.
-- The version of the action and (if relevant) the Claude model used.
+- The version of the action and (if relevant) the model and provider used.
 - Whether the issue is already public somewhere.
 
 ### What's in scope
 
 This action runs inside `actions/runner` with access to:
-- `ANTHROPIC_API_KEY` (passed via `inputs.anthropic_api_key`)
+- `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` (passed via `inputs.anthropic_api_key` / `inputs.openai_api_key`, depending on the resolved provider)
 - `GITHUB_TOKEN` (defaults to the workflow token with `pull-requests: write`)
 - The full PR diff and any files the agent reads via `read_file_at_ref` / `read_repo_context_file`
 
@@ -37,7 +37,7 @@ Anything that could leak those secrets, escalate the token's permissions, exfilt
 
 ### What's out of scope
 
-- Issues in `@anthropic-ai/sdk`, `@octokit/*`, or other dependencies — please report those upstream. We'll bump versions promptly once a fix is released.
+- Issues in `@anthropic-ai/sdk`, `openai`, `@octokit/*`, or other dependencies — please report those upstream. We'll bump versions promptly once a fix is released.
 - Issues that require an attacker to already have write access to the repo running the action.
 - Review-quality issues (the agent missed something, or flagged something wrong) — those belong in the [review-quality template](https://github.com/driches/vor/issues/new?template=review_quality.yml).
 
