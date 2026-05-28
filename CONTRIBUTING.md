@@ -1,8 +1,10 @@
 # Contributing
 
-Thanks for thinking about contributing. This is a small project — issues, PRs, and review-quality reports are all genuinely useful, and "I tried the action and here's what felt off" feedback in [Discussions](https://github.com/driches/code-review/discussions) is just as welcome as code.
+Thanks for thinking about contributing. This is a small project — issues, PRs, and review-quality reports are all useful, and "I tried the action and here's what felt off" feedback in [Discussions](https://github.com/driches/code-review/discussions) is just as welcome as code.
 
 By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+> **Using an AI assistant to write the code?** Read **[AGENTS.md](AGENTS.md)** first. Same rules apply whether the keystrokes came from you or from Claude / Codex / Copilot — but the bar on "agentic fluff" (filler comments, decorative emoji, unverified claims of "tested and passing") is set explicitly there because that's where AI contributions most often go wrong. PRs that include any of those patterns get reverted.
 
 ## Getting started
 
@@ -11,10 +13,10 @@ By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 ```sh
 nvm use            # node 20
 npm install
+npm run lint       # eslint
 npm run typecheck
 npm test
-npm run build      # bundles src/ → dist/index.js via esbuild
-npm run verify-dist
+npm run verify-dist  # rebuilds src/ → dist/index.js and checks they match
 ```
 
 If `verify-dist` fails, the committed `dist/` is out of sync with `src/`. Run `npm run build` and commit the regenerated bundle.
@@ -24,6 +26,7 @@ If `verify-dist` fails, the committed `dist/` is out of sync with `src/`. Run `n
 Comment "I'll take this" on the issue before starting. The maintainer will assign it. If you don't open a PR within ~10 days, the assignment may be released so others can pick it up.
 
 Good starting points:
+
 - [`good first issue`](https://github.com/driches/code-review/labels/good%20first%20issue) — scoped, no deep context required
 - [`help wanted`](https://github.com/driches/code-review/labels/help%20wanted) — larger, but with a clear shape
 
@@ -33,56 +36,105 @@ If you can't find an issue but have something in mind, open a Discussion first t
 
 ### Branch naming
 
-`<type>/<short-description>` — e.g. `feat/exclude-paths-glob`, `fix/dismiss-prior-reviews`, `docs/contributing-update`. Type matches Conventional Commits.
+`<type>/<short-description>` — e.g. `feat/exclude-paths-glob`, `fix/dismiss-prior-reviews`, `docs/contributing-update`. Type matches Conventional Commits (see [AGENTS.md §4](AGENTS.md) for the type list).
 
 ### Commit messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/) where it's natural:
+Use [Conventional Commits](https://www.conventionalcommits.org/). Subject under 70 chars. Body explains why.
 
-- `feat: add priority_paths config field`
-- `fix: handle empty diff without crashing`
-- `docs: clarify cost budget defaults`
-- `chore(deps): bump octokit-rest to v22`
+**Accept:**
+```
+fix(github): pass numeric status codes to plugin-retry doNotRetry
 
-Don't over-engineer this — `fix typo` is fine for a typo.
+`@octokit/plugin-retry` compares `error.status` (a number) against
+`doNotRetry` entries via Array.includes (strict equality). We were
+passing strings, so 4xx never short-circuited.
+```
+
+**Reject:**
+```
+feat: comprehensive improvements to error handling
+```
+
+The first one tells the reader what changed and why. The second tells the reader nothing.
+
+Don't over-engineer this for trivial changes — `fix typo` is fine for a typo.
 
 ### PR checklist
 
-The PR template has the full list, but in short:
+The [PR template](.github/PULL_REQUEST_TEMPLATE.md) has the full list. In short, all four must be green locally before requesting review:
 
-- `npm run typecheck && npm test` pass
-- If you changed `src/`, also `npm run build && npm run verify-dist`
-- If user-facing, update `CHANGELOG.md` under `## [Unreleased]`
-- Description explains the *why*, not just the *what*
+```sh
+npm run lint
+npx tsc --noEmit
+npm test -- --run
+npm run verify-dist   # rebuilds internally; no separate build step needed
+```
 
-### Dogfooding (read this if you're changing the prompt or tools)
+User-facing changes also need a `CHANGELOG.md` entry under `## [Unreleased]`. Cite measurements if you have them (cost, recall, latency).
 
-Every PR against this repo runs the action against itself via [`.github/workflows/self-review.yml`](.github/workflows/self-review.yml) (`uses: ./`). That gives us:
+### Coding standards
 
-- A real review on your PR before merge
-- A corpus of real reviews we can compare across changes to evaluate prompt quality
+Substantive expectations — types, comments, error handling, logging, architecture invariants — are in **[AGENTS.md §1–§2](AGENTS.md)**. The big ones:
 
-If the self-review flags something on your PR, **read it.** It's not a CI gate, but it usually catches at least one thing worth thinking about. If you disagree with the AI, that's fine — push back in the PR thread or file a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so the calibration can improve.
+- Comments explain **why**, not what. The code already says what.
+- No `any`; no `console.log` in production; no swallowed exceptions; no `dist/` hand-edits.
+- No imports from `src/eval/*` into `src/!(eval)/*` — `verify-dist` enforces this.
+- New dependencies need a justification in the PR description. Every dep ships in the action bundle.
 
-If your change is to the prompt or to one of the tools in `src/tools/`, run a few PRs through it manually first — the regression risk is highest there.
+### Receiving review feedback
+
+This repo currently has OpenAI's Codex reviewer (`chatgpt-codex-connector[bot]`) configured to auto-review every PR (separate from our manually-dispatched self-review described below). When Codex — or a human reviewer, or our own self-review — leaves comments, treat them the same way:
+
+1. Read the comment in full before responding
+2. Decide if you agree. If not, explain why in the thread (cite the line, name the wrong premise) — reviewers can be wrong, but disagreement needs evidence
+3. If you fix it, the commit message should reference the comment ID (`Codex P2 #3311224941`)
+4. Reply on the thread with what you changed (or why you didn't). Resolve the thread.
+
+This pattern keeps the codebase self-documenting about *why* non-obvious decisions were made.
+
+If the Codex auto-review is ever disabled on this repo, the workflow above still applies to whatever review fires — it's about the response pattern, not about which bot is leaving the comments.
+
+### Dogfooding
+
+Self-review is **manual** ([`.github/workflows/self-review.yml`](.github/workflows/self-review.yml) is `workflow_dispatch` only — the auto-trigger on `pull_request` was disabled to prevent feedback loops on prompt-iteration PRs). A maintainer dispatches one on PRs that touch the prompt, tools, or scanners — and on anything else where dogfooding the change is worth the credits.
+
+To run one yourself, ask a maintainer to dispatch:
+
+```sh
+gh workflow run self-review.yml \
+  --ref <PR-head-branch> \
+  -f pr_number=<your-PR> \
+  -R driches/code-review
+```
+
+`--ref` is **required** when you want the dogfood to actually exercise your PR's code: the workflow does `actions/checkout@v5` with no explicit ref and then `uses: ./`, so without `--ref` GitHub defaults to main and your prompt / tool / scanner changes don't get dogfooded. For docs-only or test-only PRs the `--ref` flag is optional.
+
+The job posts a review on the PR within a few minutes.
+
+**If the self-review flags something, read it.** It's not a CI gate, but it usually catches at least one thing worth thinking about. Push back in the thread if you disagree, or file a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so calibration improves.
+
+If your change touches the agent prompt, scanners, or tools in `src/tools/`, run a few representative PRs through it manually first using `npm run local-review` — the regression risk is highest there. See [AGENTS.md §3](AGENTS.md) for the eval workflow.
 
 ## Architecture
 
 The agent has no built-in tools — only the custom tools in `src/tools/`. The single output channel is `post_inline_comment`, which validates the `(file_path, line)` against the PR diff before accepting. The agent terminates with `post_summary`.
 
-Module map: see [`docs/architecture.md`](docs/architecture.md) (TBD — contributions welcome).
+Full architecture invariants — what the orchestrator owns, when to add a scanner vs. an agent capability, the `OrchestratorOutput.kept_comments` eval contract — are in [AGENTS.md §2](AGENTS.md).
 
 ## Releasing
 
-Maintainer-only.
+Maintainer-only. Full sequence in [AGENTS.md §8](AGENTS.md). Summary:
 
-1. Bump version in `package.json` and update `CHANGELOG.md`.
-2. `npm run build` — must produce a clean `dist/index.js` diff.
-3. Tag and push: `git tag v1.2.3 && git push --tags`.
-4. The `release.yml` workflow handles the GitHub release and moves the major tag (`v1`).
+1. Bump version in `package.json` and `package-lock.json`
+2. Move `## [Unreleased]` content to a new `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md`
+3. `npm run build && npm run verify-dist` — must be clean
+4. Open release PR, merge
+5. From main: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
+6. The `release.yml` workflow handles the GitHub release and moves the major tag (`v0`)
 
 ## Getting help
 
-- [Discussions](https://github.com/driches/code-review/discussions) for any question that isn't a bug or a feature request
-- [SUPPORT.md](SUPPORT.md) for the full routing map
-- [SECURITY.md](SECURITY.md) for vulnerabilities (please don't file public issues for these)
+- [GitHub Discussions](https://github.com/driches/code-review/discussions) — questions, design feedback, anything that isn't a bug or feature request
+- [SUPPORT.md](SUPPORT.md) — full routing map
+- [SECURITY.md](SECURITY.md) — vulnerabilities (please don't file public issues for these)
