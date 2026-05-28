@@ -3,7 +3,7 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths:
+    paths: &site_paths
       - 'site/**'
       - 'README.md'
       - 'CHANGELOG.md'
@@ -15,6 +15,10 @@ on:
       - 'docs/**'
       - 'assets/**'
       - '.github/workflows/pages.yml'
+  # PRs that touch the site or any synced source build (but don't deploy), so a
+  # broken MDX page, Astro config, or sync script is caught before it reaches main.
+  pull_request:
+    paths: *site_paths
   workflow_dispatch:
 
 permissions:
@@ -22,9 +26,10 @@ permissions:
   pages: write
   id-token: write
 
+# Scope by ref so PR builds never queue behind (or block) a production deploy.
 # Let in-flight production deploys finish rather than cancelling them.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -49,12 +54,15 @@ jobs:
         working-directory: site
 
       - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist
 
   deploy:
     needs: build
+    # PR runs validate the build only; deploys happen on push to main / dispatch.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
