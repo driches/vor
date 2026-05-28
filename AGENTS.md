@@ -147,18 +147,6 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same four c
 
 If your change touches LLM-adjacent code (prompts, tools, agent loop, scanners), running unit tests is the floor, not the ceiling. The unit tests verify mechanics; they can't verify "does the agent still find security bugs."
 
-Before claiming a prompt or tool change is safe:
-
-```sh
-# Synthetic eval — 5 cases × 11 known bugs, ~$0.25 with Sonnet
-GOLDEN_REPO_PATH=/path/to/vor-golden npx tsx scripts/eval/synthetic-real.ts
-
-# Captured-PR eval — 3 real PRs with Codex baseline, ~$1.60
-GOLDEN_REPO_PATH=/path/to/vor-golden npx tsx scripts/eval/captured-real.ts
-```
-
-Compare your run's recall / cost against the prior baseline in the CHANGELOG. A drop in recall is a regression — don't ship it. A cost increase needs justification.
-
 ### The "I tested it locally" trap
 
 `npm run local-review -- --base origin/main --head HEAD` runs the full pipeline (scanners + agent) against your working copy in <2 minutes, no GitHub round-trip required. Use it before claiming a change works on real PRs.
@@ -286,7 +274,7 @@ Self-review is manually dispatched (see §4 — Dogfooding), not on every PR. Wh
 
 If a dispatched self-review flags something obvious you "didn't see" while writing the code, that's a signal the code is doing something non-obvious. Add a comment explaining why, or restructure the code so it's no longer surprising.
 
-For PRs that touch the prompt, tools, or scanners, get a self-review dispatched against the PR branch (`--ref <PR-head-branch>`) before merge — the local `npm run lint / tsc / test / verify-dist` quartet can't verify "does the agent still find security bugs," and CI doesn't run the eval harnesses. See §3 for the eval-harness commands when you need stronger evidence.
+For PRs that touch the prompt, tools, or scanners, get a self-review dispatched against the PR branch (`--ref <PR-head-branch>`) before merge — the local `npm run lint / tsc / test / verify-dist` quartet can't verify "does the agent still find security bugs," and CI doesn't run a full behavioral eval.
 
 ---
 
