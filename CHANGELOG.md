@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 - **README and supporting docs refocused around multi-provider support.** The copy no longer frames Vor as an Anthropic-first tool — Anthropic Claude and OpenAI (GPT / o-series, including `gpt-5-codex`) are now presented as peer providers. Quick start gains an OpenAI snippet alongside the Claude one, and the inputs table documents that bare `codex-*` model ids need an explicit `provider: openai`. References comparing the product to OpenAI's Codex PR-reviewer (`chatgpt-codex-connector[bot]`) were removed; the "receiving review feedback" guidance in AGENTS.md / CONTRIBUTING.md is now phrased for any auto-reviewer bot rather than naming a specific one. SECURITY.md now covers both API keys and SDKs.
+- **Corrected the README security-scanning scope and added a languages section to the docs site.** The "Scope (v1)" section previously called SAST a not-yet-active v2 stub, but `src/config/defaults.ts` enables it by default — the bullet now documents the real coverage (ESLint/`tsc`/knip for JS/TS, Ruff for Python, `dart analyze` for Dart, actionlint for GitHub Actions workflows, and Semgrep), with container scanning still noted as the remaining stub. The site landing gained a "Works with your stack" section conveying the same, and feature-card heights were aligned (Starlight's content-flow margins were leaking onto the grid items).
 
 ## [0.5.2] - 2026-05-27
 

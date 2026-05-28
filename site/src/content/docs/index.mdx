@@ -41,6 +41,22 @@ export const base = import.meta.env.BASE_URL;
 </section>
 
 <section class="ccr-section">
+  <h2 class="ccr-h2">Works with your stack</h2>
+  <p class="ccr-sub">The AI review reads <strong>any language</strong> — no per-language setup. Deterministic scanners add zero-token depth wherever your toolchain runs.</p>
+  <div class="ccr-langs">
+    <div class="ccr-lang"><h3>Any language</h3><p>The agent reasons over any diff the model understands — no language list to maintain.</p></div>
+    <div class="ccr-lang"><h3>JavaScript &amp; TypeScript</h3><p>Your repo's ESLint, <code>tsc --noEmit</code>, and knip, surfaced inline.</p></div>
+    <div class="ccr-lang"><h3>Python</h3><p>Ruff, run against the <code>.py</code> files your PR changes.</p></div>
+    <div class="ccr-lang"><h3>Dart</h3><p><code>dart analyze</code> on changed <code>.dart</code> files.</p></div>
+    <div class="ccr-lang"><h3>GitHub Actions</h3><p>actionlint flags workflow and shell mistakes in your CI.</p></div>
+    <div class="ccr-lang"><h3>Custom rules</h3><p>Bring your own Semgrep ruleset under <code>.vor/semgrep-rules</code> (opt-in).</p></div>
+    <div class="ccr-lang"><h3>Dependency CVEs</h3><p>npm (<code>package-lock</code>, <code>yarn</code>, <code>pnpm</code>) and PyPI (<code>requirements.txt</code>) via OSV.dev.</p></div>
+    <div class="ccr-lang"><h3>Secrets</h3><p>~14 credential patterns — any language, any file.</p></div>
+  </div>
+  <p class="ccr-step">Linters run only when the tool is available in your repo, so they stay silent on stacks they don't apply to.</p>
+</section>
+
+<section class="ccr-section">
   <h2 class="ccr-h2">60-second setup</h2>
   <p class="ccr-sub">Drop one workflow file in your repo, add your API key as a secret, and trigger a review by hand.</p>
 

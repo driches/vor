@@ -208,7 +208,8 @@ security:
 
 - **Dependency CVEs**: npm (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`) and PyPI (`requirements.txt` — only `==`-pinned lines). Queries the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost.
 - **Secrets**: AWS access keys (`AKIA…`), AWS secret keys (entropy-gated), GitHub classic + fine-grained PATs (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Slack tokens (`xox[baprs]-`), Stripe live/restricted keys (`sk_live_`, `rk_live_`), Google API keys (`AIza…`), npm tokens (`npm_…`), PEM private key headers, JSON Web Tokens (`eyJ…`-prefixed 3-segment shape). Only **added lines** in the diff are scanned — pre-existing secrets in untouched code are out of scope for this PR.
-- **SAST + container scanning**: stubs in v1; not yet active. The slots in `.vor.yml` are reserved so v2 can plug them in without breaking your config.
+- **Static analysis (SAST)**: enabled by default. Runs the repo's own linters against changed files and surfaces findings inline at zero token cost — ESLint, `tsc`, and knip (JavaScript / TypeScript), Ruff (Python), `dart analyze` (Dart), actionlint (GitHub Actions workflows), and Semgrep (`--config=auto` plus any custom rules under `.vor/semgrep-rules/`). Each linter runs only when its tool is available in the repo, so it stays silent on stacks it doesn't apply to. Disable all of it with `security.scanners.sast.enabled: false`.
+- **Container scanning**: stub in v1; not yet active. The `.vor.yml` slot is reserved so v2 can plug it in without breaking your config.
 
 ### Suppressing findings — `.vor/security-ignore.yml`
 
