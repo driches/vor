@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Docs site (site/ has its own .gitignore for generated content)
+site/node_modules/
+site/dist/
+site/.astro/
+
 # Build outputs (we COMMIT dist/index.js for the GitHub Action)
 # Only ignore dist/ subdirectories that aren't the action bundle
 .tsbuildinfo

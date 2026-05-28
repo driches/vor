@@ -1,0 +1,73 @@
+---
+type Feature = { title: string; body: string; icon: string };
+
+// Inline icon paths (Lucide-style, 24x24, currentColor stroke).
+const features: Feature[] = [
+  {
+    title: 'Anchored inline comments',
+    body: 'Suggestions land on the exact diff line — not a wall of text at the bottom of the PR.',
+    icon: 'M3 5h18M3 12h12M3 19h18',
+  },
+  {
+    title: 'No hallucinated lines',
+    body: 'The post tool validates every (file, line) against the real diff before accepting, and hints the agent toward valid lines on rejection.',
+    icon: 'M9 12l2 2 4-4M12 3a9 9 0 100 18 9 9 0 000-18z',
+  },
+  {
+    title: 'Dependency CVE scanning',
+    body: 'Parses changed lockfiles and queries OSV.dev for known CVEs — npm, yarn, pnpm, and pinned pip requirements.',
+    icon: 'M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z',
+  },
+  {
+    title: 'Secret detection',
+    body: 'Scans added lines for ~14 high-confidence credential patterns — AWS keys, GitHub PATs, Slack, Stripe, PEM keys — masked before posting.',
+    icon: 'M12 1a4 4 0 00-4 4v4H6a2 2 0 00-2 2v9h16v-9a2 2 0 00-2-2h-2V5a4 4 0 00-4-4z',
+  },
+  {
+    title: 'Claude or OpenAI',
+    body: 'Defaults to Claude Sonnet. Swap to Haiku for cost, Opus for depth, or a GPT / o-series model — provider is inferred from the id.',
+    icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20',
+  },
+  {
+    title: 'Noise control',
+    body: 'Severity floor plus per-file and per-PR comment caps keep reviews signal-dense instead of overwhelming.',
+    icon: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  },
+  {
+    title: 'Repo-aware context',
+    body: 'Reads .vor.yml, CLAUDE.md, AGENTS.md, and custom docs so findings respect your conventions.',
+    icon: 'M4 4h11l5 5v11a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1zM14 4v5h5',
+  },
+  {
+    title: 'Sticky reviews',
+    body: 'Re-run any time. Prior agent reviews are dismissed so you only ever see the latest pass against HEAD.',
+    icon: 'M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16',
+  },
+];
+---
+
+<div class="ccr-features">
+  {
+    features.map((f) => (
+      <div class="ccr-feature">
+        <div class="ccr-feature__icon" aria-hidden="true">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d={f.icon} />
+          </svg>
+        </div>
+        <h3>{f.title}</h3>
+        <p>{f.body}</p>
+      </div>
+    ))
+  }
+</div>

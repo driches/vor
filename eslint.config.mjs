@@ -8,6 +8,9 @@ export default [
       'node_modules/**',
       'coverage/**',
       '.claude/**',
+      // The docs site is a self-contained subproject with its own toolchain
+      // (own package.json/tsconfig, Astro's own checks). Don't lint it from root.
+      'site/**',
       '**/*.config.ts',
       '**/*.config.mjs',
       // Synthetic-bug eval fixtures. `before/` files intentionally declare
