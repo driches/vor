@@ -48,7 +48,7 @@ beforeAll(() => {
     resolve(repoDir, 'src/foo.ts'),
     `export function existing() {\n  return 1;\n}\n`,
   );
-  writeFileSync(resolve(repoDir, '.code-review.yml'), `severity:\n  floor: minor\n`);
+  writeFileSync(resolve(repoDir, '.vor.yml'), `severity:\n  floor: minor\n`);
   writeFileSync(resolve(repoDir, 'CLAUDE.md'), `# Repo conventions\nUse explicit return types.\n`);
   git(repoDir, 'add -A');
   git(repoDir, 'commit -q -m base');
@@ -140,8 +140,8 @@ describe('buildLocalDeps', () => {
     expect(f.reviewable_lines.length).toBeGreaterThan(0);
   });
 
-  it('falls back to DEFAULT_CONFIG when .code-review.yml is missing in the snapshot', async () => {
-    // Use a fresh case dir without .code-review.yml committed
+  it('falls back to DEFAULT_CONFIG when .vor.yml is missing in the snapshot', async () => {
+    // Use a fresh case dir without .vor.yml committed
     const altCaseDir = mkdtempSync(resolve(tmpdir(), 'local-deps-test-alt-'));
     try {
       const repoDir = resolve(altCaseDir, 'repo');

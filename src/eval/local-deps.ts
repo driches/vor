@@ -73,7 +73,7 @@ export async function buildLocalDeps(input: BuildLocalDepsInput): Promise<BuildL
     const snapshotYaml = await fileReader.read({
       owner: meta.owner,
       repo: meta.repo,
-      path: '.code-review.yml',
+      path: '.vor.yml',
       ref: meta.head_sha,
     });
     if (snapshotYaml) {

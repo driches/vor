@@ -215,7 +215,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     };
   }
 
-  // Load .code-review.yml from the PR HEAD
+  // Load .vor.yml from the PR HEAD
   const fileReader = new FileReader(octokit);
   const config = await loadConfig(input, fileReader, prContext.metadata.head_sha);
   if (input.model_override) config.model = input.model_override;
@@ -223,7 +223,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // Note: we deliberately do NOT mutate `config.provider = input.provider_override`
   // here. The precedence chain below handles override-wins-over-config; mutating
   // would also make any post-resolution reader of `config.provider` see the
-  // override value rather than what the operator's `.code-review.yml` actually
+  // override value rather than what the operator's `.vor.yml` actually
   // contained, which would be a silent source of confusion. PR #20 self-review
   // minor #3300684743.
 

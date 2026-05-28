@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // keeps exercising the production path. Setting `nextRejection` makes the
 // next call throw instead, isolating the "evalRun re-throws" contract test
 // from the full async agent+scanner plumbing that intermittently wedges
-// vitest workers in CI. See https://github.com/driches/code-review/issues/30.
+// vitest workers in CI. See https://github.com/driches/vor/issues/30.
 const orchestratorState = vi.hoisted(() => ({
   nextRejection: null as Error | null,
 }));
@@ -354,7 +354,7 @@ describe('evalRun', () => {
 
     // 1. The caller's config is unmutated — they still see enabled: true.
     expect(callerConfig.experimental.worker_delegation.enabled).toBe(true);
-    // 2. The serialized .code-review.yml the orchestrator reads has the
+    // 2. The serialized .vor.yml the orchestrator reads has the
     //    flag flipped off (we don't have direct access to it post-run, but
     //    the absence of a thrown error from runAgent's worker/pre-flight
     //    code paths is the load-bearing signal — with enabled=true and

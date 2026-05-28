@@ -1,5 +1,5 @@
-name: 'AI Code Review'
-description: 'AI code review + parallel vulnerability scanning for GitHub PRs — Claude or OpenAI, inline comments'
+name: 'Vor'
+description: 'Vor — AI code review + parallel vulnerability scanning for GitHub PRs. Inline comments via Claude or OpenAI.'
 author: 'driches'
 
 branding:
@@ -29,9 +29,9 @@ inputs:
     required: false
     default: '40'
   config_path:
-    description: 'Path to .code-review.yml in the consumer repo.'
+    description: 'Path to .vor.yml in the consumer repo.'
     required: false
-    default: '.code-review.yml'
+    default: '.vor.yml'
   dry_run:
     description: 'If true, log the review instead of posting it.'
     required: false

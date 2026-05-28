@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**Canonical guidelines for AI agents (and humans) contributing to `driches/code-review`.**
+**Canonical guidelines for AI agents (and humans) contributing to `driches/vor`.**
 
 If you are an AI assistant — Claude, Codex, Copilot, Cursor, anything — read this file before touching the codebase. `CLAUDE.md` and similar tool-specific files point here.
 
@@ -99,7 +99,7 @@ Don't log secrets. The logger registers and masks `anthropic_api_key`, `openai_a
 [`src/orchestrator.ts:runOrchestrator`](src/orchestrator.ts) is the single entry point. It:
 
 1. Fetches PR context via Octokit
-2. Loads `.code-review.yml` from PR HEAD (with workspace fallback)
+2. Loads `.vor.yml` from PR HEAD (with workspace fallback)
 3. Runs scanners + the LLM agent (parallel by default, sequential when the experimental flag is on)
 4. Aggregates, filters, dedups, posts
 
@@ -151,10 +151,10 @@ Before claiming a prompt or tool change is safe:
 
 ```sh
 # Synthetic eval — 5 cases × 11 known bugs, ~$0.25 with Sonnet
-GOLDEN_REPO_PATH=/path/to/code-review-golden npx tsx scripts/eval/synthetic-real.ts
+GOLDEN_REPO_PATH=/path/to/vor-golden npx tsx scripts/eval/synthetic-real.ts
 
 # Captured-PR eval — 3 real PRs with Codex baseline, ~$1.60
-GOLDEN_REPO_PATH=/path/to/code-review-golden npx tsx scripts/eval/captured-real.ts
+GOLDEN_REPO_PATH=/path/to/vor-golden npx tsx scripts/eval/captured-real.ts
 ```
 
 Compare your run's recall / cost against the prior baseline in the CHANGELOG. A drop in recall is a regression — don't ship it. A cost increase needs justification.
@@ -212,7 +212,7 @@ When a self-review does fire on your PR:
 
 - **Read it.** Even if the finding looks wrong, treat it as a signal the code is misleading enough to confuse an agent.
 - **Reply in the thread.** Either fix what's flagged, or explain why it's wrong. Don't ignore it.
-- **If the finding is a false positive**, that's also useful — open a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so the prompt / scanner gets calibrated.
+- **If the finding is a false positive**, that's also useful — open a [`review-quality`](https://github.com/driches/vor/issues/new?template=review_quality.yml) issue so the prompt / scanner gets calibrated.
 
 To run a self-review yourself, ask a maintainer to dispatch it:
 
@@ -220,7 +220,7 @@ To run a self-review yourself, ask a maintainer to dispatch it:
 gh workflow run self-review.yml \
   --ref <PR-head-branch> \
   -f pr_number=<your-PR> \
-  -R driches/code-review
+  -R driches/vor
 ```
 
 `--ref` is required when the dogfood needs to run **the PR's code**, not main's. The workflow does `actions/checkout@v5` with no explicit ref and then `uses: ./`, so the action that runs is whatever ref was dispatched — without `--ref`, GitHub defaults to the default branch (main) and the PR's prompt / tool / scanner changes never get exercised. For PRs that only touch docs or tests, dispatching against `main` is fine because no executable code changed.
@@ -279,7 +279,7 @@ Self-review is manually dispatched (see §4 — Dogfooding), not on every PR. Wh
 - TypeScript errors (`tsc` scanner)
 - Lint violations (`eslint`, `ruff`, `dart analyze`, `actionlint`, depending on file type)
 - Unused exports (`knip`)
-- Known Semgrep patterns including the bundled rule pack at [.code-review/semgrep-rules/](.code-review/semgrep-rules/)
+- Known Semgrep patterns including the bundled rule pack at [.vor/semgrep-rules/](.vor/semgrep-rules/)
 - Dependency CVEs (OSV-backed)
 - Coverage gaps (opt-in)
 - Plus semantic findings the agent decides are worth surfacing
@@ -305,7 +305,7 @@ Pre-1.0, breaking changes can land in minor versions; just call them out in the 
 
 ## 9. Getting help
 
-- [GitHub Discussions](https://github.com/driches/code-review/discussions) — questions, design feedback, "is this a bug?"
+- [GitHub Discussions](https://github.com/driches/vor/discussions) — questions, design feedback, "is this a bug?"
 - [SUPPORT.md](SUPPORT.md) — routing for specific kinds of questions
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure (do NOT file public issues)
 

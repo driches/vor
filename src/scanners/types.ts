@@ -79,7 +79,7 @@ export interface ScanCache {
 }
 
 /**
- * Result of matching a finding against the repo's `.code-review/security-ignore.yml`.
+ * Result of matching a finding against the repo's `.vor/security-ignore.yml`.
  * Expired entries still suppress the finding (`ignored: true`) but set
  * `expired: true` so the runner can surface a "your ignore expired" notice
  * to the PR author.

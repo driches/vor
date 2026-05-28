@@ -14,7 +14,7 @@ function stubReader(content: string | null): FileReader {
   } as unknown as FileReader;
 }
 
-const loadArgs = { owner: 'o', repo: 'r', ref: 'sha', path: '.code-review/security-ignore.yml' };
+const loadArgs = { owner: 'o', repo: 'r', ref: 'sha', path: '.vor/security-ignore.yml' };
 
 function makeFinding(over: Partial<ScanFinding> & { evidence?: ScanEvidence } = {}): ScanFinding {
   return {

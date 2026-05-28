@@ -17,7 +17,7 @@ export interface ClientOptions {
 export function createOctokit(opts: ClientOptions): Octokit {
   return new OctokitWithPlugins({
     auth: opts.auth,
-    userAgent: opts.userAgent ?? 'driches/code-review',
+    userAgent: opts.userAgent ?? 'driches/vor',
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
     throttle: {
       onRateLimit: (retryAfter, options, _octokit, retryCount) => {
@@ -40,7 +40,7 @@ export function createOctokit(opts: ClientOptions): Octokit {
     // equality — strings don't match numeric statuses. Passing numbers
     // ensures 4xx errors actually short-circuit retries; with strings the
     // plugin retries 404s 3 extra times, wasting API quota on every
-    // missing optional file (.code-review.yml, AGENTS.md, CLAUDE.md).
+    // missing optional file (.vor.yml, AGENTS.md, CLAUDE.md).
     retry: { doNotRetry: [400, 401, 403, 404, 422] },
   });
 }

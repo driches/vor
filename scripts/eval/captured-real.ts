@@ -6,14 +6,14 @@
  * code-path on captured PRs.
  *
  *   GOLDEN_REPO_PATH=/path/to/golden npx tsx scripts/eval/captured-real.ts
- *   GOLDEN_REPO_PATH=/path/to/golden npx tsx scripts/eval/captured-real.ts --case code-review-pr-6
+ *   GOLDEN_REPO_PATH=/path/to/golden npx tsx scripts/eval/captured-real.ts --case vor-pr-6
  *   GOLDEN_REPO_PATH=/path/to/golden npx tsx scripts/eval/captured-real.ts --scanner-findings-in-user-prompt
  *
  * For each captured case it:
  *   1. Loads `meta.yml`, `pr.json.data`, `files.json.data`, `diff.patch`.
  *   2. Builds a FakeOctokit serving those bytes, with `repos.getContent`
  *      backed by `git show <ref>:<path>` against the case's `repo/` snapshot.
- *      A synthetic `.code-review.yml` is injected when the experimental flag
+ *      A synthetic `.vor.yml` is injected when the experimental flag
  *      is requested so the orchestrator picks it up at HEAD without git churn.
  *   3. Runs `runOrchestrator` with `dry_run: true`.
  *   4. Compares the kept comments against `codex/normalized.json` to get
@@ -51,7 +51,7 @@ function parseArgs(argv: readonly string[]): Args {
     return i >= 0 ? argv[i + 1] : def;
   };
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const goldenRepo = process.env.GOLDEN_REPO_PATH ?? '../code-review-golden';
+  const goldenRepo = process.env.GOLDEN_REPO_PATH ?? '../vor-golden';
   const maxTurnsRaw = a('--max-turns');
   return {
     goldenRepo: resolve(goldenRepo),
@@ -152,8 +152,8 @@ function buildFakeOctokit(opts: {
       },
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
-          // Synthetic `.code-review.yml` for flag injection takes precedence.
-          if (args.path === '.code-review.yml' && configOverride !== undefined) {
+          // Synthetic `.vor.yml` for flag injection takes precedence.
+          if (args.path === '.vor.yml' && configOverride !== undefined) {
             return {
               data: {
                 type: 'file',
@@ -207,14 +207,14 @@ async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<C
   const artifacts = loadCapturedArtifacts(caseDir);
 
   // When the flag is requested, merge the experimental key INTO the repo's
-  // real `.code-review.yml` rather than replacing it. Codex caught this on
+  // real `.vor.yml` rather than replacing it. Codex caught this on
   // PR #34: the earlier behavior overwrote everything (severity floor,
   // exclude paths, scanner enables) the repo had configured. Plus the
   // round-trip through the real loader lets us warn when the flag has no
   // schema-level effect on the current branch.
   let configOverride: string | undefined;
   if (args.scannerFindingsInUserPrompt) {
-    const existingYaml = gitShow(repoDir, artifacts.meta.head_sha, '.code-review.yml');
+    const existingYaml = gitShow(repoDir, artifacts.meta.head_sha, '.vor.yml');
     const inj = injectScannerFindingsFlag(existingYaml);
     configOverride = inj.mergedYaml;
     if (!inj.effective) {
@@ -252,7 +252,7 @@ async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<C
     github_token: 'captured-eval-placeholder',
     ...(args.model !== undefined ? { model_override: args.model } : {}),
     ...(args.maxTurns !== undefined ? { max_turns_override: args.maxTurns } : {}),
-    config_path: '.code-review.yml',
+    config_path: '.vor.yml',
     dry_run: true,
     workspace_dir: repoDir,
     octokitFactory: () => fakeOctokit,

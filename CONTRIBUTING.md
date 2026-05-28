@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for thinking about contributing. This is a small project — issues, PRs, and review-quality reports are all useful, and "I tried the action and here's what felt off" feedback in [Discussions](https://github.com/driches/code-review/discussions) is just as welcome as code.
+Thanks for thinking about contributing. This is a small project — issues, PRs, and review-quality reports are all useful, and "I tried the action and here's what felt off" feedback in [Discussions](https://github.com/driches/vor/discussions) is just as welcome as code.
 
 By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -27,8 +27,8 @@ Comment "I'll take this" on the issue before starting. The maintainer will assig
 
 Good starting points:
 
-- [`good first issue`](https://github.com/driches/code-review/labels/good%20first%20issue) — scoped, no deep context required
-- [`help wanted`](https://github.com/driches/code-review/labels/help%20wanted) — larger, but with a clear shape
+- [`good first issue`](https://github.com/driches/vor/labels/good%20first%20issue) — scoped, no deep context required
+- [`help wanted`](https://github.com/driches/vor/labels/help%20wanted) — larger, but with a clear shape
 
 If you can't find an issue but have something in mind, open a Discussion first to check it's wanted before sinking time into it.
 
@@ -105,14 +105,14 @@ To run one yourself, ask a maintainer to dispatch:
 gh workflow run self-review.yml \
   --ref <PR-head-branch> \
   -f pr_number=<your-PR> \
-  -R driches/code-review
+  -R driches/vor
 ```
 
 `--ref` is **required** when you want the dogfood to actually exercise your PR's code: the workflow does `actions/checkout@v5` with no explicit ref and then `uses: ./`, so without `--ref` GitHub defaults to main and your prompt / tool / scanner changes don't get dogfooded. For docs-only or test-only PRs the `--ref` flag is optional.
 
 The job posts a review on the PR within a few minutes.
 
-**If the self-review flags something, read it.** It's not a CI gate, but it usually catches at least one thing worth thinking about. Push back in the thread if you disagree, or file a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so calibration improves.
+**If the self-review flags something, read it.** It's not a CI gate, but it usually catches at least one thing worth thinking about. Push back in the thread if you disagree, or file a [`review-quality`](https://github.com/driches/vor/issues/new?template=review_quality.yml) issue so calibration improves.
 
 If your change touches the agent prompt, scanners, or tools in `src/tools/`, run a few representative PRs through it manually first using `npm run local-review` — the regression risk is highest there. See [AGENTS.md §3](AGENTS.md) for the eval workflow.
 
@@ -135,6 +135,6 @@ Maintainer-only. Full sequence in [AGENTS.md §8](AGENTS.md). Summary:
 
 ## Getting help
 
-- [GitHub Discussions](https://github.com/driches/code-review/discussions) — questions, design feedback, anything that isn't a bug or feature request
+- [GitHub Discussions](https://github.com/driches/vor/discussions) — questions, design feedback, anything that isn't a bug or feature request
 - [SUPPORT.md](SUPPORT.md) — full routing map
 - [SECURITY.md](SECURITY.md) — vulnerabilities (please don't file public issues for these)

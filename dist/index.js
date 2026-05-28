@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// driches/code-review — built bundle (do not edit by hand)
+// driches/vor — built bundle (do not edit by hand)
 "use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -57708,7 +57708,7 @@ function inferProviderFromModel(model) {
   if (model.startsWith("claude-")) return "anthropic";
   if (/^(gpt-|o\d|chatgpt-)/.test(model)) return "openai";
   throw new Error(
-    `Cannot infer provider from model "${model}". Set 'provider:' explicitly in .code-review.yml.`
+    `Cannot infer provider from model "${model}". Set 'provider:' explicitly in .vor.yml.`
   );
 }
 function createProvider(input) {
@@ -57741,7 +57741,7 @@ function jsonResult(value) {
 var REPO_CONTEXT_FILES = [
   "CLAUDE.md",
   "AGENTS.md",
-  ".code-review.yml",
+  ".vor.yml",
   "package.json",
   "tsconfig.json",
   "README.md",
@@ -58439,7 +58439,7 @@ function makeReadFileAtRefTool(deps) {
 function makeReadRepoContextFileTool(deps) {
   return tool(
     "read_repo_context_file",
-    "Reads one or more repo-convention files (CLAUDE.md, AGENTS.md, package.json, tsconfig.json, README.md, .code-review.yml, etc.) at HEAD. Call this EARLY (turn 2 or 3) to ground your judgments in the repo's actual conventions. Returns content for each file or { exists: false }.",
+    "Reads one or more repo-convention files (CLAUDE.md, AGENTS.md, package.json, tsconfig.json, README.md, .vor.yml, etc.) at HEAD. Call this EARLY (turn 2 or 3) to ground your judgments in the repo's actual conventions. Returns content for each file or { exists: false }.",
     {
       files: external_exports.array(external_exports.enum(REPO_CONTEXT_FILES)).optional().describe("Files to read. Defaults to all whitelisted files.")
     },
@@ -58557,7 +58557,7 @@ function makeWorkerCheckUsageClaimTool(deps) {
         return jsonResult({
           ok: false,
           error: "worker delegation is not enabled in this run",
-          hint: "Set experimental.worker_delegation.enabled = true in .code-review.yml to use this tool."
+          hint: "Set experimental.worker_delegation.enabled = true in .vor.yml to use this tool."
         });
       }
       const matches = await runGitGrep2(args.symbol, deps.workspaceDir, args.path_glob);
@@ -59362,7 +59362,7 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
 # Process (follow in this order)
 
 1. Call \`get_pr_metadata\` to read the title, body, author, and linked context. Form a hypothesis about what this PR is trying to do.
-2. Call \`read_repo_context_file\` to load CLAUDE.md, AGENTS.md, package.json, .code-review.yml. These are the project's conventions. Do NOT judge style without checking these first.
+2. Call \`read_repo_context_file\` to load CLAUDE.md, AGENTS.md, package.json, .vor.yml. These are the project's conventions. Do NOT judge style without checking these first.
 3. Call \`list_changed_files\`. This is your authoritative map of what's reviewable. You may ONLY post comments on lines that appear in \`reviewable_line_ranges\` for each file.
 4. Call \`get_pr_diff\` to read the changes. Mark generated/lockfile/binary files with \`skip_file\`.
 5. For every non-trivial finding, VERIFY before commenting:
@@ -59433,7 +59433,7 @@ When \`post_inline_comment\` returns \`accepted: false\`, the response includes 
 
 # Respect prior author pushback
 
-This PR may have prior review comments from you (recognizable by the \`<!-- driches/code-review: agent-review v1 -->\` marker) AND author replies on those threads. The PR description may also note design decisions you should respect.
+This PR may have prior review comments from you (recognizable by the \`<!-- driches/vor: agent-review v1 -->\` marker) AND author replies on those threads. The PR description may also note design decisions you should respect.
 
 If you previously flagged a finding and the author replied with "pushing back", "won't fix", "wontdo", "by design", "duplicate", "as documented", "intentional", or similar \u2014 DO NOT re-issue that finding on this run. The author already evaluated and rejected it. Re-issuing the same finding after pushback erodes trust faster than missing a real bug.
 
@@ -59603,7 +59603,7 @@ var DEFAULT_CONFIG = {
   },
   security: {
     enabled: true,
-    ignore_file: ".code-review/security-ignore.yml",
+    ignore_file: ".vor/security-ignore.yml",
     scanners: {
       dependency_cve: { enabled: true },
       secrets: { enabled: true, include_generic_entropy: false },
@@ -59614,7 +59614,7 @@ var DEFAULT_CONFIG = {
       //
       // v0.4.1 adds an opt-in custom Semgrep ruleset alongside the
       // existing `--config=auto`. The default path points at the bundled
-      // rule pack under `.code-review/semgrep-rules/` (N+1, sync-in-async,
+      // rule pack under `.vor/semgrep-rules/` (N+1, sync-in-async,
       // raw SQL, missing auth). When the directory is absent, semgrep is
       // configured exactly as before — no behavior change for old configs.
       //
@@ -59625,7 +59625,7 @@ var DEFAULT_CONFIG = {
       // every other linter).
       sast: {
         enabled: true,
-        semgrep: { custom_rules_path: ".code-review/semgrep-rules" },
+        semgrep: { custom_rules_path: ".vor/semgrep-rules" },
         tsc: { enabled: true }
       },
       container_cve: { enabled: false },
@@ -59677,7 +59677,7 @@ var semgrepSchema = external_exports.object({
   // here would reject perfectly valid absolute paths on Windows.
   //
   // The empty string is allowed and acts as an explicit opt-out: it
-  // bypasses the default `.code-review/semgrep-rules` directory without
+  // bypasses the default `.vor/semgrep-rules` directory without
   // forcing the operator to also disable the entire sast scanner. The
   // resolver in semgrep.ts treats unset, empty, and missing-on-disk
   // identically — all three forward only `--config=auto`.
@@ -59788,7 +59788,7 @@ function loadConfigFromString(yaml) {
   try {
     parsed = (0, import_yaml.parse)(yaml);
   } catch (err) {
-    void logger.warn(`Failed to parse .code-review.yml: ${err.message}. Using defaults.`);
+    void logger.warn(`Failed to parse .vor.yml: ${err.message}. Using defaults.`);
     return DEFAULT_CONFIG;
   }
   if (parsed == null || typeof parsed !== "object") {
@@ -59797,7 +59797,7 @@ function loadConfigFromString(yaml) {
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
     const errMsg = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
-    void logger.warn(`.code-review.yml validation failed: ${errMsg}. Using defaults.`);
+    void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
     return DEFAULT_CONFIG;
   }
   return deepMerge(DEFAULT_CONFIG, result.data);
@@ -63641,7 +63641,7 @@ var OctokitWithPlugins = Octokit2.plugin(retry, throttling);
 function createOctokit(opts) {
   return new OctokitWithPlugins({
     auth: opts.auth,
-    userAgent: opts.userAgent ?? "driches/code-review",
+    userAgent: opts.userAgent ?? "driches/vor",
     ...opts.baseUrl ? { baseUrl: opts.baseUrl } : {},
     throttle: {
       onRateLimit: (retryAfter, options, _octokit, retryCount) => {
@@ -63664,7 +63664,7 @@ function createOctokit(opts) {
     // equality — strings don't match numeric statuses. Passing numbers
     // ensures 4xx errors actually short-circuit retries; with strings the
     // plugin retries 404s 3 extra times, wasting API quota on every
-    // missing optional file (.code-review.yml, AGENTS.md, CLAUDE.md).
+    // missing optional file (.vor.yml, AGENTS.md, CLAUDE.md).
     retry: { doNotRetry: [400, 401, 403, 404, 422] }
   });
 }
@@ -63926,7 +63926,7 @@ async function fetchPRFiles(octokit, ref) {
 }
 
 // src/github/prior-reviews.ts
-var AGENT_REVIEW_MARKER = "<!-- driches/code-review: agent-review v1 -->";
+var AGENT_REVIEW_MARKER = "<!-- driches/vor: agent-review v1 -->";
 async function dismissPriorAgentReviews(octokit, ref, newHeadSha) {
   let page = 1;
   let dismissed = 0;
@@ -64162,7 +64162,7 @@ function renderSummary(input) {
   }
   sections.push("---");
   sections.push(
-    `_Reviewed by [driches/code-review](https://github.com/driches/code-review) using \`${input.modelName}\`._`
+    `_Reviewed by [driches/vor](https://github.com/driches/vor) using \`${input.modelName}\`._`
   );
   const agentEvent = !summary2 ? "COMMENT" : summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
   const event = chooseEvent(input.configEvent, agentEvent);
@@ -69068,7 +69068,7 @@ async function main() {
   }
   const provider_override = raw_provider;
   const max_turns_override = parseIntOrUndefined(process.env.INPUT_MAX_TURNS);
-  const config_path = process.env.INPUT_CONFIG_PATH?.trim() || ".code-review.yml";
+  const config_path = process.env.INPUT_CONFIG_PATH?.trim() || ".vor.yml";
   const workspace_dir = process.env.GITHUB_WORKSPACE?.trim() || process.cwd();
   const eventName = process.env.GITHUB_EVENT_NAME?.trim() ?? "";
   const allowAutoTrigger = (process.env.INPUT_ALLOW_AUTO_TRIGGER ?? "false").toLowerCase() === "true";

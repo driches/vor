@@ -20,12 +20,12 @@
 # rate low while still catching the actual N+1 shape.
 #
 # To suppress a specific finding, add an entry to
-# .code-review/security-ignore.yml with rule:
-# "sast:semgrep/code-review.n-plus-one.await-in-for-loop" (or the
+# .vor/security-ignore.yml with rule:
+# "sast:semgrep/vor.n-plus-one.await-in-for-loop" (or the
 # matching id from below).
 
 rules:
-  - id: code-review.n-plus-one.await-in-for-loop
+  - id: vor.n-plus-one.await-in-for-loop
     message: |
       `await` inside a `for` loop body serializes each iteration on the
       event loop. If the awaited call is a query, this is the N+1 shape.
@@ -49,7 +49,7 @@ rules:
             ...
           }
 
-  - id: code-review.n-plus-one.await-in-for-of-loop
+  - id: vor.n-plus-one.await-in-for-of-loop
     message: |
       `await` inside `for ... of` serializes each iteration. If the
       awaited call hits a database / network, this is N+1. Prefer
@@ -89,7 +89,7 @@ rules:
           patterns:
             - pattern-not: Promise.all(...)
 
-  - id: code-review.n-plus-one.await-in-while-loop
+  - id: vor.n-plus-one.await-in-while-loop
     message: |
       `await` inside a `while` loop serializes iterations. For paginated
       I/O this is sometimes intentional (each page depends on the prior);
@@ -107,7 +107,7 @@ rules:
         ...
       }
 
-  - id: code-review.n-plus-one.await-in-forEach
+  - id: vor.n-plus-one.await-in-forEach
     message: |
       `await` inside `.forEach()` does NOT actually wait — `forEach`
       returns void and the callback's promise is discarded. This is
@@ -125,7 +125,7 @@ rules:
         ...
       })
 
-  - id: code-review.n-plus-one.await-in-map
+  - id: vor.n-plus-one.await-in-map
     message: |
       `await` inside `.map()` produces an array of pending Promises, not
       values. Either wrap the call in `Promise.all(...)` (batched
@@ -154,7 +154,7 @@ rules:
 
   # Python: `await` inside `for ... in` / `while` loops. Same N+1
   # shape; asyncio's equivalent of Promise.all is `asyncio.gather`.
-  - id: code-review.n-plus-one.await-in-for-loop-py
+  - id: vor.n-plus-one.await-in-for-loop-py
     message: |
       `await` inside a `for` loop in Python serializes each iteration.
       If the awaited call is a query, this is N+1. Prefer
@@ -176,7 +176,7 @@ rules:
               await asyncio.gather(...)
               ...
 
-  - id: code-review.n-plus-one.await-in-while-loop-py
+  - id: vor.n-plus-one.await-in-while-loop-py
     message: |
       `await` inside a `while` loop in Python serializes iterations.
       For paginated I/O this is sometimes intentional; for unbatched

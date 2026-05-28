@@ -312,7 +312,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       turns: 0,
     };
 
-    // The orchestrator's loadConfig will look for .code-review.yml at HEAD; we
+    // The orchestrator's loadConfig will look for .vor.yml at HEAD; we
     // serve a serialized form of the supplied config so the orchestrator picks
     // up exactly what the test asked for.
     //
@@ -330,7 +330,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       JSON.stringify(input.config),
     ) as ReviewConfig;
     sandboxedConfig.experimental.worker_delegation.enabled = false;
-    state.caseFiles.set('.code-review.yml', serializeConfigAsYaml(sandboxedConfig));
+    state.caseFiles.set('.vor.yml', serializeConfigAsYaml(sandboxedConfig));
 
     const wallStart = Date.now();
     // Do NOT swallow runOrchestrator exceptions. Converting them into a
@@ -351,7 +351,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       anthropic_api_key: providerId === 'anthropic' ? input.apiKey : '',
       openai_api_key: providerId === 'openai' ? input.apiKey : '',
       github_token: 'gh-test',
-      config_path: '.code-review.yml',
+      config_path: '.vor.yml',
       dry_run: false,
       workspace_dir: '/tmp/eval',
       // Inject the scripted FakeProvider. The orchestrator forwards this to

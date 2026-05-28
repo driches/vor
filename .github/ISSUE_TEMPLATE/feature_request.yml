@@ -47,5 +47,5 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: "I searched existing issues and [discussions](https://github.com/driches/code-review/discussions) and didn't find a duplicate."
+        - label: "I searched existing issues and [discussions](https://github.com/driches/vor/discussions) and didn't find a duplicate."
           required: true

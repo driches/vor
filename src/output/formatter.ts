@@ -38,7 +38,7 @@ export interface RenderedSummary {
  * severity label tells the reader at a glance what was found.
  *
  * The agent's `assessment` still drives the GitHub event when the repo opts
- * into APPROVE / REQUEST_CHANGES via `.code-review.yml`; the configured event
+ * into APPROVE / REQUEST_CHANGES via `.vor.yml`; the configured event
  * is the ceiling and the agent cannot escalate above it.
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
@@ -106,7 +106,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
 
   sections.push('---');
   sections.push(
-    `_Reviewed by [driches/code-review](https://github.com/driches/code-review) using \`${input.modelName}\`._`,
+    `_Reviewed by [driches/vor](https://github.com/driches/vor) using \`${input.modelName}\`._`,
   );
 
   // Choose the final event: take the min of (agent assessment, configured ceiling).

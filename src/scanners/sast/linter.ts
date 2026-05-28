@@ -19,7 +19,7 @@ import path from 'node:path';
  * Failure mode is the same as the outer Scanner contract: a LinterModule
  * MUST NOT throw. Non-fatal errors return via `errors`, and a missing
  * binary returns an empty result quietly (many repos don't have every
- * linter installed in their workspace, that's not a code-review failure).
+ * linter installed in their workspace, that's not a Vor failure).
  */
 import type { ChangedFile } from '../../types.js';
 import type { ScannerDeps, ScanFinding, ScanError } from '../types.js';

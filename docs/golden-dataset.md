@@ -5,7 +5,7 @@ AI reviewer (Codex, Coderabbit, etc.) on **real PRs from private repos**.
 
 Because real PRs contain proprietary code, **the dataset itself never lives in
 this public repo**. It lives in a separate private repo (default name
-`code-review-golden`) cloned alongside this one. The harness in `src/eval/`
+`vor-golden`) cloned alongside this one. The harness in `src/eval/`
 and `scripts/golden/` reads from that dataset via `GOLDEN_REPO_PATH`.
 
 ## Why this exists
@@ -26,12 +26,12 @@ possibly equally valid) judgment call.
 ### 1. Create the private dataset repo
 
 ```sh
-# On GitHub: create driches/code-review-golden as a private repo (no template).
+# On GitHub: create driches/vor-golden as a private repo (no template).
 
 # Clone it alongside this repo:
 cd ..
-git clone git@github.com:driches/code-review-golden.git
-cd code-review-golden
+git clone git@github.com:driches/vor-golden.git
+cd vor-golden
 
 # Recommended: add this to its .gitignore so per-case repo snapshots stay local
 echo "cases/*/repo/" >> .gitignore
@@ -45,7 +45,7 @@ gitignored — it stays local (each is a regular `git clone`).
 ### 2. Capture a PR
 
 ```sh
-cd ../code-review        # back into this public repo
+cd ../vor                # back into this public repo
 export GH_TOKEN=ghp_...  # PAT with read access to the source repo
 npm run golden:capture -- \
   --pr driches/orbitboard#42 \
@@ -53,7 +53,7 @@ npm run golden:capture -- \
   --bot codex
 ```
 
-This writes `../code-review-golden/cases/orbitboard-pr-42/` containing:
+This writes `../vor-golden/cases/orbitboard-pr-42/` containing:
 
 - `meta.yml` — case metadata (owner, repo, SHAs, capture time)
 - `pr.json` — raw `octokit.pulls.get` response
@@ -76,8 +76,8 @@ npm run golden:eval -- --case orbitboard-pr-42
 The eval builds offline `LocalDeps` from the case dir (no GitHub access needed
 for the actual review run), runs the agent, and writes:
 
-- `../code-review-golden/cases/<id>/runs/<timestamp>.json` — our findings + summary + cost
-- `../code-review-golden/reports/<timestamp>.md` — comparison report
+- `../vor-golden/cases/<id>/runs/<timestamp>.json` — our findings + summary + cost
+- `../vor-golden/reports/<timestamp>.md` — comparison report
 
 Run multiple cases in one report:
 
@@ -89,7 +89,7 @@ npm run golden:eval -- --case <id> --model claude-haiku-4-5
 
 ### 4. Read the report
 
-Open `../code-review-golden/reports/<latest>.md`. Each case section has:
+Open `../vor-golden/reports/<latest>.md`. Each case section has:
 
 - **Matched pairs** — findings both Ours and Codex flagged. Table shows line
   distance, severity tier from each side, and how the match was made (`hunk`
@@ -121,9 +121,9 @@ be a good follow-up.)
 ## Privacy & safety
 
 - **The dataset never lives in this public repo.** The harness reads from
-  `GOLDEN_REPO_PATH` (default `../code-review-golden`) and refuses to write
+  `GOLDEN_REPO_PATH` (default `../vor-golden`) and refuses to write
   outputs into a path that's inside this repo. `.gitignore` lists
-  `/golden/`, `/code-review-golden/`, `/eval-reports/`, `*.golden.json` as a
+  `/golden/`, `/vor-golden/`, `/eval-reports/`, `*.golden.json` as a
   safety net.
 - **Reports embed snippets.** `body`, `title`, and suggestion blocks may
   contain real code. They go into the private repo, never here.
@@ -153,7 +153,7 @@ be a good follow-up.)
 
 The private dataset repo ships with `.github/workflows/collect-cases.yml`
 which runs daily and auto-captures any new PR that has both a Codex review
-and a code-review review. **Eval is NOT run automatically** — capture is
+and a Vor review. **Eval is NOT run automatically** — capture is
 free, eval costs Anthropic credits.
 
 ### One-time setup
@@ -162,7 +162,7 @@ free, eval costs Anthropic credits.
    <https://github.com/settings/personal-access-tokens/new>:
    - Resource owner: `driches`
    - Repositories: select every repo you want eligible for capture (must
-     include the private dataset repo `code-review-golden` itself, so the
+     include the private dataset repo `vor-golden` itself, so the
      workflow can commit back)
    - Permissions:
      - **Contents**: Read AND Write
@@ -170,7 +170,7 @@ free, eval costs Anthropic credits.
      - **Metadata**: Read
    - Expiration: 90 days (set a calendar reminder to rotate)
 
-2. **Add the PAT as a secret** on `code-review-golden`:
+2. **Add the PAT as a secret** on `vor-golden`:
    `Settings → Secrets and variables → Actions → New repository secret`
    - Name: `GOLDEN_PAT`
    - Value: the token
@@ -189,7 +189,7 @@ free, eval costs Anthropic credits.
    - `review.user.login === 'chatgpt-codex-connector[bot]'` (override with
      `--bot`), AND
    - some `review.body` contains the marker
-     `<!-- driches/code-review: agent-review v1 -->` (constant
+     `<!-- driches/vor: agent-review v1 -->` (constant
      `AGENT_REVIEW_MARKER` in `src/github/prior-reviews.ts`).
 4. Skips PRs already at `<golden>/cases/<repo>-pr-<N>/meta.yml`.
 5. Emits a JSON array on stdout. The workflow pipes that to
@@ -200,7 +200,7 @@ free, eval costs Anthropic credits.
 ```sh
 # Locally (uses your gh auth):
 export GH_TOKEN=$(gh auth token)
-export GOLDEN_REPO_PATH=$HOME/code-review-golden
+export GOLDEN_REPO_PATH=$HOME/vor-golden
 npm run golden:discover -- --owner driches --lookback-days 14 \
   --golden-path "$GOLDEN_REPO_PATH" --verbose \
   | npm run golden:capture-batch
@@ -212,7 +212,7 @@ captured without writing anything.
 ### Tuning
 
 - **Cadence**: edit the `cron:` line in
-  `code-review-golden/.github/workflows/collect-cases.yml`. Daily is a
+  `vor-golden/.github/workflows/collect-cases.yml`. Daily is a
   reasonable default — capture is idempotent, so re-running costs nothing
   when there's no new data.
 - **Lookback**: change the workflow input default (`lookback_days`). Longer
@@ -229,7 +229,7 @@ captured without writing anything.
   depending on size). Add an `ANTHROPIC_API_KEY` secret to the dataset repo
   and add a second workflow if you want weekly automated eval; for now,
   run on-demand: `npm run golden:eval -- --all`.
-- **Report sharing** — reports stay in `code-review-golden/reports/`. Never
+- **Report sharing** — reports stay in `vor-golden/reports/`. Never
   paste their contents into public issues or PR descriptions.
 
 ## Cost notes

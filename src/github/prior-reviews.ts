@@ -3,14 +3,14 @@
  * them so the new review supersedes the old one.
  *
  * The agent identifies itself via a hidden marker embedded in the review body:
- *   <!-- driches/code-review: agent-review v1 -->
+ *   <!-- driches/vor: agent-review v1 -->
  * Any review whose body contains this marker is considered a prior agent review.
  */
 
 import type { Octokit } from '@octokit/rest';
 import { logger } from '../util/logger.js';
 
-export const AGENT_REVIEW_MARKER = '<!-- driches/code-review: agent-review v1 -->';
+export const AGENT_REVIEW_MARKER = '<!-- driches/vor: agent-review v1 -->';
 
 export interface PriorReviewsRef {
   owner: string;

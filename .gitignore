@@ -30,12 +30,12 @@ Thumbs.db
 npm-debug.log*
 
 # Private golden-dataset safety net.
-# The real dataset lives in a SEPARATE PRIVATE repo (e.g. code-review-golden),
+# The real dataset lives in a SEPARATE PRIVATE repo (e.g. vor-golden),
 # discovered via the GOLDEN_REPO_PATH env var. These patterns exist so that if
 # anything from that workflow ever lands inside this repo, it cannot be staged
 # by accident. See docs/golden-dataset.md.
 /golden/
 /golden-dataset/
-/code-review-golden/
+/vor-golden/
 /eval-reports/
 *.golden.json

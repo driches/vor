@@ -72,7 +72,7 @@ describe('buildUserPrompt scanner-findings injection', () => {
   it('omits the scanner block when no findings are provided', () => {
     const out = buildUserPrompt({
       owner: 'driches',
-      repo: 'code-review',
+      repo: 'vor',
       pull_number: 1,
     });
     expect(out).not.toContain('Deterministic scanner findings');
@@ -85,7 +85,7 @@ describe('buildUserPrompt scanner-findings injection', () => {
     );
     const out = buildUserPrompt({
       owner: 'driches',
-      repo: 'code-review',
+      repo: 'vor',
       pull_number: 1,
       scanner_findings: findings,
       max_scanner_findings: 3,

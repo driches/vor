@@ -13,22 +13,22 @@
 # `app.<verb>(path, handler)` where the handler list lacks a recognized
 # auth-middleware name. Misses framework conventions that put auth in a
 # higher-level `app.use(...)` — those produce false positives here and
-# should be suppressed via .code-review/security-ignore.yml.
+# should be suppressed via .vor/security-ignore.yml.
 #
 # Severity: ERROR (semgrep ERROR → ScanFinding "important"). Mutating
 # verbs are reported; GET/HEAD are intentionally NOT flagged to keep
 # noise down on public read endpoints.
 #
 # To suppress: rule id is
-# "sast:semgrep/code-review.missing-auth-middleware.post-no-auth" (etc.).
+# "sast:semgrep/vor.missing-auth-middleware.post-no-auth" (etc.).
 
 rules:
-  - id: code-review.missing-auth-middleware.post-no-auth
+  - id: vor.missing-auth-middleware.post-no-auth
     message: |
       `POST` route handler with no recognized auth middleware
       (authenticate / requireAuth / isAuthenticated / requireUser /
       ensureAuthenticated) in the call. If this endpoint is intended
-      to be public, suppress in .code-review/security-ignore.yml. If
+      to be public, suppress in .vor/security-ignore.yml. If
       it's not, add the middleware.
     severity: ERROR
     languages: [typescript, javascript]
@@ -52,7 +52,7 @@ rules:
           - pattern-not: $APP.post($PATH, isAuthenticated(...), ...)
           - pattern-not: $APP.post($PATH, ensureAuthenticated(...), ...)
 
-  - id: code-review.missing-auth-middleware.put-no-auth
+  - id: vor.missing-auth-middleware.put-no-auth
     message: |
       `PUT` route handler with no recognized auth middleware. Confirm
       the endpoint is intentionally public, or add auth.
@@ -76,7 +76,7 @@ rules:
           - pattern-not: $APP.put($PATH, authenticate(...), ...)
           - pattern-not: $APP.put($PATH, requireAuth(...), ...)
 
-  - id: code-review.missing-auth-middleware.patch-no-auth
+  - id: vor.missing-auth-middleware.patch-no-auth
     message: |
       `PATCH` route handler with no recognized auth middleware. Confirm
       the endpoint is intentionally public, or add auth.
@@ -100,7 +100,7 @@ rules:
           - pattern-not: $APP.patch($PATH, authenticate(...), ...)
           - pattern-not: $APP.patch($PATH, requireAuth(...), ...)
 
-  - id: code-review.missing-auth-middleware.delete-no-auth
+  - id: vor.missing-auth-middleware.delete-no-auth
     message: |
       `DELETE` route handler with no recognized auth middleware. This
       is the highest-impact public mutation possible — confirm the
@@ -127,13 +127,13 @@ rules:
 
   # Fastify shorthand: fastify.route({ method, url, handler })
   # without preHandler / onRequest hook in the same object literal.
-  - id: code-review.missing-auth-middleware.fastify-route-no-auth
+  - id: vor.missing-auth-middleware.fastify-route-no-auth
     message: |
       Fastify `route()` with a mutating method but no `preHandler` /
       `onRequest` / `preValidation` hook in the route options.
       Fastify-auth conventions register the hook here; if you use a
       global `app.addHook('onRequest', ...)` instead, suppress this
-      rule in .code-review/security-ignore.yml.
+      rule in .vor/security-ignore.yml.
     severity: ERROR
     languages: [typescript, javascript]
     metadata:

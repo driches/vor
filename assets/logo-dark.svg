@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 128" role="img" width="480" height="128">
-  <title>Claude Code Review (dark theme)</title>
-  <desc>Dark-mode logo: an eye with three diff lines as the iris (middle line in coral), alongside the "code-review" wordmark.</desc>
+  <title>Vor (dark theme)</title>
+  <desc>Dark-mode logo: an eye with three diff lines as the iris (middle line in coral), alongside the "vor" wordmark.</desc>
 
   <!-- Icon -->
   <g>
@@ -17,5 +17,5 @@
   <text x="144" y="78"
         font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
         font-size="42" font-weight="600" fill="#F3F4F6"
-        letter-spacing="-0.5">code-review</text>
+        letter-spacing="-0.5">vor</text>
 </svg>

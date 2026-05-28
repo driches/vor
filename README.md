@@ -1,18 +1,18 @@
-# Claude Code Review
+# Vor
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="Claude Code Review" width="420">
+    <img src="assets/logo.svg" alt="Vor" width="420">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/driches/code-review/actions/workflows/ci.yml"><img src="https://github.com/driches/code-review/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/driches/code-review/releases"><img src="https://img.shields.io/github/v/release/driches/code-review?include_prereleases&label=release" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/driches/code-review" alt="MIT License"></a>
-  <a href="https://github.com/marketplace/actions/claude-code-review"><img src="https://img.shields.io/badge/Marketplace-GitHub%20Action-2088FF?logo=github" alt="GitHub Marketplace"></a>
-  <a href="https://github.com/driches/code-review/discussions"><img src="https://img.shields.io/github/discussions/driches/code-review" alt="Discussions"></a>
+  <a href="https://github.com/driches/vor/actions/workflows/ci.yml"><img src="https://github.com/driches/vor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/driches/vor/releases"><img src="https://img.shields.io/github/v/release/driches/vor?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/driches/vor" alt="MIT License"></a>
+  <a href="https://github.com/marketplace/actions/vor"><img src="https://img.shields.io/badge/Marketplace-GitHub%20Action-2088FF?logo=github" alt="GitHub Marketplace"></a>
+  <a href="https://github.com/driches/vor/discussions"><img src="https://img.shields.io/github/discussions/driches/vor" alt="Discussions"></a>
 </p>
 
 > AI-powered PR code review GitHub Action **with parallel vulnerability scanning**. Posts inline review comments with concrete code suggestions, anchored to real lines in the diff — like Codex review, but Claude — and now flags known CVEs in your lockfiles and hardcoded secrets in your diff alongside the AI's findings, in the same review.
@@ -28,10 +28,10 @@ Scanner findings flow through the same severity floor / per-file cap / global ca
 
 ## Quick start
 
-In any of your repos, add `.github/workflows/code-review.yml`:
+In any of your repos, add `.github/workflows/vor.yml`:
 
 ```yaml
-name: Code Review
+name: Vor
 on:
   workflow_dispatch:
     inputs:
@@ -49,13 +49,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: driches/code-review@v0
+      - uses: driches/vor@v0
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           pr_number: ${{ inputs.pr_number }}
 ```
 
-Trigger a review by hand: **Actions → Code Review → Run workflow → enter PR number**. A sticky review appears within a few minutes; re-run to refresh against the new HEAD.
+Trigger a review by hand: **Actions → Vor → Run workflow → enter PR number**. A sticky review appears within a few minutes; re-run to refresh against the new HEAD.
 
 ### Why manual-only?
 
@@ -64,7 +64,7 @@ The action refuses to run on `pull_request` / `pull_request_target` events by de
 If you've explicitly decided the auto-trigger economics work for your repo, opt in:
 
 ```yaml
-- uses: driches/code-review@v0
+- uses: driches/vor@v0
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
     allow_auto_trigger: 'true'
@@ -95,7 +95,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
 | `model` | no | `claude-sonnet-4-6` | Model ID. Claude options: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI options: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
-| `config_path` | no | `.code-review.yml` | Path in consumer repo to optional config. |
+| `config_path` | no | `.vor.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
 
@@ -108,7 +108,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 | `ended` | `summary_posted` / `max_turns` / `output_truncated` / `budget_exceeded` / `aborted` / `error` / `skipped_draft` / `skipped_no_key_anthropic` / `skipped_no_key_openai`. `output_truncated` means the response hit the per-request output token cap mid-stream — bump `budget.max_output_tokens` rather than `max_turns`. |
 | `cost_usd` | Total LLM API cost in USD. |
 
-## Per-repo config (`.code-review.yml`)
+## Per-repo config (`.vor.yml`)
 
 All fields optional. Defaults are sensible.
 
@@ -170,7 +170,7 @@ providers:
 
 security:
   enabled: true                                       # set false to skip all scanners
-  ignore_file: .code-review/security-ignore.yml
+  ignore_file: .vor/security-ignore.yml
   scanners:
     dependency_cve:
       enabled: true
@@ -190,9 +190,9 @@ security:
 
 - **Dependency CVEs**: npm (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`) and PyPI (`requirements.txt` — only `==`-pinned lines). Queries the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost.
 - **Secrets**: AWS access keys (`AKIA…`), AWS secret keys (entropy-gated), GitHub classic + fine-grained PATs (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Slack tokens (`xox[baprs]-`), Stripe live/restricted keys (`sk_live_`, `rk_live_`), Google API keys (`AIza…`), npm tokens (`npm_…`), PEM private key headers, JSON Web Tokens (`eyJ…`-prefixed 3-segment shape). Only **added lines** in the diff are scanned — pre-existing secrets in untouched code are out of scope for this PR.
-- **SAST + container scanning**: stubs in v1; not yet active. The slots in `.code-review.yml` are reserved so v2 can plug them in without breaking your config.
+- **SAST + container scanning**: stubs in v1; not yet active. The slots in `.vor.yml` are reserved so v2 can plug them in without breaking your config.
 
-### Suppressing findings — `.code-review/security-ignore.yml`
+### Suppressing findings — `.vor/security-ignore.yml`
 
 Commit this file to your repo to suppress specific findings. All entry types support a required `reason` and an optional `expires` (`YYYY-MM-DD` or full RFC3339 timestamp). Expired entries still suppress the finding but emit a notice in the run log so you don't forget to revisit them.
 
@@ -230,7 +230,7 @@ If the ignore file is missing, malformed, or fails schema validation, the action
 
 1. The action fetches PR metadata, the file list, and the full unified diff.
 2. It computes **reviewable_line_ranges** for each file (added lines + context inside hunks).
-3. It loads `.code-review.yml` and convention files (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD.
+3. It loads `.vor.yml` and convention files (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD.
 4. It builds a system prompt that includes severity calibration + repo conventions.
 5. The agent loop runs with **9 custom tools** and **no built-in tools**:
    - Read: `get_pr_metadata`, `list_changed_files`, `get_pr_diff`, `read_file_at_ref`, `grep_repo_at_ref`, `read_repo_context_file`
@@ -261,17 +261,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev workflow.
 
 ## Contributing
 
-Issues and PRs welcome. Good first contributions: pick something tagged [`good first issue`](https://github.com/driches/code-review/labels/good%20first%20issue) or [`help wanted`](https://github.com/driches/code-review/labels/help%20wanted), comment "I'll take this", and send a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, the dogfood workflow, and the release process. By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Issues and PRs welcome. Good first contributions: pick something tagged [`good first issue`](https://github.com/driches/vor/labels/good%20first%20issue) or [`help wanted`](https://github.com/driches/vor/labels/help%20wanted), comment "I'll take this", and send a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, the dogfood workflow, and the release process. By contributing you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Support
 
-- **Questions, ideas, show-and-tell** → [GitHub Discussions](https://github.com/driches/code-review/discussions)
-- **Bugs, feature requests, review-quality feedback** → [Open an issue](https://github.com/driches/code-review/issues/new/choose)
+- **Questions, ideas, show-and-tell** → [GitHub Discussions](https://github.com/driches/vor/discussions)
+- **Bugs, feature requests, review-quality feedback** → [Open an issue](https://github.com/driches/vor/issues/new/choose)
 - **Anything else** → [SUPPORT.md](SUPPORT.md)
 
 ## Security
 
-See [SECURITY.md](SECURITY.md). Please don't file public issues for vulnerabilities — use [GitHub Security Advisories](https://github.com/driches/code-review/security/advisories/new) instead.
+See [SECURITY.md](SECURITY.md). Please don't file public issues for vulnerabilities — use [GitHub Security Advisories](https://github.com/driches/vor/security/advisories/new) instead.
 
 ## License
 

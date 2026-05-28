@@ -3,7 +3,7 @@
  *
  * Composition:
  *   - BASE (the long disciplined prompt below)
- *   - + config.prompt.additions (per-repo additions from .code-review.yml)
+ *   - + config.prompt.additions (per-repo additions from .vor.yml)
  *   - + concatenated repo-context files (CLAUDE.md, AGENTS.md, etc.) capped
  *     at config.context.max_context_bytes
  */
@@ -101,7 +101,7 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
 # Process (follow in this order)
 
 1. Call \`get_pr_metadata\` to read the title, body, author, and linked context. Form a hypothesis about what this PR is trying to do.
-2. Call \`read_repo_context_file\` to load CLAUDE.md, AGENTS.md, package.json, .code-review.yml. These are the project's conventions. Do NOT judge style without checking these first.
+2. Call \`read_repo_context_file\` to load CLAUDE.md, AGENTS.md, package.json, .vor.yml. These are the project's conventions. Do NOT judge style without checking these first.
 3. Call \`list_changed_files\`. This is your authoritative map of what's reviewable. You may ONLY post comments on lines that appear in \`reviewable_line_ranges\` for each file.
 4. Call \`get_pr_diff\` to read the changes. Mark generated/lockfile/binary files with \`skip_file\`.
 5. For every non-trivial finding, VERIFY before commenting:
@@ -172,7 +172,7 @@ When \`post_inline_comment\` returns \`accepted: false\`, the response includes 
 
 # Respect prior author pushback
 
-This PR may have prior review comments from you (recognizable by the \`<!-- driches/code-review: agent-review v1 -->\` marker) AND author replies on those threads. The PR description may also note design decisions you should respect.
+This PR may have prior review comments from you (recognizable by the \`<!-- driches/vor: agent-review v1 -->\` marker) AND author replies on those threads. The PR description may also note design decisions you should respect.
 
 If you previously flagged a finding and the author replied with "pushing back", "won't fix", "wontdo", "by design", "duplicate", "as documented", "intentional", or similar — DO NOT re-issue that finding on this run. The author already evaluated and rejected it. Re-issuing the same finding after pushback erodes trust faster than missing a real bug.
 
