@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-05-27
+
+### Fixed
+- **GitHub Contents API no longer retries 404s.** [`@octokit/plugin-retry`](https://github.com/octokit/plugin-retry.js) compares `error.status` (a number) against `doNotRetry` entries via `Array.prototype.includes`, which uses strict equality. We were passing strings (`'400'`, `'404'`, …), so the 4xx short-circuit never matched and every 404 was retried 3 additional times. On every PR review without an optional file (`.code-review.yml`, `AGENTS.md`, `CLAUDE.md`), that meant **4 HTTP round-trips per missing file** instead of 1. Numeric status codes restore the intended fast-path. Roughly 3× reduction in `getContent` API calls on PRs that don't ship the optional config / context files. Fix in [src/github/client.ts](src/github/client.ts). (#44)
+
+### Docs
+- **AGENTS.md, CLAUDE.md, and a refreshed CONTRIBUTING.md.** AGENTS.md is now the canonical contribution guide for AI agents and humans; CLAUDE.md points there. The doc rejects "agentic fluff" (filler comments, decorative emoji, unverified "tested and passing" claims) explicitly, names the four-command local checklist (`lint / tsc / test / verify-dist`) that mirrors CI, and documents the manual self-review dispatch pattern including the required `--ref <PR-head-branch>` when dogfooding prompt / tool / scanner changes. PR template updated to match. (#45)
+
 ## [0.5.1] - 2026-05-27
 
 ### Fixed
