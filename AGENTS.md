@@ -214,7 +214,18 @@ When a self-review does fire on your PR:
 - **Reply in the thread.** Either fix what's flagged, or explain why it's wrong. Don't ignore it.
 - **If the finding is a false positive**, that's also useful — open a [`review-quality`](https://github.com/driches/code-review/issues/new?template=review_quality.yml) issue so the prompt / scanner gets calibrated.
 
-To run a self-review yourself, ask a maintainer to dispatch it: `gh workflow run self-review.yml -f pr_number=<your-PR> -R driches/code-review`. The job posts a review on the PR within a few minutes.
+To run a self-review yourself, ask a maintainer to dispatch it:
+
+```sh
+gh workflow run self-review.yml \
+  --ref <PR-head-branch> \
+  -f pr_number=<your-PR> \
+  -R driches/code-review
+```
+
+`--ref` is required when the dogfood needs to run **the PR's code**, not main's. The workflow does `actions/checkout@v5` with no explicit ref and then `uses: ./`, so the action that runs is whatever ref was dispatched — without `--ref`, GitHub defaults to the default branch (main) and the PR's prompt / tool / scanner changes never get exercised. For PRs that only touch docs or tests, dispatching against `main` is fine because no executable code changed.
+
+The job posts a review on the PR within a few minutes.
 
 If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell — investigate before merging.
 
