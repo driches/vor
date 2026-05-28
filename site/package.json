@@ -1,0 +1,22 @@
+{
+  "name": "vor-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "tsx scripts/sync-docs.ts",
+    "predev": "npm run sync",
+    "dev": "astro dev",
+    "prebuild": "npm run sync",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.34.0",
+    "astro": "^5.7.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

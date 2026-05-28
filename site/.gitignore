@@ -1,0 +1,22 @@
+# Astro / build
+dist/
+.astro/
+node_modules/
+
+# Synced docs — generated from repo-root markdown by scripts/sync-docs.ts.
+# The repo root is the single source of truth; never edit these by hand.
+src/content/docs/*.md
+!src/content/docs/index.mdx
+
+# Synced brand assets — copied from ../assets by the sync script.
+src/assets/logo.svg
+src/assets/logo-dark.svg
+src/assets/icon.svg
+public/favicon.svg
+public/logo.svg
+public/logo-dark.svg
+public/icon.svg
+
+# env
+.env
+.env.production

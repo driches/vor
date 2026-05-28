@@ -1,0 +1,39 @@
+---
+// Static mock of a posted review: a diff hunk with one AI finding and one
+// scanner finding, styled to echo GitHub's PR review UI. No screenshot needed.
+---
+
+<div class="ccr-mockup" role="img" aria-label="Example pull request review with an inline AI comment and a dependency CVE finding">
+  <div class="ccr-mockup__bar">
+    <span class="ccr-mockup__dot ccr-mockup__dot--r"></span>
+    <span class="ccr-mockup__dot ccr-mockup__dot--y"></span>
+    <span class="ccr-mockup__dot ccr-mockup__dot--g"></span>
+    <span class="ccr-mockup__file">src/handlers/upload.ts</span>
+  </div>
+
+  <div class="ccr-mockup__code"><span class="del">- const dest = path.join(UPLOAD_DIR, req.body.filename)</span>
+<span class="add">+ const dest = path.join(UPLOAD_DIR, sanitize(req.body.filename))</span>
+   await fs.writeFile(dest, buf)</div>
+
+  <div class="ccr-mockup__comment">
+    <div class="ccr-mockup__avatar" aria-hidden="true">V</div>
+    <div>
+      <span class="ccr-tag ccr-tag--important">IMPORTANT · security</span>
+      <p><strong>Path traversal</strong> — <code>req.body.filename</code> flows into <code>path.join</code> unsanitized, so <code>../../etc/passwd</code> escapes the upload dir.</p>
+      <p>Why it matters: an attacker controls the write path and can overwrite arbitrary files.</p>
+      <div class="ccr-suggestion">
+        <div class="ccr-suggestion__hd">Suggested change</div>
+        <div class="ccr-suggestion__body">const dest = path.join(UPLOAD_DIR, sanitize(req.body.filename))</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ccr-mockup__comment">
+    <div class="ccr-mockup__avatar" aria-hidden="true">V</div>
+    <div>
+      <span class="ccr-tag ccr-tag--critical">CRITICAL · security</span>
+      <p><code>lodash@4.17.20</code> is affected by prototype pollution.</p>
+      <p class="ccr-prov">via OSV · GHSA-jf85-cpcp-j695 — fixed in 4.17.21</p>
+    </div>
+  </div>
+</div>

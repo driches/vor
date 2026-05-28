@@ -15,6 +15,10 @@
   <a href="https://github.com/driches/vor/discussions"><img src="https://img.shields.io/github/discussions/driches/vor" alt="Discussions"></a>
 </p>
 
+<p align="center">
+  <strong><a href="https://driches.github.io/vor/">Documentation &amp; site →</a></strong>
+</p>
+
 > AI-powered PR code review GitHub Action **with parallel vulnerability scanning**. Runs on the LLM provider you choose — **Anthropic Claude or OpenAI (GPT / o-series)** — and posts inline review comments with concrete code suggestions, anchored to real lines in the diff, plus flags known CVEs in your lockfiles and hardcoded secrets in your diff alongside the AI's findings, in the same review.
 
 Provider-agnostic by design: a custom tool-use loop drives the model over a constrained set of 9 custom tools (read PR diff, read file at ref, grep the checkout, post inline comments, post summary) with **no built-in filesystem/shell access** — the same loop talks to Anthropic via [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) and to OpenAI via the Responses API. The single output tool, `post_inline_comment`, validates `(file_path, line)` against the actual diff before accepting — so the agent **cannot post on lines that don't exist**, and on rejection it gets a structured hint listing the real reviewable lines so it self-corrects.
