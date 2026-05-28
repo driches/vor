@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Documentation site at [driches.github.io/vor](https://driches.github.io/vor/).** An Astro + Starlight site with a marketing landing page (feature grid, copy-paste quickstart, example-review mockup) plus the full docs set. Built from `site/`. Content stays in sync automatically: `site/scripts/sync-docs.ts` pulls the canonical root markdown (README, CHANGELOG, SECURITY, SUPPORT, CONTRIBUTING, AGENTS, CODE_OF_CONDUCT, golden-dataset) into the docs collection at build time — the repo root remains the single source of truth, so the site can't drift. Deployed by `.github/workflows/pages.yml` on pushes that touch the site or any synced source file. No change to the action or published package.
+- **Documentation site at [driches.github.io/vor](https://driches.github.io/vor/).** An Astro + Starlight site with a marketing landing page (feature grid, copy-paste quickstart, example-review mockup) plus the full docs set. Built from `site/`. Content stays in sync automatically: `site/scripts/sync-docs.ts` pulls the canonical root markdown (README, CHANGELOG, SECURITY, SUPPORT, CONTRIBUTING, AGENTS, CODE_OF_CONDUCT) into the docs collection at build time — the repo root remains the single source of truth, so the site can't drift. Deployed by `.github/workflows/pages.yml` on pushes that touch the site or any synced source file. No change to the action or published package.
 
 ### Changed (BREAKING)
 - **Project renamed: `code-review` → `vor`.** New name comes from the Norse goddess Vór, "from whom nothing can be hidden." The rename touches every external surface:
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   5. Optionally delete prior bot review threads on open PRs so the new run doesn't post duplicates.
 
 ### Docs
-- **README and supporting docs refocused around multi-provider support.** The copy no longer frames Vor as an Anthropic-first tool — Anthropic Claude and OpenAI (GPT / o-series, including `gpt-5-codex`) are now presented as peer providers. Quick start gains an OpenAI snippet alongside the Claude one, and the inputs table documents that bare `codex-*` model ids need an explicit `provider: openai`. References comparing the product to OpenAI's Codex PR-reviewer (`chatgpt-codex-connector[bot]`) were removed; the "receiving review feedback" guidance in AGENTS.md / CONTRIBUTING.md is now phrased for any auto-reviewer bot rather than naming a specific one. SECURITY.md now covers both API keys and SDKs. (The eval-harness Codex baseline in `docs/golden-dataset.md` is unchanged — it describes real functionality.)
+- **README and supporting docs refocused around multi-provider support.** The copy no longer frames Vor as an Anthropic-first tool — Anthropic Claude and OpenAI (GPT / o-series, including `gpt-5-codex`) are now presented as peer providers. Quick start gains an OpenAI snippet alongside the Claude one, and the inputs table documents that bare `codex-*` model ids need an explicit `provider: openai`. References comparing the product to OpenAI's Codex PR-reviewer (`chatgpt-codex-connector[bot]`) were removed; the "receiving review feedback" guidance in AGENTS.md / CONTRIBUTING.md is now phrased for any auto-reviewer bot rather than naming a specific one. SECURITY.md now covers both API keys and SDKs.
 
 ## [0.5.2] - 2026-05-27
 
