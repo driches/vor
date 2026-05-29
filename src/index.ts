@@ -54,8 +54,7 @@ async function main(): Promise<void> {
   const isPrEvent = eventName === 'pull_request';
   const isPrTargetEvent = eventName === 'pull_request_target';
   const isReviewEvent =
-    eventName === 'pull_request_review' ||
-    eventName === 'pull_request_review_comment';
+    eventName === 'pull_request_review' || eventName === 'pull_request_review_comment';
   if (isReviewEvent) {
     await logger.notice(
       `Refusing to run on '${eventName}' event. Review and review-comment events ` +
