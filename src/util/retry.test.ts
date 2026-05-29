@@ -44,10 +44,7 @@ describe('retry', () => {
 
   it('calls onRetry with attempt and delay', async () => {
     const onRetry = vi.fn();
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce('ok');
+    const fn = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce('ok');
     await retry(fn, { retries: 1, minDelayMs: 1, onRetry });
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onRetry.mock.calls[0]?.[1]).toBe(0); // attempt index

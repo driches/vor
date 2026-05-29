@@ -240,9 +240,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       });
       if (analysis !== null) {
         userPrompt =
-          renderPreflightSection(analysis, input.deps.prContext.files) +
-          '\n\n' +
-          userPrompt;
+          renderPreflightSection(analysis, input.deps.prContext.files) + '\n\n' + userPrompt;
       }
     } catch (err) {
       if (err instanceof BudgetError) {
@@ -260,9 +258,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  const messages: CanonicalMessage[] = [
-    { role: 'user', content: userPrompt },
-  ];
+  const messages: CanonicalMessage[] = [{ role: 'user', content: userPrompt }];
 
   try {
     if (preflightBudgetExceeded) {

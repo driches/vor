@@ -40,9 +40,9 @@ describe('get_pr_diff tool', () => {
       files: [makeFile({ path: 'a.ts' }), makeFile({ path: 'b.ts' })],
     });
     const tool = makeGetPrDiffTool(deps);
-    const r = getResultJson(
-      await callTool(tool, { paths: ['a.ts'], max_bytes: 100_000 }),
-    ) as { diff: string };
+    const r = getResultJson(await callTool(tool, { paths: ['a.ts'], max_bytes: 100_000 })) as {
+      diff: string;
+    };
     expect(r.diff).toContain('a.ts');
     expect(r.diff).not.toContain('b.ts');
   });

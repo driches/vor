@@ -50,9 +50,7 @@ interface EslintMessage {
 export const eslintLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -160,9 +158,10 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
       // one of those.
       shell: bin.needsShell,
     };
-    const child = argsForSpawn === null
-      ? spawn(command, spawnOptions)
-      : spawn(command, argsForSpawn, spawnOptions);
+    const child =
+      argsForSpawn === null
+        ? spawn(command, spawnOptions)
+        : spawn(command, argsForSpawn, spawnOptions);
     // Collect chunks as Buffers; concatenate once at close. Avoids the
     // O(n²) string-concat copy on large outputs and prevents UTF-8
     // corruption when a multi-byte sequence straddles a chunk boundary.
@@ -251,9 +250,7 @@ function buildFinding(
   // comment.
   const endLine = message.endLine;
   const useRange =
-    endLine !== undefined &&
-    endLine > message.line &&
-    changedFile.added_lines.has(endLine);
+    endLine !== undefined && endLine > message.line && changedFile.added_lines.has(endLine);
   // Fingerprint must match the line the comment is posted at — the
   // dedup/ignore-list key (file_path + line + rule_id) lives at the
   // anchored line, so the fingerprint has to use the same. Pre-fix it
@@ -282,11 +279,7 @@ function buildFinding(
 }
 
 function categorize(ruleId: string): Category {
-  if (
-    ruleId.startsWith('security/') ||
-    ruleId.includes('xss') ||
-    ruleId.includes('injection')
-  ) {
+  if (ruleId.startsWith('security/') || ruleId.includes('xss') || ruleId.includes('injection')) {
     return 'vulnerability';
   }
   if (ruleId.includes('unused')) return 'readability';
@@ -314,8 +307,6 @@ function renderTitle(message: EslintMessage): string {
 
 function renderDescription(message: EslintMessage): string {
   const ruleStr =
-    message.ruleId !== null
-      ? `ESLint rule: \`${message.ruleId}\`.`
-      : 'Reported by ESLint.';
+    message.ruleId !== null ? `ESLint rule: \`${message.ruleId}\`.` : 'Reported by ESLint.';
   return `${ruleStr}\n\n${message.message}`;
 }

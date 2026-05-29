@@ -69,7 +69,13 @@ describe('isLineReviewable', () => {
 
 describe('formatRanges', () => {
   it('formats multiple ranges with comma', () => {
-    expect(formatRanges([[5, 8], [12, 12], [20, 30]])).toBe('5-8, 12, 20-30');
+    expect(
+      formatRanges([
+        [5, 8],
+        [12, 12],
+        [20, 30],
+      ]),
+    ).toBe('5-8, 12, 20-30');
   });
 
   it('collapses single-line ranges to single number', () => {

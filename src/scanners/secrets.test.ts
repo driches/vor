@@ -319,9 +319,7 @@ describe('createSecretsScanner — generic-entropy opt-in', () => {
 
     const result = await scanner.scan(makeScannerDeps({ changedFiles: [file] }));
 
-    const generic = result.findings.find(
-      (f) => f.rule_id === 'secret:generic-high-entropy',
-    );
+    const generic = result.findings.find((f) => f.rule_id === 'secret:generic-high-entropy');
     expect(generic).toBeDefined();
     expect(generic!.severity).toBe('important');
     expect(generic!.confidence).toBe('low');
@@ -347,13 +345,9 @@ describe('createSecretsScanner — generic-entropy opt-in', () => {
       },
     } as unknown as SecurityConfig;
 
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], config }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], config }));
 
-    expect(
-      result.findings.find((f) => f.rule_id === 'secret:generic-high-entropy'),
-    ).toBeDefined();
+    expect(result.findings.find((f) => f.rule_id === 'secret:generic-high-entropy')).toBeDefined();
   });
 });
 
@@ -400,9 +394,7 @@ describe('createSecretsScanner — multiple findings', () => {
     const scanner = createSecretsScanner();
     const KEY_A = buildExampleAccessKey('A');
     const KEY_B = buildExampleAccessKey('B');
-    const file = makeFileWithLines('src/colocated.ts', [
-      `const pair = ["${KEY_A}", "${KEY_B}"];`,
-    ]);
+    const file = makeFileWithLines('src/colocated.ts', [`const pair = ["${KEY_A}", "${KEY_B}"];`]);
     const result = await scanner.scan(makeScannerDeps({ changedFiles: [file] }));
 
     expect(result.findings).toHaveLength(2);
@@ -451,9 +443,7 @@ describe('createSecretsScanner — PEM body suppresses AWS-secret pattern', () =
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.rule_id).toBe('secret:private-key-pem');
     // Crucially: the AWS-secret pattern was suppressed by the PEM neighbor.
-    expect(
-      result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key'),
-    ).toBe(false);
+    expect(result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key')).toBe(false);
   });
 
   it('does NOT suppress AWS findings on lines far from any PEM (>20 lines away)', async () => {
@@ -471,9 +461,7 @@ describe('createSecretsScanner — PEM body suppresses AWS-secret pattern', () =
     const result = await scanner_scan_with(file);
 
     // Should fire because there's no PEM header within ±20 lines.
-    expect(
-      result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key'),
-    ).toBe(true);
+    expect(result.findings.some((f) => f.rule_id === 'secret:aws-secret-access-key')).toBe(true);
   });
 });
 
@@ -494,9 +482,7 @@ describe('createSecretsScanner — ignored finding', () => {
     const logger = makeLogger();
     const scanner = createSecretsScanner({ logger });
 
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], ignoreList }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], ignoreList }));
 
     expect(result.findings).toEqual([]);
     expect(ignoreList.matches).toHaveBeenCalled();
@@ -513,9 +499,7 @@ describe('createSecretsScanner — ignored finding', () => {
     const ignoreList = makeIgnoreList({ ignored: true, reason: 'fixture-known-value' });
     const scanner = createSecretsScanner();
 
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], ignoreList }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], ignoreList }));
 
     expect(result.findings).toEqual([]);
     // The redactor should NOT mask the planted value, because the operator
@@ -541,9 +525,7 @@ describe('createSecretsScanner — expired ignore entry', () => {
     const logger = makeLogger();
     const scanner = createSecretsScanner({ logger });
 
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], ignoreList }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], ignoreList }));
 
     expect(result.findings).toEqual([]);
     expect(logger.notice).toHaveBeenCalledTimes(1);

@@ -42,16 +42,12 @@ describe('replaceAnchor', () => {
   it('throws when the marker appears more than once (ambiguous truth anchor)', () => {
     // Two markers means scoreRun would have to pick one; that's a case-author
     // bug, not a runtime fallback. Fail loud.
-    const source = [
-      'line1',
-      '// PLANT_ANCHOR: dup',
-      'line3',
-      '// PLANT_ANCHOR: dup',
-      'line5',
-    ].join('\n');
-    expect(() =>
-      replaceAnchor(source, '// PLANT_ANCHOR: dup', 'planted', 'dup'),
-    ).toThrow(/matched 2 lines/);
+    const source = ['line1', '// PLANT_ANCHOR: dup', 'line3', '// PLANT_ANCHOR: dup', 'line5'].join(
+      '\n',
+    );
+    expect(() => replaceAnchor(source, '// PLANT_ANCHOR: dup', 'planted', 'dup')).toThrow(
+      /matched 2 lines/,
+    );
   });
 
   it('throws when only multiple trimmed-equivalent markers exist', () => {
@@ -59,8 +55,6 @@ describe('replaceAnchor', () => {
     // `\t// PLANT_ANCHOR: x` — both trim to the same string and would both
     // be ambiguous match targets.
     const source = ['  // PLANT_ANCHOR: x', '\t// PLANT_ANCHOR: x'].join('\n');
-    expect(() => replaceAnchor(source, '// PLANT_ANCHOR: x', 'p', 'x')).toThrow(
-      /matched 2 lines/,
-    );
+    expect(() => replaceAnchor(source, '// PLANT_ANCHOR: x', 'p', 'x')).toThrow(/matched 2 lines/);
   });
 });

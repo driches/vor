@@ -37,11 +37,7 @@ import type { CanonicalMessage, CanonicalTool } from './types.js';
 type Block = Record<string, unknown>;
 
 function hasCache(block: unknown): boolean {
-  return (
-    block !== null &&
-    typeof block === 'object' &&
-    'cache_control' in (block as Block)
-  );
+  return block !== null && typeof block === 'object' && 'cache_control' in (block as Block);
 }
 
 function userResults(blocks: Block[]): Anthropic.MessageParam {
@@ -64,9 +60,7 @@ describe('markLatestMessageForCaching', () => {
   });
 
   it('is a no-op when only string-content user messages exist (turn 1, before any tool_results)', () => {
-    const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: 'initial user prompt' },
-    ];
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: 'initial user prompt' }];
     markLatestMessageForCaching(messages);
     expect(messages[0]!.content).toBe('initial user prompt');
   });
@@ -209,28 +203,20 @@ describe('markLastBlockForCaching', () => {
 
 describe('canonicalMessagesToAnthropic', () => {
   it('round-trips a single string-content user message unchanged', () => {
-    const result = canonicalMessagesToAnthropic([
-      { role: 'user', content: 'review this PR' },
-    ]);
+    const result = canonicalMessagesToAnthropic([{ role: 'user', content: 'review this PR' }]);
     expect(result).toEqual([{ role: 'user', content: 'review this PR' }]);
   });
 
   it('converts an assistant message with only text into a single text block', () => {
-    const result = canonicalMessagesToAnthropic([
-      { role: 'assistant', text: 'Got it.' },
-    ]);
-    expect(result).toEqual([
-      { role: 'assistant', content: [{ type: 'text', text: 'Got it.' }] },
-    ]);
+    const result = canonicalMessagesToAnthropic([{ role: 'assistant', text: 'Got it.' }]);
+    expect(result).toEqual([{ role: 'assistant', content: [{ type: 'text', text: 'Got it.' }] }]);
   });
 
   it('converts an assistant message with only tool_calls into tool_use blocks', () => {
     const result = canonicalMessagesToAnthropic([
       {
         role: 'assistant',
-        tool_calls: [
-          { id: 't1', name: 'get_pr_diff', arguments: { full: true } },
-        ],
+        tool_calls: [{ id: 't1', name: 'get_pr_diff', arguments: { full: true } }],
       },
     ]);
     expect(result).toEqual([
@@ -266,9 +252,7 @@ describe('canonicalMessagesToAnthropic', () => {
     ]);
     // The resulting MessageParam shape only allows role+content; provider_state
     // is not a field on it. Asserting equality covers this implicitly.
-    expect(result).toEqual([
-      { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
-    ]);
+    expect(result).toEqual([{ role: 'assistant', content: [{ type: 'text', text: 'hi' }] }]);
   });
 
   it('wraps a single tool message in one user message with one tool_result block', () => {
@@ -324,9 +308,7 @@ describe('canonicalMessagesToAnthropic', () => {
     ]);
     expect(result[0]).toEqual({
       role: 'user',
-      content: [
-        { type: 'tool_result', tool_use_id: 't1', content: 'oops', is_error: true },
-      ],
+      content: [{ type: 'tool_result', tool_use_id: 't1', content: 'oops', is_error: true }],
     });
   });
 
@@ -451,9 +433,7 @@ describe('anthropicResponseToCanonical', () => {
   it('extracts tool_calls from a tool_use response and maps stop_reason → tool_calls', () => {
     const result = anthropicResponseToCanonical(
       fakeMessage({
-        content: [
-          { type: 'tool_use', id: 't1', name: 'get_pr_diff', input: { ref: 'HEAD' } },
-        ],
+        content: [{ type: 'tool_use', id: 't1', name: 'get_pr_diff', input: { ref: 'HEAD' } }],
         stop_reason: 'tool_use',
       }),
     );
@@ -467,9 +447,7 @@ describe('anthropicResponseToCanonical', () => {
   it('coerces tool_use input null → empty object', () => {
     const result = anthropicResponseToCanonical(
       fakeMessage({
-        content: [
-          { type: 'tool_use', id: 't1', name: 'noargs', input: null as unknown as object },
-        ],
+        content: [{ type: 'tool_use', id: 't1', name: 'noargs', input: null as unknown as object }],
         stop_reason: 'tool_use',
       }),
     );
@@ -503,23 +481,17 @@ describe('anthropicResponseToCanonical', () => {
   });
 
   it('maps max_tokens stop_reason through unchanged', () => {
-    const result = anthropicResponseToCanonical(
-      fakeMessage({ stop_reason: 'max_tokens' }),
-    );
+    const result = anthropicResponseToCanonical(fakeMessage({ stop_reason: 'max_tokens' }));
     expect(result.stop_reason).toBe('max_tokens');
   });
 
   it('collapses unknown stop_reason values (stop_sequence) onto "other"', () => {
-    const result = anthropicResponseToCanonical(
-      fakeMessage({ stop_reason: 'stop_sequence' }),
-    );
+    const result = anthropicResponseToCanonical(fakeMessage({ stop_reason: 'stop_sequence' }));
     expect(result.stop_reason).toBe('other');
   });
 
   it('collapses a null stop_reason onto "other"', () => {
-    const result = anthropicResponseToCanonical(
-      fakeMessage({ stop_reason: null }),
-    );
+    const result = anthropicResponseToCanonical(fakeMessage({ stop_reason: null }));
     expect(result.stop_reason).toBe('other');
   });
 
@@ -660,15 +632,11 @@ describe('AnthropicProvider', () => {
         },
       ];
 
-      const result = await provider.complete(
-        [{ role: 'user', content: 'review this' }],
-        tools,
-        {
-          model: 'claude-sonnet-4-6',
-          maxOutputTokens: 4096,
-          system: 'You are a reviewer.',
-        },
-      );
+      const result = await provider.complete([{ role: 'user', content: 'review this' }], tools, {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 4096,
+        system: 'You are a reviewer.',
+      });
 
       // 1. Spy was called once with the expected shape.
       expect(createSpy).toHaveBeenCalledTimes(1);
@@ -688,9 +656,7 @@ describe('AnthropicProvider', () => {
 
       // 2. Returned shape is canonical.
       expect(result.text).toBe('Reviewing.');
-      expect(result.tool_calls).toEqual([
-        { id: 't1', name: 'get_pr_diff', arguments: {} },
-      ]);
+      expect(result.tool_calls).toEqual([{ id: 't1', name: 'get_pr_diff', arguments: {} }]);
       expect(result.stop_reason).toBe('tool_calls');
       expect(result.usage).toEqual({
         input_tokens: 200,
@@ -710,7 +676,12 @@ describe('AnthropicProvider', () => {
         content: [],
         stop_reason: 'end_turn',
         stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
       });
       await new AnthropicProvider('sk-test').complete([], [], {
         model: 'claude-sonnet-4-6',
@@ -730,7 +701,12 @@ describe('AnthropicProvider', () => {
         content: [],
         stop_reason: 'end_turn',
         stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
       });
       const controller = new AbortController();
       await new AnthropicProvider('sk-test').complete([], [], {
@@ -752,7 +728,12 @@ describe('AnthropicProvider', () => {
         content: [],
         stop_reason: 'end_turn',
         stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
       });
       await new AnthropicProvider('sk-test').complete(
         [

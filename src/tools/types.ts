@@ -34,7 +34,10 @@ export interface ToolDeps {
 }
 
 /** Helper: build the text-content shape MCP tools return. */
-export function textResult(text: string, isError = false): {
+export function textResult(
+  text: string,
+  isError = false,
+): {
   content: { type: 'text'; text: string }[];
   isError?: boolean;
 } {

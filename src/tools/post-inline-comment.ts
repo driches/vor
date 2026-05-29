@@ -7,13 +7,7 @@
 import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { validateInlineComment } from '../agent/validate-comment.js';
-import {
-  CATEGORIES,
-  type Category,
-  type Confidence,
-  type Severity,
-  type Side,
-} from '../types.js';
+import { CATEGORIES, type Category, type Confidence, type Severity, type Side } from '../types.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
@@ -67,9 +61,7 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
     },
     async (args) => {
       const normalizedSuggestion =
-        typeof args.suggestion === 'string'
-          ? normalizeSuggestion(args.suggestion)
-          : undefined;
+        typeof args.suggestion === 'string' ? normalizeSuggestion(args.suggestion) : undefined;
       // Schema-level invariant: suggestion required for high severity
       if (
         (args.severity === 'critical' || args.severity === 'important') &&

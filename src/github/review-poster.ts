@@ -43,9 +43,7 @@ export async function postReview(
     line: c.line,
     side: c.side,
     body: renderCommentBody(c),
-    ...(c.start_line !== undefined
-      ? { start_line: c.start_line, start_side: c.side }
-      : {}),
+    ...(c.start_line !== undefined ? { start_line: c.start_line, start_side: c.side } : {}),
   }));
 
   try {
@@ -106,10 +104,7 @@ function renderProvenanceTag(c: PostedComment): string {
       // etc. don't have CVE/GHSA aliases but we don't want to render
       // `_via OSV · osv:PYSEC-…_` with the redundant prefix).
       const id =
-        c.source.cve_id ??
-        c.source.ghsa_id ??
-        c.source.rule_id?.replace(/^osv:/, '') ??
-        '';
+        c.source.cve_id ?? c.source.ghsa_id ?? c.source.rule_id?.replace(/^osv:/, '') ?? '';
       return `\n\n_via OSV · ${id}_`;
     }
     case 'secrets':

@@ -6,18 +6,8 @@
  * can self-correct rather than silently fail.
  */
 
-import {
-  formatRanges,
-  isLineReviewable,
-} from '../github/reviewable-lines.js';
-import type {
-  Category,
-  ChangedFile,
-  Confidence,
-  PostedComment,
-  Severity,
-  Side,
-} from '../types.js';
+import { formatRanges, isLineReviewable } from '../github/reviewable-lines.js';
+import type { Category, ChangedFile, Confidence, PostedComment, Severity, Side } from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
 import { hasReadRange, type RunContext } from './run-context.js';
 
@@ -53,9 +43,7 @@ export interface ValidationContext {
   runContext?: RunContext;
 }
 
-export type ValidationResult =
-  | { ok: true }
-  | { ok: false; reason: string; hint: string };
+export type ValidationResult = { ok: true } | { ok: false; reason: string; hint: string };
 
 export function validateInlineComment(
   input: PostInlineCommentInput,
@@ -113,7 +101,10 @@ export function validateInlineComment(
   }
 
   // 5. start_line must also be in reviewable range
-  if (input.start_line !== undefined && !isLineReviewable(input.start_line, file.reviewable_lines)) {
+  if (
+    input.start_line !== undefined &&
+    !isLineReviewable(input.start_line, file.reviewable_lines)
+  ) {
     return {
       ok: false,
       reason: `start_line ${input.start_line} of '${file.path}' is not in the diff`,
@@ -199,7 +190,9 @@ export function validateInlineComment(
     );
     if (unread !== undefined) {
       const span =
-        input.start_line !== undefined ? `lines ${input.start_line}-${input.line}` : `line ${input.line}`;
+        input.start_line !== undefined
+          ? `lines ${input.start_line}-${input.line}`
+          : `line ${input.line}`;
       const win = 10;
       const hintStart = Math.max(1, (input.start_line ?? input.line) - win);
       const hintEnd = input.line + win;

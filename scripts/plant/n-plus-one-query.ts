@@ -29,8 +29,7 @@ export const nPlusOneQueryTemplate: PlantTemplate = {
         `n-plus-one-query: line ${line} is outside the file (1..${lines.length + 1})`,
       );
     }
-    const itemsVar =
-      typeof config.items_var === 'string' ? config.items_var : 'items';
+    const itemsVar = typeof config.items_var === 'string' ? config.items_var : 'items';
     const insertion = [
       `  for (const item of ${itemsVar}) {`,
       `    const row = await db.query('SELECT * FROM rows WHERE id = $1', [item.id]);`,

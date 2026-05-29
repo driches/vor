@@ -18,12 +18,9 @@ export const evalUserInputTemplate: PlantTemplate = {
     const line = typeof config.line === 'number' ? config.line : NaN;
     const lines = source.split('\n');
     if (!Number.isInteger(line) || line < 1 || line > lines.length + 1) {
-      throw new Error(
-        `eval-user-input: line ${line} is outside the file (1..${lines.length + 1})`,
-      );
+      throw new Error(`eval-user-input: line ${line} is outside the file (1..${lines.length + 1})`);
     }
-    const inputVar =
-      typeof config.input_var === 'string' ? config.input_var : 'userExpression';
+    const inputVar = typeof config.input_var === 'string' ? config.input_var : 'userExpression';
     const insertion = `  const result = eval(${inputVar});`;
     const before = lines.slice(0, line - 1);
     const after = lines.slice(line - 1);

@@ -21,11 +21,7 @@ async function main(): Promise<void> {
   // any programmatic caller — but the env-var path is the common one
   // and deserves a dedicated, specific error message.
   const raw_provider = process.env.INPUT_PROVIDER?.trim() || undefined;
-  if (
-    raw_provider !== undefined &&
-    raw_provider !== 'anthropic' &&
-    raw_provider !== 'openai'
-  ) {
+  if (raw_provider !== undefined && raw_provider !== 'anthropic' && raw_provider !== 'openai') {
     await logger.error(
       `Invalid INPUT_PROVIDER "${raw_provider}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
     );

@@ -74,10 +74,7 @@ const AI_OVERLAP_LINE_WINDOW = 3;
  * what keeps the runner's output deterministic when two scanners produce
  * identical-confidence duplicates.
  */
-function preferHigherConfidence(
-  incumbent: ScanFinding,
-  challenger: ScanFinding,
-): ScanFinding {
+function preferHigherConfidence(incumbent: ScanFinding, challenger: ScanFinding): ScanFinding {
   return CONFIDENCE_RANK[challenger.confidence] > CONFIDENCE_RANK[incumbent.confidence]
     ? challenger
     : incumbent;
@@ -97,9 +94,7 @@ function preferHigherConfidence(
  * (rare) case where two scanners report the same rule at the same site
  * without coordinating their fingerprint salts.
  */
-export function dedupAcrossScanners(
-  findings: readonly ScanFinding[],
-): ScanFinding[] {
+export function dedupAcrossScanners(findings: readonly ScanFinding[]): ScanFinding[] {
   // We maintain two parallel indices because either match alone marks a dup.
   // `byKey` maps a dedup key → index into `out`. We update `out[idx]` in
   // place when a higher-confidence challenger arrives.
@@ -193,9 +188,7 @@ export function dedupAcrossScanners(
  *
  * Non-scanner comments (i.e. AI comments) are returned unchanged.
  */
-export function dedupKeptScannerComments(
-  kept: readonly PostedComment[],
-): PostedComment[] {
+export function dedupKeptScannerComments(kept: readonly PostedComment[]): PostedComment[] {
   // Snapshot surviving AI comments once so the per-scanner overlap check
   // doesn't re-scan the full list each iteration.
   const survivingAi = kept.filter((c) => c.source?.kind !== 'scanner');

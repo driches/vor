@@ -62,10 +62,12 @@ function makeFile(over: Partial<ChangedFile> = {}): ChangedFile {
   };
 }
 
-function makeDeps(over: Partial<ScannerDeps> & {
-  workspaceDir: string;
-  customRulesPath?: string;
-}): ScannerDeps {
+function makeDeps(
+  over: Partial<ScannerDeps> & {
+    workspaceDir: string;
+    customRulesPath?: string;
+  },
+): ScannerDeps {
   // Minimal deps shape — semgrep only reads `workspaceDir`, `signal`,
   // and `config.scanners.sast.semgrep.custom_rules_path`. Everything else
   // is unused by the module under test.
@@ -107,11 +109,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
     try {
       const rulesDir = join(workspace, '.vor/semgrep-rules');
       mkdirSync(rulesDir, { recursive: true });
-      writeFileSync(
-        join(rulesDir, 'placeholder.yml'),
-        'rules: []\n',
-        'utf-8',
-      );
+      writeFileSync(join(rulesDir, 'placeholder.yml'), 'rules: []\n', 'utf-8');
 
       const deps = makeDeps({
         workspaceDir: workspace,
@@ -128,9 +126,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
       // Auto-config still present...
       expect(call.args).toContain('--config=auto');
       // ...AND the absolute custom path appears as a separate --config flag.
-      const configIdx = call.args.findIndex(
-        (a, i) => a === '--config' && i + 1 < call.args.length,
-      );
+      const configIdx = call.args.findIndex((a, i) => a === '--config' && i + 1 < call.args.length);
       expect(configIdx).toBeGreaterThanOrEqual(0);
       const customPathArg = call.args[configIdx + 1]!;
       // Absolute path resolution (relative input resolves against workspaceDir).
@@ -204,11 +200,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'semgrep-added-lines-'));
     try {
       mkdirSync(join(workspace, '.vor/semgrep-rules'), { recursive: true });
-      writeFileSync(
-        join(workspace, '.vor/semgrep-rules/dummy.yml'),
-        'rules: []\n',
-        'utf-8',
-      );
+      writeFileSync(join(workspace, '.vor/semgrep-rules/dummy.yml'), 'rules: []\n', 'utf-8');
 
       nextScript = {
         // Two findings: one ON an added line (line 3 — kept) and one
@@ -259,9 +251,7 @@ describe('semgrepLinter — custom_rules_path integration', () => {
 
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0]!.line).toBe(3);
-      expect(result.findings[0]!.rule_id).toBe(
-        'semgrep/vor.n-plus-one.await-in-for-loop',
-      );
+      expect(result.findings[0]!.rule_id).toBe('semgrep/vor.n-plus-one.await-in-for-loop');
       expect(result.findings[0]!.scanner).toBe('sast');
       // WARNING from a custom rule maps to "minor", as for any other
       // semgrep finding — the custom-rules code path doesn't reshape

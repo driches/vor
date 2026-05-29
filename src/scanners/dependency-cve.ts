@@ -317,9 +317,7 @@ function parseCvssScore(score: string): number | undefined {
  */
 function highestCvssScore(vuln: OsvVuln): number | undefined {
   if (!vuln.severity || vuln.severity.length === 0) return undefined;
-  const preferred = vuln.severity.filter(
-    (s) => s.type === 'CVSS_V3' || s.type === 'CVSS_V4',
-  );
+  const preferred = vuln.severity.filter((s) => s.type === 'CVSS_V3' || s.type === 'CVSS_V4');
   const best = highestParseable(preferred);
   if (best !== undefined) return best;
   // Preferred subset yielded nothing parseable — try the full list.
@@ -493,11 +491,7 @@ function findFixedVersion(
  * hint lives in prose where it belongs, and `suggestion` is omitted entirely
  * from these findings.
  */
-function buildDescription(
-  vuln: OsvVuln,
-  fixed_version: string | undefined,
-  pkg: string,
-): string {
+function buildDescription(vuln: OsvVuln, fixed_version: string | undefined, pkg: string): string {
   const body = (vuln.details ?? vuln.summary ?? '').trim();
   const link = `https://osv.dev/vulnerability/${vuln.id}`;
   const upgrade = fixed_version != null ? ` Upgrade ${pkg} to >=${fixed_version} (or later).` : '';
@@ -553,9 +547,7 @@ function vulnCacheKey(id: string): string {
   return `osv-vuln:${id}`;
 }
 
-export function createDependencyCveScanner(
-  options?: DependencyCveScannerOptions,
-): Scanner {
+export function createDependencyCveScanner(options?: DependencyCveScannerOptions): Scanner {
   const parsers = options?.parsers ?? DEFAULT_PARSERS;
   // OSV client is constructed lazily so a scanner that never gets scheduled
   // (applies() === false) doesn't even allocate a fetch wrapper.
@@ -639,9 +631,7 @@ export function createDependencyCveScanner(
         files_examined += 1;
         const parsed = parser.parse(content);
         if (parsed.length === 0) {
-          void log.debug(
-            `dependency-cve: parser returned no deps for ${file.path} (malformed?)`,
-          );
+          void log.debug(`dependency-cve: parser returned no deps for ${file.path} (malformed?)`);
           continue;
         }
 

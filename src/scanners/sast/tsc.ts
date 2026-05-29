@@ -104,9 +104,7 @@ export const tscLinter: LinterModule = {
   // path tsc references can be attributed — same shape knip uses.
   wholeProject: true,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -127,15 +125,11 @@ export const tscLinter: LinterModule = {
     // if they happen to contain a stray .ts file).
     const tsconfigPath = path.join(deps.workspaceDir, 'tsconfig.json');
     if (!existsSync(tsconfigPath)) {
-      await logger.debug(
-        `tsc: skipped — no tsconfig.json at ${tsconfigPath}`,
-      );
+      await logger.debug(`tsc: skipped — no tsconfig.json at ${tsconfigPath}`);
       return { findings: [], errors: [], filesExamined: 0 };
     }
 
-    const bin = findWorkspaceBinary([
-      path.join(deps.workspaceDir, 'node_modules', '.bin', 'tsc'),
-    ]);
+    const bin = findWorkspaceBinary([path.join(deps.workspaceDir, 'node_modules', '.bin', 'tsc')]);
     if (bin === null) {
       // MUST `await` — see eslint.ts for the full rationale (logger.debug
       // returns a Promise that, fire-and-forget, leaves a dangling
@@ -238,8 +232,7 @@ export function parseTscOutput(raw: string): TscDiagnostic[] {
     // Empty lines and lines with no leading whitespace are NOT
     // continuations (they're separators or summary lines like
     // "Found 3 errors in 2 files."), so we drop them.
-    const isContinuation =
-      diagnostics.length > 0 && line.length > 0 && /^\s/.test(line);
+    const isContinuation = diagnostics.length > 0 && line.length > 0 && /^\s/.test(line);
     if (isContinuation) {
       const last = diagnostics[diagnostics.length - 1]!;
       last.message = `${last.message}\n${line.trim()}`;
@@ -283,9 +276,10 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       env: buildLinterEnv(),
       shell: bin.needsShell,
     };
-    const child = argsForSpawn === null
-      ? spawn(command, spawnOptions)
-      : spawn(command, argsForSpawn, spawnOptions);
+    const child =
+      argsForSpawn === null
+        ? spawn(command, spawnOptions)
+        : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries. tsc output on a
     // monorepo with hundreds of errors can be MBs.
@@ -399,8 +393,5 @@ function renderTitle(diag: TscDiagnostic): string {
 }
 
 function renderDescription(diag: TscDiagnostic): string {
-  return (
-    `TypeScript compiler diagnostic: \`${diag.code}\` (${diag.severity}).\n\n` +
-    diag.message
-  );
+  return `TypeScript compiler diagnostic: \`${diag.code}\` (${diag.severity}).\n\n` + diag.message;
 }

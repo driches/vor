@@ -114,10 +114,7 @@ export async function buildLocalDeps(input: BuildLocalDepsInput): Promise<BuildL
  * Idempotent: returns immediately if the snapshot already exists.
  * Requires a GitHub token (param > GH_TOKEN > GITHUB_TOKEN) when cloning.
  */
-export async function ensureRepoSnapshot(opts: {
-  caseDir: string;
-  token?: string;
-}): Promise<void> {
+export async function ensureRepoSnapshot(opts: { caseDir: string; token?: string }): Promise<void> {
   const meta = await readCaseMeta(opts.caseDir);
   const repoDir = resolve(opts.caseDir, 'repo');
   if (existsSync(resolve(repoDir, '.git'))) return;
@@ -174,11 +171,10 @@ export function cloneRepoAtSha(opts: {
     GIT_CONFIG_VALUE_0: authHeader,
   };
 
-  const cloneRes = spawnSync(
-    'git',
-    ['clone', '--depth', '100', '--no-tags', url, opts.dest],
-    { stdio: 'inherit', env },
-  );
+  const cloneRes = spawnSync('git', ['clone', '--depth', '100', '--no-tags', url, opts.dest], {
+    stdio: 'inherit',
+    env,
+  });
   if (cloneRes.status !== 0) {
     throw new Error(
       `git clone of ${opts.owner}/${opts.repo} failed (exit ${cloneRes.status ?? 'spawn-error'}).`,
@@ -193,11 +189,11 @@ export function cloneRepoAtSha(opts: {
     env,
   });
   if (co1.status !== 0) {
-    const fetch = spawnSync(
-      'git',
-      ['fetch', '--depth', '100', 'origin', opts.headSha],
-      { cwd: opts.dest, stdio: 'inherit', env },
-    );
+    const fetch = spawnSync('git', ['fetch', '--depth', '100', 'origin', opts.headSha], {
+      cwd: opts.dest,
+      stdio: 'inherit',
+      env,
+    });
     if (fetch.status !== 0) {
       throw new Error(`git fetch ${opts.headSha} failed in ${opts.dest}.`);
     }

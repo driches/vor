@@ -33,7 +33,9 @@ describe('loadCase', () => {
     const { dir, id } = makeCase();
     const c = loadCase(dir, id);
     expect(c.case_id).toBe('example');
-    expect(c.files.find((f) => f.path === 'src/auth.ts')?.content).toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(c.files.find((f) => f.path === 'src/auth.ts')?.content).toContain(
+      'AKIAIOSFODNN7EXAMPLE',
+    );
     expect(c.beforeFiles.find((f) => f.path === 'src/auth.ts')?.content).toContain('// empty');
     expect(c.beforeFiles.length).toBeGreaterThan(0);
     expect(c.truths).toHaveLength(1);
@@ -300,11 +302,7 @@ describe('loadCase', () => {
     expect(paths1).toEqual(['src/a.ts', 'src/b.ts', 'src/z.ts']);
 
     // beforeFiles must also be sorted.
-    expect(c1.beforeFiles.map((f) => f.path)).toEqual([
-      'src/a.ts',
-      'src/b.ts',
-      'src/z.ts',
-    ]);
+    expect(c1.beforeFiles.map((f) => f.path)).toEqual(['src/a.ts', 'src/b.ts', 'src/z.ts']);
     rmSync(root, { recursive: true });
   });
 });

@@ -73,7 +73,10 @@ async function main(): Promise<void> {
       for (const c of found.candidates) {
         if (candidates.length >= args.limit) break;
         if (args.goldenPath && isAlreadyCaptured(args.goldenPath, c.case_id)) {
-          vlog(args, `  skip ${c.owner}/${c.repo}#${c.pull_number} — already captured as ${c.case_id}`);
+          vlog(
+            args,
+            `  skip ${c.owner}/${c.repo}#${c.pull_number} — already captured as ${c.case_id}`,
+          );
           continue;
         }
         candidates.push(c);

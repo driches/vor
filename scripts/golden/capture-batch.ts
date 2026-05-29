@@ -49,10 +49,7 @@ async function main(): Promise<void> {
   }
 
   log(`Capturing ${candidates.length} PR(s)...`);
-  const captureScript = resolve(
-    fileURLToPath(new URL('.', import.meta.url)),
-    'capture.ts',
-  );
+  const captureScript = resolve(fileURLToPath(new URL('.', import.meta.url)), 'capture.ts');
 
   const failures: Array<{ candidate: Candidate; error: string }> = [];
   for (const c of candidates) {
@@ -149,7 +146,9 @@ function parseCandidates(text: string): Candidate[] {
       typeof (c as Candidate).pull_number !== 'number' ||
       typeof (c as Candidate).case_id !== 'string'
     ) {
-      die(`Candidate at index ${i} is missing required fields (owner, repo, pull_number, case_id).`);
+      die(
+        `Candidate at index ${i} is missing required fields (owner, repo, pull_number, case_id).`,
+      );
     }
     return c as Candidate;
   });

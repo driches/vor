@@ -41,9 +41,7 @@ describe('tool() helper', () => {
   it('throws a readable, name-prefixed error on schema-invalid input', async () => {
     const t = tool('mytool', 'desc', { a: z.enum(['x', 'y']) }, ok);
 
-    await expect(t.handler({ a: 'z' }, undefined)).rejects.toThrow(
-      /Invalid arguments for mytool/,
-    );
+    await expect(t.handler({ a: 'z' }, undefined)).rejects.toThrow(/Invalid arguments for mytool/);
   });
 
   it('strips unknown keys not declared in the schema', async () => {

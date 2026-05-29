@@ -23,9 +23,5 @@
     "allowImportingTsExtensions": false
   },
   "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "tests/fixtures/golden-repo/cases/*/before/**"
-  ]
+  "exclude": ["node_modules", "dist", "tests/fixtures/golden-repo/cases/*/before/**"]
 }

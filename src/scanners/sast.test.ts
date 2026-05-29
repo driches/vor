@@ -74,15 +74,9 @@ describe('sast scanner (fan-out orchestrator)', () => {
 
   it('applies() skips generated and binary files even when extension matches', () => {
     const scanner = createSastScanner();
-    expect(
-      scanner.applies([makeFile({ path: 'dist/index.js', is_generated: true })]),
-    ).toBe(false);
-    expect(
-      scanner.applies([makeFile({ path: 'src/foo.ts', is_binary: true })]),
-    ).toBe(false);
-    expect(
-      scanner.applies([makeFile({ path: 'lib/foo.dart', is_generated: true })]),
-    ).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'dist/index.js', is_generated: true })])).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'src/foo.ts', is_binary: true })])).toBe(false);
+    expect(scanner.applies([makeFile({ path: 'lib/foo.dart', is_generated: true })])).toBe(false);
   });
 
   it('scan() returns an empty result quietly when no linter binaries are in the workspace', async () => {

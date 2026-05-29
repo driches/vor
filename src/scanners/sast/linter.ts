@@ -198,9 +198,7 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
  */
 export const SEMGREP_EXTRA_ENV_KEYS: readonly string[] = ['SEMGREP_APP_TOKEN'];
 
-export function buildLinterEnv(
-  extraKeys: readonly string[] = [],
-): NodeJS.ProcessEnv {
+export function buildLinterEnv(extraKeys: readonly string[] = []): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const key of LINTER_ENV_ALLOWLIST) {
     const value = process.env[key];
@@ -389,9 +387,7 @@ export function filterShellSafePaths(
   return { safe, dropped };
 }
 
-export function findWorkspaceBinary(
-  candidates: readonly string[],
-): ResolvedBinary | null {
+export function findWorkspaceBinary(candidates: readonly string[]): ResolvedBinary | null {
   // Try the no-extension form first (Unix), then Windows shim/exe forms.
   // Most repos resolve at the first candidate; the extension fallbacks
   // only kick in on Windows.

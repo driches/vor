@@ -20,11 +20,7 @@ function makeFinding(overrides: Partial<ScanFinding> = {}): ScanFinding {
 
 describe('renderScannerFindings', () => {
   it('renders all findings when count is under the cap', () => {
-    const findings = [
-      makeFinding({ line: 1 }),
-      makeFinding({ line: 2 }),
-      makeFinding({ line: 3 }),
-    ];
+    const findings = [makeFinding({ line: 1 }), makeFinding({ line: 2 }), makeFinding({ line: 3 })];
     const out = renderScannerFindings(findings, 30);
     expect(out).toContain('(3) — already detected');
     expect(out).toContain('scanner pipeline handles these');
@@ -37,9 +33,7 @@ describe('renderScannerFindings', () => {
   it('caps output and announces truncation when findings exceed the budget', () => {
     // 100 findings; cap at 5. Expect the top 5 in the rendered list and a
     // truncation footer naming the remaining 95.
-    const findings = Array.from({ length: 100 }, (_, i) =>
-      makeFinding({ line: i + 1 }),
-    );
+    const findings = Array.from({ length: 100 }, (_, i) => makeFinding({ line: i + 1 }));
     const out = renderScannerFindings(findings, 5);
 
     expect(out).toContain('(5 shown / 100 total)');
@@ -80,9 +74,7 @@ describe('buildUserPrompt scanner-findings injection', () => {
   });
 
   it('threads max_scanner_findings through to the renderer', () => {
-    const findings = Array.from({ length: 50 }, (_, i) =>
-      makeFinding({ line: i + 1 }),
-    );
+    const findings = Array.from({ length: 50 }, (_, i) => makeFinding({ line: i + 1 }));
     const out = buildUserPrompt({
       owner: 'driches',
       repo: 'vor',

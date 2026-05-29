@@ -317,9 +317,7 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
  * input order so the runner's deterministic ordering is unchanged.
  */
 const PEM_AWS_DEDUP_WINDOW = 20;
-function suppressAwsBodyOverlapsWithPem(
-  findings: readonly ScanFinding[],
-): ScanFinding[] {
+function suppressAwsBodyOverlapsWithPem(findings: readonly ScanFinding[]): ScanFinding[] {
   // Bucket PEM headers by file once so the AWS filter is O(N*K) per file
   // (K = PEM headers in that file, typically 0 or 1) instead of O(N²) overall.
   const pemLinesByFile = new Map<string, number[]>();
@@ -341,11 +339,7 @@ function suppressAwsBodyOverlapsWithPem(
   });
 }
 
-function buildMetrics(
-  started: number,
-  files_examined: number,
-  cache_hits: number,
-): ScannerMetrics {
+function buildMetrics(started: number, files_examined: number, cache_hits: number): ScannerMetrics {
   return {
     duration_ms: Date.now() - started,
     files_examined,

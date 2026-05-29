@@ -22,18 +22,14 @@ export function loadPipelineConfig(path: string): ReviewConfig {
   try {
     raw = readFileSync(path, 'utf-8');
   } catch (err) {
-    throw new Error(
-      `Failed to read pipeline config ${path}: ${(err as Error).message}`,
-    );
+    throw new Error(`Failed to read pipeline config ${path}: ${(err as Error).message}`);
   }
 
   let parsed: unknown;
   try {
     parsed = parseYaml(raw);
   } catch (err) {
-    throw new Error(
-      `Pipeline config ${path} failed to parse: ${(err as Error).message}`,
-    );
+    throw new Error(`Pipeline config ${path} failed to parse: ${(err as Error).message}`);
   }
 
   // Empty file or scalar root is almost always a mistake (an empty file with
@@ -57,9 +53,7 @@ export function loadPipelineConfig(path: string): ReviewConfig {
 
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
-    const issues = result.error.issues
-      .map((i) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ');
+    const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Pipeline config ${path} is invalid: ${issues}`);
   }
 
