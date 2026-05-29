@@ -26,7 +26,11 @@ function mockResponse(textBlocks: Array<{ text: string }>): Anthropic.Message {
     type: 'message',
     role: 'assistant',
     model: 'claude-haiku-4-5',
-    content: textBlocks.map((b) => ({ type: 'text' as const, text: b.text, citations: [] })) as Anthropic.ContentBlock[],
+    content: textBlocks.map((b) => ({
+      type: 'text' as const,
+      text: b.text,
+      citations: [],
+    })) as Anthropic.ContentBlock[],
     stop_reason: 'end_turn',
     stop_sequence: null,
     usage: {
@@ -74,9 +78,7 @@ describe('WorkerClient', () => {
     const fakeClient: FakeAnthropic = {
       messages: {
         create: vi.fn(async () =>
-          mockResponse([
-            { text: '```json\n{"verdict": "refuted", "confidence": "low"}\n```' },
-          ]),
+          mockResponse([{ text: '```json\n{"verdict": "refuted", "confidence": "low"}\n```' }]),
         ),
       },
     };
@@ -84,10 +86,7 @@ describe('WorkerClient', () => {
       verdict: z.enum(['confirmed', 'refuted']),
       confidence: z.enum(['high', 'medium', 'low']),
     });
-    const worker = new WorkerClient(
-      fakeClient as unknown as Anthropic,
-      makeBudget(),
-    );
+    const worker = new WorkerClient(fakeClient as unknown as Anthropic, makeBudget());
 
     const result = await worker.invoke({
       task: 'test',
@@ -106,10 +105,7 @@ describe('WorkerClient', () => {
       },
     };
     const schema = z.object({ verdict: z.string() });
-    const worker = new WorkerClient(
-      fakeClient as unknown as Anthropic,
-      makeBudget(),
-    );
+    const worker = new WorkerClient(fakeClient as unknown as Anthropic, makeBudget());
 
     await expect(
       worker.invoke({
@@ -125,18 +121,13 @@ describe('WorkerClient', () => {
   it('throws when JSON does not match the response schema', async () => {
     const fakeClient: FakeAnthropic = {
       messages: {
-        create: vi.fn(async () =>
-          mockResponse([{ text: '{"verdict": "unknown_value"}' }]),
-        ),
+        create: vi.fn(async () => mockResponse([{ text: '{"verdict": "unknown_value"}' }])),
       },
     };
     const schema = z.object({
       verdict: z.enum(['confirmed', 'refuted']),
     });
-    const worker = new WorkerClient(
-      fakeClient as unknown as Anthropic,
-      makeBudget(),
-    );
+    const worker = new WorkerClient(fakeClient as unknown as Anthropic, makeBudget());
 
     await expect(
       worker.invoke({
@@ -202,11 +193,7 @@ describe('WorkerClient', () => {
       verdict: z.enum(['confirmed', 'refuted']),
       confidence: z.enum(['high', 'medium', 'low']),
     });
-    const worker = new WorkerClient(
-      fakeClient as unknown as Anthropic,
-      budget,
-      'claude-haiku-4-5',
-    );
+    const worker = new WorkerClient(fakeClient as unknown as Anthropic, budget, 'claude-haiku-4-5');
 
     await worker.invoke({
       task: 'test',

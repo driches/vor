@@ -15,10 +15,7 @@ export function deepMerge<T>(base: T, override: unknown): T {
 
   const result: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, value] of Object.entries(override as Record<string, unknown>)) {
-    result[key] = deepMerge(
-      (base as Record<string, unknown>)[key] as unknown,
-      value,
-    );
+    result[key] = deepMerge((base as Record<string, unknown>)[key] as unknown, value);
   }
   return result as T;
 }
@@ -45,9 +42,7 @@ export function loadConfigFromString(yaml: string | null | undefined): ReviewCon
 
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
-    const errMsg = result.error.issues
-      .map((i) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ');
+    const errMsg = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
     return DEFAULT_CONFIG;
   }

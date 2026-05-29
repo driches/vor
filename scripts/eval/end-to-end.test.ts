@@ -56,11 +56,9 @@ describe('eval harness end-to-end', () => {
   beforeAll(async () => {
     cleanup = mkdtempSync(join(tmpdir(), 'eval-e2e-'));
     goldenRepo = cleanup;
-    cpSync(
-      join(process.cwd(), 'tests/fixtures/golden-repo/cases'),
-      join(goldenRepo, 'cases'),
-      { recursive: true },
-    );
+    cpSync(join(process.cwd(), 'tests/fixtures/golden-repo/cases'), join(goldenRepo, 'cases'), {
+      recursive: true,
+    });
     // Plant each case sequentially. runPlants does not support a `--all`
     // flag; sequential is fine here because cases are independent — the
     // shared goldenRepo tmpdir just hosts their separate subtrees.

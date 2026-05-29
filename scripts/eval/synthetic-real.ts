@@ -127,9 +127,15 @@ function materializeSyntheticWorkspace(
     // the entire eval case fails before the orchestrator ever runs.
     // Codex P2 #3311582726.
     [
-      '-c', 'user.email=eval@local',
-      '-c', 'user.name=synthetic-eval',
-      'commit', '-q', '--allow-empty', '-m', 'synthetic',
+      '-c',
+      'user.email=eval@local',
+      '-c',
+      'user.name=synthetic-eval',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'synthetic',
     ],
     gitOpts,
   );
@@ -248,11 +254,7 @@ interface CaseResult {
   score: ReturnType<typeof scoreRun>;
 }
 
-async function runOne(
-  caseId: string,
-  goldenRepo: string,
-  args: Args,
-): Promise<CaseResult> {
+async function runOne(caseId: string, goldenRepo: string, args: Args): Promise<CaseResult> {
   const c = loadCase(goldenRepo, caseId);
   const { diff, filesApi } = synthesizeDiff(c);
   const fileBytes = new Map(c.files.map((f) => [f.path, f.content]));

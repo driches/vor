@@ -9,14 +9,14 @@ import { resolveCaseDir } from '../plant/case-paths.js';
 import type { TruthEntry } from './types.js';
 
 export interface LoadedFile {
-  path: string;     // relative to after/ (or before/)
+  path: string; // relative to after/ (or before/)
   content: string;
 }
 
 export interface LoadedCase {
   case_id: string;
-  files: LoadedFile[];        // after/ contents
-  beforeFiles: LoadedFile[];  // before/ contents — used by the adapter to synthesize a real diff
+  files: LoadedFile[]; // after/ contents
+  beforeFiles: LoadedFile[]; // before/ contents — used by the adapter to synthesize a real diff
   truths: TruthEntry[];
 }
 

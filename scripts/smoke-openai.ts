@@ -59,7 +59,8 @@ async function main(): Promise<void> {
   const r1 = await provider.complete(messages, tools, {
     model: MODEL,
     maxOutputTokens: 512,
-    system: 'You are a helpful weather assistant. Always use the provided tool — never make up weather data.',
+    system:
+      'You are a helpful weather assistant. Always use the provided tool — never make up weather data.',
     temperature: 0.3,
   });
 
@@ -75,7 +76,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   if (r1.stop_reason !== 'tool_calls') {
-    console.error(`\nFAIL: expected stop_reason="tool_calls" on turn 1 but got "${r1.stop_reason}"`);
+    console.error(
+      `\nFAIL: expected stop_reason="tool_calls" on turn 1 but got "${r1.stop_reason}"`,
+    );
     process.exit(1);
   }
 
@@ -99,13 +102,18 @@ async function main(): Promise<void> {
   messages.push({
     role: 'tool',
     tool_call_id: toolCall.id,
-    content: JSON.stringify({ city: toolCall.arguments['city'], condition: 'Sunny', temperature_c: 22 }),
+    content: JSON.stringify({
+      city: toolCall.arguments['city'],
+      condition: 'Sunny',
+      temperature_c: 22,
+    }),
   });
 
   const r2 = await provider.complete(messages, tools, {
     model: MODEL,
     maxOutputTokens: 256,
-    system: 'You are a helpful weather assistant. Always use the provided tool — never make up weather data.',
+    system:
+      'You are a helpful weather assistant. Always use the provided tool — never make up weather data.',
     temperature: 0.3,
   });
 

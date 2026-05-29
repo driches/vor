@@ -1,7 +1,7 @@
 name: Bug report
 description: The action crashed, posted no review, posted a malformed review, or otherwise misbehaved.
-title: "bug: "
-labels: ["bug", "triage"]
+title: 'bug: '
+labels: ['bug', 'triage']
 body:
   - type: markdown
     attributes:
@@ -15,7 +15,7 @@ body:
     attributes:
       label: Action version
       description: "The `@vX` tag or commit SHA you're using in your workflow."
-      placeholder: "v0.1.1 (or v0)"
+      placeholder: 'v0.1.1 (or v0)'
     validations:
       required: true
 
@@ -23,8 +23,8 @@ body:
     id: model
     attributes:
       label: Model
-      description: "The Claude model the run used (default is `claude-sonnet-4-6`)."
-      placeholder: "claude-sonnet-4-6"
+      description: 'The Claude model the run used (default is `claude-sonnet-4-6`).'
+      placeholder: 'claude-sonnet-4-6'
     validations:
       required: true
 
@@ -33,7 +33,7 @@ body:
     attributes:
       label: What happened?
       description: What did the action do (or not do)? Paste any error message verbatim.
-      placeholder: "The action exited with `ended: error` and posted no review. The log showed..."
+      placeholder: 'The action exited with `ended: error` and posted no review. The log showed...'
     validations:
       required: true
 
@@ -41,7 +41,7 @@ body:
     id: expected
     attributes:
       label: What did you expect?
-      placeholder: "A review with inline comments on the changed lines."
+      placeholder: 'A review with inline comments on the changed lines.'
     validations:
       required: true
 
@@ -49,8 +49,8 @@ body:
     id: repro_link
     attributes:
       label: Public repro link (PR or repo)
-      description: "If the bug is reproducible on a public PR, a link makes triage 10x faster."
-      placeholder: "https://github.com/your-org/your-repo/pull/123"
+      description: 'If the bug is reproducible on a public PR, a link makes triage 10x faster.'
+      placeholder: 'https://github.com/your-org/your-repo/pull/123'
 
   - type: textarea
     id: workflow_snippet

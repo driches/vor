@@ -57,10 +57,7 @@ const SCANNER_CONFIG_KEY = {
  * `undefined` when the operator hasn't set it (the global `severity.floor`
  * is the only gate in that case).
  */
-function scannerMinSeverity(
-  id: ScannerId,
-  cfg: ReviewConfig['security'],
-): Severity | undefined {
+function scannerMinSeverity(id: ScannerId, cfg: ReviewConfig['security']): Severity | undefined {
   const key = SCANNER_CONFIG_KEY[id];
   return cfg.scanners[key].min_severity;
 }
@@ -153,7 +150,9 @@ export interface OrchestratorOutput {
  *  `skipped_no_key_<typo>` outcome instead of failing fast.
  *  (Codex P2 #3300632002.)
  */
-function assertValidProviderOverride(value: string | undefined): asserts value is ProviderId | undefined {
+function assertValidProviderOverride(
+  value: string | undefined,
+): asserts value is ProviderId | undefined {
   if (value === undefined || value === 'anthropic' || value === 'openai') return;
   throw new Error(
     `Invalid provider_override "${value}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
@@ -233,8 +232,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // that surfaces as an orchestrator failure, which is the right loud signal.
   const resolvedProvider: ProviderId =
     input.provider_override ?? config.provider ?? inferProviderFromModel(config.model);
-  const apiKey =
-    resolvedProvider === 'anthropic' ? input.anthropic_api_key : input.openai_api_key;
+  const apiKey = resolvedProvider === 'anthropic' ? input.anthropic_api_key : input.openai_api_key;
 
   // Fork-PR safety: a PR opened from a fork doesn't see the upstream secrets,
   // so the resolved-provider's API key is empty. Exit cleanly (no failure)
@@ -434,23 +432,14 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     await logger.info(
       'Mode: sequential (scanner_findings_in_user_prompt=true). Awaiting scanners before launching agent.',
     );
-    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
-      (r) => r[0]!,
-    );
-    const rawFindings =
-      scanOutcome.status === 'fulfilled' ? scanOutcome.value.findings : [];
-    const findings = filterScannerFindingsForPrompt(
-      rawFindings,
-      config,
-      prContext.files,
-    );
+    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then((r) => r[0]!);
+    const rawFindings = scanOutcome.status === 'fulfilled' ? scanOutcome.value.findings : [];
+    const findings = filterScannerFindingsForPrompt(rawFindings, config, prContext.files);
     await logger.info(
       `Scanners settled: ${findings.length}/${rawFindings.length} eligible finding(s) will be injected into the agent's user prompt.`,
     );
     userPrompt = buildPrompt(findings);
-    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(
-      (r) => r[0]!,
-    );
+    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then((r) => r[0]!);
   } else {
     // Parallel mode (default): fire agent + scanners concurrently and let
     // them settle independently. Lower wall-clock latency; agent never sees
@@ -470,10 +459,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       orchestratorAbort.abort();
     });
 
-    [agentOutcome, scanOutcome] = await Promise.allSettled([
-      agentPromise,
-      scannerPromise,
-    ]);
+    [agentOutcome, scanOutcome] = await Promise.allSettled([agentPromise, scannerPromise]);
   }
   if (agentOutcome.status === 'rejected') {
     if (scanOutcome.status === 'fulfilled') {
@@ -500,9 +486,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     });
   }
   const scanRunResult =
-    scanOutcome.status === 'fulfilled'
-      ? scanOutcome.value
-      : { findings: [], perScanner: [] };
+    scanOutcome.status === 'fulfilled' ? scanOutcome.value : { findings: [], perScanner: [] };
   if (scanOutcome.status === 'rejected') {
     // runScanners is supposed to be error-isolated, but harden against a
     // hypothetical regression there so the agent's review still posts.
@@ -553,9 +537,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
-      await logger.debug(
-        `Skipping scanner finding from ${finding.scanner}: ${valid.reason}`,
-      );
+      await logger.debug(`Skipping scanner finding from ${finding.scanner}: ${valid.reason}`);
       continue;
     }
     aggregator.addComment(scanFindingToPostedComment(finding));
@@ -593,12 +575,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     // negligible at the default cap (30) but bad shape for any future
     // bump.
     const dedupKeptSet = new Set(dedupedKept);
-    const dedupExcluded = new Set(
-      filtered.kept.filter((c) => !dedupKeptSet.has(c)),
-    );
-    const eligible = aggregator.acceptedComments.filter(
-      (c) => !dedupExcluded.has(c),
-    );
+    const dedupExcluded = new Set(filtered.kept.filter((c) => !dedupKeptSet.has(c)));
+    const eligible = aggregator.acceptedComments.filter((c) => !dedupExcluded.has(c));
     filtered = filterComments(eligible, caps);
     // One more dedup pass: the refill may have admitted AI comments that
     // overlap a kept scanner finding. Single iteration is enough in
@@ -667,7 +645,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     comments: filtered.kept,
   });
 
-  await logger.info(`Posted review ${posted.review_id} with ${posted.comment_count} inline comment(s).`);
+  await logger.info(
+    `Posted review ${posted.review_id} with ${posted.comment_count} inline comment(s).`,
+  );
 
   return {
     review_id: posted.review_id,
@@ -697,7 +677,9 @@ async function loadConfig(
       return loadConfigFromString(content);
     }
   } catch (err) {
-    await logger.debug(`Could not read ${input.config_path} from GitHub: ${(err as Error).message}`);
+    await logger.debug(
+      `Could not read ${input.config_path} from GitHub: ${(err as Error).message}`,
+    );
   }
 
   // Fallback: local file in workspace (useful for local testing)

@@ -141,9 +141,7 @@ export async function runPreflight(input: {
     throw err;
   }
 
-  const textBlock = response.content.find(
-    (b): b is Anthropic.TextBlock => b.type === 'text',
-  );
+  const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
   if (textBlock === undefined) {
     await logger.warn('Pre-flight returned no text block. Continuing without pre-analysis.');
     return null;
@@ -194,7 +192,12 @@ export async function runPreflight(input: {
  */
 export function renderPreflightSection(
   analysis: PreflightAnalysis,
-  changedFiles: ReadonlyArray<{ path: string; status: string; additions: number; deletions: number }>,
+  changedFiles: ReadonlyArray<{
+    path: string;
+    status: string;
+    additions: number;
+    deletions: number;
+  }>,
 ): string {
   const lines: string[] = [];
   lines.push('## Pre-analysis (advisory — verify independently before posting)');
@@ -236,7 +239,9 @@ export function renderPreflightSection(
   lines.push('');
 
   if (analysis.candidates.length === 0) {
-    lines.push('**No candidates flagged across any file.** Investigate the diff yourself — the pre-analysis may have missed everything.');
+    lines.push(
+      '**No candidates flagged across any file.** Investigate the diff yourself — the pre-analysis may have missed everything.',
+    );
   } else {
     lines.push(`### ${analysis.candidates.length} candidate(s) (advisory)`);
     lines.push('');

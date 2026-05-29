@@ -14,16 +14,14 @@ vi.mock('../../src/orchestrator.js', async (importActual) => {
   const actual = await importActual<typeof import('../../src/orchestrator.js')>();
   return {
     ...actual,
-    runOrchestrator: vi.fn(
-      async (input: Parameters<typeof actual.runOrchestrator>[0]) => {
-        if (orchestratorState.nextRejection !== null) {
-          const err = orchestratorState.nextRejection;
-          orchestratorState.nextRejection = null;
-          throw err;
-        }
-        return actual.runOrchestrator(input);
-      },
-    ),
+    runOrchestrator: vi.fn(async (input: Parameters<typeof actual.runOrchestrator>[0]) => {
+      if (orchestratorState.nextRejection !== null) {
+        const err = orchestratorState.nextRejection;
+        orchestratorState.nextRejection = null;
+        throw err;
+      }
+      return actual.runOrchestrator(input);
+    }),
   };
 });
 
@@ -49,9 +47,7 @@ afterEach(() => {
 
 const fakeCase: LoadedCase = {
   case_id: 'unit',
-  files: [
-    { path: 'src/auth.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
-  ],
+  files: [{ path: 'src/auth.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' }],
   // Empty before/ so the planted AWS key appears as an added line in the
   // synthesized diff (matches a "fresh plant" scenario in golden cases).
   beforeFiles: [{ path: 'src/auth.ts', content: '\n' }],
@@ -85,9 +81,9 @@ function summaryScript(): CompleteResponse[] {
           id: 't1',
           name: 'post_summary',
           arguments: {
-            strengths: [],
+            strengths: ['Clear separation of concerns in the auth module.'],
             assessment: 'comment',
-            assessment_reasoning: 'No AI findings in unit test',
+            assessment_reasoning: 'No AI findings in this unit-test scenario; observations only.',
           },
         },
       ],
@@ -459,12 +455,8 @@ describe('evalRun', () => {
     // patch entry and no findings.
     const unchangedCase: LoadedCase = {
       case_id: 'unit-unchanged',
-      files: [
-        { path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
-      ],
-      beforeFiles: [
-        { path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' },
-      ],
+      files: [{ path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' }],
+      beforeFiles: [{ path: 'src/foo.ts', content: 'const k = "AKIAIOSFODNN7EXAMPLE";\n' }],
       truths: [],
     };
     const result = await evalRun({
@@ -551,9 +543,7 @@ describe('synthesizeDiff', () => {
     // and after-only paths.
     const c: LoadedCase = {
       case_id: 'sort-test',
-      beforeFiles: [
-        { path: 'src/zzz.ts', content: '// existing\n' },
-      ],
+      beforeFiles: [{ path: 'src/zzz.ts', content: '// existing\n' }],
       files: [
         // Intentionally non-alphabetical order: 'zzz' (modified) listed first
         // in the case, then 'aaa-new' (new-only) — exercises the
@@ -564,10 +554,7 @@ describe('synthesizeDiff', () => {
       truths: [],
     };
     const { filesApi } = synthesizeDiff(c);
-    expect(filesApi.map((f) => f.filename)).toEqual([
-      'src/aaa-new.ts',
-      'src/zzz.ts',
-    ]);
+    expect(filesApi.map((f) => f.filename)).toEqual(['src/aaa-new.ts', 'src/zzz.ts']);
   });
 
   it('emits a valid unified-diff body for modified files', () => {

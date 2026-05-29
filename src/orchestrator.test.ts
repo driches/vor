@@ -674,16 +674,16 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
       ].join('\n'),
     );
 
-    // CRITICAL: do NOT supply `side` in the AI tool input. The post-inline-
-    // comment schema has `side: z.enum(['RIGHT','LEFT']).default('RIGHT')`,
-    // but the agent runner forwards raw args to the handler without running
-    // them through Zod, so the default never applies. Real agent runs that
-    // omit `side` (most of them — RIGHT is the universal default) end up
-    // with `side: undefined` on the in-memory PostedComment. The scanner
-    // adapter hard-codes `side: 'RIGHT'`. The dedup overlap check then sees
-    // `undefined !== 'RIGHT'` and fails to suppress the scanner. This test
-    // replays PR #12's smoke-test scenario verbatim and pins the expected
-    // dedup behavior. With the broken normalization it goes red.
+    // The AI tool input deliberately omits `side`. The post-inline-comment
+    // schema has `side: z.enum(['RIGHT','LEFT']).default('RIGHT')`, and the
+    // tool() helper now parses input through Zod before the handler runs, so
+    // the default fills in `side: 'RIGHT'` on the in-memory PostedComment.
+    // The scanner adapter also uses `side: 'RIGHT'`, so the dedup overlap
+    // check sees a match and suppresses the co-located scanner finding. This
+    // replays PR #12's smoke-test scenario and pins that dedup behavior —
+    // it historically regressed when an omitted `side` reached the handler as
+    // `undefined` (the schema default never applied) and `undefined !==
+    // 'RIGHT'` defeated the overlap check.
     agentScript.push({
       content: [
         {
@@ -752,9 +752,7 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
 
     // The scanner finding on line 11 must be suppressed by the co-located AI
     // security comment. Two comments survive — the two AI findings.
-    const scannerComments = call.comments.filter((c) =>
-      c.body.includes('via secrets scan'),
-    );
+    const scannerComments = call.comments.filter((c) => c.body.includes('via secrets scan'));
     expect(scannerComments).toHaveLength(0);
     expect(call.comments).toHaveLength(2);
     expect(call.comments.some((c) => c.body.includes('Hardcoded AWS access key ID'))).toBe(true);
@@ -890,7 +888,8 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
             side: 'RIGHT',
             category: 'security',
             title: 'Document credential origin',
-            why_it_matters: 'A brief note on where this credential should come from would help readers.',
+            why_it_matters:
+              'A brief note on where this credential should come from would help readers.',
             confidence: 'low',
           },
         },
@@ -901,7 +900,7 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
           input: {
             strengths: ['Clear and focused changes that are easy to follow.'],
             assessment: 'comment',
-            assessment_reasoning: 'A few observations.',
+            assessment_reasoning: 'A few non-blocking observations worth a look before merge.',
           },
         },
       ],
@@ -1047,7 +1046,8 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
             side: 'RIGHT',
             category: 'performance',
             title: 'Hot-path entry pass-through',
-            why_it_matters: 'This is the function entry; expensive work here ripples through every call.',
+            why_it_matters:
+              'This is the function entry; expensive work here ripples through every call.',
             suggestion: '+// Move expensive auth-module setup behind a lazy initializer',
             confidence: 'medium',
           },
@@ -1111,7 +1111,8 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
             side: 'RIGHT',
             category: 'security',
             title: 'Document credential origin',
-            why_it_matters: 'A brief note on where this credential should come from would help future readers audit the flow.',
+            why_it_matters:
+              'A brief note on where this credential should come from would help future readers audit the flow.',
             suggestion: '+// Source the credential from process.env.AWS_KEY',
             confidence: 'low',
           },
@@ -1123,7 +1124,7 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
           input: {
             strengths: ['Clear and focused changes that are easy to follow.'],
             assessment: 'comment',
-            assessment_reasoning: 'A few observations.',
+            assessment_reasoning: 'A few non-blocking observations worth a look before merge.',
           },
         },
       ],
@@ -1531,9 +1532,7 @@ describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner si
       '+    },',
     ].join('\n');
     octokitState.diff = `${lockDiff}\n`;
-    octokitState.filesApi = [
-      { filename: 'package-lock.json', changes: 3, patch: lockDiff },
-    ];
+    octokitState.filesApi = [{ filename: 'package-lock.json', changes: 3, patch: lockDiff }];
     octokitState.contents.set(
       'package-lock.json',
       [
@@ -1581,11 +1580,7 @@ describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner si
           resolve();
           return;
         }
-        capturedSignal?.addEventListener(
-          'abort',
-          () => resolve(),
-          { once: true },
-        );
+        capturedSignal?.addEventListener('abort', () => resolve(), { once: true });
       });
       return { results: [{}] };
     });
@@ -1679,9 +1674,7 @@ describe('runOrchestrator — Scenario 6: fork-safety on missing Anthropic key',
     // No config file → loader returns DEFAULT_CONFIG → model claude-sonnet-4-6
     // → inferProviderFromModel('claude-sonnet-4-6') → 'anthropic'.
 
-    const result = await runOrchestrator(
-      baseInput({ anthropic_api_key: '', openai_api_key: '' }),
-    );
+    const result = await runOrchestrator(baseInput({ anthropic_api_key: '', openai_api_key: '' }));
 
     expect(result.ended).toBe('skipped_no_key_anthropic');
     expect(result.comment_count).toBe(0);
@@ -1706,11 +1699,7 @@ describe('runOrchestrator — Scenario 7: fork-safety on missing OpenAI key', ()
     octokitState.filesApi = base.filesApi;
     octokitState.contents.set(
       '.vor.yml',
-      [
-        'model: gpt-4.1',
-        'security:',
-        '  enabled: false',
-      ].join('\n'),
+      ['model: gpt-4.1', 'security:', '  enabled: false'].join('\n'),
     );
 
     const result = await runOrchestrator(

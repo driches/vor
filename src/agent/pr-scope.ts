@@ -49,11 +49,12 @@ export function scopePrContextForAgent(
 
 export function buildAgentScopeNotice(unreviewedPaths: readonly string[]): string {
   if (unreviewedPaths.length === 0) return '';
-  const shown = unreviewedPaths.slice(0, 30).map((p) => `- ${p}`).join('\n');
+  const shown = unreviewedPaths
+    .slice(0, 30)
+    .map((p) => `- ${p}`)
+    .join('\n');
   const extra =
-    unreviewedPaths.length > 30
-      ? `\n- ...and ${unreviewedPaths.length - 30} more path(s)`
-      : '';
+    unreviewedPaths.length > 30 ? `\n- ...and ${unreviewedPaths.length - 30} more path(s)` : '';
   return [
     '## Agent scope',
     '',

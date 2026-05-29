@@ -58,39 +58,38 @@ export class OpenAIProvider implements LLMProvider {
 
     const capabilities = openaiCapabilitiesForModel(opts.model);
     const promptCacheRetention = opts.openai?.prompt_cache_retention;
-    const requestBody: OpenAI.Responses.ResponseCreateParamsNonStreaming & Record<string, unknown> = {
-      model: opts.model,
-      input,
-      instructions: opts.system,
-      tools: responsesTools,
-      max_output_tokens: opts.maxOutputTokens,
-      // Stateless: never let OpenAI persist the turn. We round-trip the
-      // entire conversation ourselves (see provider_state replay in the
-      // module JSDoc).
-      store: false,
-      // For o-series, ask for the encrypted reasoning items so we can replay
-      // them next turn without retention. No-op on non-reasoning models, but
-      // gpt-* will 400 if you pass an unsupported `include` value, hence the
-      // conditional.
-      ...(capabilities.reasoning ? { include: ['reasoning.encrypted_content' as const] } : {}),
-      // Reasoning models reject the `temperature` parameter. Only send it
-      // for models whose capability row says it is supported.
-      ...(supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}),
-      ...(opts.openai?.service_tier ? { service_tier: opts.openai.service_tier } : {}),
-      ...(opts.openai?.prompt_cache_key
-        ? { prompt_cache_key: opts.openai.prompt_cache_key }
-        : {}),
-      ...(promptCacheRetention &&
-      (promptCacheRetention !== '24h' || capabilities.promptCacheRetention24h)
-        ? { prompt_cache_retention: promptCacheRetention }
-        : {}),
-      ...(opts.openai?.reasoning_effort && capabilities.reasoning
-        ? { reasoning: { effort: opts.openai.reasoning_effort } }
-        : {}),
-      ...(opts.openai?.text_verbosity
-        ? { text: { verbosity: opts.openai.text_verbosity } }
-        : {}),
-    };
+    const requestBody: OpenAI.Responses.ResponseCreateParamsNonStreaming & Record<string, unknown> =
+      {
+        model: opts.model,
+        input,
+        instructions: opts.system,
+        tools: responsesTools,
+        max_output_tokens: opts.maxOutputTokens,
+        // Stateless: never let OpenAI persist the turn. We round-trip the
+        // entire conversation ourselves (see provider_state replay in the
+        // module JSDoc).
+        store: false,
+        // For o-series, ask for the encrypted reasoning items so we can replay
+        // them next turn without retention. No-op on non-reasoning models, but
+        // gpt-* will 400 if you pass an unsupported `include` value, hence the
+        // conditional.
+        ...(capabilities.reasoning ? { include: ['reasoning.encrypted_content' as const] } : {}),
+        // Reasoning models reject the `temperature` parameter. Only send it
+        // for models whose capability row says it is supported.
+        ...(supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}),
+        ...(opts.openai?.service_tier ? { service_tier: opts.openai.service_tier } : {}),
+        ...(opts.openai?.prompt_cache_key
+          ? { prompt_cache_key: opts.openai.prompt_cache_key }
+          : {}),
+        ...(promptCacheRetention &&
+        (promptCacheRetention !== '24h' || capabilities.promptCacheRetention24h)
+          ? { prompt_cache_retention: promptCacheRetention }
+          : {}),
+        ...(opts.openai?.reasoning_effort && capabilities.reasoning
+          ? { reasoning: { effort: opts.openai.reasoning_effort } }
+          : {}),
+        ...(opts.openai?.text_verbosity ? { text: { verbosity: opts.openai.text_verbosity } } : {}),
+      };
 
     const response = await this.client.responses.create(
       requestBody as OpenAI.Responses.ResponseCreateParamsNonStreaming,
@@ -229,10 +228,7 @@ export function canonicalMessagesToResponsesInput(
       // stashing a non-OpenAI payload into provider_state — without it we'd
       // forward those items as Responses API input and 400 (or worse, corrupt
       // the turn silently).
-      if (
-        Array.isArray(msg.provider_state) &&
-        isOpenAIResponseOutput(msg.provider_state)
-      ) {
+      if (Array.isArray(msg.provider_state) && isOpenAIResponseOutput(msg.provider_state)) {
         for (const item of msg.provider_state as OpenAI.Responses.ResponseInputItem[]) {
           out.push(item);
         }
@@ -286,9 +282,7 @@ export function canonicalMessagesToResponsesInput(
  * tool schema — there's no operator surface for cache_control here (and no
  * Anthropic-style 4-breakpoint budget to manage).
  */
-export function canonicalToolsToResponses(
-  tools: CanonicalTool[],
-): OpenAI.Responses.FunctionTool[] {
+export function canonicalToolsToResponses(tools: CanonicalTool[]): OpenAI.Responses.FunctionTool[] {
   return tools.map((t) => ({
     type: 'function' as const,
     name: t.name,
@@ -440,14 +434,10 @@ export function responsesResponseToCanonical(
     // into `max_turns`. Codex P1 #3303141995.
     const errMsg = response.error?.message ?? 'unknown error';
     const errCode = response.error?.code ? ` (code: ${response.error.code})` : '';
-    throw new Error(
-      `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`,
-    );
+    throw new Error(`OpenAI Responses API returned status=failed${errCode}: ${errMsg}`);
   } else if (response.status === 'incomplete') {
     stop_reason =
-      response.incomplete_details?.reason === 'max_output_tokens'
-        ? 'max_tokens'
-        : 'other';
+      response.incomplete_details?.reason === 'max_output_tokens' ? 'max_tokens' : 'other';
   } else if (tool_calls.length > 0) {
     stop_reason = 'tool_calls';
   } else if (refused) {

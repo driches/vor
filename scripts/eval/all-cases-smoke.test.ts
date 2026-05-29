@@ -16,14 +16,7 @@
  * subset of cases.
  */
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import {
-  mkdtempSync,
-  cpSync,
-  rmSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-} from 'node:fs';
+import { mkdtempSync, cpSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';

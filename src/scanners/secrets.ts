@@ -50,6 +50,7 @@ import type {
   ScanEvidence,
   ScannerMetrics,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 import {
   DEFAULT_SECRET_PATTERNS,
@@ -236,9 +237,7 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {
                   if (match.expired) {
-                    void log.notice(
-                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-                    );
+                    void log.notice(expiredIgnoreNotice('secrets', finding, match));
                   }
                   // Advance past zero-width matches before the next iteration.
                   if (m.index === pattern.pattern.lastIndex) {
@@ -318,9 +317,7 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
  * input order so the runner's deterministic ordering is unchanged.
  */
 const PEM_AWS_DEDUP_WINDOW = 20;
-function suppressAwsBodyOverlapsWithPem(
-  findings: readonly ScanFinding[],
-): ScanFinding[] {
+function suppressAwsBodyOverlapsWithPem(findings: readonly ScanFinding[]): ScanFinding[] {
   // Bucket PEM headers by file once so the AWS filter is O(N*K) per file
   // (K = PEM headers in that file, typically 0 or 1) instead of O(N²) overall.
   const pemLinesByFile = new Map<string, number[]>();
@@ -342,11 +339,7 @@ function suppressAwsBodyOverlapsWithPem(
   });
 }
 
-function buildMetrics(
-  started: number,
-  files_examined: number,
-  cache_hits: number,
-): ScannerMetrics {
+function buildMetrics(started: number, files_examined: number, cache_hits: number): ScannerMetrics {
   return {
     duration_ms: Date.now() - started,
     files_examined,

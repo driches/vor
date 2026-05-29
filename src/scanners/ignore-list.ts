@@ -20,11 +20,7 @@ import { canonicalizePackageName } from './canonicalize.js';
 import type { FileReader } from '../github/file-reader.js';
 import { GitHubApiError } from '../util/errors.js';
 import { logger } from '../util/logger.js';
-import type {
-  IgnoreList as IgnoreListContract,
-  IgnoreMatchResult,
-  ScanFinding,
-} from './types.js';
+import type { IgnoreList as IgnoreListContract, IgnoreMatchResult, ScanFinding } from './types.js';
 
 /**
  * ISO date for the `expires` field. Accepts:
@@ -185,20 +181,14 @@ export class IgnoreList implements IgnoreListContract {
     }
 
     if (parsed == null || typeof parsed !== 'object') {
-      void logger.warn(
-        `Ignore file ${args.path} did not parse to an object. Treating as empty.`,
-      );
+      void logger.warn(`Ignore file ${args.path} did not parse to an object. Treating as empty.`);
       return IgnoreList.empty();
     }
 
     const result = ignoreFileSchema.safeParse(parsed);
     if (!result.success) {
-      const detail = result.error.issues
-        .map((i) => `${i.path.join('.')}: ${i.message}`)
-        .join('; ');
-      void logger.warn(
-        `Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`,
-      );
+      const detail = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      void logger.warn(`Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`);
       return IgnoreList.empty();
     }
 
@@ -224,14 +214,10 @@ export class IgnoreList implements IgnoreListContract {
  */
 function entryMatches(entry: IgnoreEntry, finding: ScanFinding): boolean {
   if (isGhsaEntry(entry)) {
-    return (
-      finding.evidence.kind === 'cve' && finding.evidence.ghsa_id === entry.ghsa_id
-    );
+    return finding.evidence.kind === 'cve' && finding.evidence.ghsa_id === entry.ghsa_id;
   }
   if (isCveEntry(entry)) {
-    return (
-      finding.evidence.kind === 'cve' && finding.evidence.cve_id === entry.cve_id
-    );
+    return finding.evidence.kind === 'cve' && finding.evidence.cve_id === entry.cve_id;
   }
   if (isPackageEntry(entry)) {
     if (finding.evidence.kind !== 'cve') return false;
@@ -309,6 +295,26 @@ function packageInRange(version: string, range: string, ecosystem: string): bool
     return version.trim() === range.trim();
   }
   return false;
+}
+
+/**
+ * Notice emitted when a finding is suppressed by an ignore entry whose
+ * `expires` date has passed. The finding stays suppressed (we don't want a
+ * stale date to suddenly surface a wall of old findings), but the author is
+ * told the entry needs a refresh. Centralized so the wording stays identical
+ * across every scanner that honors the ignore list — `scanner` is the prefix
+ * each one passes (its own name / label).
+ */
+export function expiredIgnoreNotice(
+  scanner: string,
+  finding: Pick<ScanFinding, 'rule_id' | 'file_path' | 'line'>,
+  match: Pick<IgnoreMatchResult, 'reason'>,
+): string {
+  return (
+    `${scanner}: ignore entry for ${finding.rule_id} ` +
+    `(${finding.file_path}:${finding.line}) is expired; finding still ` +
+    `suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`
+  );
 }
 
 /**

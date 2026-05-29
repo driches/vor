@@ -37,10 +37,9 @@ describe('missingNullCheckTemplate', () => {
 
   it('throws when `file` is missing or empty', () => {
     expect(() =>
-      missingNullCheckTemplate.apply(
-        '// PLANT_ANCHOR: missing-null-check\n',
-        { type: 'missing-null-check' } as unknown as PlantConfig,
-      ),
+      missingNullCheckTemplate.apply('// PLANT_ANCHOR: missing-null-check\n', {
+        type: 'missing-null-check',
+      } as unknown as PlantConfig),
     ).toThrow(/missing or empty 'file'/);
   });
 });

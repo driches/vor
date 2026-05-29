@@ -49,9 +49,7 @@ interface DartFinding {
 export const dartLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSION.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSION.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -126,12 +124,9 @@ export function parseDartLine(line: string): DartFinding | null {
   if (line.trim().length === 0) return null;
   const parts = line.split('|');
   if (parts.length < 8) return null;
-  const [severity, type, ruleName, filePath, lineStr, columnStr, lengthStr, ...messageParts] = parts;
-  if (
-    severity !== 'ERROR' &&
-    severity !== 'WARNING' &&
-    severity !== 'INFO'
-  ) {
+  const [severity, type, ruleName, filePath, lineStr, columnStr, lengthStr, ...messageParts] =
+    parts;
+  if (severity !== 'ERROR' && severity !== 'WARNING' && severity !== 'INFO') {
     return null;
   }
   const lineNum = Number.parseInt(lineStr ?? '', 10);
@@ -153,14 +148,10 @@ export function parseDartLine(line: string): DartFinding | null {
 
 function runCli(files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      'dart',
-      ['analyze', '--format=machine', ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv(),
-      },
-    );
+    const child = spawn('dart', ['analyze', '--format=machine', ...files], {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv(),
+    });
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];

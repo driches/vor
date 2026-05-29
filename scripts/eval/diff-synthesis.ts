@@ -38,9 +38,7 @@ export function synthesizeDiff(c: LoadedCase): SynthesizedDiff {
   // Sort merged paths so the synthesized diff is fully lexicographic. Set
   // preserves insertion order; we sort to keep ordering deterministic across
   // before/after splits.
-  const allPaths = [
-    ...new Set<string>([...beforeByPath.keys(), ...afterByPath.keys()]),
-  ].sort();
+  const allPaths = [...new Set<string>([...beforeByPath.keys(), ...afterByPath.keys()])].sort();
   const chunks: string[] = [];
   const filesApi: SynthesizedFileEntry[] = [];
   for (const path of allPaths) {
@@ -79,10 +77,7 @@ function splitBodyLines(content: string): string[] {
   return lines;
 }
 
-function renderNewFile(
-  path: string,
-  content: string,
-): { diff: string; addedLines: number } | null {
+function renderNewFile(path: string, content: string): { diff: string; addedLines: number } | null {
   const lines = splitBodyLines(content);
   if (lines.length === 0) return null;
   const out: string[] = [];

@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveCaseDir } from './case-paths.js';
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, sep, join } from 'node:path';
 
@@ -17,9 +11,7 @@ describe('resolveCaseDir', () => {
   });
 
   it('rejects path traversal via "../"', () => {
-    expect(() => resolveCaseDir('/tmp/golden', '../escape')).toThrow(
-      /resolves outside cases root/,
-    );
+    expect(() => resolveCaseDir('/tmp/golden', '../escape')).toThrow(/resolves outside cases root/);
   });
 
   it('rejects deep path traversal via "../../"', () => {
@@ -32,15 +24,11 @@ describe('resolveCaseDir', () => {
   it('rejects an empty case id (resolves to cases root itself)', () => {
     // `resolve('/tmp/golden/cases', '')` === '/tmp/golden/cases', which would
     // make `runPlants` operate on the parent of every real case. Reject.
-    expect(() => resolveCaseDir('/tmp/golden', '')).toThrow(
-      /must name a specific case directory/,
-    );
+    expect(() => resolveCaseDir('/tmp/golden', '')).toThrow(/must name a specific case directory/);
   });
 
   it('rejects a case id that points exactly at the cases root via "."', () => {
-    expect(() => resolveCaseDir('/tmp/golden', '.')).toThrow(
-      /must name a specific case directory/,
-    );
+    expect(() => resolveCaseDir('/tmp/golden', '.')).toThrow(/must name a specific case directory/);
   });
 
   it('allows nested case ids (e.g. "group/case-1")', () => {
@@ -66,9 +54,7 @@ describe('resolveCaseDir', () => {
       writeFileSync(join(outsideTarget, 'sentinel.txt'), 'do not delete\n');
       // Create the malicious symlink: cases/evil -> /tmp/.../outside
       symlinkSync(outsideTarget, join(goldenRepo, 'cases', 'evil'));
-      expect(() => resolveCaseDir(goldenRepo, 'evil')).toThrow(
-        /symlink.*outside cases root/,
-      );
+      expect(() => resolveCaseDir(goldenRepo, 'evil')).toThrow(/symlink.*outside cases root/);
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }

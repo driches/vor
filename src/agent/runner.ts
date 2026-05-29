@@ -240,9 +240,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       });
       if (analysis !== null) {
         userPrompt =
-          renderPreflightSection(analysis, input.deps.prContext.files) +
-          '\n\n' +
-          userPrompt;
+          renderPreflightSection(analysis, input.deps.prContext.files) + '\n\n' + userPrompt;
       }
     } catch (err) {
       if (err instanceof BudgetError) {
@@ -260,9 +258,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  const messages: CanonicalMessage[] = [
-    { role: 'user', content: userPrompt },
-  ];
+  const messages: CanonicalMessage[] = [{ role: 'user', content: userPrompt }];
 
   try {
     if (preflightBudgetExceeded) {
@@ -519,11 +515,14 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
       name: mcp.name,
       description: mcp.description,
       input_schema: inputSchema,
+      // `mcp.handler` parses `args` through the tool's Zod schema (defaults +
+      // validation) before its own logic runs — see `tool()` in
+      // src/tools/tool-helper.ts. A schema-invalid call throws here and is
+      // surfaced to the model as an is_error tool result by the loop above.
       handler: async (args: Record<string, unknown>): Promise<string> => {
-        const result = await (mcp.handler as (a: unknown, e: unknown) => Promise<unknown>)(args, undefined);
-        const content = (result as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
-        return content
-          .map((b) => (b.type === 'text' ? b.text ?? '' : JSON.stringify(b)))
+        const result = await mcp.handler(args, undefined);
+        return result.content
+          .map((b) => (b.type === 'text' ? b.text : JSON.stringify(b)))
           .join('\n');
       },
     };

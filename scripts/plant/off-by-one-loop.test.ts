@@ -40,10 +40,9 @@ describe('offByOneLoopTemplate', () => {
 
   it('throws when `file` is missing or empty', () => {
     expect(() =>
-      offByOneLoopTemplate.apply(
-        '// PLANT_ANCHOR: off-by-one-loop\n',
-        { type: 'off-by-one-loop' } as unknown as PlantConfig,
-      ),
+      offByOneLoopTemplate.apply('// PLANT_ANCHOR: off-by-one-loop\n', {
+        type: 'off-by-one-loop',
+      } as unknown as PlantConfig),
     ).toThrow(/missing or empty 'file'/);
   });
 });

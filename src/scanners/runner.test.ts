@@ -16,13 +16,7 @@ import type { SecurityConfig } from '../config/types.js';
 import { InMemoryScanCache } from './cache.js';
 import { runScanners, type Logger } from './runner.js';
 import { emptyResult } from './types.js';
-import type {
-  IgnoreList,
-  ScanFinding,
-  ScanResult,
-  Scanner,
-  ScannerDeps,
-} from './types.js';
+import type { IgnoreList, ScanFinding, ScanResult, Scanner, ScannerDeps } from './types.js';
 import type { ScannerId } from '../types.js';
 
 // -----------------------------------------------------------------
@@ -269,11 +263,9 @@ describe('runScanners — timeout', () => {
           capturedSignal = deps.signal;
           // Resolve normally if no abort — but the test's tiny timeout
           // ensures abort fires first.
-          deps.signal.addEventListener(
-            'abort',
-            () => resolve(emptyResult('dependency-cve')),
-            { once: true },
-          );
+          deps.signal.addEventListener('abort', () => resolve(emptyResult('dependency-cve')), {
+            once: true,
+          });
         }),
     });
 
@@ -383,9 +375,7 @@ describe('runScanners — cross-scanner dedup', () => {
       id: 'secrets',
       scan: async () => ({
         ...emptyResult('secrets'),
-        findings: [
-          makeFinding({ scanner: 'secrets', fingerprint: 'dup', confidence: 'high' }),
-        ],
+        findings: [makeFinding({ scanner: 'secrets', fingerprint: 'dup', confidence: 'high' })],
       }),
     });
 

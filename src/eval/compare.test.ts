@@ -273,12 +273,12 @@ index 1..2 100644
   it('computes severity_deltas histogram for matched pairs', () => {
     const r = compare({
       ours: [
-        f('ours', 'src/foo.ts', 12, 'minor'),       // hunk 0
-        f('ours', 'src/foo.ts', 53, 'important'),   // hunk 1
+        f('ours', 'src/foo.ts', 12, 'minor'), // hunk 0
+        f('ours', 'src/foo.ts', 53, 'important'), // hunk 1
       ],
       codex: [
-        f('codex', 'src/foo.ts', 12, 'critical'),   // delta = +2 vs minor
-        f('codex', 'src/foo.ts', 53, 'important'),  // delta = 0
+        f('codex', 'src/foo.ts', 12, 'critical'), // delta = +2 vs minor
+        f('codex', 'src/foo.ts', 53, 'important'), // delta = 0
       ],
       diff: DIFF_TWO_HUNKS,
     });

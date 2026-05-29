@@ -123,7 +123,11 @@ interface AggregateTotals {
   matched: number;
   agreement_rate: number;
   severity_deltas: Record<string, number>;
-  category_co_occurrence: Array<{ ours: Category | 'unknown'; codex: Category | 'unknown'; count: number }>;
+  category_co_occurrence: Array<{
+    ours: Category | 'unknown';
+    codex: Category | 'unknown';
+    count: number;
+  }>;
 }
 
 function aggregate(cases: readonly CaseReport[]): AggregateTotals {
@@ -131,7 +135,10 @@ function aggregate(cases: readonly CaseReport[]): AggregateTotals {
   let codex = 0;
   let matched = 0;
   const deltas: Record<string, number> = {};
-  const co = new Map<string, { ours: Category | 'unknown'; codex: Category | 'unknown'; count: number }>();
+  const co = new Map<
+    string,
+    { ours: Category | 'unknown'; codex: Category | 'unknown'; count: number }
+  >();
   for (const c of cases) {
     ours += c.result.totals.ours;
     codex += c.result.totals.codex;

@@ -33,6 +33,7 @@ import type {
   ScanError,
   ScannerMetrics,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 import type { Category, ChangedFile, Confidence, ScannerId, Severity } from '../types.js';
 
 const SCANNER_ID: ScannerId = 'debris';
@@ -240,9 +241,7 @@ export function createDebrisScanner(options: DebrisScannerOptions = {}): Scanner
                 if (!match.ignored) {
                   findings.push(finding);
                 } else if (match.expired) {
-                  void log.notice(
-                    `debris: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-                  );
+                  void log.notice(expiredIgnoreNotice('debris', finding, match));
                 }
 
                 // Guard against zero-width matches (none of the default rules

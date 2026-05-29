@@ -33,9 +33,7 @@ export const vulnDepPypiTemplate: PlantTemplate = {
   apply(source, config) {
     const fileStr = String(config.file ?? '');
     if (fileStr !== 'requirements.txt' && !fileStr.endsWith('/requirements.txt')) {
-      throw new Error(
-        `vuln-dep:pypi only applies to requirements.txt, got ${fileStr}`,
-      );
+      throw new Error(`vuln-dep:pypi only applies to requirements.txt, got ${fileStr}`);
     }
     const pkg = typeof config.package === 'string' ? config.package : '';
     const ver = typeof config.version === 'string' ? config.version : '';

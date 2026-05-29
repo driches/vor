@@ -128,7 +128,9 @@ describe('postReview', () => {
     const octokit = {
       rest: {
         pulls: {
-          createReview: vi.fn().mockRejectedValue(Object.assign(new Error('boom'), { status: 422 })),
+          createReview: vi
+            .fn()
+            .mockRejectedValue(Object.assign(new Error('boom'), { status: 422 })),
         },
       },
     };

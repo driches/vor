@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FileReader } from './file-reader.js';
 
-function mockOctokitGetContent(
-  byPath: Record<string, string | null>,
-): {
+function mockOctokitGetContent(byPath: Record<string, string | null>): {
   rest: { repos: { getContent: ReturnType<typeof vi.fn> } };
 } {
   return {

@@ -28,9 +28,7 @@ export const awsAccessKeyTemplate: PlantTemplate = {
     const line = typeof config.line === 'number' ? config.line : NaN;
     const lines = source.split('\n');
     if (!Number.isInteger(line) || line < 1 || line > lines.length + 1) {
-      throw new Error(
-        `aws-access-key: line ${line} is outside the file (1..${lines.length + 1})`,
-      );
+      throw new Error(`aws-access-key: line ${line} is outside the file (1..${lines.length + 1})`);
     }
     const insertion = `const PLANTED_AWS_KEY = "${value}";`;
     // Insert at (line-1) → the new content sits AT `line`.

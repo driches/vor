@@ -16,44 +16,117 @@ export const base = import.meta.env.BASE_URL;
 <div class="ccr-landing">
 
 <section class="ccr-hero">
-  <img class="ccr-hero__mark" src={`${base}icon.svg`} alt="" aria-hidden="true" width="96" height="96" />
-  <h1>AI code review, <span class="ccr-grad">anchored to real lines</span></h1>
+  <img
+    class="ccr-hero__mark"
+    src={`${base}icon.svg`}
+    alt=""
+    aria-hidden="true"
+    width="96"
+    height="96"
+  />
+  <h1>
+    AI code review, <span class="ccr-grad">anchored to real lines</span>
+  </h1>
   <p class="ccr-tagline">
     A provider-agnostic GitHub Action — Claude or OpenAI — that posts inline review comments with
     one-click suggestions, and runs CVE and secret scanning in parallel, all in a single PR review.
   </p>
   <div class="ccr-actions">
-    <a class="ccr-btn ccr-btn--primary" href={`${base}overview/#quick-start`}>Get started →</a>
-    <a class="ccr-btn ccr-btn--ghost" href="https://github.com/driches/vor">View on GitHub</a>
+    <a class="ccr-btn ccr-btn--primary" href={`${base}overview/#quick-start`}>
+      Get started →
+    </a>
+    <a class="ccr-btn ccr-btn--ghost" href="https://github.com/driches/vor">
+      View on GitHub
+    </a>
   </div>
   <div class="ccr-trust">
-    <a href="https://github.com/driches/vor/actions/workflows/ci.yml"><img src="https://github.com/driches/vor/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
-    <a href="https://github.com/driches/vor/releases"><img src="https://img.shields.io/github/v/release/driches/vor?include_prereleases&label=release" alt="Latest release" /></a>
-    <a href="https://github.com/marketplace/actions/vor"><img src="https://img.shields.io/badge/Marketplace-GitHub%20Action-2088FF?logo=github" alt="GitHub Marketplace" /></a>
-    <a href="https://github.com/driches/vor/blob/main/LICENSE"><img src="https://img.shields.io/github/license/driches/vor" alt="MIT License" /></a>
+    <a href="https://github.com/driches/vor/actions/workflows/ci.yml">
+      <img
+        src="https://github.com/driches/vor/actions/workflows/ci.yml/badge.svg"
+        alt="CI status"
+      />
+    </a>
+    <a href="https://github.com/driches/vor/releases">
+      <img
+        src="https://img.shields.io/github/v/release/driches/vor?include_prereleases&label=release"
+        alt="Latest release"
+      />
+    </a>
+    <a href="https://github.com/marketplace/actions/vor">
+      <img
+        src="https://img.shields.io/badge/Marketplace-GitHub%20Action-2088FF?logo=github"
+        alt="GitHub Marketplace"
+      />
+    </a>
+    <a href="https://github.com/driches/vor/blob/main/LICENSE">
+      <img src="https://img.shields.io/github/license/driches/vor" alt="MIT License" />
+    </a>
   </div>
 </section>
 
 <section class="ccr-section">
   <h2 class="ccr-h2">Everything in one review</h2>
-  <p class="ccr-sub">An AI reviewer plus deterministic scanners, sharing the same severity pipeline and posting once.</p>
+  <p class="ccr-sub">
+    An AI reviewer plus deterministic scanners, sharing the same severity pipeline and posting once.
+  </p>
   <FeatureGrid />
 </section>
 
 <section class="ccr-section">
   <h2 class="ccr-h2">Works with your stack</h2>
-  <p class="ccr-sub">The AI review reads <strong>any language</strong> — no per-language setup. Deterministic scanners add zero-token depth wherever your toolchain runs.</p>
+  <p class="ccr-sub">
+    The AI review reads <strong>any language</strong> — no per-language setup. Deterministic
+    scanners add zero-token depth wherever your toolchain runs.
+  </p>
   <div class="ccr-langs">
-    <div class="ccr-lang"><h3>Any language</h3><p>The agent reasons over any diff the model understands — no language list to maintain.</p></div>
-    <div class="ccr-lang"><h3>JavaScript &amp; TypeScript</h3><p>Your repo's ESLint, <code>tsc --noEmit</code>, and knip, surfaced inline.</p></div>
-    <div class="ccr-lang"><h3>Python</h3><p>Ruff, run against the <code>.py</code> files your PR changes.</p></div>
-    <div class="ccr-lang"><h3>Dart</h3><p><code>dart analyze</code> on changed <code>.dart</code> files.</p></div>
-    <div class="ccr-lang"><h3>GitHub Actions</h3><p>actionlint flags workflow and shell mistakes in your CI.</p></div>
-    <div class="ccr-lang"><h3>Custom rules</h3><p>Bring your own Semgrep ruleset under <code>.vor/semgrep-rules</code> (opt-in).</p></div>
-    <div class="ccr-lang"><h3>Dependency CVEs</h3><p>npm (<code>package-lock</code>, <code>yarn</code>, <code>pnpm</code>) and PyPI (<code>requirements.txt</code>) via OSV.dev.</p></div>
-    <div class="ccr-lang"><h3>Secrets</h3><p>~14 credential patterns — any language, any file.</p></div>
+    <div class="ccr-lang">
+      <h3>Any language</h3>
+      <p>The agent reasons over any diff the model understands — no language list to maintain.</p>
+    </div>
+    <div class="ccr-lang">
+      <h3>JavaScript &amp; TypeScript</h3>
+      <p>
+        Your repo's ESLint, <code>tsc --noEmit</code>, and knip, surfaced inline.
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Python</h3>
+      <p>
+        Ruff, run against the <code>.py</code> files your PR changes.
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Dart</h3>
+      <p>
+        <code>dart analyze</code> on changed <code>.dart</code> files.
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>GitHub Actions</h3>
+      <p>actionlint flags workflow and shell mistakes in your CI.</p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Custom rules</h3>
+      <p>
+        Bring your own Semgrep ruleset under <code>.vor/semgrep-rules</code> (opt-in).
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Dependency CVEs</h3>
+      <p>
+        npm (<code>package-lock</code>, <code>yarn</code>, <code>pnpm</code>) and PyPI (
+        <code>requirements.txt</code>) via OSV.dev.
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Secrets</h3>
+      <p>~14 credential patterns — any language, any file.</p>
+    </div>
   </div>
-  <p class="ccr-step">Linters run only when the tool is available in your repo, so they stay silent on stacks they don't apply to.</p>
+  <p class="ccr-step">
+    Linters run only when the tool is available in your repo, so they stay silent on stacks they
+    don't apply to.
+  </p>
 </section>
 
 <section class="ccr-section">
@@ -90,7 +163,9 @@ jobs:
 
 <section class="ccr-section">
   <h2 class="ccr-h2">What a review looks like</h2>
-  <p class="ccr-sub">Findings land on the exact line, tagged by severity, with concrete suggestions and provenance.</p>
+  <p class="ccr-sub">
+    Findings land on the exact line, tagged by severity, with concrete suggestions and provenance.
+  </p>
   <ReviewMockup />
 </section>
 
@@ -99,15 +174,24 @@ jobs:
   <div class="ccr-why">
     <div class="ccr-why__card">
       <h3>Output is actionable, not prose</h3>
-      <p>The agent has no free-text output channel. Findings can only surface through the validated <code>post_inline_comment</code> tool.</p>
+      <p>
+        The agent has no free-text output channel. Findings can only surface through the validated{' '}
+        <code>post_inline_comment</code> tool.
+      </p>
     </div>
     <div class="ccr-why__card">
       <h3>Comments land inline</h3>
-      <p>Reviews post via <code>pulls.createReview</code> with a structured <code>comments[]</code> array — path, line, side, and suggestion blocks.</p>
+      <p>
+        Reviews post via <code>pulls.createReview</code> with a structured <code>comments[]</code>{' '}
+        array — path, line, side, and suggestion blocks.
+      </p>
     </div>
     <div class="ccr-why__card">
       <h3>No hallucinated lines</h3>
-      <p>The validator rejects any line outside the real diff and returns the valid ranges as a hint, so the agent self-corrects.</p>
+      <p>
+        The validator rejects any line outside the real diff and returns the valid ranges as a hint,
+        so the agent self-corrects.
+      </p>
     </div>
   </div>
 </section>
@@ -115,10 +199,17 @@ jobs:
 <section class="ccr-section">
   <div class="ccr-cta">
     <h2>Add it to your repo</h2>
-    <p>Free, MIT-licensed, and runs on your own API key. Manual-trigger by default — no surprise token spend.</p>
+    <p>
+      Free, MIT-licensed, and runs on your own API key. Manual-trigger by default — no surprise
+      token spend.
+    </p>
     <div class="ccr-actions">
-      <a class="ccr-btn ccr-btn--primary" href="https://github.com/marketplace/actions/vor">Get it on the Marketplace</a>
-      <a class="ccr-btn ccr-btn--ghost" href={`${base}overview/`}>Read the docs</a>
+      <a class="ccr-btn ccr-btn--primary" href="https://github.com/marketplace/actions/vor">
+        Get it on the Marketplace
+      </a>
+      <a class="ccr-btn ccr-btn--ghost" href={`${base}overview/`}>
+        Read the docs
+      </a>
     </div>
   </div>
 </section>

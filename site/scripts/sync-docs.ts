@@ -122,7 +122,10 @@ function rewriteLinks(md: string): string {
   });
 
   // 3. Asset references in raw HTML (<img src>, <source srcset>) and markdown images.
-  out = out.replace(/(src|srcset)="(?:\.\/)?assets\/([^"]+)"/g, (_m, attr, file) => `${attr}="${BASE}/${file}"`);
+  out = out.replace(
+    /(src|srcset)="(?:\.\/)?assets\/([^"]+)"/g,
+    (_m, attr, file) => `${attr}="${BASE}/${file}"`,
+  );
   out = out.replace(/\]\((?:\.\/)?assets\/([^)\s]+)\)/g, (_m, file) => `](${BASE}/${file})`);
 
   // 4. Relative href="" in raw HTML (e.g. the README's <a href="LICENSE">) → GitHub blob.

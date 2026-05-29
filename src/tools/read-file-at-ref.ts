@@ -31,7 +31,8 @@ export function makeReadFileAtRefTool(deps: ToolDeps) {
         .describe('Last line to return (1-indexed, inclusive). Capped to start+500.'),
     },
     async (args) => {
-      const sha = args.ref === 'head' ? deps.prContext.metadata.head_sha : deps.prContext.metadata.base_sha;
+      const sha =
+        args.ref === 'head' ? deps.prContext.metadata.head_sha : deps.prContext.metadata.base_sha;
 
       const start = args.start_line ?? 1;
       const requestedEnd = args.end_line ?? Number.MAX_SAFE_INTEGER;

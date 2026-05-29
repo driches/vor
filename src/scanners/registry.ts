@@ -91,8 +91,7 @@ export function buildEnabledScanners(
       overrides.secrets ??
       (() =>
         createSecretsScanner({
-          includeGenericEntropy:
-            config.scanners.secrets.include_generic_entropy === true,
+          includeGenericEntropy: config.scanners.secrets.include_generic_entropy === true,
         }));
     out.push(factory());
   }
@@ -106,8 +105,7 @@ export function buildEnabledScanners(
 
   // container-cve (stub in v1)
   if (config.scanners.container_cve.enabled) {
-    const factory: () => Scanner =
-      overrides['container-cve'] ?? (() => containerScannerStub);
+    const factory: () => Scanner = overrides['container-cve'] ?? (() => containerScannerStub);
     out.push(factory());
   }
 

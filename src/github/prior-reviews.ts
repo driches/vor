@@ -53,9 +53,7 @@ export async function dismissPriorAgentReviews(
         });
         dismissed += 1;
       } catch (err) {
-        void logger.warn(
-          `Failed to dismiss prior review ${review.id}: ${(err as Error).message}`,
-        );
+        void logger.warn(`Failed to dismiss prior review ${review.id}: ${(err as Error).message}`);
       }
     }
 

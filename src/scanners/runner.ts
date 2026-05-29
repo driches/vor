@@ -23,13 +23,7 @@
  * waiting on a phantom abort. Tests cover both the timeout-fires and the
  * timeout-cleared paths.
  */
-import type {
-  ScanError,
-  ScanFinding,
-  ScanResult,
-  Scanner,
-  ScannerDeps,
-} from './types.js';
+import type { ScanError, ScanFinding, ScanResult, Scanner, ScannerDeps } from './types.js';
 import type { ScannerId } from '../types.js';
 import { emptyResult } from './types.js';
 import { dedupAcrossScanners } from './dedup.js';
@@ -78,11 +72,7 @@ function resolveOptions(opts?: RunScannersOptions): ResolvedOptions {
  * Build an empty result with a single non-fatal error. Used as the
  * recovery shape when a scanner throws or times out.
  */
-function errorResult(
-  scannerId: ScannerId,
-  started: number,
-  errorMessage: string,
-): ScanResult {
+function errorResult(scannerId: ScannerId, started: number, errorMessage: string): ScanResult {
   const base = emptyResult(scannerId, Date.now() - started);
   const err: ScanError = { message: errorMessage, fatal: false };
   return { ...base, errors: [err] };
@@ -149,10 +139,7 @@ async function runOne(
   // declares a longer budget because it bundles semgrep, which downloads
   // rules and scans cross-language and can take >60s on big repos.
   const effectiveTimeoutMs = scanner.timeoutMs ?? opts.perScannerTimeoutMs;
-  const timer = setTimeout(
-    () => timeoutController.abort(),
-    effectiveTimeoutMs,
-  );
+  const timer = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
   const combinedSignal = anySignal(deps.signal, timeoutController.signal);
   const scopedDeps: ScannerDeps = { ...deps, signal: combinedSignal };
   // Belt-and-suspenders: a cooperative scanner will reject in-flight network
@@ -212,9 +199,7 @@ export async function runScanners(
 ): Promise<RunScannersResult> {
   const opts = resolveOptions(options);
 
-  const perScanner = await Promise.all(
-    scanners.map((s) => runOne(s, deps, opts)),
-  );
+  const perScanner = await Promise.all(scanners.map((s) => runOne(s, deps, opts)));
 
   const allFindings: ScanFinding[] = [];
   for (const r of perScanner) {

@@ -199,9 +199,7 @@ describe('detectCoverageTool — vitest', () => {
     });
     const deps = makeScannerDeps({
       workspaceDir: ws,
-      changedFiles: [
-        makeChangedFile({ path: 'app/main.py', added_lines: new Set([1]) }),
-      ],
+      changedFiles: [makeChangedFile({ path: 'app/main.py', added_lines: new Set([1]) })],
     });
     expect(detectCoverageTool(deps)).toBeNull();
   });
@@ -278,9 +276,7 @@ describe('detectCoverageTool — pytest-cov', () => {
     });
     const deps = makeScannerDeps({
       workspaceDir: ws,
-      changedFiles: [
-        makeChangedFile({ path: 'app/main.py', added_lines: new Set([1]) }),
-      ],
+      changedFiles: [makeChangedFile({ path: 'app/main.py', added_lines: new Set([1]) })],
     });
     const out = detectCoverageTool(deps);
     expect(out?.id).toBe('pytest-cov');
@@ -608,9 +604,7 @@ describe('createCoverageDeltaScanner.scan — ignore-list integration', () => {
       loadCoverage: () => coverage,
     });
     const ignoreList = makeIgnoreList({ ignored: true });
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], ignoreList }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], ignoreList }));
     expect(result.findings).toEqual([]);
     // ignoreList still was consulted — we don't want a silent skip.
     expect(ignoreList.matches).toHaveBeenCalledTimes(1);
@@ -643,9 +637,7 @@ describe('createCoverageDeltaScanner.scan — ignore-list integration', () => {
       expired: true,
       reason: 'TODO: cover this after refactor',
     });
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [file], ignoreList }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [file], ignoreList }));
     expect(result.findings).toEqual([]);
     expect(log.notice).toHaveBeenCalledTimes(1);
     expect(log.notice.mock.calls[0]![0]).toMatch(/expired/);

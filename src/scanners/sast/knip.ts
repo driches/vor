@@ -103,9 +103,7 @@ export const knipLinter: LinterModule = {
   // attribution map can match any PR-changed path knip references.
   wholeProject: true,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     // knip runs whole-project (no per-file argv), but we still consult
@@ -272,9 +270,7 @@ export const knipLinter: LinterModule = {
 function locateBin(workspaceDir: string): ResolvedBinary {
   // node_modules/.bin/knip on Unix; npm shims at knip.cmd on Windows
   // (findWorkspaceBinary tries .cmd / .exe variants automatically).
-  const ws = findWorkspaceBinary([
-    path.join(workspaceDir, 'node_modules', '.bin', 'knip'),
-  ]);
+  const ws = findWorkspaceBinary([path.join(workspaceDir, 'node_modules', '.bin', 'knip')]);
   if (ws !== null) return ws;
   // PATH lookup. On Windows, global npm installs land as `knip.cmd` shims —
   // Node's libuv `spawn` with `shell: false` only resolves `.exe` for bare
@@ -305,9 +301,10 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
       env: buildLinterEnv(),
       shell: bin.needsShell,
     };
-    const child = argsForSpawn === null
-      ? spawn(command, spawnOptions)
-      : spawn(command, argsForSpawn, spawnOptions);
+    const child =
+      argsForSpawn === null
+        ? spawn(command, spawnOptions)
+        : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries. knip's whole-project
     // analysis output can be MBs on monorepos.
