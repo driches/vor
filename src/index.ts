@@ -55,9 +55,8 @@ async function main(): Promise<void> {
   const eventName = process.env.GITHUB_EVENT_NAME?.trim() ?? '';
   const allowAutoTrigger =
     (process.env.INPUT_ALLOW_AUTO_TRIGGER ?? 'true').toLowerCase() === 'true';
-  const isPrEvent =
-    eventName === 'pull_request' ||
-    eventName === 'pull_request_target';
+  const isPrEvent = eventName === 'pull_request';
+  const isPrTargetEvent = eventName === 'pull_request_target';
   const isReviewEvent =
     eventName === 'pull_request_review' ||
     eventName === 'pull_request_review_comment';
@@ -70,9 +69,19 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (isPrTargetEvent) {
+    await logger.notice(
+      `Refusing to run on 'pull_request_target' event. This event runs with ` +
+        `base-repo secrets even for fork PRs; auto-triggering it could let a fork ` +
+        `author spend your API key by manipulating .vor.yml from the fork head. ` +
+        `Use 'on: pull_request' instead, or 'on: workflow_dispatch' with a ` +
+        `pr_number input for manual-only operation.`,
+    );
+    return;
+  }
   if (isPrEvent && !allowAutoTrigger) {
     await logger.notice(
-      `Refusing to run on '${eventName}' event. Set ` +
+      `Refusing to run on '${eventName}' event. ` +
         `'allow_auto_trigger: false' is blocking this run. Remove that input (or ` +
         `set it to 'true') to re-enable automatic PR reviews, or use ` +
         `'on: workflow_dispatch' with a pr_number input for manual-only operation.`,

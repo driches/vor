@@ -40,7 +40,7 @@ inputs:
     description: 'PR number. Auto-detected from pull_request events; required for manual triggers.'
     required: false
   allow_auto_trigger:
-    description: 'By default this action runs automatically on pull_request / pull_request_target events. Set to "false" to opt out and restrict runs to manual workflow_dispatch triggers only. Note: pull_request_review and pull_request_review_comment events are never auto-triggered regardless of this setting.'
+    description: 'By default this action runs automatically on pull_request events. Set to "false" to opt out and restrict runs to manual workflow_dispatch triggers only. Note: pull_request_target, pull_request_review, and pull_request_review_comment events are never auto-triggered regardless of this setting — pull_request_target carries fork-secret risk, and review events produce iteration loops.'
     required: false
     default: 'true'
 
