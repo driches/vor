@@ -33,15 +33,17 @@ await writeFile(
   JSON.stringify({ type: 'commonjs', private: true }, null, 2) + '\n',
 );
 
-// Normalise node_modules path comments so the bundle is reproducible across
+// Normalise node_modules paths so the bundle is reproducible across
 // environments. In a git worktree, node_modules lives in the main checkout
 // rather than the worktree directory, so esbuild emits relative paths like
-// `../../../node_modules/…`. Strip the leading `../` segments so the output
-// always matches what a regular CI checkout produces (`node_modules/…`).
+// `../../../node_modules/…` in BOTH the `// …` comment lines AND the string
+// keys passed to __commonJS helpers. Strip the leading `../` segments from
+// every occurrence so the output always matches what a regular CI checkout
+// produces (`node_modules/…`).
 const bundlePath = resolve(distDir, 'index.js');
 const normalised = readFileSync(bundlePath, 'utf-8').replace(
-  /^(\/\/ )(\.\.\/)+node_modules\//gm,
-  '$1node_modules/',
+  /((?:\.\.\/)+)node_modules\//g,
+  'node_modules/',
 );
 writeFileSync(bundlePath, normalised);
 
