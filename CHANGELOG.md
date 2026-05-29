@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Go: dedicated golangci-lint SAST module.** Changed `.go` files now run through golangci-lint (govet, staticcheck, gosec, errcheck, ineffassign, …) at zero token cost, surfaced inline like the other first-class languages. Previously Go was covered only by Semgrep's `--config=auto` (slower, network-fetched, shallower). Activates when `golangci-lint` resolves at `<repo>/bin/golangci-lint` or on `PATH`; quiet no-op otherwise. golangci-lint is invoked over the package directories of the changed files and findings are filtered back to added lines. Both golangci-lint v1 (`--out-format`) and v2 (`--output.json.path`) CLIs are supported.
 - **Documentation site at [driches.github.io/vor](https://driches.github.io/vor/).** An Astro + Starlight site with a marketing landing page (feature grid, copy-paste quickstart, example-review mockup) plus the full docs set. Built from `site/`. Content stays in sync automatically: `site/scripts/sync-docs.ts` pulls the canonical root markdown (README, CHANGELOG, SECURITY, SUPPORT, CONTRIBUTING, AGENTS, CODE_OF_CONDUCT) into the docs collection at build time — the repo root remains the single source of truth, so the site can't drift. Deployed by `.github/workflows/pages.yml` on pushes that touch the site or any synced source file. No change to the action or published package.
 
 ### Changed (BREAKING)
