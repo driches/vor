@@ -153,7 +153,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
-| `allow_auto_trigger` | no | `true` | Set to `false` to opt out of auto-runs on `pull_request` / `pull_request_target` events and restrict to manual `workflow_dispatch` triggers only. |
+| `allow_auto_trigger` | no | `true` | Set to `false` to opt out of auto-runs on `pull_request` / `pull_request_target` events and restrict to manual `workflow_dispatch` triggers only. `pull_request_review` and `pull_request_review_comment` events are always blocked regardless of this setting. |
 
 > **Codex models:** OpenAI ids prefixed `gpt-` (e.g. `gpt-5-codex`) are inferred automatically. A bare `codex-*` id isn't matched by the prefix rules above — set `provider: openai` explicitly for those.
 

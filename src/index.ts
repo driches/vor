@@ -54,19 +54,28 @@ async function main(): Promise<void> {
   // no provider dependency, so we keep it at the top.
   const eventName = process.env.GITHUB_EVENT_NAME?.trim() ?? '';
   const allowAutoTrigger =
-    (process.env.INPUT_ALLOW_AUTO_TRIGGER ?? 'false').toLowerCase() === 'true';
-  const isAutoEvent =
+    (process.env.INPUT_ALLOW_AUTO_TRIGGER ?? 'true').toLowerCase() === 'true';
+  const isPrEvent =
     eventName === 'pull_request' ||
-    eventName === 'pull_request_target' ||
+    eventName === 'pull_request_target';
+  const isReviewEvent =
     eventName === 'pull_request_review' ||
     eventName === 'pull_request_review_comment';
-  if (isAutoEvent && !allowAutoTrigger) {
+  if (isReviewEvent) {
     await logger.notice(
-      `Refusing to run on '${eventName}' event. This action is manual-only by ` +
-        `default — use 'on: workflow_dispatch' (with a pr_number input) instead. ` +
-        `To re-enable PR-event auto-triggering for this repo, set ` +
-        `'allow_auto_trigger: true' in the action's inputs (and accept the ` +
-        `iteration-cost / noise tradeoff that motivated this default).`,
+      `Refusing to run on '${eventName}' event. Review and review-comment events ` +
+        `are never auto-triggered by Vor — they produce review-on-review iteration ` +
+        `loops. Use 'on: pull_request' for automatic reviews or ` +
+        `'on: workflow_dispatch' for manual ones.`,
+    );
+    return;
+  }
+  if (isPrEvent && !allowAutoTrigger) {
+    await logger.notice(
+      `Refusing to run on '${eventName}' event. Set ` +
+        `'allow_auto_trigger: false' is blocking this run. Remove that input (or ` +
+        `set it to 'true') to re-enable automatic PR reviews, or use ` +
+        `'on: workflow_dispatch' with a pr_number input for manual-only operation.`,
     );
     return;
   }
