@@ -148,7 +148,12 @@ function parseIntOrUndefined(v: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-main().catch((err) => {
-  console.error(err);
+main().catch(async (err) => {
+  // Last-resort net for anything that escapes main()'s own try/catch (e.g. a
+  // throw inside the catch block, or logger.setFailed itself failing). Route
+  // it through the structured logger rather than console.error so the message
+  // passes through secret masking before it lands in consumer CI logs
+  // (AGENTS.md §0.6).
+  await logger.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
   process.exit(1);
 });

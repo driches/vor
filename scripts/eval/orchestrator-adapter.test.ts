@@ -85,9 +85,9 @@ function summaryScript(): CompleteResponse[] {
           id: 't1',
           name: 'post_summary',
           arguments: {
-            strengths: [],
+            strengths: ['Clear separation of concerns in the auth module.'],
             assessment: 'comment',
-            assessment_reasoning: 'No AI findings in unit test',
+            assessment_reasoning: 'No AI findings in this unit-test scenario; observations only.',
           },
         },
       ],

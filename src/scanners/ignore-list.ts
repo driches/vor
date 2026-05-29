@@ -312,6 +312,26 @@ function packageInRange(version: string, range: string, ecosystem: string): bool
 }
 
 /**
+ * Notice emitted when a finding is suppressed by an ignore entry whose
+ * `expires` date has passed. The finding stays suppressed (we don't want a
+ * stale date to suddenly surface a wall of old findings), but the author is
+ * told the entry needs a refresh. Centralized so the wording stays identical
+ * across every scanner that honors the ignore list — `scanner` is the prefix
+ * each one passes (its own name / label).
+ */
+export function expiredIgnoreNotice(
+  scanner: string,
+  finding: Pick<ScanFinding, 'rule_id' | 'file_path' | 'line'>,
+  match: Pick<IgnoreMatchResult, 'reason'>,
+): string {
+  return (
+    `${scanner}: ignore entry for ${finding.rule_id} ` +
+    `(${finding.file_path}:${finding.line}) is expired; finding still ` +
+    `suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`
+  );
+}
+
+/**
  * `expires` is ISO YYYY-MM-DD (timezone-naive). We compare against the
  * current calendar date in UTC: an entry expiring 2026-12-31 still suppresses
  * findings up through 2026-12-31 UTC, and becomes "expired" on 2027-01-01.

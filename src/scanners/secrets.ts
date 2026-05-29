@@ -50,6 +50,7 @@ import type {
   ScanEvidence,
   ScannerMetrics,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 import {
   DEFAULT_SECRET_PATTERNS,
@@ -236,9 +237,7 @@ export function createSecretsScanner(options: SecretsScannerOptions = {}): Scann
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {
                   if (match.expired) {
-                    void log.notice(
-                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-                    );
+                    void log.notice(expiredIgnoreNotice('secrets', finding, match));
                   }
                   // Advance past zero-width matches before the next iteration.
                   if (m.index === pattern.pattern.lastIndex) {

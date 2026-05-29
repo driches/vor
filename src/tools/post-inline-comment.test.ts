@@ -68,7 +68,7 @@ describe('post_inline_comment tool', () => {
       line: 10,
       side: 'RIGHT',
       category: 'bug',
-      title: 'A title',
+      title: 'A clear title',
       why_it_matters: 'Reason for this finding goes here.',
       confidence: 'high',
     });
@@ -87,7 +87,7 @@ describe('post_inline_comment tool', () => {
       start_line: 10,
       side: 'RIGHT',
       category: 'readability',
-      title: 'A title',
+      title: 'A clear title',
       why_it_matters: 'Reason for this finding goes here.',
       confidence: 'high',
     });
@@ -98,14 +98,13 @@ describe('post_inline_comment tool', () => {
 
   it('defaults `side` to RIGHT and `confidence` to high when omitted (PR #12 regression)', async () => {
     // The Zod schema declares `.default('RIGHT')` for side and
-    // `.default('high')` for confidence, but the agent runner forwards raw
-    // tool input to the handler without running it through Zod. The
-    // handler must apply the schema defaults itself so the in-memory
-    // PostedComment carries concrete values. If `side` lands as undefined,
-    // the post-filter scanner-vs-AI dedup fails its `ai.side === c.side`
-    // check (the scanner adapter hard-codes 'RIGHT'), and a scanner finding
-    // co-located with an AI security comment ships as a duplicate. PR #12
-    // and PR #16 smoke tests both reproduced exactly this failure.
+    // `.default('high')` for confidence. The `tool()` helper parses raw tool
+    // input through the schema before this handler runs, so those defaults
+    // fire and the in-memory PostedComment carries concrete values. If `side`
+    // landed as undefined, the post-filter scanner-vs-AI dedup would fail its
+    // `ai.side === c.side` check (the scanner adapter hard-codes 'RIGHT'), and
+    // a scanner finding co-located with an AI security comment would ship as a
+    // duplicate. PR #12 and PR #16 smoke tests both reproduced exactly this.
     const deps = buildFakeDeps({ files: [makeFile()] });
     const tool = makePostInlineCommentTool(deps);
     const result = await callTool(tool, {
@@ -124,38 +123,32 @@ describe('post_inline_comment tool', () => {
     expect(stored.confidence).toBe('high');
   });
 
-  it('normalizes an out-of-enum `side`/`confidence` (e.g. lowercase) to the schema default', async () => {
-    // Since Zod parsing is bypassed at the runner boundary, an LLM that
-    // emits `side: 'left'` (lowercase) or `confidence: 'maybe'` would
-    // otherwise be cast through `as Side`/`as Confidence` unchecked,
-    // landing a malformed value in the aggregator. The handler defends
-    // by allowlist: anything outside the enum collapses to the schema's
-    // documented default.
+  it('rejects an out-of-enum `side`/`confidence` at the schema boundary', async () => {
+    // The `tool()` helper parses raw tool input through the Zod schema before
+    // the handler runs, so an out-of-enum value (e.g. lowercase 'left' or an
+    // unknown confidence) is rejected rather than cast through unchecked. The
+    // throw is surfaced to the agent as a tool error so it can self-correct;
+    // no malformed value lands in the aggregator.
     const deps = buildFakeDeps({ files: [makeFile()] });
     const tool = makePostInlineCommentTool(deps);
-    const result = await callTool(tool, {
-      severity: 'minor',
-      file_path: 'src/foo.ts',
-      line: 10,
-      side: 'left',
-      category: 'readability',
-      title: 'A reasonably descriptive title',
-      why_it_matters: 'A short rationale that makes future readers care.',
-      confidence: 'maybe',
-    } as unknown as Parameters<typeof callTool>[1]);
-    const json = getResultJson(result) as { accepted: boolean };
-    expect(json.accepted).toBe(true);
-    const stored = deps.aggregator.acceptedComments[0]!;
-    expect(stored.side).toBe('RIGHT');
-    expect(stored.confidence).toBe('high');
+    await expect(
+      callTool(tool, {
+        severity: 'minor',
+        file_path: 'src/foo.ts',
+        line: 10,
+        side: 'left',
+        category: 'readability',
+        title: 'A reasonably descriptive title',
+        why_it_matters: 'A short rationale that makes future readers care.',
+        confidence: 'maybe',
+      } as unknown as Parameters<typeof callTool>[1]),
+    ).rejects.toThrow(/Invalid arguments for post_inline_comment/);
+    expect(deps.aggregator.acceptedComments).toHaveLength(0);
   });
 
   it('preserves valid `side: LEFT` and `confidence: medium` when explicitly provided', async () => {
-    // Pins the pass-through branch of the normalization allowlist: a valid
-    // enum value must survive unchanged. Without this assertion, a typo
-    // like `rawSide === 'left'` instead of `rawSide === 'LEFT'` in the
-    // handler would silently collapse every LEFT-side comment to RIGHT
-    // and the suite would still be green.
+    // Pins the pass-through of a valid non-default enum value: LEFT/medium
+    // must survive the schema parse unchanged and reach the aggregator as-is.
     const deps = buildFakeDeps({ files: [makeFile()] });
     const tool = makePostInlineCommentTool(deps);
     const result = await callTool(tool, {

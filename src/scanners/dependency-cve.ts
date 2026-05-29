@@ -54,6 +54,7 @@ import type {
   ScannerMetrics,
   ScanResult,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 
 const SCANNER_ID: ScannerId = 'dependency-cve';
 /** Cap on the rendered `description` so very chatty advisories don't blow up
@@ -835,9 +836,7 @@ export function createDependencyCveScanner(
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log.notice(
-                `dependency-cve: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-              );
+              void log.notice(expiredIgnoreNotice('dependency-cve', finding, match));
             }
             continue;
           }

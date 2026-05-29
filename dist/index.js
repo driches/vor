@@ -57729,7 +57729,20 @@ function createProvider(input) {
 
 // src/tools/tool-helper.ts
 function tool(name, description, inputSchema, handler2) {
-  return { name, description, inputSchema, handler: handler2 };
+  const schema = external_exports.object(inputSchema);
+  return {
+    name,
+    description,
+    inputSchema,
+    handler: async (rawArgs, extra) => {
+      const parsed = schema.safeParse(rawArgs ?? {});
+      if (!parsed.success) {
+        const detail = parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`).join("; ");
+        throw new Error(`Invalid arguments for ${name}: ${detail}`);
+      }
+      return handler2(parsed.data, extra);
+    }
+  };
 }
 
 // src/tools/types.ts
@@ -58248,10 +58261,8 @@ function makePostInlineCommentTool(deps) {
           hint: "Swap them or omit start_line."
         });
       }
-      const rawSide = args.side;
-      const side = rawSide === "RIGHT" || rawSide === "LEFT" ? rawSide : "RIGHT";
-      const rawConfidence = args.confidence;
-      const confidence = rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low" ? rawConfidence : "high";
+      const side = args.side;
+      const confidence = args.confidence;
       const changedFiles = new Map(deps.prContext.files.map((f2) => [f2.path, f2]));
       const validation = validateInlineComment(
         {
@@ -59214,10 +59225,13 @@ function buildToolDefinitions(deps) {
       name: mcp.name,
       description: mcp.description,
       input_schema: inputSchema,
+      // `mcp.handler` parses `args` through the tool's Zod schema (defaults +
+      // validation) before its own logic runs — see `tool()` in
+      // src/tools/tool-helper.ts. A schema-invalid call throws here and is
+      // surfaced to the model as an is_error tool result by the loop above.
       handler: async (args) => {
         const result = await mcp.handler(args, void 0);
-        const content = result.content ?? [];
-        return content.map((b2) => b2.type === "text" ? b2.text ?? "" : JSON.stringify(b2)).join("\n");
+        return result.content.map((b2) => b2.type === "text" ? b2.text : JSON.stringify(b2)).join("\n");
       }
     };
   });
@@ -64569,6 +64583,9 @@ function packageInRange(version, range, ecosystem) {
   }
   return false;
 }
+function expiredIgnoreNotice(scanner, finding, match) {
+  return `${scanner}: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`;
+}
 function isExpired(expires) {
   if (expires == null) return false;
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -65445,9 +65462,7 @@ function createDependencyCveScanner(options) {
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log2.notice(
-                `dependency-cve: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-              );
+              void log2.notice(expiredIgnoreNotice("dependency-cve", finding, match));
             }
             continue;
           }
@@ -65758,9 +65773,7 @@ function createSecretsScanner(options = {}) {
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {
                   if (match.expired) {
-                    void log2.notice(
-                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                    );
+                    void log2.notice(expiredIgnoreNotice("secrets", finding, match));
                   }
                   if (m2.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
@@ -67583,9 +67596,7 @@ function createCoverageDeltaScanner(options = {}) {
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log2.notice(
-                `coverage-delta: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-              );
+              void log2.notice(expiredIgnoreNotice("coverage-delta", finding, match));
             }
             continue;
           }
@@ -68026,9 +68037,7 @@ function createDebrisScanner(options = {}) {
                 if (!match.ignored) {
                   findings.push(finding);
                 } else if (match.expired) {
-                  void log2.notice(
-                    `debris: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                  );
+                  void log2.notice(expiredIgnoreNotice("debris", finding, match));
                 }
                 if (m2.index === rule.pattern.lastIndex) {
                   rule.pattern.lastIndex += 1;
@@ -68179,9 +68188,7 @@ function createMigrationSafetyScanner(options = {}) {
                 if (!match.ignored) {
                   findings.push(finding);
                 } else if (match.expired) {
-                  void log2.notice(
-                    `migration-safety: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                  );
+                  void log2.notice(expiredIgnoreNotice("migration-safety", finding, match));
                 }
                 if (m2.index === rule.pattern.lastIndex) {
                   rule.pattern.lastIndex += 1;
@@ -68460,9 +68467,7 @@ function pushUnlessIgnored(finding, deps, out, log2, scannerLabel) {
     return;
   }
   if (match.expired) {
-    void log2.notice(
-      `${scannerLabel}: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-    );
+    void log2.notice(expiredIgnoreNotice(scannerLabel, finding, match));
   }
 }
 function buildMetrics5(started, files_examined) {
@@ -69143,8 +69148,8 @@ function parseIntOrUndefined(v2) {
   const n2 = Number.parseInt(v2.trim(), 10);
   return Number.isFinite(n2) ? n2 : void 0;
 }
-main().catch((err) => {
-  console.error(err);
+main().catch(async (err) => {
+  await logger.error(err instanceof Error ? err.stack ?? err.message : String(err));
   process.exit(1);
 });
 /*! Bundled license information:

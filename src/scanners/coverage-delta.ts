@@ -48,6 +48,7 @@ import type {
   ScanError,
   ScannerMetrics,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 
 const SCANNER_ID: ScannerId = 'coverage-delta';
@@ -294,9 +295,7 @@ export function createCoverageDeltaScanner(
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log.notice(
-                `coverage-delta: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-              );
+              void log.notice(expiredIgnoreNotice('coverage-delta', finding, match));
             }
             continue;
           }
