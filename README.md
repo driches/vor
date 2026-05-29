@@ -42,6 +42,15 @@ on:
       pr_number:
         description: 'PR number to review'
         required: true
+      model:
+        description: 'Model to use'
+        required: false
+        default: 'claude-sonnet-4-6'
+      dry_run:
+        description: 'Log review instead of posting comments'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: read
@@ -57,16 +66,19 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           pr_number: ${{ inputs.pr_number }}
+          model: ${{ inputs.model }}
+          dry_run: ${{ inputs.dry_run }}
 ```
 
-Prefer OpenAI? Swap the key and set a `model` — everything else is identical:
+Prefer OpenAI? Swap the key and change the model — everything else is identical:
 
 ```yaml
       - uses: driches/vor@v0
         with:
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-4.1            # or o4-mini, gpt-5-codex, …
           pr_number: ${{ inputs.pr_number }}
+          model: gpt-4.1            # or o4-mini, gpt-5-codex, …
+          dry_run: ${{ inputs.dry_run }}
 ```
 
 The provider is inferred from the `model` id (`claude-*` → Anthropic, `gpt-*`/`o<digit>*`/`chatgpt-*` → OpenAI), so you only supply the API key for the provider you're using.
