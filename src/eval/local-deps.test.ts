@@ -31,7 +31,13 @@ function git(repoDir: string, args: string): string {
   return execSync(`git ${args}`, {
     cwd: repoDir,
     encoding: 'utf-8',
-    env: { ...process.env, GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 't@e.x', GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 't@e.x' },
+    env: {
+      ...process.env,
+      GIT_COMMITTER_NAME: 'test',
+      GIT_COMMITTER_EMAIL: 't@e.x',
+      GIT_AUTHOR_NAME: 'test',
+      GIT_AUTHOR_EMAIL: 't@e.x',
+    },
   }).trim();
 }
 
@@ -44,10 +50,7 @@ beforeAll(() => {
   // Two-commit history so we have distinct base + head SHAs reachable.
   git(repoDir, 'init -q');
   git(repoDir, 'config commit.gpgsign false');
-  writeFileSync(
-    resolve(repoDir, 'src/foo.ts'),
-    `export function existing() {\n  return 1;\n}\n`,
-  );
+  writeFileSync(resolve(repoDir, 'src/foo.ts'), `export function existing() {\n  return 1;\n}\n`);
   writeFileSync(resolve(repoDir, '.vor.yml'), `severity:\n  floor: minor\n`);
   writeFileSync(resolve(repoDir, 'CLAUDE.md'), `# Repo conventions\nUse explicit return types.\n`);
   git(repoDir, 'add -A');
@@ -159,7 +162,9 @@ describe('buildLocalDeps', () => {
       );
       writeFileSync(
         resolve(altCaseDir, 'pr.json'),
-        JSON.stringify({ data: { title: 't', user: { login: 'a' }, base: { ref: 'main' }, head: { ref: 'f' } } }),
+        JSON.stringify({
+          data: { title: 't', user: { login: 'a' }, base: { ref: 'main' }, head: { ref: 'f' } },
+        }),
       );
       writeFileSync(resolve(altCaseDir, 'files.json'), JSON.stringify({ data: [] }));
       writeFileSync(resolve(altCaseDir, 'diff.patch'), '');

@@ -15,9 +15,7 @@ describe('syncInAsyncLoopTemplate', () => {
       file: 'src/jobs/batch.ts',
     });
     const lines = mutated.split('\n');
-    expect(lines[1]).toBe(
-      '  items.forEach(async (item) => { await processOne(item); });',
-    );
+    expect(lines[1]).toBe('  items.forEach(async (item) => { await processOne(item); });');
     expect(truth).toEqual({
       file: 'src/jobs/batch.ts',
       line_range: [2, 2],
@@ -38,10 +36,9 @@ describe('syncInAsyncLoopTemplate', () => {
 
   it('throws when `file` is missing or empty', () => {
     expect(() =>
-      syncInAsyncLoopTemplate.apply(
-        '// PLANT_ANCHOR: sync-in-async-loop\n',
-        { type: 'sync-in-async-loop' } as unknown as PlantConfig,
-      ),
+      syncInAsyncLoopTemplate.apply('// PLANT_ANCHOR: sync-in-async-loop\n', {
+        type: 'sync-in-async-loop',
+      } as unknown as PlantConfig),
     ).toThrow(/missing or empty 'file'/);
   });
 });

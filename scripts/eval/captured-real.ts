@@ -88,15 +88,26 @@ function listCapturedCases(casesRoot: string, filter?: string): string[] {
 interface CapturedArtifacts {
   meta: CaseMeta;
   prData: Record<string, unknown>;
-  filesData: Array<{ filename: string; additions: number; deletions: number; changes: number; patch?: string | null; status?: string }>;
+  filesData: Array<{
+    filename: string;
+    additions: number;
+    deletions: number;
+    changes: number;
+    patch?: string | null;
+    status?: string;
+  }>;
   diff: string;
   codexFindings: NormalizedFinding[];
 }
 
 function loadCapturedArtifacts(caseDir: string): CapturedArtifacts {
   const meta = parseYaml(readFileSync(resolve(caseDir, 'meta.yml'), 'utf-8')) as CaseMeta;
-  const prJson = JSON.parse(readFileSync(resolve(caseDir, 'pr.json'), 'utf-8')) as { data: Record<string, unknown> };
-  const filesJson = JSON.parse(readFileSync(resolve(caseDir, 'files.json'), 'utf-8')) as { data: CapturedArtifacts['filesData'] };
+  const prJson = JSON.parse(readFileSync(resolve(caseDir, 'pr.json'), 'utf-8')) as {
+    data: Record<string, unknown>;
+  };
+  const filesJson = JSON.parse(readFileSync(resolve(caseDir, 'files.json'), 'utf-8')) as {
+    data: CapturedArtifacts['filesData'];
+  };
   const diff = readFileSync(resolve(caseDir, 'diff.patch'), 'utf-8');
   const codexNormalizedPath = resolve(caseDir, 'codex', 'normalized.json');
   const codexFindings = existsSync(codexNormalizedPath)
@@ -337,7 +348,9 @@ async function main(): Promise<void> {
         `agreement=${r.agreement_rate.toFixed(2)}`,
     );
   }
-  console.error(`\n  TOTAL: ${totalTurns}t  $${totalCost.toFixed(4)} across ${results.length} case(s)`);
+  console.error(
+    `\n  TOTAL: ${totalTurns}t  $${totalCost.toFixed(4)} across ${results.length} case(s)`,
+  );
   if (failures.length > 0) {
     console.error(`\n  FAILED: ${failures.length} case(s)`);
     for (const f of failures) console.error(`    ${f.case_id}: ${f.error}`);

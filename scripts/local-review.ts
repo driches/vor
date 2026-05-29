@@ -169,9 +169,7 @@ function mergeScannerFindingsFlag(existingYaml: string | null): string {
   // pattern as `scripts/eval/flag-injection.ts`. Codex P2 #3313098982.
   const existing = parsed['experimental'];
   const experimental: Record<string, unknown> =
-    existing !== null &&
-    typeof existing === 'object' &&
-    !Array.isArray(existing)
+    existing !== null && typeof existing === 'object' && !Array.isArray(existing)
       ? (existing as Record<string, unknown>)
       : {};
   experimental['scanner_findings_in_user_prompt'] = true;
@@ -194,10 +192,7 @@ function countTopLevelKeys(yaml: string): number {
 }
 
 function unifiedDiff(workspace: string, base: string, head: string): string {
-  return git(
-    ['diff', '--no-color', '--unified=3', `${base}..${head}`],
-    workspace,
-  );
+  return git(['diff', '--no-color', '--unified=3', `${base}..${head}`], workspace);
 }
 
 function authorFromHead(workspace: string): string {
@@ -264,7 +259,8 @@ function buildFakeOctokit(opts: {
     sha: opts.headSha,
   }));
 
-  const notImplemented = (method: string) =>
+  const notImplemented =
+    (method: string) =>
     async (..._args: unknown[]): Promise<never> => {
       throw new Error(
         `local-review FakeOctokit: ${method} is not implemented — extend buildFakeOctokit if a code path requires it.`,
@@ -333,9 +329,7 @@ async function main(): Promise<void> {
   const openaiKey = process.env.OPENAI_API_KEY?.trim() ?? '';
 
   if (!anthropicKey && !openaiKey) {
-    console.error(
-      'ANTHROPIC_API_KEY or OPENAI_API_KEY must be set in the environment.',
-    );
+    console.error('ANTHROPIC_API_KEY or OPENAI_API_KEY must be set in the environment.');
     process.exit(2);
   }
 
@@ -344,13 +338,17 @@ async function main(): Promise<void> {
   const baseSha = resolveRef(args.workspace, args.base);
   const headSha = resolveRef(args.workspace, args.head);
   if (baseSha === headSha) {
-    console.error(`Base and head resolve to the same SHA (${baseSha.slice(0, 7)}). Nothing to review.`);
+    console.error(
+      `Base and head resolve to the same SHA (${baseSha.slice(0, 7)}). Nothing to review.`,
+    );
     process.exit(2);
   }
 
   const files = diffNameStatus(args.workspace, baseSha, headSha);
   if (files.length === 0) {
-    console.error(`No changed files between ${args.base} (${baseSha.slice(0, 7)}) and ${args.head} (${headSha.slice(0, 7)}).`);
+    console.error(
+      `No changed files between ${args.base} (${baseSha.slice(0, 7)}) and ${args.head} (${headSha.slice(0, 7)}).`,
+    );
     process.exit(2);
   }
 
@@ -376,7 +374,9 @@ async function main(): Promise<void> {
     contentOverrides.set(args.configPath, mergeScannerFindingsFlag(existingYaml));
     console.error(
       `local-review: injecting scanner_findings_in_user_prompt=true via merged ${args.configPath}` +
-        (existingYaml ? ` (preserving ${countTopLevelKeys(existingYaml)} existing top-level key(s))` : ''),
+        (existingYaml
+          ? ` (preserving ${countTopLevelKeys(existingYaml)} existing top-level key(s))`
+          : ''),
     );
   }
 

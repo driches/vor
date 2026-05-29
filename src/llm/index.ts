@@ -55,9 +55,7 @@ export function createProvider(input: CreateProviderInput): LLMProvider {
       // throws cleanly for any string that bypasses the type system (e.g. a
       // typo'd INPUT_PROVIDER env var that wasn't validated upstream).
       const _exhaustive: never = id;
-      throw new Error(
-        `Unknown provider "${String(_exhaustive)}". Valid: anthropic | openai.`,
-      );
+      throw new Error(`Unknown provider "${String(_exhaustive)}". Valid: anthropic | openai.`);
     }
   }
 }

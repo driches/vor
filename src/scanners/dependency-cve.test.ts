@@ -225,9 +225,7 @@ describe('createDependencyCveScanner — added-lines filter', () => {
     const onlyOtherLines = new Set([1, 2, 3, 20, 21]);
     const result = await scanner.scan(
       makeScannerDeps({
-        changedFiles: [
-          makeChangedFile({ path: 'package-lock.json', added_lines: onlyOtherLines }),
-        ],
+        changedFiles: [makeChangedFile({ path: 'package-lock.json', added_lines: onlyOtherLines })],
         fileReader: reader,
       }),
     );
@@ -733,7 +731,10 @@ describe('createDependencyCveScanner — CVSS vector parsing', () => {
     const vuln: OsvVuln = {
       ...LODASH_VULN,
       severity: [
-        { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H' },
+        {
+          type: 'CVSS_V4',
+          score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H',
+        },
         { type: 'CVSS_V2', score: '8.5' },
       ],
       database_specific: undefined,

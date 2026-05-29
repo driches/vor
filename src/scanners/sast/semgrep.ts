@@ -41,7 +41,8 @@ const TIMEOUT_MS = 180_000;
 // Semgrep handles many languages; we let semgrep's auto-config decide
 // which rules apply. We only filter the input set to non-binary,
 // non-generated source files to avoid wasting semgrep cycles on lockfiles.
-const PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|m|mm|scala|clj|ex|exs|sh|bash|yaml|yml|tf|hcl)$/;
+const PROBABLY_SOURCE =
+  /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|m|mm|scala|clj|ex|exs|sh|bash|yaml|yml|tf|hcl)$/;
 
 interface SemgrepOutput {
   results: SemgrepResult[];
@@ -84,9 +85,7 @@ interface SemgrepResult {
 export const semgrepLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => PROBABLY_SOURCE.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => PROBABLY_SOURCE.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -161,7 +160,8 @@ export const semgrepLinter: LinterModule = {
     // with no signal that some files were skipped. Emit each as a
     // non-fatal ScanError so they show up in the run summary.
     for (const semgrepErr of output.errors ?? []) {
-      const message = semgrepErr.message ?? semgrepErr.short_msg ?? semgrepErr.type ?? 'unknown error';
+      const message =
+        semgrepErr.message ?? semgrepErr.short_msg ?? semgrepErr.type ?? 'unknown error';
       const pathSuffix = semgrepErr.path !== undefined ? ` (${semgrepErr.path})` : '';
       errors.push({
         message: `semgrep partial: ${message}${pathSuffix}`,
@@ -299,18 +299,14 @@ function runCli(
       '--',
       ...files,
     ];
-    const child = spawn(
-      'semgrep',
-      args,
-      {
-        cwd: deps.workspaceDir,
-        // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
-        // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
-        // malicious workspace-resolved eslint/ruff/knip binary cannot
-        // read this credential.
-        env: buildLinterEnv(SEMGREP_EXTRA_ENV_KEYS),
-      },
-    );
+    const child = spawn('semgrep', args, {
+      cwd: deps.workspaceDir,
+      // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
+      // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
+      // malicious workspace-resolved eslint/ruff/knip binary cannot
+      // read this credential.
+      env: buildLinterEnv(SEMGREP_EXTRA_ENV_KEYS),
+    });
     // Buffer accumulation — semgrep JSON on a large monorepo with
     // --config=auto can be tens of MB. The pre-fix `stdout += chunk`
     // pattern was O(n²) AND risked UTF-8 corruption on chunk boundaries.
@@ -386,9 +382,7 @@ function buildFinding(
   // finding for a violation that starts on an added line but extends
   // into context lines.
   const useRange =
-    endLine !== undefined &&
-    endLine > startLine &&
-    changedFile.added_lines.has(endLine);
+    endLine !== undefined && endLine > startLine && changedFile.added_lines.has(endLine);
   // Fingerprint anchors at the line we actually post the comment at —
   // see eslint.ts for the full rationale. Pre-fix this used startLine
   // unconditionally, so useRange findings dedup'd against a different

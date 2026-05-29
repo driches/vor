@@ -23,12 +23,7 @@ import type { LoadedCase } from './case-loader.js';
 import { synthesizeDiff } from './diff-synthesis.js';
 import type { RunRecord } from './types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
-import {
-  type Severity,
-  type Category,
-  type Confidence,
-  CATEGORIES,
-} from '../../src/types.js';
+import { type Severity, type Category, type Confidence, CATEGORIES } from '../../src/types.js';
 import { MODEL_PRICING } from '../../src/util/pricing.js';
 import {
   inferProviderFromModel,
@@ -42,12 +37,7 @@ import {
   type ProviderId,
 } from '../../src/llm/index.js';
 
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
-  'critical',
-  'important',
-  'minor',
-  'nit',
-]);
+const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'important', 'minor', 'nit']);
 const VALID_CATEGORIES: ReadonlySet<Category> = new Set(CATEGORIES);
 
 // MODEL_PRICING lives in src/util/pricing.ts so the production runner and
@@ -326,9 +316,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     // bypassing the sandbox and skewing eval results. We deep-clone the
     // config first so the caller's object isn't mutated. Codex P2
     // #3300812876.
-    const sandboxedConfig: ReviewConfig = JSON.parse(
-      JSON.stringify(input.config),
-    ) as ReviewConfig;
+    const sandboxedConfig: ReviewConfig = JSON.parse(JSON.stringify(input.config)) as ReviewConfig;
     sandboxedConfig.experimental.worker_delegation.enabled = false;
     state.caseFiles.set('.vor.yml', serializeConfigAsYaml(sandboxedConfig));
 
@@ -368,8 +356,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
     // past the first call if we only read `createReviewCalls[0]`, causing
     // artificially low TPs without any signal. See PR #10 comment 3295052517.
     const allComments = state.createReviewCalls.flatMap(
-      (call) =>
-        (call.args as { comments?: Array<Record<string, unknown>> }).comments ?? [],
+      (call) => (call.args as { comments?: Array<Record<string, unknown>> }).comments ?? [],
     );
     const findings: RunRecord['findings'] = allComments.map(reconstructFinding);
 
@@ -396,9 +383,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
  *
  * Exported for tests; production callers go through `evalRun`.
  */
-export function reconstructFinding(
-  c: Record<string, unknown>,
-): RunRecord['findings'][number] {
+export function reconstructFinding(c: Record<string, unknown>): RunRecord['findings'][number] {
   const body = typeof c.body === 'string' ? c.body : '';
   const parsed = parseRenderedComment(body);
   // Preserve `start_line` for multi-line review comments. scoreRun treats a
@@ -486,7 +471,10 @@ function parseRenderedComment(body: string): {
     const stripped = afterHeading
       .replace(/\n\n```suggestion[\s\S]*?```/g, '')
       .replace(/\n\n_via [^_]+_\s*$/g, '');
-    const paragraphs = stripped.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const paragraphs = stripped
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
     why_it_matters = paragraphs[0] ?? '';
   }
   return { severity, category, confidence, title, why_it_matters };

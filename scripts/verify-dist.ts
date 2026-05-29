@@ -49,7 +49,9 @@ const FORBIDDEN_MARKERS = [
 ];
 const leaked = FORBIDDEN_MARKERS.filter((m) => bundle.includes(m));
 if (leaked.length > 0) {
-  console.error('dist/index.js contains eval-only modules — eval code leaked into the action bundle:');
+  console.error(
+    'dist/index.js contains eval-only modules — eval code leaked into the action bundle:',
+  );
   for (const m of leaked) console.error(`  - ${m}`);
   console.error('Verify that src/index.ts (and its imports) never reach src/eval/*.');
   process.exit(1);

@@ -28,17 +28,17 @@ describe('Budget', () => {
   it('throws when input tokens exceed limit', () => {
     const b = new Budget(limits);
     b.addUsage(SONNET, { input_tokens: 500, output_tokens: 100 });
-    expect(() =>
-      b.addUsage(SONNET, { input_tokens: 600, output_tokens: 0 }),
-    ).toThrowError(BudgetError);
+    expect(() => b.addUsage(SONNET, { input_tokens: 600, output_tokens: 0 })).toThrowError(
+      BudgetError,
+    );
   });
 
   it('throws when output tokens exceed limit', () => {
     const b = new Budget(limits);
     b.addUsage(SONNET, { input_tokens: 100, output_tokens: 400 });
-    expect(() =>
-      b.addUsage(SONNET, { input_tokens: 0, output_tokens: 200 }),
-    ).toThrowError(BudgetError);
+    expect(() => b.addUsage(SONNET, { input_tokens: 0, output_tokens: 200 })).toThrowError(
+      BudgetError,
+    );
   });
 
   it('shouldWrapUp false below warn threshold', () => {
@@ -68,9 +68,9 @@ describe('Budget', () => {
       cache_creation_input_tokens: 500,
     });
     // 400 + 500 = 900 (under 1000) → OK
-    expect(() =>
-      b.addUsage(SONNET, { input_tokens: 200, output_tokens: 0 }),
-    ).toThrowError(BudgetError);
+    expect(() => b.addUsage(SONNET, { input_tokens: 200, output_tokens: 0 })).toThrowError(
+      BudgetError,
+    );
   });
 
   it('does NOT count cache_read toward the input cap (billed at 0.1×, would over-trip the cap)', () => {
@@ -82,18 +82,16 @@ describe('Budget', () => {
       cache_read_input_tokens: 800_000,
     });
     // Budget gate sees 100 billable input, not 800,100. Adding 500 more should still fit.
-    expect(() =>
-      b.addUsage(SONNET, { input_tokens: 500, output_tokens: 50 }),
-    ).not.toThrow();
+    expect(() => b.addUsage(SONNET, { input_tokens: 500, output_tokens: 50 })).not.toThrow();
   });
 
   it('aggregates totals across models (Sonnet driver + Haiku worker share the cap)', () => {
     const b = new Budget(limits);
     b.addUsage(SONNET, { input_tokens: 600, output_tokens: 300 });
     // 600 + 500 = 1100 > 1000 — Haiku contribution must trip the cap too.
-    expect(() =>
-      b.addUsage(HAIKU, { input_tokens: 500, output_tokens: 0 }),
-    ).toThrowError(BudgetError);
+    expect(() => b.addUsage(HAIKU, { input_tokens: 500, output_tokens: 0 })).toThrowError(
+      BudgetError,
+    );
   });
 
   it('snapshotByModel returns per-model usage entries', () => {
@@ -139,9 +137,9 @@ describe('Budget', () => {
     b.addUsage(SONNET, { input_tokens: 500, output_tokens: 200 });
     const before = b.snapshot();
     // 500 + 600 = 1100 > cap of 1000 — should throw and leave state alone.
-    expect(() =>
-      b.addUsage(SONNET, { input_tokens: 600, output_tokens: 0 }),
-    ).toThrowError(BudgetError);
+    expect(() => b.addUsage(SONNET, { input_tokens: 600, output_tokens: 0 })).toThrowError(
+      BudgetError,
+    );
     const after = b.snapshot();
     expect(after.inputTokens).toBe(before.inputTokens);
     expect(after.outputTokens).toBe(before.outputTokens);

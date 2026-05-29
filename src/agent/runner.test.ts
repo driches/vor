@@ -270,9 +270,7 @@ describe('runAgent', () => {
       // Turn 1: model wants a tool.
       makeResponse({
         text: 'let me look',
-        tool_calls: [
-          { id: 'call_1', name: 'get_pr_metadata', arguments: {} },
-        ],
+        tool_calls: [{ id: 'call_1', name: 'get_pr_metadata', arguments: {} }],
         stop_reason: 'tool_calls',
         usage: { input_tokens: 100, output_tokens: 50 },
       }),
@@ -310,9 +308,7 @@ describe('runAgent', () => {
     expect(asst.role).toBe('assistant');
     if (asst.role !== 'assistant') throw new Error('unreachable'); // narrow
     expect(asst.text).toBe('let me look');
-    expect(asst.tool_calls).toEqual([
-      { id: 'call_1', name: 'get_pr_metadata', arguments: {} },
-    ]);
+    expect(asst.tool_calls).toEqual([{ id: 'call_1', name: 'get_pr_metadata', arguments: {} }]);
 
     const toolMsg = turn2Messages[2]!;
     expect(toolMsg.role).toBe('tool');
@@ -376,7 +372,8 @@ describe('runAgent', () => {
             arguments: {
               strengths: ['The implementation remains focused and small'],
               assessment: 'approve',
-              assessment_reasoning: 'The scoped review completed without identifying any actionable issues.',
+              assessment_reasoning:
+                'The scoped review completed without identifying any actionable issues.',
             },
           },
         ],

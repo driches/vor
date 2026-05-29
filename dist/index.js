@@ -47558,10 +47558,10 @@ var MODEL_PRICING = {
   // landed across two passes: o1/o3/o3-mini/o4-mini in #3300755077; the
   // o1-mini and o1-preview variants in #3300818612 (the regex also
   // matches them).
-  "o1": { input: 15, output: 60, cache_read: 7.5 },
+  o1: { input: 15, output: 60, cache_read: 7.5 },
   "o1-mini": { input: 3, output: 12, cache_read: 1.5 },
   "o1-preview": { input: 15, output: 60, cache_read: 7.5 },
-  "o3": { input: 10, output: 40, cache_read: 2.5 },
+  o3: { input: 10, output: 40, cache_read: 2.5 },
   "o3-mini": { input: 1.1, output: 4.4, cache_read: 0.275 },
   "o4-mini": { input: 1.1, output: 4.4, cache_read: 0.275 }
 };
@@ -47696,9 +47696,7 @@ function canonicalToolsToAnthropic(tools) {
   }));
 }
 function anthropicResponseToCanonical(response) {
-  const textBlocks = response.content.filter(
-    (b2) => b2.type === "text"
-  );
+  const textBlocks = response.content.filter((b2) => b2.type === "text");
   const toolUseBlocks = response.content.filter(
     (b2) => b2.type === "tool_use"
   );
@@ -57670,9 +57668,7 @@ function responsesResponseToCanonical(response) {
   if (response.status === "failed") {
     const errMsg = response.error?.message ?? "unknown error";
     const errCode = response.error?.code ? ` (code: ${response.error.code})` : "";
-    throw new Error(
-      `OpenAI Responses API returned status=failed${errCode}: ${errMsg}`
-    );
+    throw new Error(`OpenAI Responses API returned status=failed${errCode}: ${errMsg}`);
   } else if (response.status === "incomplete") {
     stop_reason = response.incomplete_details?.reason === "max_output_tokens" ? "max_tokens" : "other";
   } else if (tool_calls.length > 0) {
@@ -57720,16 +57716,27 @@ function createProvider(input) {
       return new OpenAIProvider(input.apiKey);
     default: {
       const _exhaustive = id;
-      throw new Error(
-        `Unknown provider "${String(_exhaustive)}". Valid: anthropic | openai.`
-      );
+      throw new Error(`Unknown provider "${String(_exhaustive)}". Valid: anthropic | openai.`);
     }
   }
 }
 
 // src/tools/tool-helper.ts
 function tool(name, description, inputSchema, handler2) {
-  return { name, description, inputSchema, handler: handler2 };
+  const schema = external_exports.object(inputSchema);
+  return {
+    name,
+    description,
+    inputSchema,
+    handler: async (rawArgs, extra) => {
+      const parsed = schema.safeParse(rawArgs ?? {});
+      if (!parsed.success) {
+        const detail = parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`).join("; ");
+        throw new Error(`Invalid arguments for ${name}: ${detail}`);
+      }
+      return handler2(parsed.data, extra);
+    }
+  };
 }
 
 // src/tools/types.ts
@@ -58248,10 +58255,8 @@ function makePostInlineCommentTool(deps) {
           hint: "Swap them or omit start_line."
         });
       }
-      const rawSide = args.side;
-      const side = rawSide === "RIGHT" || rawSide === "LEFT" ? rawSide : "RIGHT";
-      const rawConfidence = args.confidence;
-      const confidence = rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low" ? rawConfidence : "high";
+      const side = args.side;
+      const confidence = args.confidence;
       const changedFiles = new Map(deps.prContext.files.map((f2) => [f2.path, f2]));
       const validation = validateInlineComment(
         {
@@ -58566,10 +58571,7 @@ function makeWorkerCheckUsageClaimTool(deps) {
       for (const path22 of topPaths) {
         const firstMatch = matches.find((m2) => m2.path === path22);
         const matchLine = firstMatch?.line ?? 1;
-        const readStart = Math.max(
-          1,
-          matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2)
-        );
+        const readStart = Math.max(1, matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2));
         const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
@@ -58642,7 +58644,9 @@ function renderUserPrompt(args) {
   }
   lines.push("");
   if (args.fileSnippets.length > 0) {
-    lines.push(`## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`);
+    lines.push(
+      `## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`
+    );
     for (const snip of args.fileSnippets) {
       lines.push(`### ${snip.path}`);
       lines.push("```");
@@ -58652,7 +58656,9 @@ function renderUserPrompt(args) {
     }
   }
   lines.push("## Required output");
-  lines.push("Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence.");
+  lines.push(
+    "Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence."
+  );
   return lines.join("\n");
 }
 async function runGitGrep2(pattern, cwd, pathGlob) {
@@ -58803,9 +58809,7 @@ async function runPreflight(input) {
   } catch (err) {
     throw err;
   }
-  const textBlock = response.content.find(
-    (b2) => b2.type === "text"
-  );
+  const textBlock = response.content.find((b2) => b2.type === "text");
   if (textBlock === void 0) {
     await logger.warn("Pre-flight returned no text block. Continuing without pre-analysis.");
     return null;
@@ -58868,7 +58872,9 @@ function renderPreflightSection(analysis, changedFiles) {
   }
   lines.push("");
   if (analysis.candidates.length === 0) {
-    lines.push("**No candidates flagged across any file.** Investigate the diff yourself \u2014 the pre-analysis may have missed everything.");
+    lines.push(
+      "**No candidates flagged across any file.** Investigate the diff yourself \u2014 the pre-analysis may have missed everything."
+    );
   } else {
     lines.push(`### ${analysis.candidates.length} candidate(s) (advisory)`);
     lines.push("");
@@ -58918,9 +58924,7 @@ var WorkerClient = class {
       messages: [{ role: "user", content: inv.userPrompt }]
     });
     this.budget.addUsage(this.model, response.usage);
-    const textBlock = response.content.find(
-      (b2) => b2.type === "text"
-    );
+    const textBlock = response.content.find((b2) => b2.type === "text");
     if (textBlock === void 0) {
       throw new Error(`Worker '${inv.task}' returned no text block`);
     }
@@ -58930,21 +58934,15 @@ var WorkerClient = class {
     try {
       unvalidated = JSON.parse(json);
     } catch (err) {
-      await logger.warn(
-        `Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`
-      );
-      throw new Error(
-        `Worker '${inv.task}' returned non-JSON: ${err.message}`
-      );
+      await logger.warn(`Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`);
+      throw new Error(`Worker '${inv.task}' returned non-JSON: ${err.message}`);
     }
     const validation = inv.responseSchema.safeParse(unvalidated);
     if (!validation.success) {
       await logger.warn(
         `Worker '${inv.task}' returned JSON that failed schema validation: ${validation.error.message}`
       );
-      throw new Error(
-        `Worker '${inv.task}' response failed schema: ${validation.error.message}`
-      );
+      throw new Error(`Worker '${inv.task}' response failed schema: ${validation.error.message}`);
     }
     return {
       parsed: validation.data,
@@ -59028,9 +59026,7 @@ async function runAgent(input) {
       }
     }
   }
-  const messages = [
-    { role: "user", content: userPrompt }
-  ];
+  const messages = [{ role: "user", content: userPrompt }];
   try {
     if (preflightBudgetExceeded) {
       throw new BudgetError(lastError ?? "Pre-flight exhausted budget");
@@ -59214,10 +59210,13 @@ function buildToolDefinitions(deps) {
       name: mcp.name,
       description: mcp.description,
       input_schema: inputSchema,
+      // `mcp.handler` parses `args` through the tool's Zod schema (defaults +
+      // validation) before its own logic runs — see `tool()` in
+      // src/tools/tool-helper.ts. A schema-invalid call throws here and is
+      // surfaced to the model as an is_error tool result by the loop above.
       handler: async (args) => {
         const result = await mcp.handler(args, void 0);
-        const content = result.content ?? [];
-        return content.map((b2) => b2.type === "text" ? b2.text ?? "" : JSON.stringify(b2)).join("\n");
+        return result.content.map((b2) => b2.type === "text" ? b2.text : JSON.stringify(b2)).join("\n");
       }
     };
   });
@@ -59474,8 +59473,10 @@ ${entry.content.trim()}
 \`\`\``;
     const block = header + fenced;
     if (bytes + block.length > maxBytes) {
-      sections.push(`
-_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`);
+      sections.push(
+        `
+_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`
+      );
       break;
     }
     sections.push(block);
@@ -59773,10 +59774,7 @@ function deepMerge(base, override) {
   if (typeof base !== "object" || typeof override !== "object") return override;
   const result = { ...base };
   for (const [key, value] of Object.entries(override)) {
-    result[key] = deepMerge(
-      base[key],
-      value
-    );
+    result[key] = deepMerge(base[key], value);
   }
   return result;
 }
@@ -63708,11 +63706,7 @@ var FileReader = class {
     } catch (err) {
       const status = err.status;
       if (status === 404) return null;
-      throw new GitHubApiError(
-        `Failed to read ${ref.path}@${ref.ref}`,
-        status,
-        { cause: err }
-      );
+      throw new GitHubApiError(`Failed to read ${ref.path}@${ref.ref}`, status, { cause: err });
     }
   }
   /** Read a specific line range. Returns null if file doesn't exist. */
@@ -63836,10 +63830,7 @@ function parseUnifiedDiff(diff) {
     const path22 = file.to && file.to !== "/dev/null" ? file.to : file.from ?? "";
     const previousPath = file.from && file.from !== file.to ? file.from : void 0;
     const reviewable = computeReviewableLines(file.chunks);
-    const totalChanges = file.chunks.reduce(
-      (sum, c2) => sum + c2.changes.length,
-      0
-    );
+    const totalChanges = file.chunks.reduce((sum, c2) => sum + c2.changes.length, 0);
     return {
       path: path22,
       ...previousPath ? { previous_path: previousPath } : {},
@@ -63953,9 +63944,7 @@ async function dismissPriorAgentReviews(octokit, ref, newHeadSha) {
         });
         dismissed += 1;
       } catch (err) {
-        void logger.warn(
-          `Failed to dismiss prior review ${review.id}: ${err.message}`
-        );
+        void logger.warn(`Failed to dismiss prior review ${review.id}: ${err.message}`);
       }
     }
     if (r2.data.length < 100) break;
@@ -64505,17 +64494,13 @@ var IgnoreList = class _IgnoreList {
       return _IgnoreList.empty();
     }
     if (parsed == null || typeof parsed !== "object") {
-      void logger.warn(
-        `Ignore file ${args.path} did not parse to an object. Treating as empty.`
-      );
+      void logger.warn(`Ignore file ${args.path} did not parse to an object. Treating as empty.`);
       return _IgnoreList.empty();
     }
     const result = ignoreFileSchema.safeParse(parsed);
     if (!result.success) {
       const detail = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
-      void logger.warn(
-        `Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`
-      );
+      void logger.warn(`Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`);
       return _IgnoreList.empty();
     }
     return new _IgnoreList(result.data.entries);
@@ -64568,6 +64553,9 @@ function packageInRange(version, range, ecosystem) {
     return version.trim() === range.trim();
   }
   return false;
+}
+function expiredIgnoreNotice(scanner, finding, match) {
+  return `${scanner}: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`;
 }
 function isExpired(expires) {
   if (expires == null) return false;
@@ -65160,9 +65148,7 @@ function parseCvssScore(score) {
 }
 function highestCvssScore(vuln) {
   if (!vuln.severity || vuln.severity.length === 0) return void 0;
-  const preferred = vuln.severity.filter(
-    (s2) => s2.type === "CVSS_V3" || s2.type === "CVSS_V4"
-  );
+  const preferred = vuln.severity.filter((s2) => s2.type === "CVSS_V3" || s2.type === "CVSS_V4");
   const best = highestParseable(preferred);
   if (best !== void 0) return best;
   return highestParseable(vuln.severity);
@@ -65317,9 +65303,7 @@ function createDependencyCveScanner(options) {
         files_examined += 1;
         const parsed = parser.parse(content);
         if (parsed.length === 0) {
-          void log2.debug(
-            `dependency-cve: parser returned no deps for ${file.path} (malformed?)`
-          );
+          void log2.debug(`dependency-cve: parser returned no deps for ${file.path} (malformed?)`);
           continue;
         }
         const inDiff = parsed.filter(
@@ -65445,9 +65429,7 @@ function createDependencyCveScanner(options) {
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log2.notice(
-                `dependency-cve: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-              );
+              void log2.notice(expiredIgnoreNotice("dependency-cve", finding, match));
             }
             continue;
           }
@@ -65758,9 +65740,7 @@ function createSecretsScanner(options = {}) {
                 const match = deps.ignoreList.matches(finding);
                 if (match.ignored) {
                   if (match.expired) {
-                    void log2.notice(
-                      `secrets: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                    );
+                    void log2.notice(expiredIgnoreNotice("secrets", finding, match));
                   }
                   if (m2.index === pattern.pattern.lastIndex) {
                     pattern.pattern.lastIndex += 1;
@@ -66008,9 +65988,7 @@ var TARGET_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 var eslintLinter = {
   id: ID,
   applies(files) {
-    return files.some(
-      (f2) => TARGET_EXTENSIONS.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => TARGET_EXTENSIONS.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -66197,9 +66175,7 @@ var TARGET_EXTENSIONS2 = /\.(py|pyi)$/;
 var ruffLinter = {
   id: ID2,
   applies(files) {
-    return files.some(
-      (f2) => TARGET_EXTENSIONS2.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => TARGET_EXTENSIONS2.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -66381,9 +66357,7 @@ var TARGET_EXTENSION = /\.dart$/;
 var dartLinter = {
   id: ID3,
   applies(files) {
-    return files.some(
-      (f2) => TARGET_EXTENSION.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => TARGET_EXTENSION.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -66451,14 +66425,10 @@ function parseDartLine(line) {
 }
 function runCli3(files, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process5.spawn)(
-      "dart",
-      ["analyze", "--format=machine", ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv()
-      }
-    );
+    const child2 = (0, import_node_child_process5.spawn)("dart", ["analyze", "--format=machine", ...files], {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv()
+    });
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -66558,9 +66528,7 @@ var WORKFLOW_PATH_RE = /^\.github\/workflows\/.+\.ya?ml$/;
 var actionlintLinter = {
   id: ID4,
   applies(files) {
-    return files.some(
-      (f2) => WORKFLOW_PATH_RE.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => WORKFLOW_PATH_RE.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -66614,14 +66582,10 @@ var actionlintLinter = {
 };
 function runCli4(files, deps) {
   return new Promise((resolve3, reject) => {
-    const child2 = (0, import_node_child_process6.spawn)(
-      "actionlint",
-      ["-no-color", "-format", "{{json .}}", ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv()
-      }
-    );
+    const child2 = (0, import_node_child_process6.spawn)("actionlint", ["-no-color", "-format", "{{json .}}", ...files], {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv()
+    });
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -66727,9 +66691,7 @@ var knipLinter = {
   // attribution map can match any PR-changed path knip references.
   wholeProject: true,
   applies(files) {
-    return files.some(
-      (f2) => TARGET_EXTENSIONS3.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => TARGET_EXTENSIONS3.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -66816,9 +66778,7 @@ var knipLinter = {
   }
 };
 function locateBin2(workspaceDir) {
-  const ws = findWorkspaceBinary([
-    import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "knip")
-  ]);
+  const ws = findWorkspaceBinary([import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "knip")]);
   if (ws !== null) return ws;
   const isWindows2 = process.platform === "win32";
   return { path: "knip", needsShell: isWindows2 };
@@ -66955,9 +66915,7 @@ var PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp
 var semgrepLinter = {
   id: ID6,
   applies(files) {
-    return files.some(
-      (f2) => PROBABLY_SOURCE.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => PROBABLY_SOURCE.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -67069,18 +67027,14 @@ function runCli6(files, deps, customRulesPath) {
       "--",
       ...files
     ];
-    const child2 = (0, import_node_child_process8.spawn)(
-      "semgrep",
-      args,
-      {
-        cwd: deps.workspaceDir,
-        // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
-        // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
-        // malicious workspace-resolved eslint/ruff/knip binary cannot
-        // read this credential.
-        env: buildLinterEnv(SEMGREP_EXTRA_ENV_KEYS)
-      }
-    );
+    const child2 = (0, import_node_child_process8.spawn)("semgrep", args, {
+      cwd: deps.workspaceDir,
+      // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
+      // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
+      // malicious workspace-resolved eslint/ruff/knip binary cannot
+      // read this credential.
+      env: buildLinterEnv(SEMGREP_EXTRA_ENV_KEYS)
+    });
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -67213,9 +67167,7 @@ var tscLinter = {
   // path tsc references can be attributed — same shape knip uses.
   wholeProject: true,
   applies(files) {
-    return files.some(
-      (f2) => TARGET_EXTENSIONS4.test(f2.path) && !f2.is_binary && !f2.is_generated
-    );
+    return files.some((f2) => TARGET_EXTENSIONS4.test(f2.path) && !f2.is_binary && !f2.is_generated);
   },
   async run(deps, targetFiles) {
     const errors = [];
@@ -67225,14 +67177,10 @@ var tscLinter = {
     }
     const tsconfigPath = import_node_path11.default.join(deps.workspaceDir, "tsconfig.json");
     if (!(0, import_node_fs4.existsSync)(tsconfigPath)) {
-      await logger.debug(
-        `tsc: skipped \u2014 no tsconfig.json at ${tsconfigPath}`
-      );
+      await logger.debug(`tsc: skipped \u2014 no tsconfig.json at ${tsconfigPath}`);
       return { findings: [], errors: [], filesExamined: 0 };
     }
-    const bin = findWorkspaceBinary([
-      import_node_path11.default.join(deps.workspaceDir, "node_modules", ".bin", "tsc")
-    ]);
+    const bin = findWorkspaceBinary([import_node_path11.default.join(deps.workspaceDir, "node_modules", ".bin", "tsc")]);
     if (bin === null) {
       await logger.debug(
         `tsc: skipped \u2014 no tsc binary at ${deps.workspaceDir}/node_modules/.bin/tsc (workspace not npm-installed?)`
@@ -67508,27 +67456,19 @@ function createCoverageDeltaScanner(options = {}) {
       try {
         tool2 = detect(deps);
       } catch (err) {
-        void log2.warn(
-          `coverage-delta: tool detection failed: ${err.message}`
-        );
+        void log2.warn(`coverage-delta: tool detection failed: ${err.message}`);
         return finalize(started, [], errors, 0);
       }
       if (tool2 === null) {
-        void log2.debug(
-          "coverage-delta: no supported coverage tool detected; skipping"
-        );
+        void log2.debug("coverage-delta: no supported coverage tool detected; skipping");
         return finalize(started, [], errors, 0);
       }
-      void log2.debug(
-        `coverage-delta: detected ${tool2.id}; artifact=${tool2.artifact}`
-      );
+      void log2.debug(`coverage-delta: detected ${tool2.id}; artifact=${tool2.artifact}`);
       let outcome;
       try {
         outcome = await run(tool2, deps);
       } catch (err) {
-        void log2.warn(
-          `coverage-delta: ${tool2.id} runner threw: ${err.message}`
-        );
+        void log2.warn(`coverage-delta: ${tool2.id} runner threw: ${err.message}`);
         errors.push({
           message: `coverage-delta: ${tool2.id} runner failed`,
           cause: err.message,
@@ -67551,9 +67491,7 @@ function createCoverageDeltaScanner(options = {}) {
       try {
         coverage = load(tool2, deps);
       } catch (err) {
-        void log2.warn(
-          `coverage-delta: failed to load coverage report: ${err.message}`
-        );
+        void log2.warn(`coverage-delta: failed to load coverage report: ${err.message}`);
         errors.push({
           message: "coverage-delta: failed to load coverage report",
           cause: err.message,
@@ -67583,9 +67521,7 @@ function createCoverageDeltaScanner(options = {}) {
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log2.notice(
-                `coverage-delta: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-              );
+              void log2.notice(expiredIgnoreNotice("coverage-delta", finding, match));
             }
             continue;
           }
@@ -67761,11 +67697,7 @@ async function runCoverageCli(tool2, deps) {
       stderrChunks.push(b2);
       stderrTotal += b2.length;
     });
-    deps.signal.addEventListener(
-      "abort",
-      () => finishErr(`${tool2.id} aborted`),
-      { once: true }
-    );
+    deps.signal.addEventListener("abort", () => finishErr(`${tool2.id} aborted`), { once: true });
     child2.on("close", () => finishOk());
     child2.on("error", (err) => finishErr(`${tool2.id} spawn error: ${err.message}`));
   });
@@ -68026,9 +67958,7 @@ function createDebrisScanner(options = {}) {
                 if (!match.ignored) {
                   findings.push(finding);
                 } else if (match.expired) {
-                  void log2.notice(
-                    `debris: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                  );
+                  void log2.notice(expiredIgnoreNotice("debris", finding, match));
                 }
                 if (m2.index === rule.pattern.lastIndex) {
                   rule.pattern.lastIndex += 1;
@@ -68179,9 +68109,7 @@ function createMigrationSafetyScanner(options = {}) {
                 if (!match.ignored) {
                   findings.push(finding);
                 } else if (match.expired) {
-                  void log2.notice(
-                    `migration-safety: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-                  );
+                  void log2.notice(expiredIgnoreNotice("migration-safety", finding, match));
                 }
                 if (m2.index === rule.pattern.lastIndex) {
                   rule.pattern.lastIndex += 1;
@@ -68460,9 +68388,7 @@ function pushUnlessIgnored(finding, deps, out, log2, scannerLabel) {
     return;
   }
   if (match.expired) {
-    void log2.notice(
-      `${scannerLabel}: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? "(no reason)"}`
-    );
+    void log2.notice(expiredIgnoreNotice(scannerLabel, finding, match));
   }
 }
 function buildMetrics5(started, files_examined) {
@@ -68570,10 +68496,7 @@ async function runOne(scanner, deps, opts) {
   }
   const timeoutController = new AbortController();
   const effectiveTimeoutMs = scanner.timeoutMs ?? opts.perScannerTimeoutMs;
-  const timer = setTimeout(
-    () => timeoutController.abort(),
-    effectiveTimeoutMs
-  );
+  const timer = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
   const combinedSignal = anySignal(deps.signal, timeoutController.signal);
   const scopedDeps = { ...deps, signal: combinedSignal };
   const abortPromise = new Promise((_resolve, reject) => {
@@ -68604,9 +68527,7 @@ async function runOne(scanner, deps, opts) {
 }
 async function runScanners(scanners, deps, options) {
   const opts = resolveOptions2(options);
-  const perScanner = await Promise.all(
-    scanners.map((s2) => runOne(s2, deps, opts))
-  );
+  const perScanner = await Promise.all(scanners.map((s2) => runOne(s2, deps, opts)));
   const allFindings = [];
   for (const r2 of perScanner) {
     if (r2.findings.length > 0) allFindings.push(...r2.findings);
@@ -68853,32 +68774,21 @@ ${base}` : base;
     await logger.info(
       "Mode: sequential (scanner_findings_in_user_prompt=true). Awaiting scanners before launching agent."
     );
-    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then(
-      (r2) => r2[0]
-    );
+    scanOutcome = await Promise.allSettled([runScanners(scanners, scannerDeps)]).then((r2) => r2[0]);
     const rawFindings = scanOutcome.status === "fulfilled" ? scanOutcome.value.findings : [];
-    const findings = filterScannerFindingsForPrompt(
-      rawFindings,
-      config,
-      prContext.files
-    );
+    const findings = filterScannerFindingsForPrompt(rawFindings, config, prContext.files);
     await logger.info(
       `Scanners settled: ${findings.length}/${rawFindings.length} eligible finding(s) will be injected into the agent's user prompt.`
     );
     userPrompt = buildPrompt(findings);
-    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then(
-      (r2) => r2[0]
-    );
+    agentOutcome = await Promise.allSettled([makeAgentPromise(userPrompt)]).then((r2) => r2[0]);
   } else {
     const agentPromise = makeAgentPromise(userPrompt);
     const scannerPromise = runScanners(scanners, scannerDeps);
     agentPromise.catch(() => {
       orchestratorAbort.abort();
     });
-    [agentOutcome, scanOutcome] = await Promise.allSettled([
-      agentPromise,
-      scannerPromise
-    ]);
+    [agentOutcome, scanOutcome] = await Promise.allSettled([agentPromise, scannerPromise]);
   }
   if (agentOutcome.status === "rejected") {
     if (scanOutcome.status === "fulfilled") {
@@ -68924,9 +68834,7 @@ ${base}` : base;
     }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
     if (!valid.ok) {
-      await logger.debug(
-        `Skipping scanner finding from ${finding.scanner}: ${valid.reason}`
-      );
+      await logger.debug(`Skipping scanner finding from ${finding.scanner}: ${valid.reason}`);
       continue;
     }
     aggregator.addComment(scanFindingToPostedComment(finding));
@@ -68947,12 +68855,8 @@ ${base}` : base;
   const dedupedKept = dedupKeptScannerComments(filtered.kept);
   if (dedupedKept.length < filtered.kept.length) {
     const dedupKeptSet = new Set(dedupedKept);
-    const dedupExcluded = new Set(
-      filtered.kept.filter((c2) => !dedupKeptSet.has(c2))
-    );
-    const eligible = aggregator.acceptedComments.filter(
-      (c2) => !dedupExcluded.has(c2)
-    );
+    const dedupExcluded = new Set(filtered.kept.filter((c2) => !dedupKeptSet.has(c2)));
+    const eligible = aggregator.acceptedComments.filter((c2) => !dedupExcluded.has(c2));
     filtered = filterComments(eligible, caps);
     filtered.kept = dedupKeptScannerComments(filtered.kept);
   } else {
@@ -69007,7 +68911,9 @@ ${base}` : base;
     body: rendered.body,
     comments: filtered.kept
   });
-  await logger.info(`Posted review ${posted.review_id} with ${posted.comment_count} inline comment(s).`);
+  await logger.info(
+    `Posted review ${posted.review_id} with ${posted.comment_count} inline comment(s).`
+  );
   return {
     review_id: posted.review_id,
     comment_count: posted.comment_count,
@@ -69030,7 +68936,9 @@ async function loadConfig(input, fileReader, headSha) {
       return loadConfigFromString(content);
     }
   } catch (err) {
-    await logger.debug(`Could not read ${input.config_path} from GitHub: ${err.message}`);
+    await logger.debug(
+      `Could not read ${input.config_path} from GitHub: ${err.message}`
+    );
   }
   try {
     const localPath = (0, import_node_path16.resolve)(input.workspace_dir, input.config_path);
@@ -69157,8 +69065,8 @@ function parseIntOrUndefined(v2) {
   const n2 = Number.parseInt(v2.trim(), 10);
   return Number.isFinite(n2) ? n2 : void 0;
 }
-main().catch((err) => {
-  console.error(err);
+main().catch(async (err) => {
+  await logger.error(err instanceof Error ? err.stack ?? err.message : String(err));
   process.exit(1);
 });
 /*! Bundled license information:

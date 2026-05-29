@@ -354,10 +354,7 @@ export function createOsvClient(opts?: OsvClientOptions): OsvClient {
   }
 
   return {
-    async queryBatch(
-      queries: OsvQuery[],
-      opts?: OsvRequestOptions,
-    ): Promise<OsvBatchResponse> {
+    async queryBatch(queries: OsvQuery[], opts?: OsvRequestOptions): Promise<OsvBatchResponse> {
       if (queries.length === 0) return { results: [] };
 
       const chunks = chunk(queries, QUERY_BATCH_LIMIT);

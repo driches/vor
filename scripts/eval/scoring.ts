@@ -57,8 +57,7 @@ export function scoreRun(input: ScoreInput): ScoreResult {
       const findingStart = finding.start_line ?? finding.line;
       const findingEnd = finding.line;
       const overlaps =
-        findingStart <= truthEnd + LINE_SLACK &&
-        findingEnd >= truthStart - LINE_SLACK;
+        findingStart <= truthEnd + LINE_SLACK && findingEnd >= truthStart - LINE_SLACK;
       const ok =
         finding.side === 'RIGHT' &&
         finding.file_path === truth.file &&

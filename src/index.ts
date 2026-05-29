@@ -21,11 +21,7 @@ async function main(): Promise<void> {
   // any programmatic caller — but the env-var path is the common one
   // and deserves a dedicated, specific error message.
   const raw_provider = process.env.INPUT_PROVIDER?.trim() || undefined;
-  if (
-    raw_provider !== undefined &&
-    raw_provider !== 'anthropic' &&
-    raw_provider !== 'openai'
-  ) {
+  if (raw_provider !== undefined && raw_provider !== 'anthropic' && raw_provider !== 'openai') {
     await logger.error(
       `Invalid INPUT_PROVIDER "${raw_provider}". Must be "anthropic" or "openai" (or omit to infer from model id).`,
     );
@@ -166,7 +162,12 @@ function parseIntOrUndefined(v: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-main().catch((err) => {
-  console.error(err);
+main().catch(async (err) => {
+  // Last-resort net for anything that escapes main()'s own try/catch (e.g. a
+  // throw inside the catch block, or logger.setFailed itself failing). Route
+  // it through the structured logger rather than console.error so the message
+  // passes through secret masking before it lands in consumer CI logs
+  // (AGENTS.md §0.6).
+  await logger.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
   process.exit(1);
 });

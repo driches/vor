@@ -20,16 +20,11 @@ export const pathTraversalTemplate: PlantTemplate = {
     const line = typeof config.line === 'number' ? config.line : NaN;
     const lines = source.split('\n');
     if (!Number.isInteger(line) || line < 1 || line > lines.length + 1) {
-      throw new Error(
-        `path-traversal: line ${line} is outside the file (1..${lines.length + 1})`,
-      );
+      throw new Error(`path-traversal: line ${line} is outside the file (1..${lines.length + 1})`);
     }
-    const inputVar =
-      typeof config.input_var === 'string' ? config.input_var : 'filename';
-    const baseVar =
-      typeof config.base_var === 'string' ? config.base_var : 'baseDir';
-    const insertion =
-      `  const fileData = await fs.readFile(path.join(${baseVar}, ${inputVar}), 'utf-8');`;
+    const inputVar = typeof config.input_var === 'string' ? config.input_var : 'filename';
+    const baseVar = typeof config.base_var === 'string' ? config.base_var : 'baseDir';
+    const insertion = `  const fileData = await fs.readFile(path.join(${baseVar}, ${inputVar}), 'utf-8');`;
     const before = lines.slice(0, line - 1);
     const after = lines.slice(line - 1);
     return {

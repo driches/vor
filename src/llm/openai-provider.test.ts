@@ -74,9 +74,7 @@ describe('supportsTemperature', () => {
 
 describe('canonicalMessagesToResponsesInput', () => {
   it('converts a user message into a message item with one input_text block', () => {
-    const result = canonicalMessagesToResponsesInput([
-      { role: 'user', content: 'review this PR' },
-    ]);
+    const result = canonicalMessagesToResponsesInput([{ role: 'user', content: 'review this PR' }]);
     expect(result).toEqual([
       {
         type: 'message',
@@ -92,9 +90,7 @@ describe('canonicalMessagesToResponsesInput', () => {
     // valid in API RESPONSES, not request input. (Real assistant turns come
     // back from the API with provider_state set; this branch is for
     // synthesized/seed fixtures only.)
-    const result = canonicalMessagesToResponsesInput([
-      { role: 'assistant', text: 'Got it.' },
-    ]);
+    const result = canonicalMessagesToResponsesInput([{ role: 'assistant', text: 'Got it.' }]);
     expect(result).toEqual([
       {
         type: 'message',
@@ -161,7 +157,11 @@ describe('canonicalMessagesToResponsesInput', () => {
   it('splats provider_state (array) verbatim and ignores text/tool_calls on that message', () => {
     const priorOutput: unknown[] = [
       { type: 'reasoning', id: 'r1', summary: [], encrypted_content: 'opaque' },
-      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'go', annotations: [] }] },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'go', annotations: [] }],
+      },
       { type: 'function_call', call_id: 't1', name: 'x', arguments: '{}' },
     ];
     const result = canonicalMessagesToResponsesInput([
@@ -249,9 +249,7 @@ describe('canonicalMessagesToResponsesInput', () => {
     const result = canonicalMessagesToResponsesInput([
       { role: 'tool', tool_call_id: 't1', content: 'diff text' },
     ]);
-    expect(result).toEqual([
-      { type: 'function_call_output', call_id: 't1', output: 'diff text' },
-    ]);
+    expect(result).toEqual([{ type: 'function_call_output', call_id: 't1', output: 'diff text' }]);
   });
 
   it('emits adjacent tool messages as SEPARATE function_call_output items (no Anthropic-style grouping)', () => {
@@ -619,9 +617,7 @@ describe('responsesResponseToCanonical', () => {
         status: 'completed',
       } as unknown as Partial<OpenAI.Responses.Response>),
     );
-    expect(result.tool_calls).toEqual([
-      { id: 't1', name: 'broken_tool', arguments: {} },
-    ]);
+    expect(result.tool_calls).toEqual([{ id: 't1', name: 'broken_tool', arguments: {} }]);
     expect(result.stop_reason).toBe('tool_calls');
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const warnMessage = warnSpy.mock.calls[0]![0] as string;
@@ -1024,9 +1020,7 @@ describe('OpenAIProvider', () => {
       );
 
       expect(result.text).toBe('Reviewing.');
-      expect(result.tool_calls).toEqual([
-        { id: 't1', name: 'get_pr_diff', arguments: {} },
-      ]);
+      expect(result.tool_calls).toEqual([{ id: 't1', name: 'get_pr_diff', arguments: {} }]);
       expect(result.stop_reason).toBe('tool_calls');
       expect(result.usage).toEqual({
         input_tokens: 200,

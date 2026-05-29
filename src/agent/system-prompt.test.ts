@@ -53,7 +53,10 @@ describe('buildSystemPrompt', () => {
   it('truncates context if it exceeds max_context_bytes', () => {
     const huge = 'x'.repeat(40_000);
     const p = buildSystemPrompt({
-      config: { ...DEFAULT_CONFIG, context: { ...DEFAULT_CONFIG.context, max_context_bytes: 5_000 } },
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, max_context_bytes: 5_000 },
+      },
       repoName: 'r',
       contextFiles: [
         { file: 'CLAUDE.md', content: huge },

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileReader } from '../github/file-reader.js';
 import { logger } from '../util/logger.js';
-import { IgnoreList } from './ignore-list.js';
+import { IgnoreList, expiredIgnoreNotice } from './ignore-list.js';
 import type { ScanEvidence, ScanFinding } from './types.js';
 
 /**
@@ -597,5 +597,25 @@ describe('IgnoreList.load — missing file', () => {
     } as unknown as FileReader;
     const list = await IgnoreList.load(reader, loadArgs);
     expect(list.matches(makeFinding())).toEqual({ ignored: false });
+  });
+});
+
+describe('expiredIgnoreNotice', () => {
+  it('renders scanner, rule, location, and reason in one line', () => {
+    const finding = makeFinding({
+      rule_id: 'osv:CVE-2021-1',
+      file_path: 'package-lock.json',
+      line: 42,
+    });
+    const notice = expiredIgnoreNotice('dependency-cve', finding, { reason: 'tracked in JIRA-9' });
+    expect(notice).toBe(
+      'dependency-cve: ignore entry for osv:CVE-2021-1 (package-lock.json:42) is expired; ' +
+        'finding still suppressed but will need refresh. Reason: tracked in JIRA-9',
+    );
+  });
+
+  it('falls back to "(no reason)" when the match has no reason', () => {
+    const notice = expiredIgnoreNotice('secrets', makeFinding(), {});
+    expect(notice).toContain('Reason: (no reason)');
   });
 });

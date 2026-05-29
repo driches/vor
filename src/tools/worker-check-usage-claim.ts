@@ -131,10 +131,7 @@ export function makeWorkerCheckUsageClaimTool(deps: ToolDeps) {
         // around the match so the worker sees actual usage.
         const firstMatch = matches.find((m) => m.path === path);
         const matchLine = firstMatch?.line ?? 1;
-        const readStart = Math.max(
-          1,
-          matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2),
-        );
+        const readStart = Math.max(1, matchLine - Math.floor(READ_FILE_LINES_PER_CALL / 2));
         const readEnd = readStart + READ_FILE_LINES_PER_CALL - 1;
         const head = deps.prContext.metadata.head_sha;
         const result = await deps.fileReader.readRange(
@@ -230,7 +227,9 @@ function renderUserPrompt(args: {
   }
   lines.push('');
   if (args.fileSnippets.length > 0) {
-    lines.push(`## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`);
+    lines.push(
+      `## File content (top ${args.fileSnippets.length} hit files, first ${READ_FILE_LINES_PER_CALL} lines each)`,
+    );
     for (const snip of args.fileSnippets) {
       lines.push(`### ${snip.path}`);
       lines.push('```');
@@ -240,15 +239,13 @@ function renderUserPrompt(args: {
     }
   }
   lines.push('## Required output');
-  lines.push('Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence.');
+  lines.push(
+    'Return ONLY the JSON verdict described in your instructions. No prose, no markdown fence.',
+  );
   return lines.join('\n');
 }
 
-async function runGitGrep(
-  pattern: string,
-  cwd: string,
-  pathGlob?: string,
-): Promise<GrepMatch[]> {
+async function runGitGrep(pattern: string, cwd: string, pathGlob?: string): Promise<GrepMatch[]> {
   const args = ['grep', '-n', '-E', '--no-color', '--', pattern];
   if (pathGlob !== undefined) args.push(pathGlob);
 

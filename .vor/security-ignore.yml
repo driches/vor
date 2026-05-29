@@ -16,109 +16,109 @@ entries:
   # Pattern-level smoke suite: one positive per supported rule.
   # ---------------------------------------------------------------
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "Positive fixture for the aws-access-key-id pattern test (canonical AWS example)"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Positive fixture for the aws-access-key-id pattern test (canonical AWS example)'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:aws-secret-access-key"
-    reason: "Positive + boundary-case fixtures for the aws-secret-access-key pattern test"
+    rule: 'secret:aws-secret-access-key'
+    reason: 'Positive + boundary-case fixtures for the aws-secret-access-key pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-classic"
-    reason: "Positive fixture for the github-pat-classic pattern test"
+    rule: 'secret:github-pat-classic'
+    reason: 'Positive fixture for the github-pat-classic pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-oauth"
-    reason: "Positive fixture for the github-pat-oauth pattern test"
+    rule: 'secret:github-pat-oauth'
+    reason: 'Positive fixture for the github-pat-oauth pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-user-server"
-    reason: "Positive fixture for the github-pat-user-server pattern test"
+    rule: 'secret:github-pat-user-server'
+    reason: 'Positive fixture for the github-pat-user-server pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-server-server"
-    reason: "Positive fixture for the github-pat-server-server pattern test"
+    rule: 'secret:github-pat-server-server'
+    reason: 'Positive fixture for the github-pat-server-server pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-refresh"
-    reason: "Positive fixture for the github-pat-refresh pattern test"
+    rule: 'secret:github-pat-refresh'
+    reason: 'Positive fixture for the github-pat-refresh pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:github-pat-fine-grained"
-    reason: "Positive fixture for the github-pat-fine-grained pattern test"
+    rule: 'secret:github-pat-fine-grained'
+    reason: 'Positive fixture for the github-pat-fine-grained pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:slack-token"
-    reason: "Positive fixture for the slack-token pattern test"
+    rule: 'secret:slack-token'
+    reason: 'Positive fixture for the slack-token pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:stripe-live-key"
-    reason: "Positive fixture for the stripe-live-key pattern test"
+    rule: 'secret:stripe-live-key'
+    reason: 'Positive fixture for the stripe-live-key pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:stripe-restricted-key"
-    reason: "Positive fixture for the stripe-restricted-key pattern test"
+    rule: 'secret:stripe-restricted-key'
+    reason: 'Positive fixture for the stripe-restricted-key pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:google-api-key"
-    reason: "Positive fixture for the google-api-key pattern test"
+    rule: 'secret:google-api-key'
+    reason: 'Positive fixture for the google-api-key pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:npm-access-token"
-    reason: "Positive fixture for the npm-access-token pattern test"
+    rule: 'secret:npm-access-token'
+    reason: 'Positive fixture for the npm-access-token pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:private-key-pem"
-    reason: "Positive fixture for the private-key-pem pattern test"
+    rule: 'secret:private-key-pem'
+    reason: 'Positive fixture for the private-key-pem pattern test'
   - file: src/scanners/secrets-patterns.test.ts
-    rule: "secret:jwt"
-    reason: "Positive fixture for the JWT pattern test (3-segment eyJ-prefixed shape)"
+    rule: 'secret:jwt'
+    reason: 'Positive fixture for the JWT pattern test (3-segment eyJ-prefixed shape)'
 
   # ---------------------------------------------------------------
   # src/scanners/secrets.test.ts
   # Scanner-level integration tests (planted keys exercise findings).
   # ---------------------------------------------------------------
   - file: src/scanners/secrets.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "PLANTED_AWS_KEY + KEY_A + KEY_B fixtures for the secrets scanner happy-path and multi-finding tests"
+    rule: 'secret:aws-access-key-id'
+    reason: 'PLANTED_AWS_KEY + KEY_A + KEY_B fixtures for the secrets scanner happy-path and multi-finding tests'
   - file: src/scanners/secrets.test.ts
-    rule: "secret:private-key-pem"
-    reason: "Test fixture for the PEM-overlap suppression behavior"
+    rule: 'secret:private-key-pem'
+    reason: 'Test fixture for the PEM-overlap suppression behavior'
 
   # ---------------------------------------------------------------
   # src/orchestrator.test.ts
   # End-to-end integration test plants the AWS key on a diff hunk.
   # ---------------------------------------------------------------
   - file: src/orchestrator.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "PLANTED_AWS_KEY fixture for the orchestrator integration test (Scenarios 1, 2b)"
+    rule: 'secret:aws-access-key-id'
+    reason: 'PLANTED_AWS_KEY fixture for the orchestrator integration test (Scenarios 1, 2b)'
 
   # ---------------------------------------------------------------
   # eval harness — design/plan docs reference the AKIA canonical example.
   # ---------------------------------------------------------------
   - file: docs/superpowers/specs/2026-05-23-eval-harness-design.md
-    rule: "secret:aws-access-key-id"
-    reason: "Spec doc references canonical AKIAIOSFODNN7EXAMPLE in plant catalog table"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Spec doc references canonical AKIAIOSFODNN7EXAMPLE in plant catalog table'
   - file: docs/superpowers/plans/2026-05-23-eval-harness-mvp.md
-    rule: "secret:aws-access-key-id"
-    reason: "Plan doc references canonical AKIAIOSFODNN7EXAMPLE in code examples"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Plan doc references canonical AKIAIOSFODNN7EXAMPLE in code examples'
 
   # ---------------------------------------------------------------
   # eval harness — plant catalog template + its tests use the canonical AKIA marker.
   # ---------------------------------------------------------------
   - file: scripts/plant/aws-access-key.ts
-    rule: "secret:aws-access-key-id"
-    reason: "DEFAULT_VALUE constant is AKIAIOSFODNN7EXAMPLE (canonical AWS example marker)"
+    rule: 'secret:aws-access-key-id'
+    reason: 'DEFAULT_VALUE constant is AKIAIOSFODNN7EXAMPLE (canonical AWS example marker)'
   - file: scripts/plant/aws-access-key.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "Positive fixtures for the AWS-key plant template"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Positive fixtures for the AWS-key plant template'
   - file: scripts/plant/plant-runner.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "Integration fixtures that exercise the AWS-key plant template"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Integration fixtures that exercise the AWS-key plant template'
 
   # ---------------------------------------------------------------
   # eval harness — case-loader + orchestrator-adapter tests use the canonical AKIA marker.
   # ---------------------------------------------------------------
   - file: scripts/eval/case-loader.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "Fixture LoadedCase contains the canonical AWS example marker"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Fixture LoadedCase contains the canonical AWS example marker'
   - file: scripts/eval/orchestrator-adapter.test.ts
-    rule: "secret:aws-access-key-id"
-    reason: "Fixture LoadedCase contains the canonical AWS example marker"
+    rule: 'secret:aws-access-key-id'
+    reason: 'Fixture LoadedCase contains the canonical AWS example marker'
 
   # ---------------------------------------------------------------
   # this file — reason strings above reference the canonical AKIA marker
   # when documenting why other test fixtures need suppression.
   # ---------------------------------------------------------------
   - file: .vor/security-ignore.yml
-    rule: "secret:aws-access-key-id"
+    rule: 'secret:aws-access-key-id'
     reason: "Self-reference: this file's reason strings mention AKIAIOSFODNN7EXAMPLE (canonical test marker) when documenting suppression entries for other fixtures"
 
   # ---------------------------------------------------------------
@@ -128,20 +128,20 @@ entries:
   # constant lives in source; suppress the per-file scanner hit on this repo.
   # ---------------------------------------------------------------
   - file: scripts/plant/github-pat.ts
-    rule: "secret:github-pat-classic"
+    rule: 'secret:github-pat-classic'
     reason: "DEFAULT_VALUE is the placeholder ghp_aaaa…aaaa (36 a's) — emitted into after/ at plant time, not a real PAT"
   - file: scripts/plant/github-pat.test.ts
-    rule: "secret:github-pat-classic"
-    reason: "Positive fixtures for the github-pat plant template (default value + custom-value assertion)"
+    rule: 'secret:github-pat-classic'
+    reason: 'Positive fixtures for the github-pat plant template (default value + custom-value assertion)'
   - file: scripts/plant/pem-private-key.ts
-    rule: "secret:private-key-pem"
-    reason: "PEM_HEADER/PEM_FOOTER constants are the BEGIN/END markers the template emits; body is EXAMPLE…EXAMPLE"
+    rule: 'secret:private-key-pem'
+    reason: 'PEM_HEADER/PEM_FOOTER constants are the BEGIN/END markers the template emits; body is EXAMPLE…EXAMPLE'
   - file: scripts/plant/pem-private-key.test.ts
-    rule: "secret:private-key-pem"
-    reason: "Positive fixtures + range-coverage assertions for the pem-private-key plant template"
+    rule: 'secret:private-key-pem'
+    reason: 'Positive fixtures + range-coverage assertions for the pem-private-key plant template'
   - file: scripts/plant/plant-runner.test.ts
-    rule: "secret:private-key-pem"
-    reason: "Regression test plants a PEM block then asserts no AWS-key line is spliced between the markers — assertion text contains the BEGIN marker string"
+    rule: 'secret:private-key-pem'
+    reason: 'Regression test plants a PEM block then asserts no AWS-key line is spliced between the markers — assertion text contains the BEGIN marker string'
 
   # ---------------------------------------------------------------
   # eval harness v1.1 — vuln-dep:pypi fixtures pin vulnerable versions.
@@ -158,20 +158,20 @@ entries:
   # add it here.
   # ---------------------------------------------------------------
   - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
-    rule: "osv:GHSA-m2qf-hxjv-5gpq"
-    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, vuln-dep:pypi fixture"
+    rule: 'osv:GHSA-m2qf-hxjv-5gpq'
+    reason: 'Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, vuln-dep:pypi fixture'
   - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
-    rule: "osv:PYSEC-2023-62"
-    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, vuln-dep:pypi fixture"
+    rule: 'osv:PYSEC-2023-62'
+    reason: 'Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, vuln-dep:pypi fixture'
   - file: tests/fixtures/golden-repo/cases/single-vuln-dep-pypi/before/requirements.txt
-    rule: "osv:GHSA-6w46-j5rx-g56g"
-    reason: "Pre-existing pytest@8.0.0 pin in vuln-dep:pypi fixture — OSV/GHSA finding for CVE-2025-71176"
+    rule: 'osv:GHSA-6w46-j5rx-g56g'
+    reason: 'Pre-existing pytest@8.0.0 pin in vuln-dep:pypi fixture — OSV/GHSA finding for CVE-2025-71176'
   - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
-    rule: "osv:GHSA-m2qf-hxjv-5gpq"
-    reason: "Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+    rule: 'osv:GHSA-m2qf-hxjv-5gpq'
+    reason: 'Planted flask@2.3.0 pin — OSV/GHSA finding for CVE-2023-30861, dependency-pair multi-plant fixture'
   - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
-    rule: "osv:PYSEC-2023-62"
-    reason: "Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, dependency-pair multi-plant fixture"
+    rule: 'osv:PYSEC-2023-62'
+    reason: 'Planted flask@2.3.0 pin — OSV/PYSEC finding for CVE-2023-30861, dependency-pair multi-plant fixture'
   - file: tests/fixtures/golden-repo/cases/dependency-pair/before/requirements.txt
-    rule: "osv:GHSA-6w46-j5rx-g56g"
-    reason: "Pre-existing pytest@8.0.0 pin in dependency-pair multi-plant fixture — OSV/GHSA finding for CVE-2025-71176"
+    rule: 'osv:GHSA-6w46-j5rx-g56g'
+    reason: 'Pre-existing pytest@8.0.0 pin in dependency-pair multi-plant fixture — OSV/GHSA finding for CVE-2025-71176'

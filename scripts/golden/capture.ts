@@ -147,10 +147,7 @@ async function main(): Promise<void> {
 
   // 5. Normalize Codex comments
   const normalized = normalizeReview({ captured, bot });
-  writeFileSync(
-    resolve(caseDir, 'codex/normalized.json'),
-    JSON.stringify(normalized, null, 2),
-  );
+  writeFileSync(resolve(caseDir, 'codex/normalized.json'), JSON.stringify(normalized, null, 2));
   log(`  → ${normalized.length} normalized finding(s)`);
 
   // 6. Clone source repo at head SHA (snapshot). cloneRepoAtSha passes the

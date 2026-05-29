@@ -15,25 +15,22 @@ interface PackageLockShape {
 export const vulnDepNpmTemplate: PlantTemplate = {
   type: 'vuln-dep:npm',
   apply(source, config) {
-    if (config.file !== 'package-lock.json' && !String(config.file).endsWith('/package-lock.json')) {
-      throw new Error(
-        `vuln-dep:npm only applies to package-lock.json, got ${String(config.file)}`,
-      );
+    if (
+      config.file !== 'package-lock.json' &&
+      !String(config.file).endsWith('/package-lock.json')
+    ) {
+      throw new Error(`vuln-dep:npm only applies to package-lock.json, got ${String(config.file)}`);
     }
     const pkg = typeof config.package === 'string' ? config.package : '';
     const ver = typeof config.version === 'string' ? config.version : '';
     if (!pkg || !ver) {
-      throw new Error(
-        `vuln-dep:npm requires both 'package' and 'version' params`,
-      );
+      throw new Error(`vuln-dep:npm requires both 'package' and 'version' params`);
     }
     let parsed: PackageLockShape;
     try {
       parsed = JSON.parse(source) as PackageLockShape;
     } catch (err) {
-      throw new Error(
-        `vuln-dep:npm: lockfile is invalid JSON: ${(err as Error).message}`,
-      );
+      throw new Error(`vuln-dep:npm: lockfile is invalid JSON: ${(err as Error).message}`);
     }
     parsed.packages = parsed.packages ?? {};
     // Refuse no-op plants: if the lockfile already pins exactly this
@@ -81,9 +78,7 @@ export const vulnDepNpmTemplate: PlantTemplate = {
       }
     }
     if (entryLine < 0) {
-      throw new Error(
-        `vuln-dep:npm: failed to locate planted entry for ${pkg}`,
-      );
+      throw new Error(`vuln-dep:npm: failed to locate planted entry for ${pkg}`);
     }
     let versionLine = -1;
     for (let i = entryLine; i < lines.length; i++) {

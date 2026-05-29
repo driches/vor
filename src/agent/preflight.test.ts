@@ -133,7 +133,16 @@ describe('runPreflight', () => {
         create: vi.fn(async () =>
           mockResponse(
             JSON.stringify({
-              candidates: [{ file: 'x', line_range: '1', severity_guess: 'BOGUS_SEV', category: 'bug', what: 'x', why: 'x' }],
+              candidates: [
+                {
+                  file: 'x',
+                  line_range: '1',
+                  severity_guess: 'BOGUS_SEV',
+                  category: 'bug',
+                  what: 'x',
+                  why: 'x',
+                },
+              ],
             }),
           ),
         ),
@@ -174,9 +183,7 @@ describe('runPreflight', () => {
     });
     const fakeClient: FakeAnthropic = {
       messages: {
-        create: vi.fn(async () =>
-          mockResponse(JSON.stringify({ candidates: [] })),
-        ),
+        create: vi.fn(async () => mockResponse(JSON.stringify({ candidates: [] }))),
       },
     };
     // Response usage of 1000 input tokens blows past the 50-token cap.
@@ -217,7 +224,9 @@ describe('runPreflight', () => {
     const fakeClient: FakeAnthropic = {
       messages: {
         create: vi.fn(async () =>
-          mockResponse(JSON.stringify({ candidates: [], low_risk_files: [], global_observations: [] })),
+          mockResponse(
+            JSON.stringify({ candidates: [], low_risk_files: [], global_observations: [] }),
+          ),
         ),
       },
     };

@@ -36,7 +36,10 @@ describe('renderSummaryReport', () => {
       baseline_config: 'sonnet-only',
       scores: [
         score({ config_name: 'sonnet-only' }),
-        score({ config_name: 'haiku-only', cost: { ...score({ config_name: 'x' }).cost, cost_usd: 0.1 } }),
+        score({
+          config_name: 'haiku-only',
+          cost: { ...score({ config_name: 'x' }).cost, cost_usd: 0.1 },
+        }),
       ],
     });
     expect(md).toContain('# Eval run 2026-05-23T15:42:00Z');
@@ -51,15 +54,27 @@ describe('renderSummaryReport', () => {
       baseline_config: 'sonnet-only',
       scores: [
         score({ config_name: 'sonnet-only', recall: 1, tp: 2, fn: 0 }),
-        score({ config_name: 'haiku-only', recall: 0.5, tp: 1, fn: 1, cost: { ...score({ config_name: 'x' }).cost, cost_usd: 0.1 } }),
+        score({
+          config_name: 'haiku-only',
+          recall: 0.5,
+          tp: 1,
+          fn: 1,
+          cost: { ...score({ config_name: 'x' }).cost, cost_usd: 0.1 },
+        }),
       ],
     });
     expect(md).toContain('🔴');
   });
 
   it('flags a cheaper-but-not-enough as 🟡', () => {
-    const baseline = score({ config_name: 'sonnet-only', cost: { ...score({ config_name: 'x' }).cost, cost_usd: 1.0 } });
-    const challenger = score({ config_name: 'opus-only', cost: { ...baseline.cost, cost_usd: 0.8 } });
+    const baseline = score({
+      config_name: 'sonnet-only',
+      cost: { ...score({ config_name: 'x' }).cost, cost_usd: 1.0 },
+    });
+    const challenger = score({
+      config_name: 'opus-only',
+      cost: { ...baseline.cost, cost_usd: 0.8 },
+    });
     const md = renderSummaryReport({
       timestamp: '2026-05-23T15:42:00Z',
       baseline_config: 'sonnet-only',
@@ -104,7 +119,11 @@ describe('renderSummaryReport', () => {
         scores: [
           // case-A: baseline + challenger both ran.
           score({ case_id: 'case-A', config_name: 'sonnet-only' }),
-          score({ case_id: 'case-A', config_name: 'haiku-only', cost: { ...baselineCost, cost_usd: 0.1 } }),
+          score({
+            case_id: 'case-A',
+            config_name: 'haiku-only',
+            cost: { ...baselineCost, cost_usd: 0.1 },
+          }),
           // case-B: baseline DIDN'T run (challenger-only).
           score({ case_id: 'case-B', config_name: 'haiku-only' }),
         ],
@@ -120,10 +139,7 @@ describe('renderSummaryReport', () => {
       renderSummaryReport({
         timestamp: '2026-05-23T15:42:00Z',
         baseline_config: 'sonnet-only', // doesn't exist in scores
-        scores: [
-          score({ config_name: 'opus-only' }),
-          score({ config_name: 'haiku-only' }),
-        ],
+        scores: [score({ config_name: 'opus-only' }), score({ config_name: 'haiku-only' })],
       }),
     ).toThrow(/baseline_config.*not found/);
   });

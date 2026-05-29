@@ -49,9 +49,7 @@ interface ActionlintError {
 export const actionlintLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => WORKFLOW_PATH_RE.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => WORKFLOW_PATH_RE.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -133,14 +131,10 @@ function runCli(files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     // -no-color avoids ANSI sequences leaking into the JSON. -format
     // '{{json .}}' is actionlint's Go-template-driven JSON output.
-    const child = spawn(
-      'actionlint',
-      ['-no-color', '-format', '{{json .}}', ...files],
-      {
-        cwd: deps.workspaceDir,
-        env: buildLinterEnv(),
-      },
-    );
+    const child = spawn('actionlint', ['-no-color', '-format', '{{json .}}', ...files], {
+      cwd: deps.workspaceDir,
+      env: buildLinterEnv(),
+    });
     // Collect chunks as Buffers and concatenate once at close time. The
     // pre-fix `stdout += chunk.toString('utf-8')` pattern is O(n²) on long
     // outputs AND can corrupt UTF-8 sequences that straddle a chunk
@@ -223,11 +217,7 @@ function buildFinding(filePath: string, message: ActionlintError): ScanFinding {
 function severityFromKind(kind: string): Severity {
   // Schema/syntax errors mean the workflow likely won't run as intended.
   // Expression and shellcheck findings are usually subtler.
-  if (
-    kind === 'syntax-check' ||
-    kind === 'workflow-schema' ||
-    kind === 'workflow-call'
-  ) {
+  if (kind === 'syntax-check' || kind === 'workflow-schema' || kind === 'workflow-call') {
     return 'important';
   }
   return 'minor';

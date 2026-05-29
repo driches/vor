@@ -53,11 +53,7 @@ export class FileReader {
     } catch (err) {
       const status = (err as { status?: number }).status;
       if (status === 404) return null;
-      throw new GitHubApiError(
-        `Failed to read ${ref.path}@${ref.ref}`,
-        status,
-        { cause: err },
-      );
+      throw new GitHubApiError(`Failed to read ${ref.path}@${ref.ref}`, status, { cause: err });
     }
   }
 

@@ -211,9 +211,7 @@ export function canonicalToolsToAnthropic(tools: CanonicalTool[]): Anthropic.Too
  * replay blob (it's stateless wrt reasoning).
  */
 export function anthropicResponseToCanonical(response: Anthropic.Message): CompleteResponse {
-  const textBlocks = response.content.filter(
-    (b): b is Anthropic.TextBlock => b.type === 'text',
-  );
+  const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
   const toolUseBlocks = response.content.filter(
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
   );

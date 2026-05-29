@@ -14,8 +14,7 @@ import type { SecurityConfig } from '../../config/types.js';
 // multi-line continuation behavior, and severity routing.
 describe('parseTscOutput', () => {
   it('parses the canonical `path(line,col): error TSXXXX: message` format', () => {
-    const raw =
-      "src/foo.ts(42,7): error TS2322: Type 'number' is not assignable to type 'string'.";
+    const raw = "src/foo.ts(42,7): error TS2322: Type 'number' is not assignable to type 'string'.";
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
@@ -31,7 +30,7 @@ describe('parseTscOutput', () => {
   it('parses multiple diagnostics on separate lines', () => {
     const raw = [
       "src/foo.ts(1,1): error TS2322: Type 'A' is not assignable to type 'B'.",
-      "src/bar.ts(15,3): error TS2554: Expected 2 arguments, but got 1.",
+      'src/bar.ts(15,3): error TS2554: Expected 2 arguments, but got 1.',
     ].join('\n');
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(2);
@@ -42,8 +41,7 @@ describe('parseTscOutput', () => {
   });
 
   it('parses warning severity (defensive — tsc rarely emits warnings)', () => {
-    const raw =
-      "src/foo.ts(10,2): warning TS9999: Synthetic warning for test coverage.";
+    const raw = 'src/foo.ts(10,2): warning TS9999: Synthetic warning for test coverage.';
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(1);
     expect(result[0]?.severity).toBe('warning');
@@ -75,8 +73,8 @@ describe('parseTscOutput', () => {
     // message — operator-visible junk in PR comments.
     const raw = [
       "src/foo.ts(1,1): error TS2322: Type 'A' is not assignable to type 'B'.",
-      "",
-      "Found 1 error in 1 file.",
+      '',
+      'Found 1 error in 1 file.',
     ].join('\n');
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(1);
@@ -87,7 +85,7 @@ describe('parseTscOutput', () => {
   it('handles Windows-style CRLF line endings', () => {
     const raw =
       "src/foo.ts(1,1): error TS2322: Type 'A' is not assignable to type 'B'.\r\n" +
-      "src/bar.ts(2,2): error TS2554: Expected 2 arguments, but got 1.\r\n";
+      'src/bar.ts(2,2): error TS2554: Expected 2 arguments, but got 1.\r\n';
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(2);
     // Trailing \r must be stripped; otherwise the regex anchor on `$`
@@ -97,8 +95,7 @@ describe('parseTscOutput', () => {
   });
 
   it('parses paths with subdirectories and dot characters', () => {
-    const raw =
-      "src/scanners/sast/foo.test.ts(100,50): error TS2304: Cannot find name 'Bar'.";
+    const raw = "src/scanners/sast/foo.test.ts(100,50): error TS2304: Cannot find name 'Bar'.";
     const result = parseTscOutput(raw);
     expect(result).toHaveLength(1);
     expect(result[0]?.filePath).toBe('src/scanners/sast/foo.test.ts');
@@ -246,12 +243,8 @@ describe('tscLinter', () => {
       size_bytes: 100,
       head_line_text: new Map(),
     };
-    expect(
-      tscLinter.applies([{ ...base, is_generated: true, is_binary: false }]),
-    ).toBe(false);
-    expect(
-      tscLinter.applies([{ ...base, is_generated: false, is_binary: true }]),
-    ).toBe(false);
+    expect(tscLinter.applies([{ ...base, is_generated: true, is_binary: false }])).toBe(false);
+    expect(tscLinter.applies([{ ...base, is_generated: false, is_binary: true }])).toBe(false);
   });
 
   it('quietly skips when tsconfig.json is missing', async () => {
@@ -309,8 +302,8 @@ describe('tscLinter', () => {
 describe('tsc finding filter', () => {
   it('drops parsed diagnostics whose line is NOT in added_lines', () => {
     const raw = [
-      "src/foo.ts(10,1): error TS2322: pr-added line.",
-      "src/foo.ts(99,1): error TS2322: pre-existing context line.",
+      'src/foo.ts(10,1): error TS2322: pr-added line.',
+      'src/foo.ts(99,1): error TS2322: pre-existing context line.',
     ].join('\n');
     const diagnostics = parseTscOutput(raw);
     expect(diagnostics).toHaveLength(2);
@@ -331,8 +324,8 @@ describe('tsc finding filter', () => {
 describe('tsc severity mapping', () => {
   it('error → important, warning → minor (parsed)', () => {
     const raw = [
-      "src/foo.ts(1,1): error TS2322: an error.",
-      "src/bar.ts(2,2): warning TS9999: a warning.",
+      'src/foo.ts(1,1): error TS2322: an error.',
+      'src/bar.ts(2,2): warning TS9999: a warning.',
     ].join('\n');
     const diagnostics = parseTscOutput(raw);
     expect(diagnostics[0]?.severity).toBe('error');

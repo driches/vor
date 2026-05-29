@@ -100,10 +100,7 @@ export function parseUnifiedDiff(diff: string): ChangedFile[] {
     const path = file.to && file.to !== '/dev/null' ? file.to : (file.from ?? '');
     const previousPath = file.from && file.from !== file.to ? file.from : undefined;
     const reviewable = computeReviewableLines(file.chunks);
-    const totalChanges = file.chunks.reduce(
-      (sum, c) => sum + c.changes.length,
-      0,
-    );
+    const totalChanges = file.chunks.reduce((sum, c) => sum + c.changes.length, 0);
 
     return {
       path,

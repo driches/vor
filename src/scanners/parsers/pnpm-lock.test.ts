@@ -125,9 +125,7 @@ describe('pnpmLockParser.parse', () => {
     ].join('\n');
 
     const deps = pnpmLockParser.parse(content);
-    expect(deps).toEqual([
-      { ecosystem: 'npm', name: 'lodash', version: '3.10.1', line: 3 },
-    ]);
+    expect(deps).toEqual([{ ecosystem: 'npm', name: 'lodash', version: '3.10.1', line: 3 }]);
   });
 
   it('resolves scoped npm:alias targets', () => {
@@ -140,9 +138,7 @@ describe('pnpmLockParser.parse', () => {
     ].join('\n');
 
     const deps = pnpmLockParser.parse(content);
-    expect(deps).toEqual([
-      { ecosystem: 'npm', name: '@scope/real', version: '1.0.0', line: 3 },
-    ]);
+    expect(deps).toEqual([{ ecosystem: 'npm', name: '@scope/real', version: '1.0.0', line: 3 }]);
   });
 
   it('leaves non-alias entries unchanged when the lockfile mixes both', () => {

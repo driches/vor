@@ -231,8 +231,7 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
     });
 
     it('matches a JWT whose signature segment ends in `_`', () => {
-      const jwt =
-        'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.X9_';
+      const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.X9_';
       const wrapped = `auth: '${jwt}'`;
       const hits = matches(p(), wrapped);
       expect(hits).toHaveLength(1);
@@ -243,8 +242,7 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
       // The 3-segment shape sits inside an even longer run of JWT-class
       // characters. Lookarounds reject because neither boundary lands at
       // a non-class character.
-      const text =
-        'extraeyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcMORE';
+      const text = 'extraeyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcMORE';
       const hits = matches(p(), text);
       expect(hits).toEqual([]);
     });

@@ -50,9 +50,7 @@ interface RuffMessage {
 export const ruffLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSIONS.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -159,11 +157,7 @@ function locateBin(workspaceDir: string): ResolvedBinary {
   return { path: 'ruff', needsShell: isWindows };
 }
 
-function runCli(
-  bin: ResolvedBinary,
-  files: string[],
-  deps: ScannerDeps,
-): Promise<string> {
+function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     // DEP0190 — see eslint.ts for the full rationale.
     //
@@ -183,9 +177,10 @@ function runCli(
       env: buildLinterEnv(),
       shell: bin.needsShell,
     };
-    const child = argsForSpawn === null
-      ? spawn(command, spawnOptions)
-      : spawn(command, argsForSpawn, spawnOptions);
+    const child =
+      argsForSpawn === null
+        ? spawn(command, spawnOptions)
+        : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];
@@ -261,9 +256,7 @@ function buildFinding(
   // a violation starting on an added line but extending into context
   // lines would be silently dropped by the validator.
   const useRange =
-    endLine !== undefined &&
-    endLine > startLine &&
-    changedFile.added_lines.has(endLine);
+    endLine !== undefined && endLine > startLine && changedFile.added_lines.has(endLine);
   // Fingerprint anchors at the line we actually post the comment at —
   // see eslint.ts for the full rationale. Pre-fix this used `startLine`
   // unconditionally, so a useRange finding's fingerprint disagreed with
