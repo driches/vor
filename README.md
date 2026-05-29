@@ -38,6 +38,7 @@ In any of your repos, add `.github/workflows/vor.yml`:
 name: Vor
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
