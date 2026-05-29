@@ -674,16 +674,16 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
       ].join('\n'),
     );
 
-    // CRITICAL: do NOT supply `side` in the AI tool input. The post-inline-
-    // comment schema has `side: z.enum(['RIGHT','LEFT']).default('RIGHT')`,
-    // but the agent runner forwards raw args to the handler without running
-    // them through Zod, so the default never applies. Real agent runs that
-    // omit `side` (most of them — RIGHT is the universal default) end up
-    // with `side: undefined` on the in-memory PostedComment. The scanner
-    // adapter hard-codes `side: 'RIGHT'`. The dedup overlap check then sees
-    // `undefined !== 'RIGHT'` and fails to suppress the scanner. This test
-    // replays PR #12's smoke-test scenario verbatim and pins the expected
-    // dedup behavior. With the broken normalization it goes red.
+    // The AI tool input deliberately omits `side`. The post-inline-comment
+    // schema has `side: z.enum(['RIGHT','LEFT']).default('RIGHT')`, and the
+    // tool() helper now parses input through Zod before the handler runs, so
+    // the default fills in `side: 'RIGHT'` on the in-memory PostedComment.
+    // The scanner adapter also uses `side: 'RIGHT'`, so the dedup overlap
+    // check sees a match and suppresses the co-located scanner finding. This
+    // replays PR #12's smoke-test scenario and pins that dedup behavior —
+    // it historically regressed when an omitted `side` reached the handler as
+    // `undefined` (the schema default never applied) and `undefined !==
+    // 'RIGHT'` defeated the overlap check.
     agentScript.push({
       content: [
         {
@@ -900,7 +900,7 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
           input: {
             strengths: ['Clear and focused changes that are easy to follow.'],
             assessment: 'comment',
-            assessment_reasoning: 'A few observations.',
+            assessment_reasoning: 'A few non-blocking observations worth a look before merge.',
           },
         },
       ],
@@ -1124,7 +1124,7 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
           input: {
             strengths: ['Clear and focused changes that are easy to follow.'],
             assessment: 'comment',
-            assessment_reasoning: 'A few observations.',
+            assessment_reasoning: 'A few non-blocking observations worth a look before merge.',
           },
         },
       ],
