@@ -8,7 +8,7 @@ Be respectful. Assume good intent. Disagree on the technical merits, not the per
 
 ## Reporting
 
-If you experience or witness behavior that violates the Code of Conduct, please report it privately by emailing **doug@richesfamily.ca**.
+If you experience or witness behavior that violates the Code of Conduct, please report it privately by opening a [GitHub Discussion](https://github.com/driches/vor/discussions) or contacting the maintainer via GitHub.
 
 Reports will be reviewed and investigated promptly and fairly. The maintainer is obligated to respect the privacy and safety of anyone who reports an incident.
 

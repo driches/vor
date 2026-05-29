@@ -17,8 +17,6 @@ Once `v1.0.0` ships, the previous major will receive security fixes for six mont
 
 The preferred channel is **[GitHub Security Advisories](https://github.com/driches/vor/security/advisories/new)** — this lets us collaborate on a fix privately and coordinate disclosure.
 
-If that's not workable, email **doug@richesfamily.ca**. PGP key available on request.
-
 ### What to include
 
 - A description of the issue and its impact.
