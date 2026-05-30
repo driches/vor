@@ -88,6 +88,46 @@ If you've explicitly decided the auto-trigger economics work for your repo, opt 
 
 …and use `on: pull_request:` as you would expect.
 
+### Trigger from a PR comment
+
+Want to (re)trigger from the PR itself instead of the Actions tab? Add a comment-triggered workflow. It stays manual — a person types a command, so there's no per-push token spend — but re-running is just typing `/review` on the PR again.
+
+No `allow_auto_trigger` needed: the manual-only guard blocks `pull_request*` events, and `issue_comment` isn't one of them, so a comment trigger counts as a manual invocation. Pass the PR number explicitly — on a PR comment, `github.event.issue.number` *is* the PR number.
+
+```yaml
+name: Vor (comment)
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # PR comments only, the trigger phrase only, and only from people you trust:
+    # issue_comment runs in the base repo with secrets available, even on fork PRs.
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/review') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      # issue_comment checks out the default branch by default, but grep_repo_at_ref
+      # greps the local checkout expecting PR HEAD — so check out the PR head.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+      - uses: driches/vor@v0
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ github.event.issue.number }}
+```
+
+Anyone with write access then types `/review` on the PR to start or refresh a review against current HEAD. The "@ mention" is just a string match on the comment body — swap `/review` for `@vor` if you prefer; no bot account required.
+
 ## What you get
 
 Every review has:

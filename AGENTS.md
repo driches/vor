@@ -215,6 +215,12 @@ gh workflow run self-review.yml \
 
 The job posts a review on the PR within a few minutes.
 
+#### Or just comment `/review` on the PR
+
+[`.github/workflows/self-review-comment.yml`](.github/workflows/self-review-comment.yml) wires the same dogfood to an `issue_comment` trigger. Anyone with write access types `/review` on the PR and the review runs against that PR's HEAD — no Actions-tab trip, no `gh workflow run`, no `--ref` to remember. The workflow checks out `refs/pull/<PR>/head` for you (the comment-event equivalent of the `--ref <PR-head-branch>` above) and builds from source the same way, so it exercises the PR's code.
+
+It's still manual — a human types the command — so it doesn't reintroduce the `pull_request` feedback loop. It works without `allow_auto_trigger` because `issue_comment` isn't one of the events the manual-only guard blocks, and it's gated to `OWNER` / `MEMBER` / `COLLABORATOR`: `issue_comment` runs in the base repo with secrets available, even on fork PRs, so an unguarded trigger would let any commenter spend the API budget.
+
 If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell — investigate before merging.
 
 ---

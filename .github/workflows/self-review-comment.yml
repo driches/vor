@@ -1,0 +1,55 @@
+name: Self Review (comment)
+
+# Comment-triggered sibling of self-review.yml. Type `/review` on a PR to run
+# the dogfood review against that PR's HEAD — the ergonomic equivalent of the
+# `gh workflow run self-review.yml --ref <branch> -f pr_number=<n>` dispatch
+# documented in AGENTS.md §4, with no --ref to remember.
+#
+# Still manual: a person types the command, so this does NOT reintroduce the
+# pull_request auto-trigger feedback loop that self-review.yml's header warns
+# about. issue_comment isn't one of the events the action's manual-only guard
+# (src/index.ts) blocks, so no allow_auto_trigger is needed.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # PR comments only, the `/review` phrase only, and only from maintainers:
+    # issue_comment runs in the base repo with secrets available even on fork
+    # PRs, so an unguarded trigger would let any commenter spend the API budget.
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/review') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      # issue_comment checks out the default branch by default. We need the PR's
+      # HEAD for two reasons: grep_repo_at_ref greps the local checkout, and
+      # `uses: ./` below must run the PR's action code, not main's (the whole
+      # point of dogfooding). refs/pull/<n>/head is the comment-event equivalent
+      # of AGENTS.md §4's `--ref <PR-head-branch>`.
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+
+      # Build the bundle from source so we dogfood the actual code in this PR,
+      # not the committed dist/index.js. (For consumer repos, the committed
+      # dist/ is what runs.)
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: ./
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ github.event.issue.number }}

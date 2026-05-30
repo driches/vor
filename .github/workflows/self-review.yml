@@ -6,6 +6,9 @@ name: Self Review (dogfood)
 # knip exit-code claims, etc.) and the iteration churn outweighed the
 # bug-catching value. Re-enable by adding `pull_request:` back to `on:`
 # once we have better grounding discipline in the review prompt.
+#
+# To (re)trigger from the PR itself instead of the Actions tab, comment
+# `/review` on the PR — see self-review-comment.yml (issue_comment sibling).
 on:
   workflow_dispatch:
     inputs:
