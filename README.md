@@ -105,18 +105,40 @@ permissions:
   pull-requests: write
 
 jobs:
-  review:
-    # Authorization gate — controls WHO can trigger (so a random commenter can't
-    # spend your tokens). It does NOT make the PR's code safe to run; see the
-    # security note below.
+  # Two gates: WHO may trigger (author_association), and whether the PR's code
+  # is safe to run. Vor's SAST runs your repo's own linters from the checkout
+  # (e.g. node_modules/.bin/eslint — on by default), so checking out a fork
+  # PR's HEAD and running Vor with secrets would execute attacker-controlled
+  # code. The guard skips forks; same-repo branches need write access = trusted.
+  guard:
     if: >
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/review') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    outputs:
+      same_repo: ${{ steps.head.outputs.same_repo }}
     steps:
-      # issue_comment checks out the default branch by default, but grep_repo_at_ref
-      # greps the local checkout expecting PR HEAD — so check out the PR head.
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          head="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.repo.full_name')"
+          if [ "$head" = "$REPO" ]; then
+            echo "same_repo=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "same_repo=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    needs: guard
+    if: needs.guard.outputs.same_repo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Safe to check out PR HEAD: the guard confirmed it's a same-repo (trusted)
+      # branch. grep_repo_at_ref and the SAST linters run against this checkout.
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
@@ -127,9 +149,9 @@ jobs:
           pr_number: ${{ github.event.issue.number }}
 ```
 
-Anyone with write access then types `/review` on the PR to start or refresh a review against current HEAD. The "@ mention" is just a string match on the comment body — swap `/review` for `@vor` if you prefer; no bot account required.
+Anyone with write access then types `/review` on a PR **from a branch in your repo** to start or refresh a review against current HEAD. The "@ mention" is just a string match on the comment body — swap `/review` for `@vor` if you prefer; no bot account required.
 
-**Security note.** The `author_association` check gates *who can trigger* a review, not whether the PR's code is safe. This snippet is safe to point at a fork PR because the pinned `driches/vor@v0` action only **reads** your diff (over the API) and **greps** the checkout — it never installs dependencies, runs a build, or executes the PR's `package.json` scripts. Do **not** add `npm ci` / `npm run build` / `uses: ./<local-path>` steps to a comment-triggered workflow: `issue_comment` runs in your base repo with secrets and a write token in scope, so building or running a fork's HEAD hands those to attacker-controlled code (a "pwn request" — `npm ci` alone runs lifecycle scripts). If you must run PR code, first require the PR head to be in your own repo (not a fork), and pin the action to a release tag or commit SHA.
+**Security — why the fork guard.** `issue_comment` runs in your base repo with secrets and a write token in scope. Vor's SAST scanners (on by default) run your repo's own linters resolved from the checkout — e.g. `node_modules/.bin/eslint`, `ruff`, `knip` — so pointing this at a **fork** PR's HEAD would execute attacker-controlled code on the runner (a "pwn request"). The action ships an env allowlist so a malicious binary doesn't get your keys *for free*, but it's still code execution, so the `guard` job runs the review only when the PR head is in your own repo. `author_association` gates *who can trigger*, not whether the code is safe. To review external fork PRs, use a path that doesn't expose secrets to PR code — e.g. a `workflow_dispatch` that checks out a trusted ref and reviews the fork PR by number (Vor reads its diff over the API). Pin the action to a release tag or commit SHA.
 
 ## What you get
 
