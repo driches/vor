@@ -67459,13 +67459,12 @@ function issuePathCandidates(workspaceDir, moduleRoot, filename) {
   if (import_node_path12.default.isAbsolute(filename)) {
     return [normalizeToolPath(workspaceDir, filename)];
   }
-  const posixName = filename.split(import_node_path12.default.sep).join("/");
-  const candidates = [];
-  if (moduleRoot !== ".") {
-    candidates.push(import_node_path12.default.posix.normalize(`${moduleRoot}/${posixName}`));
+  const posixName = import_node_path12.default.posix.normalize(filename.split(import_node_path12.default.sep).join("/"));
+  if (moduleRoot === ".") {
+    return [posixName];
   }
-  candidates.push(import_node_path12.default.posix.normalize(posixName));
-  return candidates;
+  const moduleRooted = import_node_path12.default.posix.normalize(`${moduleRoot}/${posixName}`);
+  return posixName.startsWith(`${moduleRoot}/`) ? [posixName, moduleRooted] : [moduleRooted, posixName];
 }
 function locateBin3(workspaceDir) {
   const ws = findWorkspaceBinary([import_node_path12.default.join(workspaceDir, "bin", "golangci-lint")]);

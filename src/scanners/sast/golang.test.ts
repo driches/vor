@@ -76,13 +76,14 @@ describe('issuePathCandidates', () => {
     ]);
   });
 
-  it('resolves a cfg-mode (config-relative) path via the as-reported fallback', () => {
-    // golangci reports `backend/api/h.go` relative to a repo-root config;
-    // the module-rooted guess (backend/backend/api/h.go) misses, the
-    // as-reported key matches.
+  it('prefers the as-reported key when the path already starts with the module root (cfg mode)', () => {
+    // golangci reports `backend/api/h.go` relative to a repo-root config —
+    // already workspace-relative. Trying the module-rooted guess
+    // (backend/backend/api/h.go) first could mis-attach to a real nested
+    // file on a line collision, so the as-reported key comes first.
     expect(issuePathCandidates('/ws', 'backend', 'backend/api/h.go')).toEqual([
-      'backend/backend/api/h.go',
       'backend/api/h.go',
+      'backend/backend/api/h.go',
     ]);
   });
 

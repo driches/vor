@@ -248,19 +248,23 @@ export function groupByGoModule(
  *     repo-root `.golangci.yml` shared by a subdirectory module is the
  *     repo root, so the path is already workspace-relative.
  *
- * So for a subdirectory module we can't assume one base. We try the
- * module-rooted interpretation first (correct for wd/gomod, and for a
- * module-local config) and fall back to the as-reported path (correct for
- * a shared repo-root config under cfg mode). Module-first ordering also
- * avoids a same-basename collision with a root-level file under wd mode —
- * e.g. a reported `main.go` from `backend/` resolves to `backend/main.go`
- * before it could ever match a changed root `main.go`. The
- * `backend/backend/...` non-match the cfg case produces is harmless.
+ * So for a subdirectory module we can't assume one base — we return both
+ * interpretations and let the changedFiles lookup pick. Ordering is by the
+ * strongest available signal: if the reported path already starts with the
+ * module root it's almost certainly already workspace-relative (cfg mode
+ * against a repo-root config — the v2 default), so the as-reported key
+ * goes first; prepending the module root would double the prefix
+ * (`backend/backend/...`) and could mis-attach to a real nested file on a
+ * line collision. Otherwise the path is module-relative (wd/gomod), so the
+ * module-rooted key goes first — which also avoids a same-basename
+ * collision with a root-level file (a reported `main.go` from `backend/`
+ * resolves to `backend/main.go` before it could match a changed root
+ * `main.go`). Either way the other interpretation stays as a fallback.
  *
  * Absolute paths (`relative-path-mode: abs`) are unambiguous.
  *
  * Exported for testing — this resolution is exactly where the
- * relative-path-mode mismatch silently dropped findings.
+ * relative-path-mode mismatch silently dropped (or mis-attached) findings.
  */
 export function issuePathCandidates(
   workspaceDir: string,
@@ -270,13 +274,14 @@ export function issuePathCandidates(
   if (path.isAbsolute(filename)) {
     return [normalizeToolPath(workspaceDir, filename)];
   }
-  const posixName = filename.split(path.sep).join('/');
-  const candidates: string[] = [];
-  if (moduleRoot !== '.') {
-    candidates.push(path.posix.normalize(`${moduleRoot}/${posixName}`));
+  const posixName = path.posix.normalize(filename.split(path.sep).join('/'));
+  if (moduleRoot === '.') {
+    return [posixName];
   }
-  candidates.push(path.posix.normalize(posixName));
-  return candidates;
+  const moduleRooted = path.posix.normalize(`${moduleRoot}/${posixName}`);
+  return posixName.startsWith(`${moduleRoot}/`)
+    ? [posixName, moduleRooted]
+    : [moduleRooted, posixName];
 }
 
 function locateBin(workspaceDir: string): ResolvedBinary {
