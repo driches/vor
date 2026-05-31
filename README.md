@@ -128,6 +128,71 @@ jobs:
           dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
+### Trigger from a PR comment
+
+Want to (re)trigger from the PR itself instead of the Actions tab? Add a comment-triggered workflow. It stays manual — a person types a command, so there's no per-push token spend — but re-running is just typing `/review` on the PR again.
+
+No `allow_auto_trigger` needed: the manual-only guard blocks `pull_request*` events, and `issue_comment` isn't one of them, so a comment trigger counts as a manual invocation. Pass the PR number explicitly — on a PR comment, `github.event.issue.number` *is* the PR number.
+
+```yaml
+name: Vor (comment)
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Two gates: WHO may trigger (author_association), and whether the PR's code
+  # is safe to run. Vor's SAST runs your repo's own linters from the checkout
+  # (e.g. node_modules/.bin/eslint — on by default), so checking out a fork
+  # PR's HEAD and running Vor with secrets would execute attacker-controlled
+  # code. The guard skips forks; same-repo branches need write access = trusted.
+  guard:
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/review') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    outputs:
+      same_repo: ${{ steps.head.outputs.same_repo }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          head="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.repo.full_name')"
+          if [ "$head" = "$REPO" ]; then
+            echo "same_repo=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "same_repo=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    needs: guard
+    if: needs.guard.outputs.same_repo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Safe to check out PR HEAD: the guard confirmed it's a same-repo (trusted)
+      # branch. grep_repo_at_ref and the SAST linters run against this checkout.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+      - uses: driches/vor@v0
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ github.event.issue.number }}
+```
+
+Anyone with write access then types `/review` on a PR **from a branch in your repo** to start or refresh a review against current HEAD. The "@ mention" is just a string match on the comment body — swap `/review` for `@vor` if you prefer; no bot account required.
+
+**Security — why the fork guard.** `issue_comment` runs in your base repo with secrets and a write token in scope. Vor's SAST scanners (on by default) run your repo's own linters resolved from the checkout — e.g. `node_modules/.bin/eslint`, `ruff`, `knip` — so pointing this at a **fork** PR's HEAD would execute attacker-controlled code on the runner (a "pwn request"). The action ships an env allowlist so a malicious binary doesn't get your keys *for free*, but it's still code execution, so the `guard` job runs the review only when the PR head is in your own repo. `author_association` gates *who can trigger*, not whether the code is safe. To review external fork PRs, use a path that doesn't expose secrets to PR code — e.g. a `workflow_dispatch` that checks out a trusted ref and reviews the fork PR by number (Vor reads its diff over the API). Pin the action to a release tag or commit SHA.
+
 ## What you get
 
 Every review has:

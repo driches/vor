@@ -215,6 +215,12 @@ gh workflow run self-review.yml \
 
 The job posts a review on the PR within a few minutes.
 
+#### Or just comment `/review` on the PR
+
+[`.github/workflows/self-review-comment.yml`](.github/workflows/self-review-comment.yml) wires the same dogfood to an `issue_comment` trigger. Anyone with write access types `/review` on a PR whose head branch lives in this repo, and the review runs against that PR's HEAD — no Actions-tab trip, no `gh workflow run`, no `--ref` to remember. The workflow checks out `refs/pull/<PR>/head` (the comment-event equivalent of `--ref <PR-head-branch>` above) and builds from source the same way, so it exercises the PR's code.
+
+It's still manual — a human types the command — so it doesn't reintroduce the `pull_request` feedback loop, and it needs no `allow_auto_trigger` (`issue_comment` isn't an event the manual-only guard blocks). Two gates do two different jobs. The `author_association` check (`OWNER` / `MEMBER` / `COLLABORATOR`) controls *who can trigger*, so an outsider can't spend the API budget. A `guard` job then requires the PR **head to be in this repo, not a fork** — because this workflow builds and runs the PR's code (`npm ci`, `npm run build`, `uses: ./`) and `issue_comment` exposes the repo's secrets and write token, so running a fork's HEAD would be a "pwn request" (`npm ci` runs attacker-controlled lifecycle scripts). Fork PRs are skipped; review them with the `gh workflow run self-review.yml --ref <trusted-branch>` dispatch above, which runs trusted action code against the PR over the API and never executes the fork's code.
+
 If a self-review costs more than ~$0.50 on a PR under 500 LOC, that's a smell — investigate before merging.
 
 ---
