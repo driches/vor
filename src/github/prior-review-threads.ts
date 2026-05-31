@@ -180,18 +180,26 @@ function resolveRootId(
 }
 
 /**
- * First non-blank line of a comment body, stripped of Markdown emphasis so the
- * agent reads the finding headline cleanly. The agent's own comments lead with
+ * First meaningful line of a comment body, stripped of Markdown emphasis so the
+ * agent reads it cleanly. The agent's own comments lead with
  * `**[SEVERITY · category]** Title`; stripping `**`/backticks keeps the
  * bracketed severity tag, which is the useful signal.
+ *
+ * Blockquote lines are skipped: GitHub's reply UI prepends `> <quoted comment>`
+ * above the actual response, so the first non-blank line of a reply is often
+ * the quoted finding, not the author's reply. Picking it would drop the real
+ * response — including pushback phrases ("won't fix", "by design") the agent
+ * must see — which is exactly the finding this feature exists to suppress.
+ * Falls back to the first non-blank line only when every line is quoted.
+ * addressing #58 (Codex P2 review).
  */
 function excerpt(body: string, max = EXCERPT_MAX): string {
-  const first =
-    body
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? '';
-  const cleaned = first
+  const lines = body
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const line = lines.find((l) => !l.startsWith('>')) ?? lines[0] ?? '';
+  const cleaned = line
     .replace(/\*\*/g, '')
     .replace(/`/g, '')
     .replace(/^[>#\s-]+/, '')

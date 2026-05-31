@@ -64089,8 +64089,9 @@ function resolveRootId(start, byId) {
   return current.id;
 }
 function excerpt(body, max = EXCERPT_MAX) {
-  const first = body.split("\n").map((l2) => l2.trim()).find((l2) => l2.length > 0) ?? "";
-  const cleaned = first.replace(/\*\*/g, "").replace(/`/g, "").replace(/^[>#\s-]+/, "").trim();
+  const lines = body.split("\n").map((l2) => l2.trim()).filter((l2) => l2.length > 0);
+  const line = lines.find((l2) => !l2.startsWith(">")) ?? lines[0] ?? "";
+  const cleaned = line.replace(/\*\*/g, "").replace(/`/g, "").replace(/^[>#\s-]+/, "").trim();
   return cleaned.length > max ? `${cleaned.slice(0, max - 3)}...` : cleaned;
 }
 

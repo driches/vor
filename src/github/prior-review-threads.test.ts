@@ -172,6 +172,61 @@ describe('fetchPriorReviewThreads', () => {
     expect(t!.replies.map((r) => r.excerpt)).toEqual(['first reply', 'second reply']);
   });
 
+  it('skips a leading blockquote so the actual reply (pushback) survives', async () => {
+    // GitHub's reply UI prepends `> <quoted finding>` above the real response.
+    const octokit = makeOctokit(
+      [agentReview],
+      [
+        {
+          id: 60,
+          path: 'q.ts',
+          line: 1,
+          body: 'finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
+        {
+          id: 61,
+          path: 'q.ts',
+          line: 1,
+          body: "> **[CRITICAL · security]** SQL injection\n\nWon't fix — parameterized upstream, by design.",
+          user: { login: 'author' },
+          in_reply_to_id: 60,
+        },
+      ],
+    );
+
+    const [t] = await fetchPriorReviewThreads(octokit, ref);
+    expect(t!.replies[0]!.excerpt).toBe("Won't fix — parameterized upstream, by design.");
+  });
+
+  it('falls back to the quoted line when a reply is nothing but a quote', async () => {
+    const octokit = makeOctokit(
+      [agentReview],
+      [
+        {
+          id: 70,
+          path: 'q2.ts',
+          line: 1,
+          body: 'finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
+        {
+          id: 71,
+          path: 'q2.ts',
+          line: 1,
+          body: '> just a quote',
+          user: { login: 'author' },
+          in_reply_to_id: 70,
+        },
+      ],
+    );
+
+    const [t] = await fetchPriorReviewThreads(octokit, ref);
+    expect(t!.replies[0]!.excerpt).toBe('just a quote');
+  });
+
   it('renders a reply author as "unknown" when the user is null', async () => {
     const octokit = makeOctokit(
       [agentReview],
