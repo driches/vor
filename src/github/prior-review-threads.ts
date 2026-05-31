@@ -106,7 +106,9 @@ const REJECTION_PATTERNS: RegExp[] = [
   /won['’]?t\s*do/i,
   /wont\s*do/i,
   /by\s*design/i,
-  /intentional/i,
+  // `\b` so "unintentional" (an acknowledgement) doesn't match "intentional"
+  // and wrongly suppress a finding. addressing #58 (Codex review).
+  /\bintentional/i,
   /as\s*(documented|designed|intended)/i,
   /working\s*as\s*intended/i,
   /\bwai\b/i,

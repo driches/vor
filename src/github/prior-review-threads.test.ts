@@ -367,6 +367,7 @@ describe('isRejectionReply', () => {
       'Will address this shortly.',
       'Can you clarify what you mean?',
       'Done.',
+      'This was unintentional — fixing in the next push.',
     ]) {
       expect(isRejectionReply(body)).toBe(false);
     }
