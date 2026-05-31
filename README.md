@@ -106,8 +106,9 @@ permissions:
 
 jobs:
   review:
-    # PR comments only, the trigger phrase only, and only from people you trust:
-    # issue_comment runs in the base repo with secrets available, even on fork PRs.
+    # Authorization gate — controls WHO can trigger (so a random commenter can't
+    # spend your tokens). It does NOT make the PR's code safe to run; see the
+    # security note below.
     if: >
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/review') &&
@@ -127,6 +128,8 @@ jobs:
 ```
 
 Anyone with write access then types `/review` on the PR to start or refresh a review against current HEAD. The "@ mention" is just a string match on the comment body — swap `/review` for `@vor` if you prefer; no bot account required.
+
+**Security note.** The `author_association` check gates *who can trigger* a review, not whether the PR's code is safe. This snippet is safe to point at a fork PR because the pinned `driches/vor@v0` action only **reads** your diff (over the API) and **greps** the checkout — it never installs dependencies, runs a build, or executes the PR's `package.json` scripts. Do **not** add `npm ci` / `npm run build` / `uses: ./<local-path>` steps to a comment-triggered workflow: `issue_comment` runs in your base repo with secrets and a write token in scope, so building or running a fork's HEAD hands those to attacker-controlled code (a "pwn request" — `npm ci` alone runs lifecycle scripts). If you must run PR code, first require the PR head to be in your own repo (not a fork), and pin the action to a release tag or commit SHA.
 
 ## What you get
 

@@ -9,6 +9,18 @@ name: Self Review (comment)
 # pull_request auto-trigger feedback loop that self-review.yml's header warns
 # about. issue_comment isn't one of the events the action's manual-only guard
 # (src/index.ts) blocks, so no allow_auto_trigger is needed.
+#
+# SECURITY — this workflow builds and runs the PR's own code (`npm ci`,
+# `npm run build`, `uses: ./`), and issue_comment runs in the BASE repo with
+# secrets + a write token. Building/running a fork's HEAD that way is a "pwn
+# request": `npm ci` alone executes attacker-controlled lifecycle scripts with
+# ANTHROPIC_API_KEY and the token in scope. The author_association gate only
+# proves the *commenter* is trusted, not the *code* — a maintainer commenting
+# /review on a malicious fork PR is the normal review flow, not an edge case.
+# So the `guard` job below also requires the PR head to live in THIS repo
+# (same-repo branches need write access to push = already-trusted code); fork
+# PRs are skipped. Review forks via the dispatch path in AGENTS.md §4, which
+# runs trusted action code against the PR over the API and never executes it.
 on:
   issue_comment:
     types: [created]
@@ -18,25 +30,51 @@ permissions:
   pull-requests: write
 
 jobs:
-  review:
-    # PR comments only, the `/review` phrase only, and only from maintainers:
-    # issue_comment runs in the base repo with secrets available even on fork
-    # PRs, so an unguarded trigger would let any commenter spend the API budget.
+  # Two independent gates: WHO may trigger (author_association) and whether the
+  # PR's code is safe to run (same-repo head, not a fork).
+  guard:
+    # PR comments only, the `/review` phrase only, and only from maintainers.
+    # This stops an outside commenter from spending the API budget; it does NOT
+    # establish that the PR's code is safe — the same-repo check below does.
     if: >
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/review') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    outputs:
+      same_repo: ${{ steps.head.outputs.same_repo }}
     steps:
-      # issue_comment checks out the default branch by default. We need the PR's
-      # HEAD for two reasons: grep_repo_at_ref greps the local checkout, and
-      # `uses: ./` below must run the PR's action code, not main's (the whole
-      # point of dogfooding). refs/pull/<n>/head is the comment-event equivalent
-      # of AGENTS.md §4's `--ref <PR-head-branch>`.
+      - name: Require PR head to be in this repo (not a fork)
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          head_repo="$(gh api "repos/$REPO/pulls/$PR" --jq '.head.repo.full_name')"
+          if [ "$head_repo" = "$REPO" ]; then
+            echo "same_repo=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "same_repo=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping comment-triggered review: PR #$PR head is a fork ($head_repo). This workflow builds and runs the PR's code with repo secrets, so it only runs on same-repo PRs. Review fork PRs with 'gh workflow run self-review.yml --ref <trusted-branch> -f pr_number=$PR -R $REPO', which runs trusted action code against the PR over the API."
+          fi
+
+  review:
+    needs: guard
+    if: needs.guard.outputs.same_repo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Safe to build/run PR HEAD: the guard confirmed it's a same-repo branch,
+      # which requires write access to push — i.e. already-trusted code. We need
+      # HEAD because grep_repo_at_ref greps the local checkout and `uses: ./`
+      # must run the PR's action code, not main's (the point of dogfooding).
+      # refs/pull/<n>/head is the comment-event equivalent of §4's --ref.
+      # persist-credentials: false keeps the checkout token out of the workspace.
       - uses: actions/checkout@v5
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
           fetch-depth: 0
+          persist-credentials: false
 
       # Build the bundle from source so we dogfood the actual code in this PR,
       # not the committed dist/index.js. (For consumer repos, the committed
