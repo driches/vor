@@ -10,6 +10,7 @@ function makeThread(overrides: Partial<PriorReviewThread> = {}): PriorReviewThre
     outdated: false,
     finding_excerpt: '[MINOR · style] prefer const',
     from_dismissable_review: false,
+    already_dismissed: false,
     replies: [],
     ...overrides,
   };

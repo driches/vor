@@ -1966,4 +1966,33 @@ describe('runOrchestrator — prior review threads injected into the agent promp
     // be free to re-raise it, so it's absent from the dedup block.
     expect(firstCall).not.toContain('Unhandled null deref still pending');
   });
+
+  it('does not suppress an unanswered finding from an already-dismissed review', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // A prior sticky run already dismissed this review (state DISMISSED). It
+    // backs nothing now, so its unanswered finding must be excluded from the
+    // dedup block regardless of the current sticky setting — otherwise a later
+    // rerun would suppress a still-valid blocking issue.
+    octokitState.priorReviews = [{ id: 502, state: 'DISMISSED', body: AGENT_REVIEW_MARKER }];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[IMPORTANT · correctness]** Still-valid blocking issue',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 502,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).not.toContain('## Your prior review threads on this PR');
+    expect(firstCall).not.toContain('Still-valid blocking issue');
+  });
 });

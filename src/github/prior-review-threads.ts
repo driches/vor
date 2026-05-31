@@ -40,10 +40,18 @@ export interface PriorReviewThread {
   /**
    * True when the originating review's state is CHANGES_REQUESTED or APPROVED —
    * the states `dismissPriorAgentReviews` dismisses. Such a finding loses its
-   * active (blocking) state when the sticky step runs, so the orchestrator must
-   * not blanket-suppress it; see the sticky-aware filter at the call site.
+   * active (blocking) state IF the sticky step runs this turn, so the
+   * orchestrator must not blanket-suppress it then; see the filter at the call
+   * site. (Config-dependent: only matters when `review.sticky` is on.)
    */
   from_dismissable_review: boolean;
+  /**
+   * True when the originating review's state is already DISMISSED (a prior
+   * sticky run superseded it). Such a finding has no active backing regardless
+   * of the current `review.sticky` setting, so it must never blanket-suppress a
+   * still-valid finding on a rerun.
+   */
+  already_dismissed: boolean;
   /** Author replies on the thread, oldest first. */
   replies: PriorReviewReply[];
 }
@@ -74,9 +82,9 @@ interface ReviewCommentLike {
 
 const EXCERPT_MAX = 200;
 
-// GitHub review states that `dismissPriorAgentReviews` dismisses (it skips
-// COMMENTED / DISMISSED / PENDING). Findings from these reviews go inactive
-// when the sticky step runs.
+// GitHub review states that `dismissPriorAgentReviews` dismisses on a sticky
+// run (it skips COMMENTED / DISMISSED / PENDING). Findings from these reviews
+// go inactive when that step runs.
 const DISMISSABLE_STATES = new Set(['CHANGES_REQUESTED', 'APPROVED']);
 
 export async function fetchPriorReviewThreads(
@@ -124,6 +132,7 @@ export async function fetchPriorReviewThreads(
       outdated: c.line == null,
       finding_excerpt: excerpt(c.body),
       from_dismissable_review: DISMISSABLE_STATES.has(state),
+      already_dismissed: state === 'DISMISSED',
       replies,
     });
   }

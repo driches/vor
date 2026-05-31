@@ -312,18 +312,21 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     }
   }
 
-  // Sticky-aware filter on the prior-thread dedup block. The sticky step
-  // (below, gated on review.sticky) dismisses prior CHANGES_REQUESTED/APPROVED
-  // reviews before posting. A finding from such a review loses its active
-  // (blocking) state, so telling the agent "don't re-post it" would drop a
-  // still-valid finding entirely. When sticky is on we therefore keep only the
-  // PUSHED-BACK threads (those with author replies) from dismissable reviews —
-  // honoring pushback while letting the agent re-raise the rest fresh. Threads
-  // from surviving reviews (e.g. the default COMMENT event, never dismissed)
-  // are kept in full. addressing #58 (Codex P1 review).
-  const promptThreads = config.review.sticky
-    ? priorThreads.filter((t) => !t.from_dismissable_review || t.replies.length > 0)
-    : priorThreads;
+  // Filter the prior-thread dedup block to findings that will still be backed
+  // by an active review after this run. A finding loses its active (blocking)
+  // backing when:
+  //   - its review is ALREADY dismissed (a prior sticky run superseded it), or
+  //   - the sticky step will dismiss it this run (sticky on + the review is
+  //     CHANGES_REQUESTED/APPROVED).
+  // For those, blanket-suppression ("don't re-post") would silently drop a
+  // still-valid finding, so we keep only the PUSHED-BACK threads (author replies
+  // present) to honor pushback and let the agent re-raise the rest fresh.
+  // Threads still backed by an active review (e.g. the default COMMENT event,
+  // never dismissed) are kept in full. addressing #58 (Codex P1 reviews).
+  const promptThreads = priorThreads.filter((t) => {
+    const losesBacking = t.already_dismissed || (config.review.sticky && t.from_dismissable_review);
+    return !losesBacking || t.replies.length > 0;
+  });
 
   // The user prompt is FINALIZED below, after deciding whether to inject
   // scanner findings. If the experimental flag is OFF we use the empty-

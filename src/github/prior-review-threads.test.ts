@@ -93,11 +93,12 @@ describe('fetchPriorReviewThreads', () => {
     ]);
   });
 
-  it('flags from_dismissable_review by the originating review state', async () => {
+  it('flags from_dismissable_review / already_dismissed by the originating review state', async () => {
     const octokit = makeOctokit(
       [
         { id: 100, body: AGENT_REVIEW_MARKER, state: 'COMMENTED' },
         { id: 101, body: AGENT_REVIEW_MARKER, state: 'CHANGES_REQUESTED' },
+        { id: 102, body: AGENT_REVIEW_MARKER, state: 'DISMISSED' },
       ],
       [
         {
@@ -116,13 +117,25 @@ describe('fetchPriorReviewThreads', () => {
           user: { login: 'vor-bot' },
           pull_request_review_id: 101,
         },
+        {
+          id: 3,
+          path: 'c.ts',
+          line: 1,
+          body: 'already-dismissed finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 102,
+        },
       ],
     );
 
     const threads = await fetchPriorReviewThreads(octokit, ref);
     const byPath = new Map(threads.map((t) => [t.file_path, t]));
     expect(byPath.get('a.ts')!.from_dismissable_review).toBe(false);
+    expect(byPath.get('a.ts')!.already_dismissed).toBe(false);
     expect(byPath.get('b.ts')!.from_dismissable_review).toBe(true);
+    expect(byPath.get('b.ts')!.already_dismissed).toBe(false);
+    expect(byPath.get('c.ts')!.from_dismissable_review).toBe(false);
+    expect(byPath.get('c.ts')!.already_dismissed).toBe(true);
   });
 
   it('ignores inline comments that belong to non-agent reviews', async () => {

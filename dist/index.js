@@ -64038,6 +64038,7 @@ async function fetchPriorReviewThreads(octokit, ref) {
       outdated: c2.line == null,
       finding_excerpt: excerpt(c2.body),
       from_dismissable_review: DISMISSABLE_STATES.has(state),
+      already_dismissed: state === "DISMISSED",
       replies
     });
   }
@@ -69156,7 +69157,10 @@ async function runOrchestrator(input) {
       );
     }
   }
-  const promptThreads = config.review.sticky ? priorThreads.filter((t2) => !t2.from_dismissable_review || t2.replies.length > 0) : priorThreads;
+  const promptThreads = priorThreads.filter((t2) => {
+    const losesBacking = t2.already_dismissed || config.review.sticky && t2.from_dismissable_review;
+    return !losesBacking || t2.replies.length > 0;
+  });
   const buildPrompt = (findings = []) => {
     const base = buildUserPrompt({
       owner: input.owner,
