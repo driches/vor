@@ -143,6 +143,28 @@ describe('renderPriorReviewThreads', () => {
     expect(out).toContain('(5 shown / 40 total)');
     expect(out).toContain('35 additional prior thread(s) omitted');
   });
+
+  it('caps replies per thread and notes how many were omitted', () => {
+    const replies = Array.from({ length: 9 }, (_, i) => ({
+      author: 'author',
+      excerpt: `reply ${i + 1}`,
+    }));
+    const out = renderPriorReviewThreads([makeThread({ replies })]);
+    // First 5 kept (earliest = strongest pushback signal), rest summarized.
+    expect(out).toContain('reply 1');
+    expect(out).toContain('reply 5');
+    expect(out).not.toContain('reply 6');
+    expect(out).toContain('(+4 more replies in this thread, omitted)');
+  });
+
+  it('uses singular "reply" when exactly one reply is omitted', () => {
+    const replies = Array.from({ length: 6 }, (_, i) => ({
+      author: 'author',
+      excerpt: `reply ${i + 1}`,
+    }));
+    const out = renderPriorReviewThreads([makeThread({ replies })]);
+    expect(out).toContain('(+1 more reply in this thread, omitted)');
+  });
 });
 
 describe('buildUserPrompt prior-threads injection', () => {

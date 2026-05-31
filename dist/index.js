@@ -59555,6 +59555,7 @@ function renderScannerFindings(findings, maxFindings = MAX_INJECTED_FINDINGS_DEF
   return lines.join("\n");
 }
 var MAX_INJECTED_PRIOR_THREADS_DEFAULT = 30;
+var MAX_REPLIES_PER_THREAD = 5;
 function renderPriorReviewThreads(threads, maxThreads = MAX_INJECTED_PRIOR_THREADS_DEFAULT) {
   const sorted = [...threads].sort((a2, b2) => {
     const r2 = (b2.replies.length > 0 ? 1 : 0) - (a2.replies.length > 0 ? 1 : 0);
@@ -59580,8 +59581,15 @@ function renderPriorReviewThreads(threads, maxThreads = MAX_INJECTED_PRIOR_THREA
     const loc = t2.line == null ? t2.file_path : `${t2.file_path}:${t2.line}`;
     const outdated = t2.outdated ? " (outdated \u2014 author pushed past this line)" : "";
     lines.push(`- \`${loc}\`${outdated} \u2014 ${t2.finding_excerpt}`);
-    for (const reply of t2.replies) {
+    const shownReplies = t2.replies.slice(0, MAX_REPLIES_PER_THREAD);
+    for (const reply of shownReplies) {
       lines.push(`    - reply from @${reply.author}: "${reply.excerpt}"`);
+    }
+    const omittedReplies = t2.replies.length - shownReplies.length;
+    if (omittedReplies > 0) {
+      lines.push(
+        `    - (+${omittedReplies} more repl${omittedReplies === 1 ? "y" : "ies"} in this thread, omitted)`
+      );
     }
   }
   if (truncated > 0) {

@@ -152,6 +152,14 @@ export function renderScannerFindings(
 const MAX_INJECTED_PRIOR_THREADS_DEFAULT = 30;
 
 /**
+ * Per-thread reply cap. The thread cap alone doesn't bound prompt size: a
+ * single contentious finding can accumulate a long reply chain. Keep the
+ * earliest replies (the author's initial pushback is the highest-signal one)
+ * and note how many were omitted.
+ */
+const MAX_REPLIES_PER_THREAD = 5;
+
+/**
  * Render the agent's prior review threads as a block it can scan in one glance.
  * Threads carrying author replies sort first (pushback is the case the agent
  * most needs to honor), then by file/line for stable output.
@@ -197,8 +205,20 @@ export function renderPriorReviewThreads(
     const loc = t.line == null ? t.file_path : `${t.file_path}:${t.line}`;
     const outdated = t.outdated ? ' (outdated — author pushed past this line)' : '';
     lines.push(`- \`${loc}\`${outdated} — ${t.finding_excerpt}`);
-    for (const reply of t.replies) {
+    // Cap replies PER THREAD, not just the thread count. A long back-and-forth
+    // on one finding could otherwise inject hundreds of 200-char lines and trip
+    // the input budget despite maxThreads. Keep the earliest replies — the
+    // author's initial response is where pushback ("won't fix", "by design")
+    // almost always lands. addressing #58 (Codex P2 review).
+    const shownReplies = t.replies.slice(0, MAX_REPLIES_PER_THREAD);
+    for (const reply of shownReplies) {
       lines.push(`    - reply from @${reply.author}: "${reply.excerpt}"`);
+    }
+    const omittedReplies = t.replies.length - shownReplies.length;
+    if (omittedReplies > 0) {
+      lines.push(
+        `    - (+${omittedReplies} more repl${omittedReplies === 1 ? 'y' : 'ies'} in this thread, omitted)`,
+      );
     }
   }
   if (truncated > 0) {
