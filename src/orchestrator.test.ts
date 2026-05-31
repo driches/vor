@@ -48,6 +48,10 @@ interface AgentTurnResponse {
 
 const agentScript: AgentTurnResponse[] = [];
 
+// Captured first arg of every Anthropic `messages.create` call, so a test can
+// assert what reached the agent's prompt (e.g. the prior-review-threads block).
+const anthropicCreateCalls: Array<Record<string, unknown>> = [];
+
 // Optional handle the SDK mock yields on each `messages.create` call so a test
 // can force ordering between the agent loop and the scanner runner. Default is
 // undefined (no synchronization); the parallel-execution test below installs
@@ -67,6 +71,11 @@ interface OctokitState {
   // Path → string content (or null for 404).
   contents: Map<string, string | null>;
   priorReviews: Array<{ id: number; state: string; body: string }>;
+  // Inline review comments returned by listReviewComments (prior-thread fetch).
+  priorReviewComments: Array<Record<string, unknown>>;
+  // When true, listReviewComments throws — exercises the best-effort
+  // degradation path in the prior-thread fetch.
+  priorReviewCommentsError: boolean;
   // createReview captures.
   createReviewCalls: Array<{ args: Record<string, unknown>; at: number }>;
 }
@@ -77,6 +86,8 @@ const octokitState: OctokitState = {
   pullData: {},
   contents: new Map(),
   priorReviews: [],
+  priorReviewComments: [],
+  priorReviewCommentsError: false,
   createReviewCalls: [],
 };
 
@@ -91,7 +102,8 @@ const octokitState: OctokitState = {
 vi.mock('@anthropic-ai/sdk', () => {
   class FakeAnthropic {
     public messages = {
-      create: vi.fn(async () => {
+      create: vi.fn(async (args: Record<string, unknown>) => {
+        anthropicCreateCalls.push(args);
         // If a parallel-execution test installed a gate, wait for it before
         // returning the scripted response.
         if (agentTurnGate) await agentTurnGate;
@@ -214,6 +226,12 @@ vi.mock('@octokit/rest', () => {
           listReviews: vi.fn(async () => ({ data: octokitState.priorReviews })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,
+          listReviewComments: vi.fn(async () => {
+            if (octokitState.priorReviewCommentsError) {
+              throw new Error('listReviewComments boom');
+            }
+            return { data: octokitState.priorReviewComments };
+          }) as unknown as (...args: unknown[]) => Promise<unknown>,
           dismissReview: vi.fn(async () => ({ data: {} })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,
@@ -291,6 +309,7 @@ vi.mock('./scanners/osv-client.js', () => {
 import { runOrchestrator, type OrchestratorInput } from './orchestrator.js';
 import { _clearRegisteredSecrets } from './util/secrets.js';
 import { OsvClientError } from './scanners/osv-client.js';
+import { AGENT_REVIEW_MARKER } from './github/prior-reviews.js';
 
 // -----------------------------------------------------------------
 // Fixtures
@@ -443,6 +462,7 @@ function scriptSummaryOnly(
 
 beforeEach(() => {
   agentScript.length = 0;
+  anthropicCreateCalls.length = 0;
   openaiScript.length = 0;
   openaiCtorCalls.length = 0;
   octokitState.diff = '';
@@ -450,6 +470,8 @@ beforeEach(() => {
   octokitState.pullData = makePullData();
   octokitState.contents = new Map();
   octokitState.priorReviews = [];
+  octokitState.priorReviewComments = [];
+  octokitState.priorReviewCommentsError = false;
   octokitState.createReviewCalls = [];
   agentTurnGate = undefined;
   onFirstOsvCall = undefined;
@@ -1819,5 +1841,196 @@ describe('runOrchestrator — Scenario 9: provider_override runtime validation',
     });
     const result2 = await runOrchestrator(input2);
     expect(result2.ended).toBe('skipped_no_key_openai');
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario: prior agent review threads are folded into the agent prompt.
+//
+// On a re-run, the orchestrator fetches the agent's own prior inline threads
+// (plus author replies) and injects them into the user prompt so the agent can
+// dedup against itself and honor pushback. We assert the rendered block (and
+// the author's reply text) reach the provider's `messages.create` call.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — prior review threads injected into the agent prompt', () => {
+  it('renders prior agent findings + author replies into the user prompt', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    // Scanners off — this scenario only exercises the prompt-injection path.
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+
+    // A prior agent review (carries the marker) with one inline finding and an
+    // author reply pushing back.
+    octokitState.priorReviews = [
+      { id: 500, state: 'COMMENTED', body: `${AGENT_REVIEW_MARKER}\n\n### Findings` },
+    ];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[MINOR · readability]** Function lacks return type annotation',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 500,
+      },
+      {
+        id: 2,
+        path: 'src/app.ts',
+        line: 5,
+        body: "Won't fix — inference is fine here, by design.",
+        user: { login: 'doug' },
+        in_reply_to_id: 1,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    expect(anthropicCreateCalls.length).toBeGreaterThan(0);
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    // The `##` header is unique to the rendered user-prompt block (the system
+    // prompt mentions the phrase in prose, so match the heading form).
+    expect(firstCall).toContain('## Your prior review threads on this PR');
+    expect(firstCall).toContain('Function lacks return type annotation');
+    expect(firstCall).toContain("Won't fix — inference is fine here, by design.");
+  });
+
+  it('still posts a review when fetching prior threads throws (best-effort)', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // A marked prior review exists, so the fetch proceeds to listReviewComments,
+    // which throws. The orchestrator must swallow it and still post.
+    octokitState.priorReviews = [{ id: 500, state: 'COMMENTED', body: AGENT_REVIEW_MARKER }];
+    octokitState.priorReviewCommentsError = true;
+
+    scriptSummaryOnly();
+    const result = await runOrchestrator(baseInput());
+
+    expect(result.review_id).toBe(12345);
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    // The prompt carries no prior-threads block when the fetch failed.
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).not.toContain('## Your prior review threads on this PR');
+  });
+
+  it('drops a no-reply finding from a dismissable review under sticky (P1)', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // CHANGES_REQUESTED review → will be dismissed by the sticky step. Its
+    // no-reply finding must NOT be suppressed (else it would vanish), so it is
+    // excluded from the dedup block; the pushed-back one is kept.
+    octokitState.priorReviews = [
+      { id: 501, state: 'CHANGES_REQUESTED', body: AGENT_REVIEW_MARKER },
+    ];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[IMPORTANT · correctness]** Unhandled null deref still pending',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 501,
+      },
+      {
+        id: 2,
+        path: 'src/auth.ts',
+        line: 10,
+        body: '**[MINOR · style]** rename this',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 501,
+      },
+      {
+        id: 3,
+        path: 'src/auth.ts',
+        line: 10,
+        body: "Won't fix — name matches the spec, by design.",
+        user: { login: 'doug' },
+        in_reply_to_id: 2,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    // Pushed-back finding is kept (honor pushback)...
+    expect(firstCall).toContain('rename this');
+    expect(firstCall).toContain("Won't fix — name matches the spec, by design.");
+    // ...but the unanswered blocking finding is NOT suppressed — the agent must
+    // be free to re-raise it, so it's absent from the dedup block.
+    expect(firstCall).not.toContain('Unhandled null deref still pending');
+  });
+
+  it('does not suppress an unanswered finding from an already-dismissed review', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // A prior sticky run already dismissed this review (state DISMISSED). It
+    // backs nothing now, so its unanswered finding must be excluded from the
+    // dedup block regardless of the current sticky setting — otherwise a later
+    // rerun would suppress a still-valid blocking issue.
+    octokitState.priorReviews = [{ id: 502, state: 'DISMISSED', body: AGENT_REVIEW_MARKER }];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[IMPORTANT · correctness]** Still-valid blocking issue',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 502,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).not.toContain('## Your prior review threads on this PR');
+    expect(firstCall).not.toContain('Still-valid blocking issue');
+  });
+
+  it('does not suppress a dismissable finding whose only reply is an acknowledgement', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // CHANGES_REQUESTED (will be dismissed by the sticky step). The reply is an
+    // acknowledgement, NOT a rejection — so the finding must not be suppressed,
+    // or it could vanish after the old review is dismissed without being fixed.
+    octokitState.priorReviews = [
+      { id: 503, state: 'CHANGES_REQUESTED', body: AGENT_REVIEW_MARKER },
+    ];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[IMPORTANT · correctness]** Race on the shared counter',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 503,
+      },
+      {
+        id: 2,
+        path: 'src/app.ts',
+        line: 5,
+        body: 'Good catch — fixing in the next push.',
+        user: { login: 'doug' },
+        in_reply_to_id: 1,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).not.toContain('## Your prior review threads on this PR');
+    expect(firstCall).not.toContain('Race on the shared counter');
   });
 });

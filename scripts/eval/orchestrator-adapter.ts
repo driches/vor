@@ -200,6 +200,9 @@ vi.mock('@octokit/rest', () => {
           listReviews: vi.fn(async () => ({ data: [] })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,
+          listReviewComments: vi.fn(async () => ({ data: [] })) as unknown as (
+            ...args: unknown[]
+          ) => Promise<unknown>,
           dismissReview: vi.fn(async () => ({ data: {} })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,

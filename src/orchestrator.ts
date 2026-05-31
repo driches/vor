@@ -17,6 +17,7 @@ import { createOctokit } from './github/client.js';
 import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
 import { dismissPriorAgentReviews } from './github/prior-reviews.js';
+import { fetchPriorReviewThreads, type PriorReviewThread } from './github/prior-review-threads.js';
 import { postReview } from './github/review-poster.js';
 import { inferProviderFromModel, type LLMProvider, type ProviderId } from './llm/index.js';
 import { ReviewAggregator } from './output/aggregator.js';
@@ -284,15 +285,68 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
+
+  // Fold the agent's own prior review threads (findings it posted on earlier
+  // commits + author replies) into the user prompt so it dedups against itself
+  // and honors pushback deterministically, instead of guessing via the
+  // system-prompt heuristic. Best-effort: a fetch failure degrades to no
+  // threads rather than failing the review. Skipped when there are no
+  // LLM-scoped files (the agent won't run) to avoid the extra API calls.
+  let priorThreads: PriorReviewThread[] = [];
+  if (agentScope.prContext.files.length > 0) {
+    try {
+      priorThreads = await fetchPriorReviewThreads(octokit, {
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pull_number,
+      });
+      if (priorThreads.length > 0) {
+        await logger.info(
+          `Loaded ${priorThreads.length} prior agent review thread(s) to fold into the agent prompt.`,
+        );
+      }
+    } catch (err) {
+      await logger.warn(
+        `Failed to load prior review threads: ${(err as Error).message}. Proceeding without them.`,
+      );
+    }
+  }
+
+  // Filter the prior-thread dedup block to findings that will still be backed
+  // by an active review after this run. A finding loses its active (blocking)
+  // backing when:
+  //   - its review is ALREADY dismissed (a prior sticky run superseded it), or
+  //   - the sticky step will dismiss it this run (sticky on + the review is
+  //     CHANGES_REQUESTED/APPROVED).
+  // For those, blanket-suppression ("don't re-post") would silently drop a
+  // still-valid finding. We keep such a thread ONLY when the author actually
+  // REJECTED it (has_pushback) — honoring pushback. A thread with no reply, or
+  // only an acknowledgement like "good catch" / "fixed in next push", is
+  // dropped so the agent re-evaluates and re-raises if the issue persists;
+  // otherwise an unresolved blocking finding could vanish when its review is
+  // dismissed. Threads still backed by an active review (e.g. the default
+  // COMMENT event, never dismissed) are kept in full. addressing #58 (Codex
+  // P1 reviews).
+  const promptThreads = priorThreads.filter((t) => {
+    const losesBacking = t.already_dismissed || (config.review.sticky && t.from_dismissable_review);
+    return !losesBacking || t.has_pushback;
+  });
+
   // The user prompt is FINALIZED below, after deciding whether to inject
   // scanner findings. If the experimental flag is OFF we use the empty-
   // findings form immediately (current behavior). If ON we wait for the
-  // scanners to settle and rebuild with their output.
+  // scanners to settle and rebuild with their output. Prior threads are
+  // injected on every path (independent of the scanner-findings flag).
   const buildPrompt = (findings: ReadonlyArray<ScanFinding> = []): string => {
     const base = buildUserPrompt({
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
+      // No max_prior_threads override: prior threads are agent CONTEXT, not
+      // posted output, so they shouldn't borrow severity.max_comments_total
+      // (a user lowering that cap to reduce posted noise must not also lose
+      // pushback context). Falls through to the renderer's own default cap.
+      ...(promptThreads.length > 0 ? { prior_threads: promptThreads } : {}),
       ...(findings.length > 0
         ? {
             scanner_findings: findings,

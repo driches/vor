@@ -158,6 +158,7 @@ function buildFakeOctokit(opts: {
           return { data: artifacts.filesData.slice(start, start + perPage) };
         },
         listReviews: async () => ({ data: [] }),
+        listReviewComments: async () => ({ data: [] }),
         createReview: async () => ({ data: { id: 0 } }),
         dismissReview: async () => ({ data: {} }),
       },

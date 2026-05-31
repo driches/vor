@@ -209,6 +209,7 @@ function buildFakeOctokit(opts: {
           };
         },
         listReviews: async () => ({ data: [] }),
+        listReviewComments: async () => ({ data: [] }),
         createReview: async () => ({ data: { id: 0 } }),
         dismissReview: async () => ({ data: {} }),
       },
