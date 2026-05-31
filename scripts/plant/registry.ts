@@ -27,17 +27,13 @@ const TEMPLATES: ReadonlyArray<PlantTemplate> = [
   syncInAsyncLoopTemplate,
 ];
 
-const BY_TYPE = new Map<string, PlantTemplate>(
-  TEMPLATES.map((t) => [t.type, t]),
-);
+const BY_TYPE = new Map<string, PlantTemplate>(TEMPLATES.map((t) => [t.type, t]));
 
 export function getTemplate(type: string): PlantTemplate {
   const t = BY_TYPE.get(type);
   if (t) return t;
   const available = Array.from(BY_TYPE.keys()).sort().join(', ');
-  throw new Error(
-    `Unknown plant type "${type}". Available: ${available}`,
-  );
+  throw new Error(`Unknown plant type "${type}". Available: ${available}`);
 }
 
 export function listTemplateTypes(): string[] {

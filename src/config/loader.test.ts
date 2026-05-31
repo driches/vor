@@ -148,9 +148,7 @@ security:
     expect(cfg.security.scanners.sast.enabled).toBe(true);
     // Default semgrep block is preserved (custom_rules_path falls back to
     // the bundled rule pack location).
-    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe(
-      '.vor/semgrep-rules',
-    );
+    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe('.vor/semgrep-rules');
   });
 
   it('accepts an explicit custom_rules_path override', () => {
@@ -162,9 +160,7 @@ security:
       semgrep:
         custom_rules_path: rules/semgrep
 `);
-    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe(
-      'rules/semgrep',
-    );
+    expect(cfg.security.scanners.sast.semgrep?.custom_rules_path).toBe('rules/semgrep');
   });
 
   it('accepts the empty-string opt-out for custom_rules_path', () => {

@@ -13,13 +13,7 @@
  * so scanner findings only lose to AI comments that actually post.
  */
 import { describe, expect, it } from 'vitest';
-import type {
-  Category,
-  Confidence,
-  PostedComment,
-  ScannerId,
-  Severity,
-} from '../types.js';
+import type { Category, Confidence, PostedComment, ScannerId, Severity } from '../types.js';
 import { dedupAcrossScanners, dedupKeptScannerComments } from './dedup.js';
 import type { ScanFinding } from './types.js';
 
@@ -87,7 +81,11 @@ function makeAiComment(over: Partial<PostedComment> = {}): PostedComment {
 
 describe('dedupAcrossScanners', () => {
   it('collapses two findings with identical fingerprint, keeping the higher-confidence one', () => {
-    const lowConf = makeFinding({ scanner: 'secrets', confidence: 'low', fingerprint: 'fp-shared' });
+    const lowConf = makeFinding({
+      scanner: 'secrets',
+      confidence: 'low',
+      fingerprint: 'fp-shared',
+    });
     const highConf = makeFinding({
       scanner: 'dependency-cve',
       confidence: 'high',

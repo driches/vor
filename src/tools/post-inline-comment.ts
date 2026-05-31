@@ -7,13 +7,7 @@
 import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { validateInlineComment } from '../agent/validate-comment.js';
-import {
-  CATEGORIES,
-  type Category,
-  type Confidence,
-  type Severity,
-  type Side,
-} from '../types.js';
+import { CATEGORIES, type Category, type Confidence, type Severity, type Side } from '../types.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
@@ -67,9 +61,7 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
     },
     async (args) => {
       const normalizedSuggestion =
-        typeof args.suggestion === 'string'
-          ? normalizeSuggestion(args.suggestion)
-          : undefined;
+        typeof args.suggestion === 'string' ? normalizeSuggestion(args.suggestion) : undefined;
       // Schema-level invariant: suggestion required for high severity
       if (
         (args.severity === 'critical' || args.severity === 'important') &&
@@ -89,37 +81,18 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
         });
       }
 
-      // The Zod schema above declares `side: ...default('RIGHT')` and
-      // `confidence: ...default('high')`, but the agent runner forwards raw
-      // tool input directly to this handler without running it through Zod,
-      // so those defaults never fire at runtime. Normalize here against an
-      // explicit allowlist rather than `??` alone so that an unexpected
-      // string (e.g. the agent sends 'left' lowercase) falls back to the
-      // safe default instead of being cast through to a malformed value.
-      //
-      // The `side` default in particular is load-bearing: the post-filter
+      // `side` and `confidence` already carry their schema defaults ('RIGHT' /
+      // 'high') because the `tool()` helper parses raw tool input through the
+      // Zod schema before this handler runs (src/tools/tool-helper.ts). An
+      // out-of-enum value (e.g. lowercase 'left') is rejected at that boundary
+      // and surfaced to the agent as a tool error, so by here both are valid
+      // enum members. The `side` default is load-bearing: the post-filter
       // scanner-vs-AI dedup (src/scanners/dedup.ts) requires `ai.side ===
-      // c.side` to consider an overlap, and the scanner adapter hard-codes
-      // `side: 'RIGHT'`. If the agent omits `side` (which it usually does
-      // — RIGHT is the only sensible value for almost every comment) the
-      // AI's PostedComment lands in the aggregator with `side: undefined`,
-      // the dedup check fails on the side mismatch, and the scanner finding
-      // ships next to the AI's security comment as a duplicate. PR #12 and
-      // PR #16 smoke tests both reproduced this.
-      //
-      // TODO (follow-up): fix the runner to parse tool input through Zod
-      // before dispatching (src/agent/runner.ts ~line 194). That would
-      // also fix the same Zod-bypass bug class in grep-repo-at-ref
-      // (`case_sensitive` defaults silently flip to `-i` on every agent
-      // grep), get-pr-diff (`max_diff_lines`), and read-file-at-ref
-      // (`ref` falls back to base instead of head).
-      const rawSide = args.side;
-      const side: Side = rawSide === 'RIGHT' || rawSide === 'LEFT' ? rawSide : 'RIGHT';
-      const rawConfidence = args.confidence;
-      const confidence: Confidence =
-        rawConfidence === 'high' || rawConfidence === 'medium' || rawConfidence === 'low'
-          ? rawConfidence
-          : 'high';
+      // c.side`, and the scanner adapter hard-codes `side: 'RIGHT'`; a
+      // `side: undefined` here would ship the AI comment as a duplicate
+      // alongside the co-located scanner finding (PR #12 / PR #16 smoke tests).
+      const side: Side = args.side;
+      const confidence: Confidence = args.confidence;
 
       // Map raw schema input → validator input + PostedComment shape
       const changedFiles = new Map(deps.prContext.files.map((f) => [f.path, f]));

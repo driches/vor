@@ -7,7 +7,7 @@ export function makeReadRepoContextFileTool(deps: ToolDeps) {
     'read_repo_context_file',
     'Reads one or more repo-convention files (CLAUDE.md, AGENTS.md, package.json, ' +
       'tsconfig.json, README.md, .vor.yml, etc.) at HEAD. Call this EARLY ' +
-      '(turn 2 or 3) to ground your judgments in the repo\'s actual conventions. ' +
+      "(turn 2 or 3) to ground your judgments in the repo's actual conventions. " +
       'Returns content for each file or { exists: false }.',
     {
       files: z

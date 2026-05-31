@@ -7,7 +7,13 @@ describe('list_changed_files tool', () => {
     const deps = buildFakeDeps({
       files: [
         makeFile({ path: 'a.ts', reviewable_lines: [[5, 10]] }),
-        makeFile({ path: 'b.ts', reviewable_lines: [[1, 3], [20, 22]] }),
+        makeFile({
+          path: 'b.ts',
+          reviewable_lines: [
+            [1, 3],
+            [20, 22],
+          ],
+        }),
       ],
     });
     const tool = makeListChangedFilesTool(deps);

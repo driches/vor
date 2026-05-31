@@ -16,13 +16,14 @@ import { runPlants } from './plant-runner.js';
 function makeCase(): string {
   const dir = mkdtempSync(join(tmpdir(), 'plant-runner-test-'));
   mkdirSync(join(dir, 'before/src/config'), { recursive: true });
-  writeFileSync(
-    join(dir, 'before/src/config/aws.ts'),
-    'export const config = {\n  // body\n};\n',
-  );
+  writeFileSync(join(dir, 'before/src/config/aws.ts'), 'export const config = {\n  // body\n};\n');
   writeFileSync(
     join(dir, 'before/package-lock.json'),
-    JSON.stringify({ name: 'test', lockfileVersion: 3, packages: { '': { name: 'test', version: '1.0.0' } } }, null, 2) + '\n',
+    JSON.stringify(
+      { name: 'test', lockfileVersion: 3, packages: { '': { name: 'test', version: '1.0.0' } } },
+      null,
+      2,
+    ) + '\n',
   );
   return dir;
 }
@@ -170,9 +171,12 @@ describe('runPlants', () => {
     symlinkSync(outsideTarget, join(caseDir, 'before/leaky-link'));
     writeFileSync(
       join(caseDir, 'plants.yml'),
-      ['plants:', '  - type: secret:aws-access-key', '    file: src/config/aws.ts', '    line: 2'].join(
-        '\n',
-      ),
+      [
+        'plants:',
+        '  - type: secret:aws-access-key',
+        '    file: src/config/aws.ts',
+        '    line: 2',
+      ].join('\n'),
     );
     await expect(runPlants(caseDir)).rejects.toThrow(/refusing to copy symlink/);
     // Sensitive file in the symlink target must NOT have been copied into after/.
@@ -209,12 +213,7 @@ describe('runPlants', () => {
     mkdirSync(join(caseDir, 'before/src'), { recursive: true });
     writeFileSync(
       join(caseDir, 'before/src/secrets.ts'),
-      [
-        'export const config = {',
-        '  region: "us-east-1",',
-        '};',
-        '',
-      ].join('\n'),
+      ['export const config = {', '  region: "us-east-1",', '};', ''].join('\n'),
     );
     writeFileSync(
       join(caseDir, 'plants.yml'),
@@ -286,11 +285,7 @@ describe('runPlants', () => {
     );
     writeFileSync(
       join(caseDir, 'plants.yml'),
-      [
-        'plants:',
-        '  - type: off-by-one-loop',
-        '    file: src/util/sum.ts',
-      ].join('\n'),
+      ['plants:', '  - type: off-by-one-loop', '    file: src/util/sum.ts'].join('\n'),
     );
     await runPlants(caseDir);
 

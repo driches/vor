@@ -19,9 +19,7 @@ describe('normalizeToolPath', () => {
 
   it('re-relativizes absolute paths against the workspace (eslint/dart format)', () => {
     expect(normalizeToolPath('/work/repo', '/work/repo/src/foo.ts')).toBe('src/foo.ts');
-    expect(normalizeToolPath('/work/repo', '/work/repo/lib/main.dart')).toBe(
-      'lib/main.dart',
-    );
+    expect(normalizeToolPath('/work/repo', '/work/repo/lib/main.dart')).toBe('lib/main.dart');
   });
 
   it('normalizes away ./ and double separators on relative paths', () => {
@@ -41,13 +39,9 @@ describe('normalizeToolPath', () => {
     // platform-independent and would catch a regression even when run
     // on Linux/macOS (since the conversion logic is unconditional).
     expect(normalizeToolPath('/work/repo', 'src/foo.ts')).not.toContain('\\');
-    expect(normalizeToolPath('/work/repo', '/work/repo/lib/main.dart')).not.toContain(
-      '\\',
-    );
+    expect(normalizeToolPath('/work/repo', '/work/repo/lib/main.dart')).not.toContain('\\');
     // The forward-slash output is the contract:
-    expect(normalizeToolPath('/work/repo', '/work/repo/src/a/b/c.ts')).toBe(
-      'src/a/b/c.ts',
-    );
+    expect(normalizeToolPath('/work/repo', '/work/repo/src/a/b/c.ts')).toBe('src/a/b/c.ts');
   });
 });
 

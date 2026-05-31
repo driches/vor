@@ -26,8 +26,9 @@ describe('dismissPriorAgentReviews', () => {
       'newcommit123',
     );
     expect(n).toBe(2);
-    const calls = (octokit as never as { rest: { pulls: { dismissReview: { mock: { calls: unknown[][] } } } } })
-      .rest.pulls.dismissReview.mock.calls;
+    const calls = (
+      octokit as never as { rest: { pulls: { dismissReview: { mock: { calls: unknown[][] } } } } }
+    ).rest.pulls.dismissReview.mock.calls;
     expect(calls.map((c) => (c[0] as { review_id: number }).review_id).sort()).toEqual([2, 3]);
   });
 
@@ -77,10 +78,7 @@ describe('dismissPriorAgentReviews', () => {
               { id: 2, body: `${AGENT_REVIEW_MARKER}`, state: 'APPROVED' },
             ],
           }),
-          dismissReview: vi
-            .fn()
-            .mockRejectedValueOnce(new Error('boom'))
-            .mockResolvedValueOnce({}),
+          dismissReview: vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce({}),
         },
       },
     };

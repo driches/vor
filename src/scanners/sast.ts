@@ -29,13 +29,7 @@
  * Adding a new language: write one module under `./sast/` exporting a
  * LinterModule, and add it to the LINTERS array below.
  */
-import type {
-  Scanner,
-  ScannerDeps,
-  ScanResult,
-  ScanError,
-  ScanFinding,
-} from './types.js';
+import type { Scanner, ScannerDeps, ScanResult, ScanError, ScanFinding } from './types.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 import { emptyResult } from './types.js';
 import { eslintLinter } from './sast/eslint.js';
@@ -132,9 +126,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     applicable.map((linter) =>
       linter.run(
         deps,
-        linter.wholeProject === true
-          ? liveFiles
-          : liveFiles.filter((f) => linter.applies([f])),
+        linter.wholeProject === true ? liveFiles : liveFiles.filter((f) => linter.applies([f])),
       ),
     ),
   );

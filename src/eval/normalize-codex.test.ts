@@ -24,9 +24,7 @@ function comment(
     line: overrides.line ?? 10,
     body: overrides.body ?? '',
     user: { login: overrides.login ?? CODEX_LOGIN },
-    ...(overrides.in_reply_to_id !== undefined
-      ? { in_reply_to_id: overrides.in_reply_to_id }
-      : {}),
+    ...(overrides.in_reply_to_id !== undefined ? { in_reply_to_id: overrides.in_reply_to_id } : {}),
   };
 }
 

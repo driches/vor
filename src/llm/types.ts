@@ -140,10 +140,7 @@ export interface CompleteResponse {
  *  - OpenAI: `usage.input_tokens - cache_read_tokens` (cache_read is a
  *    subset of input_tokens that's charged at the discounted rate).
  */
-export function inputTokensFullRateFor(
-  providerId: ProviderId,
-  usage: CanonicalUsage,
-): number {
+export function inputTokensFullRateFor(providerId: ProviderId, usage: CanonicalUsage): number {
   if (providerId === 'anthropic') return usage.input_tokens;
   // openai
   return usage.input_tokens - (usage.cache_read_tokens ?? 0);

@@ -1,7 +1,7 @@
 name: Feature request
 description: Suggest a new input, output, config option, or behavior change.
-title: "feat: "
-labels: ["enhancement"]
+title: 'feat: '
+labels: ['enhancement']
 body:
   - type: markdown
     attributes:
@@ -13,7 +13,7 @@ body:
     attributes:
       label: What problem are you trying to solve?
       description: Describe the situation where the current action falls short. Concrete examples beat hypotheticals.
-      placeholder: "When I run the action on a PR with >50 changed files, the agent runs out of turns before getting to half of them..."
+      placeholder: 'When I run the action on a PR with >50 changed files, the agent runs out of turns before getting to half of them...'
     validations:
       required: true
 
@@ -37,8 +37,8 @@ body:
       label: Are you willing to send a PR?
       options:
         - "Yes, I'll send a PR"
-        - "Maybe, with some guidance"
-        - "No, just reporting"
+        - 'Maybe, with some guidance'
+        - 'No, just reporting'
     validations:
       required: true
 

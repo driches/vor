@@ -35,17 +35,17 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
   // OpenAI rates from the published price list as of 2026-05. Verify before
   // each release; published rates shift.
-  'gpt-4.1':       { input: 2,    output: 8,    cache_read: 0.5 },
-  'gpt-4.1-mini':  { input: 0.4,  output: 1.6,  cache_read: 0.1 },
-  'gpt-4.1-nano':  { input: 0.1,  output: 0.4,  cache_read: 0.025 },
-  'gpt-4o':        { input: 2.5,  output: 10,   cache_read: 1.25 },
-  'gpt-4o-mini':   { input: 0.15, output: 0.6,  cache_read: 0.075 },
+  'gpt-4.1': { input: 2, output: 8, cache_read: 0.5 },
+  'gpt-4.1-mini': { input: 0.4, output: 1.6, cache_read: 0.1 },
+  'gpt-4.1-nano': { input: 0.1, output: 0.4, cache_read: 0.025 },
+  'gpt-4o': { input: 2.5, output: 10, cache_read: 1.25 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6, cache_read: 0.075 },
   // GPT-5.x / Codex API pricing from OpenAI pricing page as of 2026-05.
-  'gpt-5.5':        { input: 5,    output: 30,   cache_read: 0.5 },
-  'gpt-5.4':        { input: 2.5,  output: 15,   cache_read: 0.25 },
-  'gpt-5.4-mini':   { input: 0.75, output: 4.5,  cache_read: 0.075 },
-  'gpt-5.4-nano':   { input: 0.2,  output: 1.25, cache_read: 0.02 },
-  'gpt-5.3-codex':  { input: 1.75, output: 14,   cache_read: 0.175 },
+  'gpt-5.5': { input: 5, output: 30, cache_read: 0.5 },
+  'gpt-5.4': { input: 2.5, output: 15, cache_read: 0.25 },
+  'gpt-5.4-mini': { input: 0.75, output: 4.5, cache_read: 0.075 },
+  'gpt-5.4-nano': { input: 0.2, output: 1.25, cache_read: 0.02 },
+  'gpt-5.3-codex': { input: 1.75, output: 14, cache_read: 0.175 },
   // o-series reasoning models. `inferProviderFromModel` routes any
   // `/^o\d/` id to OpenAI, so every o-prefix model needs a pricing entry
   // — without them, production silently falls back to Sonnet rates (3–5×
@@ -53,12 +53,12 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   // landed across two passes: o1/o3/o3-mini/o4-mini in #3300755077; the
   // o1-mini and o1-preview variants in #3300818612 (the regex also
   // matches them).
-  'o1':            { input: 15,   output: 60,   cache_read: 7.5 },
-  'o1-mini':       { input: 3,    output: 12,   cache_read: 1.5 },
-  'o1-preview':    { input: 15,   output: 60,   cache_read: 7.5 },
-  'o3':            { input: 10,   output: 40,   cache_read: 2.5 },
-  'o3-mini':       { input: 1.1,  output: 4.4,  cache_read: 0.275 },
-  'o4-mini':       { input: 1.1,  output: 4.4,  cache_read: 0.275 },
+  o1: { input: 15, output: 60, cache_read: 7.5 },
+  'o1-mini': { input: 3, output: 12, cache_read: 1.5 },
+  'o1-preview': { input: 15, output: 60, cache_read: 7.5 },
+  o3: { input: 10, output: 40, cache_read: 2.5 },
+  'o3-mini': { input: 1.1, output: 4.4, cache_read: 0.275 },
+  'o4-mini': { input: 1.1, output: 4.4, cache_read: 0.275 },
 };
 
 /**
@@ -103,7 +103,8 @@ export function costFromUsage(
     cacheReadTokens?: number;
   },
 ): number {
-  const pricing = pricingForModel(model) ?? pricingForModel('claude-sonnet-4-6') ?? SONNET_FALLBACK_PRICING;
+  const pricing =
+    pricingForModel(model) ?? pricingForModel('claude-sonnet-4-6') ?? SONNET_FALLBACK_PRICING;
   // `cache_creation` / `cache_read` are optional on `ModelPricing` because
   // OpenAI rows have no cache_creation cost (cached writes are free, only
   // reads are billed at a discounted rate). Guard each with `?? 0` so an

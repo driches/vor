@@ -158,9 +158,7 @@ export const CODEX_BOT: BotConfig = {
     nit: 'nit',
   },
   titleExtractor: (body) => {
-    const stripped = body
-      .replace(/<sub>!\[[^\]]*\]\([^)]*\)<\/sub>/g, '')
-      .replace(/<\/?sub>/g, '');
+    const stripped = body.replace(/<sub>!\[[^\]]*\]\([^)]*\)<\/sub>/g, '').replace(/<\/?sub>/g, '');
     const first = stripped.split('\n').find((l) => l.trim().length > 0);
     if (!first) return undefined;
     const cleaned = first.replace(/^[*_#>\-`\s]+|[*_`\s]+$/g, '').trim();

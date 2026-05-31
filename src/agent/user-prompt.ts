@@ -105,7 +105,7 @@ export function renderScannerFindings(
     '',
     'Scanners ran BEFORE you. The findings below are eligible to post through the scanner pipeline (subject to final caps/dedup) — you do NOT need to investigate, verify, or re-flag them. Treat them as covered unless you find a distinct semantic issue nearby.',
     '',
-    'Your job is what scanners CAN\'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn\'t match a pattern. Spend your turns there.',
+    "Your job is what scanners CAN'T catch: semantic correctness, design coherence, architectural fit, race conditions, doc-vs-code drift, and any subtle correctness bug that doesn't match a pattern. Spend your turns there.",
     '',
   );
   for (const f of capped) {

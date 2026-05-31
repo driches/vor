@@ -48,6 +48,7 @@ import type {
   ScanError,
   ScannerMetrics,
 } from './types.js';
+import { expiredIgnoreNotice } from './ignore-list.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 
 const SCANNER_ID: ScannerId = 'coverage-delta';
@@ -92,10 +93,7 @@ export interface CoverageDeltaScannerOptions {
    * coverage JSON without spawning a real tool. Production uses
    * {@link runCoverageCli}.
    */
-  runCli?: (
-    tool: DetectedTool,
-    deps: ScannerDeps,
-  ) => Promise<CoverageRunOutcome>;
+  runCli?: (tool: DetectedTool, deps: ScannerDeps) => Promise<CoverageRunOutcome>;
   /**
    * Override the JSON loader. Tests inject in-memory coverage data so the
    * scanner doesn't have to write fixture files. Production reads
@@ -164,9 +162,7 @@ interface PythonCoverageFile {
   summary?: { num_statements?: number };
 }
 
-export function createCoverageDeltaScanner(
-  options: CoverageDeltaScannerOptions = {},
-): Scanner {
+export function createCoverageDeltaScanner(options: CoverageDeltaScannerOptions = {}): Scanner {
   const log = options.logger ?? defaultLogger;
   const detect = options.detectTool ?? detectCoverageTool;
   const run = options.runCli ?? runCoverageCli;
@@ -202,21 +198,15 @@ export function createCoverageDeltaScanner(
       try {
         tool = detect(deps);
       } catch (err) {
-        void log.warn(
-          `coverage-delta: tool detection failed: ${(err as Error).message}`,
-        );
+        void log.warn(`coverage-delta: tool detection failed: ${(err as Error).message}`);
         return finalize(started, [], errors, 0);
       }
       if (tool === null) {
-        void log.debug(
-          'coverage-delta: no supported coverage tool detected; skipping',
-        );
+        void log.debug('coverage-delta: no supported coverage tool detected; skipping');
         return finalize(started, [], errors, 0);
       }
 
-      void log.debug(
-        `coverage-delta: detected ${tool.id}; artifact=${tool.artifact}`,
-      );
+      void log.debug(`coverage-delta: detected ${tool.id}; artifact=${tool.artifact}`);
 
       let outcome: CoverageRunOutcome;
       try {
@@ -226,9 +216,7 @@ export function createCoverageDeltaScanner(
         // `ok: false`, never throw. If a custom override (or a future change)
         // throws, we still degrade gracefully here rather than letting it
         // crash the scanner pipeline.
-        void log.warn(
-          `coverage-delta: ${tool.id} runner threw: ${(err as Error).message}`,
-        );
+        void log.warn(`coverage-delta: ${tool.id} runner threw: ${(err as Error).message}`);
         errors.push({
           message: `coverage-delta: ${tool.id} runner failed`,
           cause: (err as Error).message,
@@ -253,9 +241,7 @@ export function createCoverageDeltaScanner(
       try {
         coverage = load(tool, deps);
       } catch (err) {
-        void log.warn(
-          `coverage-delta: failed to load coverage report: ${(err as Error).message}`,
-        );
+        void log.warn(`coverage-delta: failed to load coverage report: ${(err as Error).message}`);
         errors.push({
           message: 'coverage-delta: failed to load coverage report',
           cause: (err as Error).message,
@@ -294,9 +280,7 @@ export function createCoverageDeltaScanner(
           const match = deps.ignoreList.matches(finding);
           if (match.ignored) {
             if (match.expired) {
-              void log.notice(
-                `coverage-delta: ignore entry for ${finding.rule_id} (${finding.file_path}:${finding.line}) is expired; finding still suppressed but will need refresh. Reason: ${match.reason ?? '(no reason)'}`,
-              );
+              void log.notice(expiredIgnoreNotice('coverage-delta', finding, match));
             }
             continue;
           }
@@ -345,9 +329,7 @@ export function detectCoverageTool(deps: ScannerDeps): DetectedTool | null {
   // claimed the workspace above (the if/return above already short-circuits).
   if (
     pkgJson !== null &&
-    (hasNamedDep(pkgJson, 'jest') ||
-      pkgJson.jest !== undefined ||
-      hasJestConfig(ws)) &&
+    (hasNamedDep(pkgJson, 'jest') || pkgJson.jest !== undefined || hasJestConfig(ws)) &&
     hasJsOrTsChange(deps.changedFiles)
   ) {
     return {
@@ -420,18 +402,15 @@ function readJsonIfExists(p: string): MinimalPackageJson | null {
 function hasCoverageScript(pkg: MinimalPackageJson): boolean {
   const scripts = pkg.scripts;
   if (!scripts || typeof scripts !== 'object') return false;
-  return (
-    typeof scripts.coverage === 'string' ||
-    typeof scripts['test:coverage'] === 'string'
-  );
+  return typeof scripts.coverage === 'string' || typeof scripts['test:coverage'] === 'string';
 }
 
 function hasNamedDep(pkg: MinimalPackageJson, name: string): boolean {
   return (
-    (pkg.dependencies?.[name] !== undefined) ||
-    (pkg.devDependencies?.[name] !== undefined) ||
-    (pkg.peerDependencies?.[name] !== undefined) ||
-    (pkg.optionalDependencies?.[name] !== undefined)
+    pkg.dependencies?.[name] !== undefined ||
+    pkg.devDependencies?.[name] !== undefined ||
+    pkg.peerDependencies?.[name] !== undefined ||
+    pkg.optionalDependencies?.[name] !== undefined
   );
 }
 
@@ -535,11 +514,7 @@ export function uncoveredLines(fc: FileCoverage): Set<number> {
   return out;
 }
 
-function buildFinding(
-  tool: DetectedTool,
-  file_path: string,
-  line: number,
-): ScanFinding {
+function buildFinding(tool: DetectedTool, file_path: string, line: number): ScanFinding {
   const rule_id = `coverage:${tool.id}:uncovered-line`;
   return {
     scanner: SCANNER_ID,
@@ -620,11 +595,7 @@ export async function runCoverageCli(
       stderrChunks.push(b);
       stderrTotal += b.length;
     });
-    deps.signal.addEventListener(
-      'abort',
-      () => finishErr(`${tool.id} aborted`),
-      { once: true },
-    );
+    deps.signal.addEventListener('abort', () => finishErr(`${tool.id} aborted`), { once: true });
     child.on('close', () => finishOk());
     // ENOENT etc. — surface as a missing-binary failure so the caller logs
     // and degrades to empty findings rather than throwing.
@@ -638,10 +609,7 @@ interface CoverageInvocation {
   env: NodeJS.ProcessEnv;
 }
 
-function buildCoverageInvocation(
-  tool: DetectedTool,
-  _deps: ScannerDeps,
-): CoverageInvocation {
+function buildCoverageInvocation(tool: DetectedTool, _deps: ScannerDeps): CoverageInvocation {
   // We inherit the parent env here (unlike the SAST linters, which
   // tightly allowlist). Coverage tools commonly need user-defined env vars
   // (DATABASE_URL, etc.) to run the test suite at all; stripping them
@@ -690,10 +658,7 @@ function buildCoverageInvocation(
  * throws — load errors propagate as `null` so the caller can degrade to an
  * empty findings list.
  */
-export function loadCoverageMap(
-  tool: DetectedTool,
-  _deps: ScannerDeps,
-): CoverageMap | null {
+export function loadCoverageMap(tool: DetectedTool, _deps: ScannerDeps): CoverageMap | null {
   if (!existsSync(tool.artifact)) return null;
   let raw: string;
   try {

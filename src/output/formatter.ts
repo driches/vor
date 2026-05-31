@@ -93,9 +93,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   if (unreviewedPaths.length > 0) {
     sections.push(
       `_Skipped (out of budget):_ ${unreviewedPaths.slice(0, 20).join(', ')}` +
-        (unreviewedPaths.length > 20
-          ? ` _+${unreviewedPaths.length - 20} more_`
-          : ''),
+        (unreviewedPaths.length > 20 ? ` _+${unreviewedPaths.length - 20} more_` : ''),
     );
   }
   if (input.truncatedCount > 0) {
@@ -123,10 +121,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   return { body: sections.join('\n\n'), event };
 }
 
-function mergeUniquePaths(
-  a: readonly string[],
-  b: readonly string[],
-): string[] {
+function mergeUniquePaths(a: readonly string[], b: readonly string[]): string[] {
   return [...new Set([...a, ...b])];
 }
 
@@ -176,9 +171,7 @@ function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): stri
     error: 'the agent run errored out',
   };
   const tail =
-    ended && ended !== 'summary_posted'
-      ? ` — ${reasons[ended]} (\`ended: ${ended}\`).`
-      : '.';
+    ended && ended !== 'summary_posted' ? ` — ${reasons[ended]} (\`ended: ${ended}\`).` : '.';
   return (
     `> ⚠️ The agent did not call \`post_summary\`${tail} ` +
     `The body was synthesized from inline findings and may be incomplete.`

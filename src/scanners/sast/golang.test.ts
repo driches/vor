@@ -20,9 +20,11 @@ describe('dirsForGoFiles', () => {
   });
 
   it('returns one target per distinct directory', () => {
-    expect(
-      dirsForGoFiles(['cmd/app/main.go', 'internal/svc/svc.go', 'main.go']),
-    ).toEqual(['./cmd/app', './internal/svc', './']);
+    expect(dirsForGoFiles(['cmd/app/main.go', 'internal/svc/svc.go', 'main.go'])).toEqual([
+      './cmd/app',
+      './internal/svc',
+      './',
+    ]);
   });
 
   it('uses POSIX separators regardless of input nesting depth', () => {

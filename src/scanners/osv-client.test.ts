@@ -234,10 +234,9 @@ describe('createOsvClient timeout', () => {
     // confirms the abort-message branch is selected by external signal only.
     const client = createOsvClient({ fetch: fakeFetch, timeoutMs: 10_000, maxRetries: 0 });
     const err = await client
-      .queryBatch(
-        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
-        { signal: controller.signal },
-      )
+      .queryBatch([{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }], {
+        signal: controller.signal,
+      })
       .catch((e) => e);
     expect(err).toBeInstanceOf(OsvClientError);
     // The key assertion: NOT labelled "timed out" — the external caller
@@ -279,10 +278,9 @@ describe('createOsvClient external-abort cancellation', () => {
     });
     const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
     await expect(
-      client.queryBatch(
-        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
-        { signal: controller.signal },
-      ),
+      client.queryBatch([{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }], {
+        signal: controller.signal,
+      }),
     ).rejects.toBeInstanceOf(OsvClientError);
     // Exactly ONE fetch attempt — no retry after the abort.
     expect(fakeFetch).toHaveBeenCalledTimes(1);
@@ -294,10 +292,9 @@ describe('createOsvClient external-abort cancellation', () => {
     const fakeFetch = vi.fn().mockResolvedValue(errorResponse(503, 'down'));
     const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
     await expect(
-      client.queryBatch(
-        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
-        { signal: controller.signal },
-      ),
+      client.queryBatch([{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }], {
+        signal: controller.signal,
+      }),
     ).rejects.toBeInstanceOf(OsvClientError);
     // Either zero fetches (pre-loop check) or at most one (loop entered and
     // bailed). Anything more means we ignored the abort and retried.
@@ -323,10 +320,9 @@ describe('createOsvClient external-abort cancellation', () => {
     }) as unknown as typeof setTimeout);
     const client = createOsvClient({ fetch: fakeFetch, maxRetries: 5 });
     await expect(
-      client.queryBatch(
-        [{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }],
-        { signal: controller.signal },
-      ),
+      client.queryBatch([{ package: { name: 'x', ecosystem: 'npm' }, version: '1' }], {
+        signal: controller.signal,
+      }),
     ).rejects.toBeInstanceOf(OsvClientError);
     expect(attempts).toBe(1);
   });

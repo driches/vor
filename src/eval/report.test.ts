@@ -161,9 +161,7 @@ describe('renderReport', () => {
       diff: DIFF,
     });
     const md = renderReport({
-      cases: [
-        { caseId: 'c', prUrl: 'u', owner: 'o', repo: 'r', pull_number: 1, result },
-      ],
+      cases: [{ caseId: 'c', prUrl: 'u', owner: 'o', repo: 'r', pull_number: 1, result }],
       generatedAt: 't',
       modelName: 'm',
     });

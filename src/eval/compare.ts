@@ -79,7 +79,8 @@ export function compare(input: CompareInput): CompareResult {
     );
 
     // Pass 1: same file, same hunk_id (when both have one)
-    let best: { entry: (typeof oursPool)[number]; dist: number; how: 'hunk' | 'line' } | null = null;
+    let best: { entry: (typeof oursPool)[number]; dist: number; how: 'hunk' | 'line' } | null =
+      null;
     if (cFinding.hunk_id) {
       for (const entry of candidates) {
         if (entry.f.hunk_id !== cFinding.hunk_id) continue;

@@ -78,9 +78,7 @@ interface GolangciOutput {
 export const golangLinter: LinterModule = {
   id: ID,
   applies(files: readonly ChangedFile[]): boolean {
-    return files.some(
-      (f) => TARGET_EXTENSION.test(f.path) && !f.is_binary && !f.is_generated,
-    );
+    return files.some((f) => TARGET_EXTENSION.test(f.path) && !f.is_binary && !f.is_generated);
   },
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
@@ -169,9 +167,7 @@ export function dirsForGoFiles(paths: readonly string[]): string[] {
 function locateBin(workspaceDir: string): ResolvedBinary {
   // Project-local install first (matches the repo's pinned version /
   // .golangci.yml config). findWorkspaceBinary tries .cmd/.exe variants.
-  const ws = findWorkspaceBinary([
-    path.join(workspaceDir, 'bin', 'golangci-lint'),
-  ]);
+  const ws = findWorkspaceBinary([path.join(workspaceDir, 'bin', 'golangci-lint')]);
   if (ws !== null) return ws;
   // PATH-resolved. On Windows, global installs land as `.cmd`/`.exe`
   // shims that Node's `spawn` with shell:false can't execute for a bare
@@ -189,6 +185,15 @@ function locateBin(workspaceDir: string): ResolvedBinary {
  * JSON shape, so we try v1 flags first and, only when the failure is an
  * unknown-flag/usage error (not a missing binary and not a real run
  * failure), retry once with the v2 invocation.
+ *
+ * `--show-stats=false` is required on the v2 path: v2 enables stats by
+ * default and appends a non-JSON summary ("N issues:" …) to stdout
+ * alongside the report, so `JSON.parse` would choke on the trailing text
+ * for exactly the v2-with-findings case this fallback exists to handle.
+ * The v1 path doesn't need it — `--out-format=json` writes JSON only, and
+ * `--show-stats` predates neither reliably nor losslessly across v1
+ * minors, so adding it there risks an unknown-flag error that would
+ * wrongly trip the fallback.
  */
 async function runWithFallback(
   bin: ResolvedBinary,
@@ -202,7 +207,11 @@ async function runWithFallback(
     const msg = (err as Error).message;
     if (isMissingBinary(msg)) throw err;
     if (looksLikeUnknownFlag(msg)) {
-      return runCli(bin, [...common, '--output.json.path=stdout', ...dirs], deps);
+      return runCli(
+        bin,
+        [...common, '--output.json.path=stdout', '--show-stats=false', ...dirs],
+        deps,
+      );
     }
     throw err;
   }
@@ -229,11 +238,7 @@ function looksLikeUnknownFlag(msg: string): boolean {
   );
 }
 
-function runCli(
-  bin: ResolvedBinary,
-  args: string[],
-  deps: ScannerDeps,
-): Promise<string> {
+function runCli(bin: ResolvedBinary, args: string[], deps: ScannerDeps): Promise<string> {
   return new Promise((resolve, reject) => {
     // DEP0190 — see eslint.ts for the full rationale. args are already
     // shell-quoted (dirs via filterShellSafePaths, flags are literal).
@@ -247,9 +252,10 @@ function runCli(
       env: buildLinterEnv(),
       shell: bin.needsShell,
     };
-    const child = argsForSpawn === null
-      ? spawn(command, spawnOptions)
-      : spawn(command, argsForSpawn, spawnOptions);
+    const child =
+      argsForSpawn === null
+        ? spawn(command, spawnOptions)
+        : spawn(command, argsForSpawn, spawnOptions);
     // Buffer accumulation — avoids O(n²) string concat on large outputs
     // and UTF-8 corruption across chunk boundaries.
     const stdoutChunks: Buffer[] = [];

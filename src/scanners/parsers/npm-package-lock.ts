@@ -69,12 +69,7 @@ function findVersionLine(lines: string[], installKey: string): number {
     const pos = line.indexOf(quoted);
     if (pos < 0) continue;
     const charAfter = line[pos + quoted.length];
-    if (
-      charAfter !== undefined &&
-      charAfter !== ':' &&
-      charAfter !== ' ' &&
-      charAfter !== '\t'
-    ) {
+    if (charAfter !== undefined && charAfter !== ':' && charAfter !== ' ' && charAfter !== '\t') {
       continue;
     }
     const end = Math.min(lines.length, i + 1 + LOOKAHEAD_LINES);

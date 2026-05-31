@@ -60,9 +60,8 @@ export function renderSummaryReport(input: RenderSummaryInput): string {
   // didn't catch anything" and "baseline didn't run". See PR #10 Codex P2
   // 3295092572.
   const casesMissingBaseline = cases.filter(
-    (caseId) => !input.scores.some(
-      (s) => s.case_id === caseId && s.config_name === input.baseline_config,
-    ),
+    (caseId) =>
+      !input.scores.some((s) => s.case_id === caseId && s.config_name === input.baseline_config),
   );
   if (casesMissingBaseline.length > 0) {
     throw new Error(

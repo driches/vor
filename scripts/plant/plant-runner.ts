@@ -94,10 +94,7 @@ export async function runPlants(caseDir: string): Promise<void> {
     truths.push({ ...result.truth, plant_id: i });
   }
 
-  writeFileSync(
-    join(caseDir, 'truth.yml'),
-    stringifyYaml({ truths }),
-  );
+  writeFileSync(join(caseDir, 'truth.yml'), stringifyYaml({ truths }));
 }
 
 /**

@@ -60,9 +60,7 @@ export class WorkerClient {
 
     this.budget.addUsage(this.model, response.usage);
 
-    const textBlock = response.content.find(
-      (b): b is Anthropic.TextBlock => b.type === 'text',
-    );
+    const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
     if (textBlock === undefined) {
       throw new Error(`Worker '${inv.task}' returned no text block`);
     }
@@ -74,12 +72,8 @@ export class WorkerClient {
     try {
       unvalidated = JSON.parse(json);
     } catch (err) {
-      await logger.warn(
-        `Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`,
-      );
-      throw new Error(
-        `Worker '${inv.task}' returned non-JSON: ${(err as Error).message}`,
-      );
+      await logger.warn(`Worker '${inv.task}' produced non-JSON output: ${rawText.slice(0, 200)}`);
+      throw new Error(`Worker '${inv.task}' returned non-JSON: ${(err as Error).message}`);
     }
 
     const validation = inv.responseSchema.safeParse(unvalidated);
@@ -87,9 +81,7 @@ export class WorkerClient {
       await logger.warn(
         `Worker '${inv.task}' returned JSON that failed schema validation: ${validation.error.message}`,
       );
-      throw new Error(
-        `Worker '${inv.task}' response failed schema: ${validation.error.message}`,
-      );
+      throw new Error(`Worker '${inv.task}' response failed schema: ${validation.error.message}`);
     }
 
     return {

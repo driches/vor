@@ -19,8 +19,7 @@ async function main(): Promise<void> {
     console.error('usage: golden:plant --case <id> [--golden-repo <path>]');
     process.exit(2);
   }
-  const goldenRepo =
-    arg('--golden-repo') ?? process.env.GOLDEN_REPO_PATH;
+  const goldenRepo = arg('--golden-repo') ?? process.env.GOLDEN_REPO_PATH;
   if (!goldenRepo) {
     console.error('--golden-repo or GOLDEN_REPO_PATH is required');
     process.exit(2);

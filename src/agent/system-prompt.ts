@@ -34,10 +34,7 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   //   - security.scanners.sast.enabled: per-scanner switch.
   // Telling the model "linters are covering this" when the pipeline is
   // disabled would suppress real findings the model would otherwise catch.
-  if (
-    input.config.security.enabled &&
-    input.config.security.scanners.sast.enabled
-  ) {
+  if (input.config.security.enabled && input.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
 
@@ -90,7 +87,6 @@ This repo runs language-appropriate static tools alongside your review (you don'
 Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
 
 **Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
-
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
@@ -215,7 +211,9 @@ function buildContextBlock(
     const fenced = `\`\`\`\n${entry.content.trim()}\n\`\`\``;
     const block = header + fenced;
     if (bytes + block.length > maxBytes) {
-      sections.push(`\n_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`);
+      sections.push(
+        `\n_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`,
+      );
       break;
     }
     sections.push(block);

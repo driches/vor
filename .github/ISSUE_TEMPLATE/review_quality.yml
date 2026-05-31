@@ -1,7 +1,7 @@
 name: Review quality feedback
 description: The AI review said something wrong, missed something important, or got severity wrong. This is the highest-signal feedback for tuning the prompt.
-title: "review-quality: "
-labels: ["review-quality", "prompt-tuning"]
+title: 'review-quality: '
+labels: ['review-quality', 'prompt-tuning']
 body:
   - type: markdown
     attributes:
@@ -15,7 +15,7 @@ body:
     attributes:
       label: Public PR link
       description: A public PR where the issue is visible. Without this, we can't see the comment in context.
-      placeholder: "https://github.com/your-org/your-repo/pull/123"
+      placeholder: 'https://github.com/your-org/your-repo/pull/123'
     validations:
       required: true
 
@@ -25,11 +25,11 @@ body:
       label: What kind of issue is this?
       options:
         - "False positive — the agent flagged something that isn't actually a problem"
-        - "False negative — the agent missed something it should have caught"
-        - "Wrong severity — flagged at the wrong level (e.g. critical vs minor)"
-        - "Wrong location — comment posted on the wrong line"
-        - "Style/tone — the comment is technically right but unhelpful, condescending, or noisy"
-        - "Other"
+        - 'False negative — the agent missed something it should have caught'
+        - 'Wrong severity — flagged at the wrong level (e.g. critical vs minor)'
+        - 'Wrong location — comment posted on the wrong line'
+        - 'Style/tone — the comment is technically right but unhelpful, condescending, or noisy'
+        - 'Other'
     validations:
       required: true
 
@@ -54,13 +54,13 @@ body:
     id: model
     attributes:
       label: Model used
-      placeholder: "claude-sonnet-4-6"
+      placeholder: 'claude-sonnet-4-6'
     validations:
       required: true
 
   - type: textarea
     id: config
     attributes:
-      label: "`.vor.yml` in use"
+      label: '`.vor.yml` in use'
       description: Especially the `focus`, `severity`, and `prompt.additions` sections.
       render: yaml

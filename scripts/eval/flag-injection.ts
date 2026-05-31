@@ -69,9 +69,7 @@ export function injectScannerFindingsFlag(existingYaml: string | null): FlagInje
   // #3313098982.
   const existing = parsed['experimental'];
   const experimental: Record<string, unknown> =
-    existing !== null &&
-    typeof existing === 'object' &&
-    !Array.isArray(existing)
+    existing !== null && typeof existing === 'object' && !Array.isArray(existing)
       ? (existing as Record<string, unknown>)
       : {};
   experimental['scanner_findings_in_user_prompt'] = true;
