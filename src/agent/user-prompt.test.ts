@@ -132,6 +132,29 @@ describe('renderPriorReviewThreads', () => {
     expect(out.indexOf('replied finding')).toBeLessThan(out.indexOf('no-reply finding'));
   });
 
+  it('keeps a genuinely pushed-back thread ahead of an acknowledgement under the cap', () => {
+    const out = renderPriorReviewThreads(
+      [
+        makeThread({
+          file_path: 'a.ts',
+          finding_excerpt: 'ack only',
+          replies: [{ author: 'x', excerpt: 'good catch' }],
+          has_pushback: false,
+        }),
+        makeThread({
+          file_path: 'z.ts',
+          finding_excerpt: 'rejected finding',
+          replies: [{ author: 'x', excerpt: 'wontfix' }],
+          has_pushback: true,
+        }),
+      ],
+      1,
+    );
+    // cap=1: the rejected thread must survive, not the mere acknowledgement.
+    expect(out).toContain('rejected finding');
+    expect(out).not.toContain('ack only');
+  });
+
   it('marks outdated threads and renders a path without a line', () => {
     const out = renderPriorReviewThreads([
       makeThread({ file_path: 'src/x.ts', line: null, outdated: true }),

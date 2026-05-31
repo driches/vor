@@ -59558,6 +59558,8 @@ var MAX_INJECTED_PRIOR_THREADS_DEFAULT = 30;
 var MAX_REPLIES_PER_THREAD = 5;
 function renderPriorReviewThreads(threads, maxThreads = MAX_INJECTED_PRIOR_THREADS_DEFAULT) {
   const sorted = [...threads].sort((a2, b2) => {
+    const p2 = (b2.has_pushback ? 1 : 0) - (a2.has_pushback ? 1 : 0);
+    if (p2 !== 0) return p2;
     const r2 = (b2.replies.length > 0 ? 1 : 0) - (a2.replies.length > 0 ? 1 : 0);
     if (r2 !== 0) return r2;
     if (a2.file_path !== b2.file_path) return a2.file_path.localeCompare(b2.file_path);

@@ -179,6 +179,12 @@ export function renderPriorReviewThreads(
   maxThreads: number = MAX_INJECTED_PRIOR_THREADS_DEFAULT,
 ): string {
   const sorted = [...threads].sort((a, b) => {
+    // Genuine pushback first — a rejected thread MUST survive the cap, since
+    // re-litigating rejected feedback is the failure this feature prevents.
+    // Then any-reply threads, then path/line for stable output.
+    // addressing #58 (Codex P2 review).
+    const p = (b.has_pushback ? 1 : 0) - (a.has_pushback ? 1 : 0);
+    if (p !== 0) return p;
     const r = (b.replies.length > 0 ? 1 : 0) - (a.replies.length > 0 ? 1 : 0);
     if (r !== 0) return r;
     if (a.file_path !== b.file_path) return a.file_path.localeCompare(b.file_path);
