@@ -131,16 +131,27 @@ export const base = import.meta.env.BASE_URL;
 
 <section class="ccr-section">
   <h2 class="ccr-h2">60-second setup</h2>
-  <p class="ccr-sub">Drop one workflow file in your repo, add your API key as a secret, and trigger a review by hand.</p>
+  <p class="ccr-sub">Drop one workflow file in your repo, add your API key as a secret — reviews run automatically on every pull request.</p>
 
 ```yaml title=".github/workflows/vor.yml"
 name: Vor
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
         description: 'PR number to review'
         required: true
+      model:
+        description: 'Model to use'
+        required: false
+        default: 'claude-sonnet-4-6'
+      dry_run:
+        description: 'Log review instead of posting comments'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: read
@@ -156,9 +167,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           pr_number: ${{ inputs.pr_number }}
+          model: ${{ inputs.model || 'claude-sonnet-4-6' }}
+          dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
-  <p class="ccr-step">Prefer OpenAI? Swap in <code>openai_api_key</code> and set <code>model: gpt-4.1</code> — the provider is inferred from the model id. Then: <strong>Actions → Vor → Run workflow → enter the PR number</strong>. A sticky review appears within minutes.</p>
+  <p class="ccr-step">Prefer OpenAI? Swap in <code>openai_api_key</code> and set <code>model: gpt-4.1</code> — the provider is inferred from the model id. You can also re-run or review any PR on demand via <strong>Actions → Vor → Run workflow</strong>.</p>
 </section>
 
 <section class="ccr-section">
@@ -200,8 +213,8 @@ jobs:
   <div class="ccr-cta">
     <h2>Add it to your repo</h2>
     <p>
-      Free, MIT-licensed, and runs on your own API key. Manual-trigger by default — no surprise
-      token spend.
+      Free, MIT-licensed, and runs on your own API key. Automatic on every PR — or trigger manually
+      on demand.
     </p>
     <div class="ccr-actions">
       <a class="ccr-btn ccr-btn--primary" href="https://github.com/marketplace/actions/vor">

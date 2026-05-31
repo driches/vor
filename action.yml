@@ -40,9 +40,9 @@ inputs:
     description: 'PR number. Auto-detected from pull_request events; required for manual triggers.'
     required: false
   allow_auto_trigger:
-    description: 'By default this action refuses to run on pull_request / pull_request_target / pull_request_review events to avoid tight review-iteration loops. Set to "true" to opt in to auto-triggering on PR events. Recommended invocation is `on: workflow_dispatch` (manual) with an explicit pr_number input.'
+    description: 'By default this action runs automatically on pull_request events. Set to "false" to opt out and restrict runs to manual workflow_dispatch triggers only. Note: pull_request_target, pull_request_review, and pull_request_review_comment events are never auto-triggered regardless of this setting — pull_request_target carries fork-secret risk, and review events produce iteration loops.'
     required: false
-    default: 'false'
+    default: 'true'
 
 outputs:
   review_id:

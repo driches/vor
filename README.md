@@ -37,11 +37,22 @@ In any of your repos, add `.github/workflows/vor.yml`:
 ```yaml
 name: Vor
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
         description: 'PR number to review'
         required: true
+      model:
+        description: 'Model to use'
+        required: false
+        default: 'claude-sonnet-4-6'
+      dry_run:
+        description: 'Log review instead of posting comments'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: read
@@ -57,36 +68,65 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           pr_number: ${{ inputs.pr_number }}
+          model: ${{ inputs.model || 'claude-sonnet-4-6' }}
+          dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
-Prefer OpenAI? Swap the key and set a `model` — everything else is identical:
+Prefer OpenAI? Swap the key and set a model — update the `default` in the dispatch input to match:
 
 ```yaml
       - uses: driches/vor@v0
         with:
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-4.1            # or o4-mini, gpt-5-codex, …
           pr_number: ${{ inputs.pr_number }}
+          model: ${{ inputs.model || 'gpt-4.1' }}
+          dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
 The provider is inferred from the `model` id (`claude-*` → Anthropic, `gpt-*`/`o<digit>*`/`chatgpt-*` → OpenAI), so you only supply the API key for the provider you're using.
 
-Trigger a review by hand: **Actions → Vor → Run workflow → enter PR number**. A sticky review appears within a few minutes; re-run to refresh against the new HEAD.
+Reviews run automatically on every pull request. You can also re-run one manually — or review any PR on demand — via **Actions → Vor → Run workflow → enter PR number**.
 
-### Why manual-only?
+### Opting out of auto-trigger
 
-The action refuses to run on `pull_request` / `pull_request_target` events by default. The auto-trigger pattern produces tight iteration loops (every push reviews, every review can be acted on, every action push re-reviews) that we found generated more noise than signal in practice. Manual invocation gives you control over when to spend tokens.
-
-If you've explicitly decided the auto-trigger economics work for your repo, opt in:
+If you'd prefer manual control over when reviews run, remove `pull_request` from the trigger and set `allow_auto_trigger: 'false'`:
 
 ```yaml
-- uses: driches/vor@v0
-  with:
-    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-    allow_auto_trigger: 'true'
-```
+name: Vor
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+      model:
+        description: 'Model to use'
+        required: false
+        default: 'claude-sonnet-4-6'
+      dry_run:
+        description: 'Log review instead of posting comments'
+        required: false
+        default: 'false'
+        type: boolean
 
-…and use `on: pull_request:` as you would expect.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: driches/vor@v0
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allow_auto_trigger: 'false'
+          pr_number: ${{ inputs.pr_number }}
+          model: ${{ inputs.model || 'claude-sonnet-4-6' }}
+          dry_run: ${{ inputs.dry_run || 'false' }}
+```
 
 ## What you get
 
@@ -114,6 +154,7 @@ By default, the agent **never auto-blocks** — all reviews are posted as `COMME
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
+| `allow_auto_trigger` | no | `true` | Set to `false` to opt out of auto-runs on `pull_request` events and restrict to manual `workflow_dispatch` triggers only. `pull_request_target` is always blocked regardless of this setting (fork PRs run with base-repo secrets; a fork could spend your API key via `.vor.yml`). Review/comment events are always blocked too. |
 
 > **Codex models:** OpenAI ids prefixed `gpt-` (e.g. `gpt-5-codex`) are inferred automatically. A bare `codex-*` id isn't matched by the prefix rules above — set `provider: openai` explicitly for those.
 
