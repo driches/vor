@@ -67362,6 +67362,7 @@ function renderDescription6(diag) {
 // src/scanners/sast/golang.ts
 var import_node_child_process10 = require("node:child_process");
 var import_node_fs5 = require("node:fs");
+var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path12 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
 var TIMEOUT_MS9 = 12e4;
@@ -67487,20 +67488,24 @@ async function runWithFallback(bin, dirs, deps, cwd) {
     const msg = err.message;
     if (isMissingBinary(msg)) throw err;
     if (looksLikeUnknownFlag(msg)) {
-      return runCli8(
-        bin,
-        [
-          ...common,
-          "--output.json.path=stdout",
-          "--output.text.path=stderr",
-          "--show-stats=false",
-          ...dirs
-        ],
-        deps,
-        cwd
-      );
+      return runV2ToFile(bin, common, dirs, deps, cwd);
     }
     throw err;
+  }
+}
+async function runV2ToFile(bin, common, dirs, deps, cwd) {
+  const tmpDir = (0, import_node_fs5.mkdtempSync)(import_node_path12.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
+  const reportPath = import_node_path12.default.join(tmpDir, "report.json");
+  const pathArg = bin.needsShell ? `"${reportPath}"` : reportPath;
+  try {
+    await runCli8(bin, [...common, `--output.json.path=${pathArg}`, ...dirs], deps, cwd);
+    try {
+      return (0, import_node_fs5.readFileSync)(reportPath, "utf-8");
+    } catch {
+      return '{"Issues":null}';
+    }
+  } finally {
+    (0, import_node_fs5.rmSync)(tmpDir, { recursive: true, force: true });
   }
 }
 function isMissingBinary(msg) {

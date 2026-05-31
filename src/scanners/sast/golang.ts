@@ -39,7 +39,8 @@
  * golangci-lint JSON format: https://golangci-lint.run/usage/faq/#how-to-integrate
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
@@ -298,41 +299,38 @@ function locateBin(workspaceDir: string): ResolvedBinary {
 }
 
 /**
- * Run golangci-lint, transparently handling the v1↔v2 CLI break.
+ * Run golangci-lint, transparently handling the v1↔v2 CLI break and the
+ * way each version delivers its JSON report.
  *
- * golangci-lint v2 (2025) removed `--out-format` in favor of
- * `--output.json.path=stdout`. Both versions emit the same `Issues[]`
- * JSON shape, so we try v1 flags first and, only when the failure is an
- * unknown-flag/usage error (not a missing binary and not a real run
- * failure), retry once with the v2 invocation.
+ * golangci-lint v2 (2025) removed `--out-format` in favor of the
+ * `--output.<format>.path` flags. We try the v1 invocation first and, only
+ * on an unknown-flag/usage error (not a missing binary, not a real run
+ * failure), retry with the v2 invocation. Both emit the same `Issues[]`
+ * JSON shape.
  *
- * The v2 path also pins two things to keep stdout pure JSON, because a
- * repo's own v2 config can otherwise pollute it:
- *   - `--show-stats=false`: v2 enables stats by default and appends a
- *     non-JSON summary ("N issues:" …) to stdout alongside the report.
- *   - `--output.text.path=stderr`: a repo config that sets
- *     `output.formats.text.path: stdout` would interleave the
- *     human-readable diagnostics with our JSON on stdout; routing text to
- *     stderr overrides that so only the JSON report lands on stdout.
- * Either one left unset makes `JSON.parse` choke for exactly the
- * v2-with-findings case this fallback exists to handle. The v1 path needs
- * neither — `--out-format=json` selects a single JSON-only stream — and
- * these v2-only flags would be unknown there and wrongly trip the
- * fallback, so they stay on the v2 invocation.
+ * How we capture the report differs by version:
+ *   - v1: `--out-format=json` selects a SINGLE json formatter on stdout,
+ *     so stdout is JSON-only and we read it directly.
+ *   - v2: we point `--output.json.path` at a TEMP FILE and read that back
+ *     instead of at stdout. v2 supports multiple simultaneous formatters,
+ *     each with its own `--output.<format>.path`, and a repo's
+ *     `.golangci.yml` can route any of them (text, sarif, checkstyle,
+ *     code-climate, …) — plus the run stats — to stdout. Reading the report
+ *     from a file we control makes stdout contention irrelevant, instead of
+ *     trying to chase down and suppress every formatter individually.
  *
  * The `common` args disable golangci-lint's built-in output limiting,
  * because we scan whole packages and filter to the PR's added lines only
- * AFTER parsing — so anything golangci-lint drops before emitting JSON is
- * a silent false negative on the changed line:
+ * AFTER parsing — so anything golangci-lint drops before emitting the
+ * report is a silent false negative on the changed line:
  *   - `--uniq-by-line=false`: by default golangci-lint keeps only the
  *     first diagnostic per line, so a line that trips two linters (e.g. a
- *     gosec security issue + a style nit) would lose all but one before we
- *     ever see it — defeating the same-line discrimination in buildFinding.
+ *     gosec security issue + a style nit) would lose all but one — defeating
+ *     the same-line discrimination in buildFinding.
  *   - `--max-issues-per-linter=0` / `--max-same-issues=0`: the defaults
  *     (50 and 3) can be exhausted by pre-existing findings elsewhere in a
  *     noisy package before the changed-line issue is reached. 0 = no cap.
- * All three are long-standing `run` flags present in both v1 and v2, so
- * they're safe in the shared args.
+ * All three are long-standing `run` flags present in both v1 and v2.
  */
 async function runWithFallback(
   bin: ResolvedBinary,
@@ -354,20 +352,42 @@ async function runWithFallback(
     const msg = (err as Error).message;
     if (isMissingBinary(msg)) throw err;
     if (looksLikeUnknownFlag(msg)) {
-      return runCli(
-        bin,
-        [
-          ...common,
-          '--output.json.path=stdout',
-          '--output.text.path=stderr',
-          '--show-stats=false',
-          ...dirs,
-        ],
-        deps,
-        cwd,
-      );
+      return runV2ToFile(bin, common, dirs, deps, cwd);
     }
     throw err;
+  }
+}
+
+/**
+ * v2 invocation: write the JSON report to a temp file and read it back, so
+ * whatever a repo config routes to stdout (any formatter, plus stats)
+ * can't corrupt the parse. The temp path is ours (never PR-controlled), so
+ * the only spawn-safety concern is spaces under Windows shim mode — quote
+ * it there.
+ */
+async function runV2ToFile(
+  bin: ResolvedBinary,
+  common: string[],
+  dirs: string[],
+  deps: ScannerDeps,
+  cwd: string,
+): Promise<string> {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'vor-golangci-'));
+  const reportPath = path.join(tmpDir, 'report.json');
+  const pathArg = bin.needsShell ? `"${reportPath}"` : reportPath;
+  try {
+    // Ignore stdout/stderr for parsing — the report is the file.
+    await runCli(bin, [...common, `--output.json.path=${pathArg}`, ...dirs], deps, cwd);
+    try {
+      return readFileSync(reportPath, 'utf-8');
+    } catch {
+      // golangci-lint writes the report on every successful run; be
+      // defensive and treat a missing file as "no issues" rather than a
+      // hard error.
+      return '{"Issues":null}';
+    }
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
