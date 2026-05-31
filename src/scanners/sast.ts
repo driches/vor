@@ -39,6 +39,7 @@ import { actionlintLinter } from './sast/actionlint.js';
 import { knipLinter } from './sast/knip.js';
 import { semgrepLinter } from './sast/semgrep.js';
 import { tscLinter } from './sast/tsc.js';
+import { golangLinter } from './sast/golang.js';
 import type { LinterModule } from './sast/linter.js';
 
 const SCANNER_ID: ScannerId = 'sast';
@@ -55,6 +56,7 @@ const LINTERS: readonly LinterModule[] = [
   knipLinter,
   semgrepLinter,
   tscLinter,
+  golangLinter,
 ];
 
 /**

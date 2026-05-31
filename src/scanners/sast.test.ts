@@ -42,6 +42,8 @@ describe('sast scanner (fan-out orchestrator)', () => {
     expect(scanner.applies([makeFile({ path: 'src/foo.pyi' })])).toBe(true);
     // Dart scope
     expect(scanner.applies([makeFile({ path: 'lib/foo.dart' })])).toBe(true);
+    // Go scope (golangci-lint)
+    expect(scanner.applies([makeFile({ path: 'internal/foo.go' })])).toBe(true);
     // actionlint scope (only .github/workflows/*.yml)
     expect(scanner.applies([makeFile({ path: '.github/workflows/ci.yml' })])).toBe(true);
     expect(scanner.applies([makeFile({ path: '.github/workflows/release.yaml' })])).toBe(true);
@@ -57,13 +59,13 @@ describe('sast scanner (fan-out orchestrator)', () => {
     expect(scanner.applies([makeFile({ path: 'icon.png' })])).toBe(false);
   });
 
-  it('applies() returns true for source files in languages semgrep covers (Go, Rust, Ruby, etc.) — even when no dedicated linter is wired', () => {
+  it('applies() returns true for source files in languages semgrep covers (Rust, Ruby, etc.) — even when no dedicated linter is wired', () => {
     // Semgrep's auto ruleset spans most popular languages, so the sast
     // scanner activates for them even though we haven't added a
-    // dedicated linter module. If semgrep isn't installed in the
-    // workspace, the module quietly no-ops at run time.
+    // dedicated linter module. (Go used to be in this set; it now has a
+    // dedicated golangci-lint module, asserted above.) If semgrep isn't
+    // installed in the workspace, the module quietly no-ops at run time.
     const scanner = createSastScanner();
-    expect(scanner.applies([makeFile({ path: 'src/foo.go' })])).toBe(true);
     expect(scanner.applies([makeFile({ path: 'src/foo.rs' })])).toBe(true);
     expect(scanner.applies([makeFile({ path: 'lib/foo.rb' })])).toBe(true);
     expect(scanner.applies([makeFile({ path: 'src/foo.java' })])).toBe(true);

@@ -184,6 +184,26 @@ const LINTER_ENV_ALLOWLIST: readonly string[] = [
   'FLUTTER_HOME',
   'PUB_CACHE',
   'PUB_HOSTED_URL',
+  // Go toolchain. golangci-lint compiles the packages it analyzes, so it
+  // needs the Go SDK + cache env vars. Stripping GOCACHE/GOPATH leaves
+  // the build step broken or pathologically slow with no findings and no
+  // error — a silent false-negative that's painful to diagnose in CI
+  // (same failure shape the Dart vars above guard against). GOPROXY/
+  // GOFLAGS/GOPRIVATE let module resolution work in proxied/private CI.
+  'GOPATH',
+  'GOROOT',
+  'GOCACHE',
+  'GOMODCACHE',
+  'GOFLAGS',
+  'GOPROXY',
+  'GOSUMDB',
+  'GONOSUMDB',
+  'GOPRIVATE',
+  'GO111MODULE',
+  'GOTOOLCHAIN',
+  'GOOS',
+  'GOARCH',
+  'CGO_ENABLED',
   // NOTE: SEMGREP_APP_TOKEN is NOT in this shared allowlist. It's passed
   // ONLY to the semgrep subprocess via the `extraEnvKeys` parameter of
   // buildLinterEnv (see semgrep.ts). Per-linter scoping limits blast
