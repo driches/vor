@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFinding,
+  extractGoSubRule,
   golangCategory,
   golangSeverity,
   groupByGoModule,
   issuePathCandidates,
   nearestGoModuleRoot,
 } from './golang.js';
+
+function issue(over: { FromLinter?: string; Text?: string; line?: number; column?: number } = {}) {
+  return {
+    FromLinter: over.FromLinter ?? 'govet',
+    Text: over.Text ?? 'something is wrong',
+    Pos: { Filename: 'main.go', Line: over.line ?? 10, Column: over.column ?? 0 },
+  };
+}
 
 // The Go module's bespoke logic that would regress silently: the
 // file→module-root attribution and package-target derivation we feed
@@ -91,6 +101,59 @@ describe('issuePathCandidates', () => {
     expect(issuePathCandidates('/ws', 'backend', '/ws/backend/main.go')).toEqual([
       'backend/main.go',
     ]);
+  });
+});
+
+describe('extractGoSubRule', () => {
+  it('extracts the prefixed check name for linters that emit one', () => {
+    expect(extractGoSubRule('printf: Printf format %d has arg s of wrong type')).toBe('printf');
+    expect(extractGoSubRule('SA1019: foo is deprecated')).toBe('SA1019');
+    expect(extractGoSubRule('G404: use of weak random')).toBe('G404');
+    expect(extractGoSubRule('var-naming: var x should be X')).toBe('var-naming');
+  });
+
+  it('returns "" for plain-sentence messages with no code prefix', () => {
+    expect(extractGoSubRule('Error return value of `x.Close` is not checked')).toBe('');
+    expect(extractGoSubRule('should rewrite this loop')).toBe('');
+  });
+});
+
+describe('buildFinding rule_id / fingerprint discrimination', () => {
+  it('keeps two different sub-checks from one linter on the same line distinct', () => {
+    const a = buildFinding('main.go', issue({ Text: 'printf: bad format', column: 5 }));
+    const b = buildFinding('main.go', issue({ Text: 'shadow: declaration shadows x', column: 5 }));
+    expect(a.rule_id).not.toBe(b.rule_id);
+    expect(a.fingerprint).not.toBe(b.fingerprint);
+    expect(a.rule_id).toBe('golangci-lint/govet:printf.c5');
+  });
+
+  it('keeps two prefix-less diagnostics at different columns distinct', () => {
+    const a = buildFinding(
+      'main.go',
+      issue({ FromLinter: 'errcheck', Text: 'unchecked', column: 3 }),
+    );
+    const b = buildFinding(
+      'main.go',
+      issue({ FromLinter: 'errcheck', Text: 'unchecked', column: 20 }),
+    );
+    expect(a.rule_id).not.toBe(b.rule_id);
+    expect(a.fingerprint).not.toBe(b.fingerprint);
+  });
+
+  it('collapses a genuine repeat (same sub-check, same column)', () => {
+    const a = buildFinding('main.go', issue({ Text: 'printf: bad format', column: 5 }));
+    const b = buildFinding('main.go', issue({ Text: 'printf: bad format', column: 5 }));
+    expect(a.rule_id).toBe(b.rule_id);
+    expect(a.fingerprint).toBe(b.fingerprint);
+  });
+
+  it('omits the discriminator when there is neither a sub-check nor a column', () => {
+    const f = buildFinding(
+      'main.go',
+      issue({ FromLinter: 'errcheck', Text: 'unchecked', column: 0 }),
+    );
+    expect(f.rule_id).toBe('golangci-lint/errcheck');
+    expect(f.fingerprint).toBe('golangci-lint:errcheck:main.go:10');
   });
 });
 

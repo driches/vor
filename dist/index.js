@@ -67560,16 +67560,24 @@ function runCli8(bin, args, deps, cwd) {
     });
   });
 }
+function extractGoSubRule(text) {
+  const match = /^([A-Za-z][A-Za-z0-9._/-]{0,39}):\s/.exec(text);
+  return match ? match[1] : "";
+}
 function buildFinding8(filePath, issue2) {
   const fromLinter = issue2.FromLinter.length > 0 ? issue2.FromLinter : "unknown";
   const severity = golangSeverity(fromLinter);
   const category = golangCategory(fromLinter);
   const confidence = "high";
   const line = issue2.Pos.Line;
-  const fingerprint = `${ID8}:${fromLinter}:${filePath}:${line}`;
+  const col = issue2.Pos.Column ?? 0;
+  const subRule = extractGoSubRule(issue2.Text);
+  const disc = [subRule, col > 0 ? `c${col}` : ""].filter((p2) => p2 !== "").join(".");
+  const ruleSuffix = disc !== "" ? `:${disc}` : "";
+  const fingerprint = `${ID8}:${fromLinter}${ruleSuffix}:${filePath}:${line}`;
   return {
     scanner: "sast",
-    rule_id: `${ID8}/${fromLinter}`,
+    rule_id: `${ID8}/${fromLinter}${ruleSuffix}`,
     file_path: filePath,
     line,
     severity,

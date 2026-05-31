@@ -443,16 +443,51 @@ function runCli(
   });
 }
 
-function buildFinding(filePath: string, issue: GolangciIssue): ScanFinding {
+/**
+ * Pull the specific sub-check out of a golangci-lint message when the
+ * linter prefixes it — `govet` ("printf: …"), `staticcheck` ("SA1019: …"),
+ * `gosec` ("G404: …"), `revive` ("var-naming: …"), etc. golangci-lint's
+ * JSON has no dedicated rule-code field (only the coarse `FromLinter`), so
+ * this prefix is the one stable, human-meaningful sub-identifier available.
+ *
+ * Returns '' for the linters that emit a plain sentence with no `code: `
+ * prefix (e.g. errcheck's "Error return value of `x` is not checked").
+ *
+ * Exported for testing.
+ */
+export function extractGoSubRule(text: string): string {
+  // Leading `<token>: ` where token looks like a check id (starts with a
+  // letter; letters/digits/._-/ only; bounded length so a stray "Note: "
+  // sentence doesn't produce an absurd rule id).
+  const match = /^([A-Za-z][A-Za-z0-9._/-]{0,39}):\s/.exec(text);
+  return match ? match[1]! : '';
+}
+
+export function buildFinding(filePath: string, issue: GolangciIssue): ScanFinding {
   const fromLinter = issue.FromLinter.length > 0 ? issue.FromLinter : 'unknown';
   const severity: Severity = golangSeverity(fromLinter);
   const category: Category = golangCategory(fromLinter);
   const confidence: Confidence = 'high';
   const line = issue.Pos.Line;
-  const fingerprint = `${ID}:${fromLinter}:${filePath}:${line}`;
+  const col = issue.Pos.Column ?? 0;
+
+  // Per-diagnostic discriminator so two distinct diagnostics on the SAME
+  // added line survive dedup. The runner drops a finding on EITHER an
+  // identical fingerprint OR an identical (file_path, line, rule_id)
+  // triple (see scanners/dedup.ts), and `FromLinter` alone is too coarse:
+  // govet can emit printf+shadow, errcheck can flag two calls, all on one
+  // line. We combine the stable sub-check (when the linter prefixes one)
+  // with the column so genuinely different diagnostics differ in BOTH
+  // keys, while a true repeat (same sub-check, same column) still
+  // collapses. Both parts are stable across runs — unlike the message
+  // text — so the rule_id stays usable as an exact ignore-list key.
+  const subRule = extractGoSubRule(issue.Text);
+  const disc = [subRule, col > 0 ? `c${col}` : ''].filter((p) => p !== '').join('.');
+  const ruleSuffix = disc !== '' ? `:${disc}` : '';
+  const fingerprint = `${ID}:${fromLinter}${ruleSuffix}:${filePath}:${line}`;
   return {
     scanner: 'sast',
-    rule_id: `${ID}/${fromLinter}`,
+    rule_id: `${ID}/${fromLinter}${ruleSuffix}`,
     file_path: filePath,
     line,
     severity,
