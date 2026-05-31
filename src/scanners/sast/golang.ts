@@ -306,14 +306,19 @@ function locateBin(workspaceDir: string): ResolvedBinary {
  * unknown-flag/usage error (not a missing binary and not a real run
  * failure), retry once with the v2 invocation.
  *
- * `--show-stats=false` is required on the v2 path: v2 enables stats by
- * default and appends a non-JSON summary ("N issues:" …) to stdout
- * alongside the report, so `JSON.parse` would choke on the trailing text
- * for exactly the v2-with-findings case this fallback exists to handle.
- * The v1 path doesn't need it — `--out-format=json` writes JSON only, and
- * `--show-stats` predates neither reliably nor losslessly across v1
- * minors, so adding it there risks an unknown-flag error that would
- * wrongly trip the fallback.
+ * The v2 path also pins two things to keep stdout pure JSON, because a
+ * repo's own v2 config can otherwise pollute it:
+ *   - `--show-stats=false`: v2 enables stats by default and appends a
+ *     non-JSON summary ("N issues:" …) to stdout alongside the report.
+ *   - `--output.text.path=stderr`: a repo config that sets
+ *     `output.formats.text.path: stdout` would interleave the
+ *     human-readable diagnostics with our JSON on stdout; routing text to
+ *     stderr overrides that so only the JSON report lands on stdout.
+ * Either one left unset makes `JSON.parse` choke for exactly the
+ * v2-with-findings case this fallback exists to handle. The v1 path needs
+ * neither — `--out-format=json` selects a single JSON-only stream — and
+ * these v2-only flags would be unknown there and wrongly trip the
+ * fallback, so they stay on the v2 invocation.
  *
  * The `common` args disable golangci-lint's built-in output limiting,
  * because we scan whole packages and filter to the PR's added lines only
@@ -351,7 +356,13 @@ async function runWithFallback(
     if (looksLikeUnknownFlag(msg)) {
       return runCli(
         bin,
-        [...common, '--output.json.path=stdout', '--show-stats=false', ...dirs],
+        [
+          ...common,
+          '--output.json.path=stdout',
+          '--output.text.path=stderr',
+          '--show-stats=false',
+          ...dirs,
+        ],
         deps,
         cwd,
       );

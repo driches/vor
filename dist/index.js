@@ -67489,7 +67489,13 @@ async function runWithFallback(bin, dirs, deps, cwd) {
     if (looksLikeUnknownFlag(msg)) {
       return runCli8(
         bin,
-        [...common, "--output.json.path=stdout", "--show-stats=false", ...dirs],
+        [
+          ...common,
+          "--output.json.path=stdout",
+          "--output.text.path=stderr",
+          "--show-stats=false",
+          ...dirs
+        ],
         deps,
         cwd
       );
