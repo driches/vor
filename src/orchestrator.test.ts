@@ -48,6 +48,10 @@ interface AgentTurnResponse {
 
 const agentScript: AgentTurnResponse[] = [];
 
+// Captured first arg of every Anthropic `messages.create` call, so a test can
+// assert what reached the agent's prompt (e.g. the prior-review-threads block).
+const anthropicCreateCalls: Array<Record<string, unknown>> = [];
+
 // Optional handle the SDK mock yields on each `messages.create` call so a test
 // can force ordering between the agent loop and the scanner runner. Default is
 // undefined (no synchronization); the parallel-execution test below installs
@@ -67,6 +71,8 @@ interface OctokitState {
   // Path → string content (or null for 404).
   contents: Map<string, string | null>;
   priorReviews: Array<{ id: number; state: string; body: string }>;
+  // Inline review comments returned by listReviewComments (prior-thread fetch).
+  priorReviewComments: Array<Record<string, unknown>>;
   // createReview captures.
   createReviewCalls: Array<{ args: Record<string, unknown>; at: number }>;
 }
@@ -77,6 +83,7 @@ const octokitState: OctokitState = {
   pullData: {},
   contents: new Map(),
   priorReviews: [],
+  priorReviewComments: [],
   createReviewCalls: [],
 };
 
@@ -91,7 +98,8 @@ const octokitState: OctokitState = {
 vi.mock('@anthropic-ai/sdk', () => {
   class FakeAnthropic {
     public messages = {
-      create: vi.fn(async () => {
+      create: vi.fn(async (args: Record<string, unknown>) => {
+        anthropicCreateCalls.push(args);
         // If a parallel-execution test installed a gate, wait for it before
         // returning the scripted response.
         if (agentTurnGate) await agentTurnGate;
@@ -214,6 +222,9 @@ vi.mock('@octokit/rest', () => {
           listReviews: vi.fn(async () => ({ data: octokitState.priorReviews })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,
+          listReviewComments: vi.fn(async () => ({ data: octokitState.priorReviewComments })) as unknown as (
+            ...args: unknown[]
+          ) => Promise<unknown>,
           dismissReview: vi.fn(async () => ({ data: {} })) as unknown as (
             ...args: unknown[]
           ) => Promise<unknown>,
@@ -291,6 +302,7 @@ vi.mock('./scanners/osv-client.js', () => {
 import { runOrchestrator, type OrchestratorInput } from './orchestrator.js';
 import { _clearRegisteredSecrets } from './util/secrets.js';
 import { OsvClientError } from './scanners/osv-client.js';
+import { AGENT_REVIEW_MARKER } from './github/prior-reviews.js';
 
 // -----------------------------------------------------------------
 // Fixtures
@@ -443,6 +455,7 @@ function scriptSummaryOnly(
 
 beforeEach(() => {
   agentScript.length = 0;
+  anthropicCreateCalls.length = 0;
   openaiScript.length = 0;
   openaiCtorCalls.length = 0;
   octokitState.diff = '';
@@ -450,6 +463,7 @@ beforeEach(() => {
   octokitState.pullData = makePullData();
   octokitState.contents = new Map();
   octokitState.priorReviews = [];
+  octokitState.priorReviewComments = [];
   octokitState.createReviewCalls = [];
   agentTurnGate = undefined;
   onFirstOsvCall = undefined;
@@ -1819,5 +1833,57 @@ describe('runOrchestrator — Scenario 9: provider_override runtime validation',
     });
     const result2 = await runOrchestrator(input2);
     expect(result2.ended).toBe('skipped_no_key_openai');
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario: prior agent review threads are folded into the agent prompt.
+//
+// On a re-run, the orchestrator fetches the agent's own prior inline threads
+// (plus author replies) and injects them into the user prompt so the agent can
+// dedup against itself and honor pushback. We assert the rendered block (and
+// the author's reply text) reach the provider's `messages.create` call.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — prior review threads injected into the agent prompt', () => {
+  it('renders prior agent findings + author replies into the user prompt', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    // Scanners off — this scenario only exercises the prompt-injection path.
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+
+    // A prior agent review (carries the marker) with one inline finding and an
+    // author reply pushing back.
+    octokitState.priorReviews = [
+      { id: 500, state: 'COMMENTED', body: `${AGENT_REVIEW_MARKER}\n\n### Findings` },
+    ];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[MINOR · readability]** Function lacks return type annotation',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 500,
+      },
+      {
+        id: 2,
+        path: 'src/app.ts',
+        line: 5,
+        body: "Won't fix — inference is fine here, by design.",
+        user: { login: 'doug' },
+        in_reply_to_id: 1,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    expect(anthropicCreateCalls.length).toBeGreaterThan(0);
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).toContain('Your prior review threads on this PR');
+    expect(firstCall).toContain('Function lacks return type annotation');
+    expect(firstCall).toContain("Won't fix — inference is fine here, by design.");
   });
 });

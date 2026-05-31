@@ -295,6 +295,8 @@ function buildFakeOctokit(opts: {
         listFiles: async () => ({ data: fileApi }),
         // Sticky dismissal lookup: no prior reviews to dismiss.
         listReviews: async () => ({ data: [] }),
+        // Prior-thread fetch: a local working copy has no prior PR threads.
+        listReviewComments: async () => ({ data: [] }),
         dismissReview: notImplemented('pulls.dismissReview'),
         // Dry-run never reaches createReview, but stub it for safety.
         createReview: async () => ({ data: { id: 0 } }),

@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { buildUserPrompt, renderScannerFindings } from './user-prompt.js';
+import { buildUserPrompt, renderScannerFindings, renderPriorReviewThreads } from './user-prompt.js';
 import type { ScanFinding } from '../scanners/types.js';
+import type { PriorReviewThread } from '../github/prior-review-threads.js';
+
+function makeThread(overrides: Partial<PriorReviewThread> = {}): PriorReviewThread {
+  return {
+    file_path: 'src/foo.ts',
+    line: 10,
+    outdated: false,
+    finding_excerpt: '[MINOR · style] prefer const',
+    replies: [],
+    ...overrides,
+  };
+}
 
 function makeFinding(overrides: Partial<ScanFinding> = {}): ScanFinding {
   return {
@@ -84,5 +96,71 @@ describe('buildUserPrompt scanner-findings injection', () => {
     });
     expect(out).toContain('(3 shown / 50 total)');
     expect(out).toContain('47 additional');
+  });
+});
+
+describe('renderPriorReviewThreads', () => {
+  it('renders findings and author replies with the dedup/pushback rules', () => {
+    const out = renderPriorReviewThreads([
+      makeThread({
+        file_path: 'src/auth.ts',
+        line: 42,
+        finding_excerpt: '[CRITICAL · security] SQL injection',
+        replies: [{ author: 'author', excerpt: "Won't fix — by design." }],
+      }),
+    ]);
+    expect(out).toContain('Your prior review threads on this PR (1)');
+    expect(out).toContain('`src/auth.ts:42`');
+    expect(out).toContain('[CRITICAL · security] SQL injection');
+    expect(out).toContain('reply from @author: "Won\'t fix — by design."');
+    expect(out).toContain('Do NOT re-post');
+    expect(out).toContain('NOT areas to skip');
+  });
+
+  it('sorts threads with author replies ahead of unanswered ones', () => {
+    const out = renderPriorReviewThreads([
+      makeThread({ file_path: 'a.ts', finding_excerpt: 'no-reply finding', replies: [] }),
+      makeThread({
+        file_path: 'z.ts',
+        finding_excerpt: 'replied finding',
+        replies: [{ author: 'author', excerpt: 'disagree' }],
+      }),
+    ]);
+    expect(out.indexOf('replied finding')).toBeLessThan(out.indexOf('no-reply finding'));
+  });
+
+  it('marks outdated threads and renders a path without a line', () => {
+    const out = renderPriorReviewThreads([
+      makeThread({ file_path: 'src/x.ts', line: null, outdated: true }),
+    ]);
+    expect(out).toContain('`src/x.ts`');
+    expect(out).toContain('outdated — author pushed past this line');
+  });
+
+  it('caps threads and announces truncation', () => {
+    const threads = Array.from({ length: 40 }, (_, i) => makeThread({ line: i + 1 }));
+    const out = renderPriorReviewThreads(threads, 5);
+    expect(out).toContain('(5 shown / 40 total)');
+    expect(out).toContain('35 additional prior thread(s) omitted');
+  });
+});
+
+describe('buildUserPrompt prior-threads injection', () => {
+  it('omits the prior-threads block when none are provided', () => {
+    const out = buildUserPrompt({ owner: 'driches', repo: 'vor', pull_number: 1 });
+    expect(out).not.toContain('Your prior review threads');
+  });
+
+  it('injects the prior-threads block and threads the cap through', () => {
+    const threads = Array.from({ length: 10 }, (_, i) => makeThread({ line: i + 1 }));
+    const out = buildUserPrompt({
+      owner: 'driches',
+      repo: 'vor',
+      pull_number: 1,
+      prior_threads: threads,
+      max_prior_threads: 4,
+    });
+    expect(out).toContain('(4 shown / 10 total)');
+    expect(out).toContain('Start by calling get_pr_metadata');
   });
 });

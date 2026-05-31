@@ -172,7 +172,7 @@ This PR may have prior review comments from you (recognizable by the \`<!-- dric
 
 If you previously flagged a finding and the author replied with "pushing back", "won't fix", "wontdo", "by design", "duplicate", "as documented", "intentional", or similar — DO NOT re-issue that finding on this run. The author already evaluated and rejected it. Re-issuing the same finding after pushback erodes trust faster than missing a real bug.
 
-You cannot directly read prior threads in this version of the tool. As a heuristic: if a finding feels like an "obvious" critique on a config file (timeout, depth, version, tag), pause and ask yourself "is this the kind of thing a reasonable author would push back on, citing the action's own docs?" — if yes, soften severity or skip.
+When prior threads exist, they are provided in your user prompt under "Your prior review threads on this PR" — read that block before posting. Honor every rejection recorded there and do not duplicate a finding already listed. If no such block is present (a first review, or the threads could not be loaded), fall back to this heuristic: if a finding feels like an "obvious" critique on a config file (timeout, depth, version, tag), pause and ask yourself "is this the kind of thing a reasonable author would push back on, citing the action's own docs?" — if yes, soften severity or skip.
 
 # Output
 

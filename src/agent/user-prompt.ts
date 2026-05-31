@@ -8,6 +8,7 @@
  */
 
 import type { ScanFinding } from '../scanners/types.js';
+import type { PriorReviewThread } from '../github/prior-review-threads.js';
 
 export function buildUserPrompt(input: {
   owner: string;
@@ -23,6 +24,14 @@ export function buildUserPrompt(input: {
    * When omitted, falls back to `MAX_INJECTED_FINDINGS_DEFAULT`.
    */
   max_scanner_findings?: number;
+  /**
+   * The agent's own prior review threads on this PR (findings it posted on an
+   * earlier commit, plus author replies). Injected so the agent dedups against
+   * itself and honors pushback instead of re-posting duplicate threads.
+   */
+  prior_threads?: ReadonlyArray<PriorReviewThread>;
+  /** Cap on rendered prior threads. Defaults to MAX_INJECTED_PRIOR_THREADS_DEFAULT. */
+  max_prior_threads?: number;
 }): string {
   const parts: string[] = [
     `Review pull request #${input.pull_number} in ${input.owner}/${input.repo}.`,
@@ -33,6 +42,17 @@ export function buildUserPrompt(input: {
   if (findings.length > 0) {
     parts.push(
       renderScannerFindings(findings, input.max_scanner_findings ?? MAX_INJECTED_FINDINGS_DEFAULT),
+    );
+    parts.push('');
+  }
+
+  const priorThreads = input.prior_threads ?? [];
+  if (priorThreads.length > 0) {
+    parts.push(
+      renderPriorReviewThreads(
+        priorThreads,
+        input.max_prior_threads ?? MAX_INJECTED_PRIOR_THREADS_DEFAULT,
+      ),
     );
     parts.push('');
   }
@@ -119,6 +139,70 @@ export function renderScannerFindings(
       '',
       `(${truncated} additional lower-severity scanner finding(s) omitted from this block — they'll still be posted by the scanner pipeline subject to the configured cap.)`,
     );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Fallback cap for prior-thread injection. Threads are usually few, but a
+ * long-lived PR with many pushes can accumulate them; cap so the prompt stays
+ * bounded. Threads with author replies sort first, so the cap keeps the
+ * highest-signal (pushed-back) ones.
+ */
+const MAX_INJECTED_PRIOR_THREADS_DEFAULT = 30;
+
+/**
+ * Render the agent's prior review threads as a block it can scan in one glance.
+ * Threads carrying author replies sort first (pushback is the case the agent
+ * most needs to honor), then by file/line for stable output.
+ *
+ * Framing rules:
+ *   - "Do NOT re-post" — the threads are still open on the PR; re-raising the
+ *     same finding creates a duplicate thread on the same line.
+ *   - "Do NOT re-issue what the author rejected" — names the pushback phrases
+ *     so the model recognizes them in the reply text rendered below.
+ *   - "NOT areas to skip" — load-bearing anti-regression: the agent must still
+ *     review the current changes fully, just not duplicate or re-litigate.
+ *
+ * Exported for unit tests so the framing language stays pinned.
+ */
+export function renderPriorReviewThreads(
+  threads: ReadonlyArray<PriorReviewThread>,
+  maxThreads: number = MAX_INJECTED_PRIOR_THREADS_DEFAULT,
+): string {
+  const sorted = [...threads].sort((a, b) => {
+    const r = (b.replies.length > 0 ? 1 : 0) - (a.replies.length > 0 ? 1 : 0);
+    if (r !== 0) return r;
+    if (a.file_path !== b.file_path) return a.file_path.localeCompare(b.file_path);
+    return (a.line ?? 0) - (b.line ?? 0);
+  });
+  const capped = sorted.slice(0, Math.max(0, maxThreads));
+  const truncated = sorted.length - capped.length;
+
+  const lines: string[] = [];
+  lines.push(
+    truncated > 0
+      ? `## Your prior review threads on this PR (${capped.length} shown / ${threads.length} total)`
+      : `## Your prior review threads on this PR (${threads.length})`,
+    '',
+    'You already reviewed an earlier version of this PR. The inline comments below are findings YOU posted, with any author replies. These threads are still open on the PR.',
+    '',
+    'RULES:',
+    '- Do NOT re-post a finding that already appears here — it would create a duplicate thread on the same line. Raise it again only if the code at that location changed and the issue genuinely still applies, and say so.',
+    '- If the author replied rejecting a finding ("won\'t fix", "wontfix", "by design", "intentional", "as documented", "disagree", or similar), DO NOT re-issue it. They already evaluated and rejected it; re-raising erodes trust.',
+    '- These are NOT areas to skip. Review the current changes fully — just avoid duplicating or re-litigating what is below.',
+    '',
+  );
+  for (const t of capped) {
+    const loc = t.line == null ? t.file_path : `${t.file_path}:${t.line}`;
+    const outdated = t.outdated ? ' (outdated — author pushed past this line)' : '';
+    lines.push(`- \`${loc}\`${outdated} — ${t.finding_excerpt}`);
+    for (const reply of t.replies) {
+      lines.push(`    - reply from @${reply.author}: "${reply.excerpt}"`);
+    }
+  }
+  if (truncated > 0) {
+    lines.push('', `(${truncated} additional prior thread(s) omitted from this block.)`);
   }
   return lines.join('\n');
 }

@@ -17,6 +17,7 @@ import { createOctokit } from './github/client.js';
 import { FileReader } from './github/file-reader.js';
 import { fetchPRContext } from './github/pr-context.js';
 import { dismissPriorAgentReviews } from './github/prior-reviews.js';
+import { fetchPriorReviewThreads, type PriorReviewThread } from './github/prior-review-threads.js';
 import { postReview } from './github/review-poster.js';
 import { inferProviderFromModel, type LLMProvider, type ProviderId } from './llm/index.js';
 import { ReviewAggregator } from './output/aggregator.js';
@@ -284,15 +285,46 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
+
+  // Fold the agent's own prior review threads (findings it posted on earlier
+  // commits + author replies) into the user prompt so it dedups against itself
+  // and honors pushback deterministically, instead of guessing via the
+  // system-prompt heuristic. Best-effort: a fetch failure degrades to no
+  // threads rather than failing the review. Skipped when there are no
+  // LLM-scoped files (the agent won't run) to avoid the extra API calls.
+  let priorThreads: PriorReviewThread[] = [];
+  if (agentScope.prContext.files.length > 0) {
+    try {
+      priorThreads = await fetchPriorReviewThreads(octokit, {
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pull_number,
+      });
+      if (priorThreads.length > 0) {
+        await logger.info(
+          `Loaded ${priorThreads.length} prior agent review thread(s) to fold into the agent prompt.`,
+        );
+      }
+    } catch (err) {
+      await logger.warn(
+        `Failed to load prior review threads: ${(err as Error).message}. Proceeding without them.`,
+      );
+    }
+  }
+
   // The user prompt is FINALIZED below, after deciding whether to inject
   // scanner findings. If the experimental flag is OFF we use the empty-
   // findings form immediately (current behavior). If ON we wait for the
-  // scanners to settle and rebuild with their output.
+  // scanners to settle and rebuild with their output. Prior threads are
+  // injected on every path (independent of the scanner-findings flag).
   const buildPrompt = (findings: ReadonlyArray<ScanFinding> = []): string => {
     const base = buildUserPrompt({
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
+      ...(priorThreads.length > 0
+        ? { prior_threads: priorThreads, max_prior_threads: config.severity.max_comments_total }
+        : {}),
       ...(findings.length > 0
         ? {
             scanner_findings: findings,

@@ -59436,7 +59436,7 @@ This PR may have prior review comments from you (recognizable by the \`<!-- dric
 
 If you previously flagged a finding and the author replied with "pushing back", "won't fix", "wontdo", "by design", "duplicate", "as documented", "intentional", or similar \u2014 DO NOT re-issue that finding on this run. The author already evaluated and rejected it. Re-issuing the same finding after pushback erodes trust faster than missing a real bug.
 
-You cannot directly read prior threads in this version of the tool. As a heuristic: if a finding feels like an "obvious" critique on a config file (timeout, depth, version, tag), pause and ask yourself "is this the kind of thing a reasonable author would push back on, citing the action's own docs?" \u2014 if yes, soften severity or skip.
+When prior threads exist, they are provided in your user prompt under "Your prior review threads on this PR" \u2014 read that block before posting. Honor every rejection recorded there and do not duplicate a finding already listed. If no such block is present (a first review, or the threads could not be loaded), fall back to this heuristic: if a finding feels like an "obvious" critique on a config file (timeout, depth, version, tag), pause and ask yourself "is this the kind of thing a reasonable author would push back on, citing the action's own docs?" \u2014 if yes, soften severity or skip.
 
 # Output
 
@@ -59498,6 +59498,16 @@ function buildUserPrompt(input) {
     );
     parts.push("");
   }
+  const priorThreads = input.prior_threads ?? [];
+  if (priorThreads.length > 0) {
+    parts.push(
+      renderPriorReviewThreads(
+        priorThreads,
+        input.max_prior_threads ?? MAX_INJECTED_PRIOR_THREADS_DEFAULT
+      )
+    );
+    parts.push("");
+  }
   parts.push(
     "Start by calling get_pr_metadata, then read_repo_context_file, then list_changed_files.",
     "Work through the changes and post each finding via post_inline_comment. End with post_summary."
@@ -59541,6 +59551,41 @@ function renderScannerFindings(findings, maxFindings = MAX_INJECTED_FINDINGS_DEF
       "",
       `(${truncated} additional lower-severity scanner finding(s) omitted from this block \u2014 they'll still be posted by the scanner pipeline subject to the configured cap.)`
     );
+  }
+  return lines.join("\n");
+}
+var MAX_INJECTED_PRIOR_THREADS_DEFAULT = 30;
+function renderPriorReviewThreads(threads, maxThreads = MAX_INJECTED_PRIOR_THREADS_DEFAULT) {
+  const sorted = [...threads].sort((a2, b2) => {
+    const r2 = (b2.replies.length > 0 ? 1 : 0) - (a2.replies.length > 0 ? 1 : 0);
+    if (r2 !== 0) return r2;
+    if (a2.file_path !== b2.file_path) return a2.file_path.localeCompare(b2.file_path);
+    return (a2.line ?? 0) - (b2.line ?? 0);
+  });
+  const capped = sorted.slice(0, Math.max(0, maxThreads));
+  const truncated = sorted.length - capped.length;
+  const lines = [];
+  lines.push(
+    truncated > 0 ? `## Your prior review threads on this PR (${capped.length} shown / ${threads.length} total)` : `## Your prior review threads on this PR (${threads.length})`,
+    "",
+    "You already reviewed an earlier version of this PR. The inline comments below are findings YOU posted, with any author replies. These threads are still open on the PR.",
+    "",
+    "RULES:",
+    "- Do NOT re-post a finding that already appears here \u2014 it would create a duplicate thread on the same line. Raise it again only if the code at that location changed and the issue genuinely still applies, and say so.",
+    `- If the author replied rejecting a finding ("won't fix", "wontfix", "by design", "intentional", "as documented", "disagree", or similar), DO NOT re-issue it. They already evaluated and rejected it; re-raising erodes trust.`,
+    "- These are NOT areas to skip. Review the current changes fully \u2014 just avoid duplicating or re-litigating what is below.",
+    ""
+  );
+  for (const t2 of capped) {
+    const loc = t2.line == null ? t2.file_path : `${t2.file_path}:${t2.line}`;
+    const outdated = t2.outdated ? " (outdated \u2014 author pushed past this line)" : "";
+    lines.push(`- \`${loc}\`${outdated} \u2014 ${t2.finding_excerpt}`);
+    for (const reply of t2.replies) {
+      lines.push(`    - reply from @${reply.author}: "${reply.excerpt}"`);
+    }
+  }
+  if (truncated > 0) {
+    lines.push("", `(${truncated} additional prior thread(s) omitted from this block.)`);
   }
   return lines.join("\n");
 }
@@ -63951,6 +63996,94 @@ async function dismissPriorAgentReviews(octokit, ref, newHeadSha) {
     page += 1;
   }
   return dismissed;
+}
+
+// src/github/prior-review-threads.ts
+var EXCERPT_MAX = 200;
+async function fetchPriorReviewThreads(octokit, ref) {
+  const agentReviewIds = await collectAgentReviewIds(octokit, ref);
+  if (agentReviewIds.size === 0) return [];
+  const comments = await listAllReviewComments(octokit, ref);
+  const byId = /* @__PURE__ */ new Map();
+  for (const c2 of comments) byId.set(c2.id, c2);
+  const isAgentRoot = (c2) => c2.in_reply_to_id == null && c2.pull_request_review_id != null && agentReviewIds.has(c2.pull_request_review_id);
+  const repliesByRoot = /* @__PURE__ */ new Map();
+  for (const c2 of comments) {
+    if (c2.in_reply_to_id == null) continue;
+    const rootId = resolveRootId(c2, byId);
+    if (rootId == null) continue;
+    const root = byId.get(rootId);
+    if (!root || !isAgentRoot(root)) continue;
+    const arr = repliesByRoot.get(rootId) ?? [];
+    arr.push(c2);
+    repliesByRoot.set(rootId, arr);
+  }
+  const threads = [];
+  for (const c2 of comments) {
+    if (!isAgentRoot(c2)) continue;
+    const replies = (repliesByRoot.get(c2.id) ?? []).sort((a2, b2) => a2.id - b2.id).map((r2) => ({ author: r2.user?.login ?? "unknown", excerpt: excerpt(r2.body) }));
+    threads.push({
+      file_path: c2.path,
+      line: c2.line ?? c2.original_line ?? null,
+      outdated: c2.line == null,
+      finding_excerpt: excerpt(c2.body),
+      replies
+    });
+  }
+  return threads;
+}
+async function collectAgentReviewIds(octokit, ref) {
+  const ids = /* @__PURE__ */ new Set();
+  let page = 1;
+  while (true) {
+    const r2 = await octokit.rest.pulls.listReviews({
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: ref.pull_number,
+      per_page: 100,
+      page
+    });
+    for (const review of r2.data) {
+      if ((review.body ?? "").includes(AGENT_REVIEW_MARKER)) ids.add(review.id);
+    }
+    if (r2.data.length < 100) break;
+    page += 1;
+  }
+  return ids;
+}
+async function listAllReviewComments(octokit, ref) {
+  const out = [];
+  let page = 1;
+  while (true) {
+    const r2 = await octokit.rest.pulls.listReviewComments({
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: ref.pull_number,
+      per_page: 100,
+      page
+    });
+    out.push(...r2.data);
+    if (r2.data.length < 100) break;
+    page += 1;
+  }
+  return out;
+}
+function resolveRootId(start, byId) {
+  let current = start;
+  const seen = /* @__PURE__ */ new Set();
+  while (current.in_reply_to_id != null) {
+    if (seen.has(current.id)) return null;
+    seen.add(current.id);
+    const parent = byId.get(current.in_reply_to_id);
+    if (!parent) return current.in_reply_to_id;
+    current = parent;
+  }
+  return current.id;
+}
+function excerpt(body, max = EXCERPT_MAX) {
+  const first = body.split("\n").map((l2) => l2.trim()).find((l2) => l2.length > 0) ?? "";
+  const cleaned = first.replace(/\*\*/g, "").replace(/`/g, "").replace(/^[>#\s-]+/, "").trim();
+  return cleaned.length > max ? `${cleaned.slice(0, max - 3)}...` : cleaned;
 }
 
 // src/github/review-poster.ts
@@ -68992,11 +69125,31 @@ async function runOrchestrator(input) {
     );
   }
   const scopeNotice = buildAgentScopeNotice(agentScope.unreviewedPaths);
+  let priorThreads = [];
+  if (agentScope.prContext.files.length > 0) {
+    try {
+      priorThreads = await fetchPriorReviewThreads(octokit, {
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pull_number
+      });
+      if (priorThreads.length > 0) {
+        await logger.info(
+          `Loaded ${priorThreads.length} prior agent review thread(s) to fold into the agent prompt.`
+        );
+      }
+    } catch (err) {
+      await logger.warn(
+        `Failed to load prior review threads: ${err.message}. Proceeding without them.`
+      );
+    }
+  }
   const buildPrompt = (findings = []) => {
     const base = buildUserPrompt({
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
+      ...priorThreads.length > 0 ? { prior_threads: priorThreads, max_prior_threads: config.severity.max_comments_total } : {},
       ...findings.length > 0 ? {
         scanner_findings: findings,
         // Share the post-filter cap with the prompt so we don't render
