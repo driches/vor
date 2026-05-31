@@ -312,6 +312,19 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     }
   }
 
+  // Sticky-aware filter on the prior-thread dedup block. The sticky step
+  // (below, gated on review.sticky) dismisses prior CHANGES_REQUESTED/APPROVED
+  // reviews before posting. A finding from such a review loses its active
+  // (blocking) state, so telling the agent "don't re-post it" would drop a
+  // still-valid finding entirely. When sticky is on we therefore keep only the
+  // PUSHED-BACK threads (those with author replies) from dismissable reviews —
+  // honoring pushback while letting the agent re-raise the rest fresh. Threads
+  // from surviving reviews (e.g. the default COMMENT event, never dismissed)
+  // are kept in full. addressing #58 (Codex P1 review).
+  const promptThreads = config.review.sticky
+    ? priorThreads.filter((t) => !t.from_dismissable_review || t.replies.length > 0)
+    : priorThreads;
+
   // The user prompt is FINALIZED below, after deciding whether to inject
   // scanner findings. If the experimental flag is OFF we use the empty-
   // findings form immediately (current behavior). If ON we wait for the
@@ -322,9 +335,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
-      ...(priorThreads.length > 0
-        ? { prior_threads: priorThreads, max_prior_threads: config.severity.max_comments_total }
-        : {}),
+      // No max_prior_threads override: prior threads are agent CONTEXT, not
+      // posted output, so they shouldn't borrow severity.max_comments_total
+      // (a user lowering that cap to reduce posted noise must not also lose
+      // pushback context). Falls through to the renderer's own default cap.
+      ...(promptThreads.length > 0 ? { prior_threads: promptThreads } : {}),
       ...(findings.length > 0
         ? {
             scanner_findings: findings,

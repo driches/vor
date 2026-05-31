@@ -37,6 +37,13 @@ export interface PriorReviewThread {
   outdated: boolean;
   /** First-line excerpt of the agent's original finding (severity tag + title). */
   finding_excerpt: string;
+  /**
+   * True when the originating review's state is CHANGES_REQUESTED or APPROVED —
+   * the states `dismissPriorAgentReviews` dismisses. Such a finding loses its
+   * active (blocking) state when the sticky step runs, so the orchestrator must
+   * not blanket-suppress it; see the sticky-aware filter at the call site.
+   */
+  from_dismissable_review: boolean;
   /** Author replies on the thread, oldest first. */
   replies: PriorReviewReply[];
 }
@@ -67,13 +74,18 @@ interface ReviewCommentLike {
 
 const EXCERPT_MAX = 200;
 
+// GitHub review states that `dismissPriorAgentReviews` dismisses (it skips
+// COMMENTED / DISMISSED / PENDING). Findings from these reviews go inactive
+// when the sticky step runs.
+const DISMISSABLE_STATES = new Set(['CHANGES_REQUESTED', 'APPROVED']);
+
 export async function fetchPriorReviewThreads(
   octokit: Octokit,
   ref: PriorThreadsRef,
 ): Promise<PriorReviewThread[]> {
-  const agentReviewIds = await collectAgentReviewIds(octokit, ref);
+  const agentReviewStates = await collectAgentReviewStates(octokit, ref);
   // No prior agent review → nothing to fold in. Skip the second API call.
-  if (agentReviewIds.size === 0) return [];
+  if (agentReviewStates.size === 0) return [];
 
   const comments = await listAllReviewComments(octokit, ref);
   const byId = new Map<number, ReviewCommentLike>();
@@ -84,7 +96,7 @@ export async function fetchPriorReviewThreads(
   const isAgentRoot = (c: ReviewCommentLike): boolean =>
     c.in_reply_to_id == null &&
     c.pull_request_review_id != null &&
-    agentReviewIds.has(c.pull_request_review_id);
+    agentReviewStates.has(c.pull_request_review_id);
 
   // Bucket replies under their resolved root comment id.
   const repliesByRoot = new Map<number, ReviewCommentLike[]>();
@@ -105,19 +117,25 @@ export async function fetchPriorReviewThreads(
     const replies = (repliesByRoot.get(c.id) ?? [])
       .sort((a, b) => a.id - b.id)
       .map((r) => ({ author: r.user?.login ?? 'unknown', excerpt: excerpt(r.body) }));
+    const state = agentReviewStates.get(c.pull_request_review_id!) ?? '';
     threads.push({
       file_path: c.path,
       line: c.line ?? c.original_line ?? null,
       outdated: c.line == null,
       finding_excerpt: excerpt(c.body),
+      from_dismissable_review: DISMISSABLE_STATES.has(state),
       replies,
     });
   }
   return threads;
 }
 
-async function collectAgentReviewIds(octokit: Octokit, ref: PriorThreadsRef): Promise<Set<number>> {
-  const ids = new Set<number>();
+/** Map each agent review id (body carries the marker) to its GitHub state. */
+async function collectAgentReviewStates(
+  octokit: Octokit,
+  ref: PriorThreadsRef,
+): Promise<Map<number, string>> {
+  const states = new Map<number, string>();
   let page = 1;
   while (true) {
     const r = await octokit.rest.pulls.listReviews({
@@ -128,12 +146,12 @@ async function collectAgentReviewIds(octokit: Octokit, ref: PriorThreadsRef): Pr
       page,
     });
     for (const review of r.data) {
-      if ((review.body ?? '').includes(AGENT_REVIEW_MARKER)) ids.add(review.id);
+      if ((review.body ?? '').includes(AGENT_REVIEW_MARKER)) states.set(review.id, review.state);
     }
     if (r.data.length < 100) break;
     page += 1;
   }
-  return ids;
+  return states;
 }
 
 async function listAllReviewComments(
@@ -150,6 +168,10 @@ async function listAllReviewComments(
       per_page: 100,
       page,
     });
+    // `r.data` is the full Octokit listReviewComments item type (dozens of
+    // fields); ReviewCommentLike is a deliberate read-subset. The cast is safe
+    // because every field we declare is present in the API response with the
+    // same type — we only narrow what we read, never reshape it.
     out.push(...(r.data as unknown as ReviewCommentLike[]));
     if (r.data.length < 100) break;
     page += 1;

@@ -64008,13 +64008,14 @@ async function dismissPriorAgentReviews(octokit, ref, newHeadSha) {
 
 // src/github/prior-review-threads.ts
 var EXCERPT_MAX = 200;
+var DISMISSABLE_STATES = /* @__PURE__ */ new Set(["CHANGES_REQUESTED", "APPROVED"]);
 async function fetchPriorReviewThreads(octokit, ref) {
-  const agentReviewIds = await collectAgentReviewIds(octokit, ref);
-  if (agentReviewIds.size === 0) return [];
+  const agentReviewStates = await collectAgentReviewStates(octokit, ref);
+  if (agentReviewStates.size === 0) return [];
   const comments = await listAllReviewComments(octokit, ref);
   const byId = /* @__PURE__ */ new Map();
   for (const c2 of comments) byId.set(c2.id, c2);
-  const isAgentRoot = (c2) => c2.in_reply_to_id == null && c2.pull_request_review_id != null && agentReviewIds.has(c2.pull_request_review_id);
+  const isAgentRoot = (c2) => c2.in_reply_to_id == null && c2.pull_request_review_id != null && agentReviewStates.has(c2.pull_request_review_id);
   const repliesByRoot = /* @__PURE__ */ new Map();
   for (const c2 of comments) {
     if (c2.in_reply_to_id == null) continue;
@@ -64030,18 +64031,20 @@ async function fetchPriorReviewThreads(octokit, ref) {
   for (const c2 of comments) {
     if (!isAgentRoot(c2)) continue;
     const replies = (repliesByRoot.get(c2.id) ?? []).sort((a2, b2) => a2.id - b2.id).map((r2) => ({ author: r2.user?.login ?? "unknown", excerpt: excerpt(r2.body) }));
+    const state = agentReviewStates.get(c2.pull_request_review_id) ?? "";
     threads.push({
       file_path: c2.path,
       line: c2.line ?? c2.original_line ?? null,
       outdated: c2.line == null,
       finding_excerpt: excerpt(c2.body),
+      from_dismissable_review: DISMISSABLE_STATES.has(state),
       replies
     });
   }
   return threads;
 }
-async function collectAgentReviewIds(octokit, ref) {
-  const ids = /* @__PURE__ */ new Set();
+async function collectAgentReviewStates(octokit, ref) {
+  const states = /* @__PURE__ */ new Map();
   let page = 1;
   while (true) {
     const r2 = await octokit.rest.pulls.listReviews({
@@ -64052,12 +64055,12 @@ async function collectAgentReviewIds(octokit, ref) {
       page
     });
     for (const review of r2.data) {
-      if ((review.body ?? "").includes(AGENT_REVIEW_MARKER)) ids.add(review.id);
+      if ((review.body ?? "").includes(AGENT_REVIEW_MARKER)) states.set(review.id, review.state);
     }
     if (r2.data.length < 100) break;
     page += 1;
   }
-  return ids;
+  return states;
 }
 async function listAllReviewComments(octokit, ref) {
   const out = [];
@@ -69153,12 +69156,17 @@ async function runOrchestrator(input) {
       );
     }
   }
+  const promptThreads = config.review.sticky ? priorThreads.filter((t2) => !t2.from_dismissable_review || t2.replies.length > 0) : priorThreads;
   const buildPrompt = (findings = []) => {
     const base = buildUserPrompt({
       owner: input.owner,
       repo: input.repo,
       pull_number: input.pull_number,
-      ...priorThreads.length > 0 ? { prior_threads: priorThreads, max_prior_threads: config.severity.max_comments_total } : {},
+      // No max_prior_threads override: prior threads are agent CONTEXT, not
+      // posted output, so they shouldn't borrow severity.max_comments_total
+      // (a user lowering that cap to reduce posted noise must not also lose
+      // pushback context). Falls through to the renderer's own default cap.
+      ...promptThreads.length > 0 ? { prior_threads: promptThreads } : {},
       ...findings.length > 0 ? {
         scanner_findings: findings,
         // Share the post-filter cap with the prompt so we don't render

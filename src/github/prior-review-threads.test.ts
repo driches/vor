@@ -6,6 +6,7 @@ import { AGENT_REVIEW_MARKER } from './prior-reviews.js';
 interface FakeReview {
   id: number;
   body: string | null;
+  state?: string;
 }
 interface FakeComment {
   id: number;
@@ -35,7 +36,11 @@ function makeOctokit(reviews: FakeReview[], comments: FakeComment[]): Octokit {
 }
 
 const ref = { owner: 'driches', repo: 'vor', pull_number: 7 };
-const agentReview: FakeReview = { id: 100, body: `${AGENT_REVIEW_MARKER}\n\n### Findings` };
+const agentReview: FakeReview = {
+  id: 100,
+  body: `${AGENT_REVIEW_MARKER}\n\n### Findings`,
+  state: 'COMMENTED',
+};
 
 describe('fetchPriorReviewThreads', () => {
   it('returns [] when there is no prior agent review', async () => {
@@ -86,6 +91,38 @@ describe('fetchPriorReviewThreads', () => {
         excerpt: "Won't fix — this query is parameterized one layer up, by design.",
       },
     ]);
+  });
+
+  it('flags from_dismissable_review by the originating review state', async () => {
+    const octokit = makeOctokit(
+      [
+        { id: 100, body: AGENT_REVIEW_MARKER, state: 'COMMENTED' },
+        { id: 101, body: AGENT_REVIEW_MARKER, state: 'CHANGES_REQUESTED' },
+      ],
+      [
+        {
+          id: 1,
+          path: 'a.ts',
+          line: 1,
+          body: 'comment-review finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
+        {
+          id: 2,
+          path: 'b.ts',
+          line: 1,
+          body: 'blocking-review finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 101,
+        },
+      ],
+    );
+
+    const threads = await fetchPriorReviewThreads(octokit, ref);
+    const byPath = new Map(threads.map((t) => [t.file_path, t]));
+    expect(byPath.get('a.ts')!.from_dismissable_review).toBe(false);
+    expect(byPath.get('b.ts')!.from_dismissable_review).toBe(true);
   });
 
   it('ignores inline comments that belong to non-agent reviews', async () => {
