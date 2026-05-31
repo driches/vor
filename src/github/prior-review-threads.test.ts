@@ -81,7 +81,10 @@ describe('fetchPriorReviewThreads', () => {
     // Markdown emphasis stripped, severity tag kept.
     expect(t.finding_excerpt).toBe('[CRITICAL · security] SQL injection on the login path');
     expect(t.replies).toEqual([
-      { author: 'author', excerpt: "Won't fix — this query is parameterized one layer up, by design." },
+      {
+        author: 'author',
+        excerpt: "Won't fix — this query is parameterized one layer up, by design.",
+      },
     ]);
   });
 
@@ -145,9 +148,23 @@ describe('fetchPriorReviewThreads', () => {
           user: { login: 'vor-bot' },
           pull_request_review_id: 100,
         },
-        { id: 41, path: 'src/y.ts', line: 5, body: 'first reply', user: { login: 'author' }, in_reply_to_id: 40 },
+        {
+          id: 41,
+          path: 'src/y.ts',
+          line: 5,
+          body: 'first reply',
+          user: { login: 'author' },
+          in_reply_to_id: 40,
+        },
         // A reply pointing at the previous reply rather than the root.
-        { id: 42, path: 'src/y.ts', line: 5, body: 'second reply', user: { login: 'author' }, in_reply_to_id: 41 },
+        {
+          id: 42,
+          path: 'src/y.ts',
+          line: 5,
+          body: 'second reply',
+          user: { login: 'author' },
+          in_reply_to_id: 41,
+        },
       ],
     );
 
@@ -159,7 +176,14 @@ describe('fetchPriorReviewThreads', () => {
     const octokit = makeOctokit(
       [agentReview],
       [
-        { id: 50, path: 'z.ts', line: 1, body: 'finding', user: { login: 'vor-bot' }, pull_request_review_id: 100 },
+        {
+          id: 50,
+          path: 'z.ts',
+          line: 1,
+          body: 'finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
         { id: 51, path: 'z.ts', line: 1, body: 'ghost reply', user: null, in_reply_to_id: 50 },
       ],
     );

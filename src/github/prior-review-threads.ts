@@ -116,10 +116,7 @@ export async function fetchPriorReviewThreads(
   return threads;
 }
 
-async function collectAgentReviewIds(
-  octokit: Octokit,
-  ref: PriorThreadsRef,
-): Promise<Set<number>> {
+async function collectAgentReviewIds(octokit: Octokit, ref: PriorThreadsRef): Promise<Set<number>> {
   const ids = new Set<number>();
   let page = 1;
   while (true) {
