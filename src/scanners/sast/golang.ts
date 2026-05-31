@@ -314,6 +314,20 @@ function locateBin(workspaceDir: string): ResolvedBinary {
  * `--show-stats` predates neither reliably nor losslessly across v1
  * minors, so adding it there risks an unknown-flag error that would
  * wrongly trip the fallback.
+ *
+ * The `common` args disable golangci-lint's built-in output limiting,
+ * because we scan whole packages and filter to the PR's added lines only
+ * AFTER parsing — so anything golangci-lint drops before emitting JSON is
+ * a silent false negative on the changed line:
+ *   - `--uniq-by-line=false`: by default golangci-lint keeps only the
+ *     first diagnostic per line, so a line that trips two linters (e.g. a
+ *     gosec security issue + a style nit) would lose all but one before we
+ *     ever see it — defeating the same-line discrimination in buildFinding.
+ *   - `--max-issues-per-linter=0` / `--max-same-issues=0`: the defaults
+ *     (50 and 3) can be exhausted by pre-existing findings elsewhere in a
+ *     noisy package before the changed-line issue is reached. 0 = no cap.
+ * All three are long-standing `run` flags present in both v1 and v2, so
+ * they're safe in the shared args.
  */
 async function runWithFallback(
   bin: ResolvedBinary,
@@ -321,7 +335,14 @@ async function runWithFallback(
   deps: ScannerDeps,
   cwd: string,
 ): Promise<string> {
-  const common = ['run', '--issues-exit-code=0', `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`];
+  const common = [
+    'run',
+    '--issues-exit-code=0',
+    `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`,
+    '--uniq-by-line=false',
+    '--max-issues-per-linter=0',
+    '--max-same-issues=0',
+  ];
   try {
     return await runCli(bin, [...common, '--out-format=json', ...dirs], deps, cwd);
   } catch (err) {

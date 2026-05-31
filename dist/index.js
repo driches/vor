@@ -67473,7 +67473,14 @@ function locateBin3(workspaceDir) {
   return { path: "golangci-lint", needsShell: isWindows2 };
 }
 async function runWithFallback(bin, dirs, deps, cwd) {
-  const common = ["run", "--issues-exit-code=0", `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`];
+  const common = [
+    "run",
+    "--issues-exit-code=0",
+    `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`,
+    "--uniq-by-line=false",
+    "--max-issues-per-linter=0",
+    "--max-same-issues=0"
+  ];
   try {
     return await runCli8(bin, [...common, "--out-format=json", ...dirs], deps, cwd);
   } catch (err) {
