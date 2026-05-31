@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { golangCategory, golangSeverity, groupByGoModule, nearestGoModuleRoot } from './golang.js';
+import {
+  golangCategory,
+  golangSeverity,
+  groupByGoModule,
+  issuePathCandidates,
+  nearestGoModuleRoot,
+} from './golang.js';
 
 // The Go module's bespoke logic that would regress silently: the
 // file→module-root attribution and package-target derivation we feed
@@ -52,6 +58,37 @@ describe('groupByGoModule', () => {
       { root: 'tools', dirs: ['./gen'] },
       // No go.mod ancestor → repo-root group, target keeps its full path.
       { root: '.', dirs: ['./scripts'] },
+    ]);
+  });
+});
+
+describe('issuePathCandidates', () => {
+  it('returns the single as-reported key for a root module', () => {
+    expect(issuePathCandidates('/ws', '.', 'main.go')).toEqual(['main.go']);
+  });
+
+  it('tries the module-rooted key first, then the as-reported key', () => {
+    // wd/gomod mode reports `main.go` from backend/ → backend/main.go.
+    // cfg mode (root config) reports `backend/main.go` already.
+    expect(issuePathCandidates('/ws', 'backend', 'main.go')).toEqual([
+      'backend/main.go',
+      'main.go',
+    ]);
+  });
+
+  it('resolves a cfg-mode (config-relative) path via the as-reported fallback', () => {
+    // golangci reports `backend/api/h.go` relative to a repo-root config;
+    // the module-rooted guess (backend/backend/api/h.go) misses, the
+    // as-reported key matches.
+    expect(issuePathCandidates('/ws', 'backend', 'backend/api/h.go')).toEqual([
+      'backend/backend/api/h.go',
+      'backend/api/h.go',
+    ]);
+  });
+
+  it('relativizes an absolute path against the workspace', () => {
+    expect(issuePathCandidates('/ws', 'backend', '/ws/backend/main.go')).toEqual([
+      'backend/main.go',
     ]);
   });
 });

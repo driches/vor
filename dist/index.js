@@ -67418,8 +67418,11 @@ var golangLinter = {
       }
       for (const issue2 of output.Issues ?? []) {
         if (issue2.Pos === void 0) continue;
-        const relPath = issuePathToWorkspaceRel(deps.workspaceDir, group2.root, issue2.Pos.Filename);
-        const changedFile = filesByPath.get(relPath);
+        let changedFile;
+        for (const key of issuePathCandidates(deps.workspaceDir, group2.root, issue2.Pos.Filename)) {
+          changedFile = filesByPath.get(key);
+          if (changedFile !== void 0) break;
+        }
         if (changedFile === void 0) continue;
         if (!changedFile.added_lines.has(issue2.Pos.Line)) continue;
         findings.push(buildFinding8(changedFile.path, issue2));
@@ -67452,13 +67455,17 @@ function groupByGoModule(paths, hasGoMod) {
   }
   return [...byRoot.entries()].map(([root, dirs]) => ({ root, dirs: [...dirs] }));
 }
-function issuePathToWorkspaceRel(workspaceDir, moduleRoot, filename) {
+function issuePathCandidates(workspaceDir, moduleRoot, filename) {
   if (import_node_path12.default.isAbsolute(filename)) {
-    return normalizeToolPath(workspaceDir, filename);
+    return [normalizeToolPath(workspaceDir, filename)];
   }
   const posixName = filename.split(import_node_path12.default.sep).join("/");
-  const joined = moduleRoot === "." ? posixName : `${moduleRoot}/${posixName}`;
-  return import_node_path12.default.posix.normalize(joined);
+  const candidates = [];
+  if (moduleRoot !== ".") {
+    candidates.push(import_node_path12.default.posix.normalize(`${moduleRoot}/${posixName}`));
+  }
+  candidates.push(import_node_path12.default.posix.normalize(posixName));
+  return candidates;
 }
 function locateBin3(workspaceDir) {
   const ws = findWorkspaceBinary([import_node_path12.default.join(workspaceDir, "bin", "golangci-lint")]);

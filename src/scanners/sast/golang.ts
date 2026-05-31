@@ -154,10 +154,14 @@ export const golangLinter: LinterModule = {
 
       for (const issue of output.Issues ?? []) {
         if (issue.Pos === undefined) continue;
-        // golangci-lint reports paths relative to its working dir (the
-        // module root), so re-root onto the workspace before matching.
-        const relPath = issuePathToWorkspaceRel(deps.workspaceDir, group.root, issue.Pos.Filename);
-        const changedFile = filesByPath.get(relPath);
+        // The base of golangci-lint's reported path depends on its
+        // relative-path-mode (see issuePathCandidates), so match against
+        // the plausible bases rather than assuming one.
+        let changedFile: ChangedFile | undefined;
+        for (const key of issuePathCandidates(deps.workspaceDir, group.root, issue.Pos.Filename)) {
+          changedFile = filesByPath.get(key);
+          if (changedFile !== undefined) break;
+        }
         if (changedFile === undefined) continue;
         if (!changedFile.added_lines.has(issue.Pos.Line)) continue;
         findings.push(buildFinding(changedFile.path, issue));
@@ -234,21 +238,45 @@ export function groupByGoModule(
 }
 
 /**
- * Re-root a path golangci-lint reported (relative to the module root it
- * ran in, or occasionally absolute) onto a workspace-relative POSIX key
- * that matches `changedFiles`.
+ * Workspace-relative POSIX keys a golangci-lint `Pos.Filename` might map
+ * to, in priority order, for matching against `changedFiles`.
+ *
+ * The base of a *relative* reported path depends on golangci-lint's
+ * `run.relative-path-mode`, which we don't control:
+ *   - `wd` / `gomod` → relative to the module root we ran the linter from.
+ *   - `cfg` (the v2 DEFAULT) → relative to the config file, which for a
+ *     repo-root `.golangci.yml` shared by a subdirectory module is the
+ *     repo root, so the path is already workspace-relative.
+ *
+ * So for a subdirectory module we can't assume one base. We try the
+ * module-rooted interpretation first (correct for wd/gomod, and for a
+ * module-local config) and fall back to the as-reported path (correct for
+ * a shared repo-root config under cfg mode). Module-first ordering also
+ * avoids a same-basename collision with a root-level file under wd mode —
+ * e.g. a reported `main.go` from `backend/` resolves to `backend/main.go`
+ * before it could ever match a changed root `main.go`. The
+ * `backend/backend/...` non-match the cfg case produces is harmless.
+ *
+ * Absolute paths (`relative-path-mode: abs`) are unambiguous.
+ *
+ * Exported for testing — this resolution is exactly where the
+ * relative-path-mode mismatch silently dropped findings.
  */
-function issuePathToWorkspaceRel(
+export function issuePathCandidates(
   workspaceDir: string,
   moduleRoot: string,
   filename: string,
-): string {
+): string[] {
   if (path.isAbsolute(filename)) {
-    return normalizeToolPath(workspaceDir, filename);
+    return [normalizeToolPath(workspaceDir, filename)];
   }
   const posixName = filename.split(path.sep).join('/');
-  const joined = moduleRoot === '.' ? posixName : `${moduleRoot}/${posixName}`;
-  return path.posix.normalize(joined);
+  const candidates: string[] = [];
+  if (moduleRoot !== '.') {
+    candidates.push(path.posix.normalize(`${moduleRoot}/${posixName}`));
+  }
+  candidates.push(path.posix.normalize(posixName));
+  return candidates;
 }
 
 function locateBin(workspaceDir: string): ResolvedBinary {
