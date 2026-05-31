@@ -64023,7 +64023,8 @@ var REJECTION_PATTERNS = [
   /not\s*a\s*(real\s*)?(bug|issue|problem)/i
 ];
 function isRejectionReply(body) {
-  return REJECTION_PATTERNS.some((re2) => re2.test(body));
+  const authorText = body.split("\n").filter((line) => !line.trim().startsWith(">")).join("\n");
+  return REJECTION_PATTERNS.some((re2) => re2.test(authorText));
 }
 async function fetchPriorReviewThreads(octokit, ref) {
   const agentReviewStates = await collectAgentReviewStates(octokit, ref);

@@ -371,4 +371,16 @@ describe('isRejectionReply', () => {
       expect(isRejectionReply(body)).toBe(false);
     }
   });
+
+  it('ignores rejection phrases inside a quoted finding above an acknowledgement', () => {
+    // GitHub reply-UI prepends `> <quoted finding>`; the rejection phrase lives
+    // in the quote, not the author's response.
+    expect(
+      isRejectionReply('> **[MINOR]** This is by design and intentional\n\nGood catch — fixing.'),
+    ).toBe(false);
+  });
+
+  it('still matches a rejection in the author text below a quote', () => {
+    expect(isRejectionReply('> previous finding\n\nThis is by design, won’t fix.')).toBe(true);
+  });
 });

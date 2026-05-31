@@ -116,7 +116,17 @@ const REJECTION_PATTERNS: RegExp[] = [
 
 /** True when a reply body rejects the finding (vs. merely acknowledging it). */
 export function isRejectionReply(body: string): boolean {
-  return REJECTION_PATTERNS.some((re) => re.test(body));
+  // Classify only the author's OWN text, not quoted review content. GitHub's
+  // reply UI prepends `> <quoted finding>`, which can itself contain rejection
+  // phrases (e.g. a prior "by design" finding); matching the quote would
+  // wrongly flag an acknowledgement like "good catch — fixing" as pushback and
+  // suppress a still-open blocking finding. Mirrors the blockquote skip in
+  // `excerpt`. addressing #58 (Codex P2 review).
+  const authorText = body
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('>'))
+    .join('\n');
+  return REJECTION_PATTERNS.some((re) => re.test(authorText));
 }
 
 export async function fetchPriorReviewThreads(
