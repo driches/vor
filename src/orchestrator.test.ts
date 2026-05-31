@@ -1995,4 +1995,42 @@ describe('runOrchestrator — prior review threads injected into the agent promp
     expect(firstCall).not.toContain('## Your prior review threads on this PR');
     expect(firstCall).not.toContain('Still-valid blocking issue');
   });
+
+  it('does not suppress a dismissable finding whose only reply is an acknowledgement', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    // CHANGES_REQUESTED (will be dismissed by the sticky step). The reply is an
+    // acknowledgement, NOT a rejection — so the finding must not be suppressed,
+    // or it could vanish after the old review is dismissed without being fixed.
+    octokitState.priorReviews = [
+      { id: 503, state: 'CHANGES_REQUESTED', body: AGENT_REVIEW_MARKER },
+    ];
+    octokitState.priorReviewComments = [
+      {
+        id: 1,
+        path: 'src/app.ts',
+        line: 5,
+        body: '**[IMPORTANT · correctness]** Race on the shared counter',
+        user: { login: 'vor-bot' },
+        pull_request_review_id: 503,
+      },
+      {
+        id: 2,
+        path: 'src/app.ts',
+        line: 5,
+        body: 'Good catch — fixing in the next push.',
+        user: { login: 'doug' },
+        in_reply_to_id: 1,
+      },
+    ];
+
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    const firstCall = JSON.stringify(anthropicCreateCalls[0]);
+    expect(firstCall).not.toContain('## Your prior review threads on this PR');
+    expect(firstCall).not.toContain('Race on the shared counter');
+  });
 });

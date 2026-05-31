@@ -52,6 +52,14 @@ export interface PriorReviewThread {
    * still-valid finding on a rerun.
    */
   already_dismissed: boolean;
+  /**
+   * True when at least one reply REJECTS the finding (matches the pushback
+   * phrases the agent prompt names — "won't fix", "by design", etc.). Distinct
+   * from "has any reply": an acknowledgement like "good catch" or "fixed in
+   * next push" is a reply but NOT pushback. Used to decide whether a thread
+   * that loses its active backing is worth keeping in the dedup block.
+   */
+  has_pushback: boolean;
   /** Author replies on the thread, oldest first. */
   replies: PriorReviewReply[];
 }
@@ -86,6 +94,30 @@ const EXCERPT_MAX = 200;
 // run (it skips COMMENTED / DISMISSED / PENDING). Findings from these reviews
 // go inactive when that step runs.
 const DISMISSABLE_STATES = new Set(['CHANGES_REQUESTED', 'APPROVED']);
+
+// Phrases that signal the author REJECTED a finding — mirrors the pushback
+// language named in the agent system prompt. Deliberately narrow: an
+// acknowledgement ("good catch", "fixed in next push", "will address") is a
+// reply but NOT a rejection, and must not match, or a soon-/already-dismissed
+// blocking finding would be wrongly suppressed.
+const REJECTION_PATTERNS: RegExp[] = [
+  /won['’]?t\s*fix/i,
+  /wont\s*fix/i,
+  /won['’]?t\s*do/i,
+  /wont\s*do/i,
+  /by\s*design/i,
+  /intentional/i,
+  /as\s*(documented|designed|intended)/i,
+  /working\s*as\s*intended/i,
+  /\bwai\b/i,
+  /disagree/i,
+  /not\s*a\s*(real\s*)?(bug|issue|problem)/i,
+];
+
+/** True when a reply body rejects the finding (vs. merely acknowledging it). */
+export function isRejectionReply(body: string): boolean {
+  return REJECTION_PATTERNS.some((re) => re.test(body));
+}
 
 export async function fetchPriorReviewThreads(
   octokit: Octokit,
@@ -122,9 +154,14 @@ export async function fetchPriorReviewThreads(
   const threads: PriorReviewThread[] = [];
   for (const c of comments) {
     if (!isAgentRoot(c)) continue;
-    const replies = (repliesByRoot.get(c.id) ?? [])
-      .sort((a, b) => a.id - b.id)
-      .map((r) => ({ author: r.user?.login ?? 'unknown', excerpt: excerpt(r.body) }));
+    const rawReplies = (repliesByRoot.get(c.id) ?? []).sort((a, b) => a.id - b.id);
+    const replies = rawReplies.map((r) => ({
+      author: r.user?.login ?? 'unknown',
+      excerpt: excerpt(r.body),
+    }));
+    // Classify on the full reply bodies (before excerpt truncation) so a
+    // rejection phrase past the first ~200 chars still counts.
+    const has_pushback = rawReplies.some((r) => isRejectionReply(r.body));
     const state = agentReviewStates.get(c.pull_request_review_id!) ?? '';
     threads.push({
       file_path: c.path,
@@ -133,6 +170,7 @@ export async function fetchPriorReviewThreads(
       finding_excerpt: excerpt(c.body),
       from_dismissable_review: DISMISSABLE_STATES.has(state),
       already_dismissed: state === 'DISMISSED',
+      has_pushback,
       replies,
     });
   }

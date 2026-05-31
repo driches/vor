@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
-import { fetchPriorReviewThreads } from './prior-review-threads.js';
+import { fetchPriorReviewThreads, isRejectionReply } from './prior-review-threads.js';
 import { AGENT_REVIEW_MARKER } from './prior-reviews.js';
 
 interface FakeReview {
@@ -295,5 +295,80 @@ describe('fetchPriorReviewThreads', () => {
 
     const [t] = await fetchPriorReviewThreads(octokit, ref);
     expect(t!.replies[0]!.author).toBe('unknown');
+  });
+
+  it('sets has_pushback only when a reply rejects the finding', async () => {
+    const octokit = makeOctokit(
+      [agentReview],
+      [
+        {
+          id: 80,
+          path: 'p.ts',
+          line: 1,
+          body: 'finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
+        // Acknowledgement, not a rejection.
+        {
+          id: 81,
+          path: 'p.ts',
+          line: 1,
+          body: 'Good catch — fixing in the next push.',
+          user: { login: 'author' },
+          in_reply_to_id: 80,
+        },
+        {
+          id: 90,
+          path: 'q.ts',
+          line: 1,
+          body: 'finding',
+          user: { login: 'vor-bot' },
+          pull_request_review_id: 100,
+        },
+        {
+          id: 91,
+          path: 'q.ts',
+          line: 1,
+          body: 'This is intentional — by design.',
+          user: { login: 'author' },
+          in_reply_to_id: 90,
+        },
+      ],
+    );
+
+    const byPath = new Map(
+      (await fetchPriorReviewThreads(octokit, ref)).map((t) => [t.file_path, t]),
+    );
+    expect(byPath.get('p.ts')!.has_pushback).toBe(false);
+    expect(byPath.get('q.ts')!.has_pushback).toBe(true);
+  });
+});
+
+describe('isRejectionReply', () => {
+  it('matches rejection phrases', () => {
+    for (const body of [
+      "Won't fix — by design.",
+      'wontfix',
+      'This is intentional.',
+      'Working as intended.',
+      'I disagree with this.',
+      'as documented in the README',
+      'This is not a real bug.',
+    ]) {
+      expect(isRejectionReply(body)).toBe(true);
+    }
+  });
+
+  it('does not match acknowledgements or neutral replies', () => {
+    for (const body of [
+      'Good catch, thanks!',
+      'Fixed in the next push.',
+      'Will address this shortly.',
+      'Can you clarify what you mean?',
+      'Done.',
+    ]) {
+      expect(isRejectionReply(body)).toBe(false);
+    }
   });
 });

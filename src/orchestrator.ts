@@ -319,13 +319,17 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   //   - the sticky step will dismiss it this run (sticky on + the review is
   //     CHANGES_REQUESTED/APPROVED).
   // For those, blanket-suppression ("don't re-post") would silently drop a
-  // still-valid finding, so we keep only the PUSHED-BACK threads (author replies
-  // present) to honor pushback and let the agent re-raise the rest fresh.
-  // Threads still backed by an active review (e.g. the default COMMENT event,
-  // never dismissed) are kept in full. addressing #58 (Codex P1 reviews).
+  // still-valid finding. We keep such a thread ONLY when the author actually
+  // REJECTED it (has_pushback) — honoring pushback. A thread with no reply, or
+  // only an acknowledgement like "good catch" / "fixed in next push", is
+  // dropped so the agent re-evaluates and re-raises if the issue persists;
+  // otherwise an unresolved blocking finding could vanish when its review is
+  // dismissed. Threads still backed by an active review (e.g. the default
+  // COMMENT event, never dismissed) are kept in full. addressing #58 (Codex
+  // P1 reviews).
   const promptThreads = priorThreads.filter((t) => {
     const losesBacking = t.already_dismissed || (config.review.sticky && t.from_dismissable_review);
-    return !losesBacking || t.replies.length > 0;
+    return !losesBacking || t.has_pushback;
   });
 
   // The user prompt is FINALIZED below, after deciding whether to inject

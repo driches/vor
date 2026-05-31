@@ -64009,6 +64009,22 @@ async function dismissPriorAgentReviews(octokit, ref, newHeadSha) {
 // src/github/prior-review-threads.ts
 var EXCERPT_MAX = 200;
 var DISMISSABLE_STATES = /* @__PURE__ */ new Set(["CHANGES_REQUESTED", "APPROVED"]);
+var REJECTION_PATTERNS = [
+  /won['’]?t\s*fix/i,
+  /wont\s*fix/i,
+  /won['’]?t\s*do/i,
+  /wont\s*do/i,
+  /by\s*design/i,
+  /intentional/i,
+  /as\s*(documented|designed|intended)/i,
+  /working\s*as\s*intended/i,
+  /\bwai\b/i,
+  /disagree/i,
+  /not\s*a\s*(real\s*)?(bug|issue|problem)/i
+];
+function isRejectionReply(body) {
+  return REJECTION_PATTERNS.some((re2) => re2.test(body));
+}
 async function fetchPriorReviewThreads(octokit, ref) {
   const agentReviewStates = await collectAgentReviewStates(octokit, ref);
   if (agentReviewStates.size === 0) return [];
@@ -64030,7 +64046,12 @@ async function fetchPriorReviewThreads(octokit, ref) {
   const threads = [];
   for (const c2 of comments) {
     if (!isAgentRoot(c2)) continue;
-    const replies = (repliesByRoot.get(c2.id) ?? []).sort((a2, b2) => a2.id - b2.id).map((r2) => ({ author: r2.user?.login ?? "unknown", excerpt: excerpt(r2.body) }));
+    const rawReplies = (repliesByRoot.get(c2.id) ?? []).sort((a2, b2) => a2.id - b2.id);
+    const replies = rawReplies.map((r2) => ({
+      author: r2.user?.login ?? "unknown",
+      excerpt: excerpt(r2.body)
+    }));
+    const has_pushback = rawReplies.some((r2) => isRejectionReply(r2.body));
     const state = agentReviewStates.get(c2.pull_request_review_id) ?? "";
     threads.push({
       file_path: c2.path,
@@ -64039,6 +64060,7 @@ async function fetchPriorReviewThreads(octokit, ref) {
       finding_excerpt: excerpt(c2.body),
       from_dismissable_review: DISMISSABLE_STATES.has(state),
       already_dismissed: state === "DISMISSED",
+      has_pushback,
       replies
     });
   }
@@ -69159,7 +69181,7 @@ async function runOrchestrator(input) {
   }
   const promptThreads = priorThreads.filter((t2) => {
     const losesBacking = t2.already_dismissed || config.review.sticky && t2.from_dismissable_review;
-    return !losesBacking || t2.replies.length > 0;
+    return !losesBacking || t2.has_pushback;
   });
   const buildPrompt = (findings = []) => {
     const base = buildUserPrompt({
