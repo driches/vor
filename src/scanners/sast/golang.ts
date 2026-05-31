@@ -18,9 +18,16 @@
  *
  * Invocation model differs from ruff/dart: golangci-lint analyzes
  * *packages* (it compiles them), so feeding it individual .go files is
- * fragile. We pass the unique set of directories the changed files live
- * in and then filter the resulting issues back down to the changed files
- * + lines this PR actually added — the same post-filter every module does.
+ * fragile. We group the changed files by their nearest `go.mod` (the Go
+ * module root), run golangci-lint once per module *from that module's
+ * directory* with package-dir targets relative to it, then filter the
+ * resulting issues back down to the changed files + lines this PR added.
+ *
+ * Running from the module root (not always the repo root) matters for
+ * repos that keep Go in a subdirectory module (e.g. `backend/go.mod` with
+ * no root `go.mod`): `go list ./backend` from the repo root fails with
+ * "go.mod file not found", so the linter would exit before producing JSON
+ * and the PR would silently get zero Go findings.
  *
  * Severity / category mapping is keyed off the issue's `FromLinter`
  * (deterministic, like ruff's code-prefix mapping) rather than
@@ -32,6 +39,7 @@
  * golangci-lint JSON format: https://golangci-lint.run/usage/faq/#how-to-integrate
  */
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { Category, ChangedFile, Confidence, Severity } from '../../types.js';
 import type { ScannerDeps, ScanError, ScanFinding } from '../types.js';
@@ -83,85 +91,164 @@ export const golangLinter: LinterModule = {
   async run(deps: ScannerDeps, targetFiles: readonly ChangedFile[]): Promise<LinterRun> {
     const errors: ScanError[] = [];
     const bin = locateBin(deps.workspaceDir);
-
-    // Targets are the package directories, not the files. Shell-injection
-    // guard still applies — directory names come from PR paths and flow
-    // into argv (and through cmd.exe when the binary is a Windows shim).
-    const { safe, dropped } = filterShellSafePaths(
-      dirsForGoFiles(targetFiles.map((f) => f.path)),
-      bin.needsShell,
-    );
-    if (dropped.length > 0) {
-      await logger.warn(
-        `golangci-lint: skipped ${dropped.length} dir(s) with shell-unsafe paths: ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
-      );
-    }
-    if (safe.length === 0) {
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
-
-    let rawOutput: string;
-    try {
-      rawOutput = await runWithFallback(bin, safe, deps);
-    } catch (err) {
-      const msg = (err as Error).message;
-      // Quiet skip when golangci-lint isn't installed anywhere
-      // resolvable. Same enumeration as ruff/dart — see ruff.ts for the
-      // per-signal rationale. `command not found` is the specific POSIX
-      // match (bare `not found` would swallow real "config not found"
-      // errors); 9009/127 are the locale-independent exit codes.
-      if (isMissingBinary(msg)) {
-        return { findings: [], errors: [], filesExamined: 0 };
-      }
-      errors.push({ message: `golangci-lint failed: ${msg}`, fatal: false });
-      return { findings: [], errors, filesExamined: 0 };
-    }
-
-    let output: GolangciOutput;
-    try {
-      output = JSON.parse(rawOutput) as GolangciOutput;
-    } catch (err) {
-      errors.push({
-        message: `golangci-lint output parse failed: ${(err as Error).message}`,
-        fatal: false,
-      });
-      return { findings: [], errors, filesExamined: targetFiles.length };
-    }
-
     const filesByPath = new Map(targetFiles.map((f) => [f.path, f]));
+
+    // Group the changed files by their nearest go.mod so each Go module is
+    // linted from its own root (see header). Falls back to the repo root
+    // for files with no go.mod ancestor.
+    const groups = groupByGoModule(
+      targetFiles.map((f) => f.path),
+      (dirRel) => existsSync(path.join(deps.workspaceDir, dirRel, 'go.mod')),
+    );
+
     const findings: ScanFinding[] = [];
-    for (const issue of output.Issues ?? []) {
-      if (issue.Pos === undefined) continue;
-      const relPath = normalizeToolPath(deps.workspaceDir, issue.Pos.Filename);
-      const changedFile = filesByPath.get(relPath);
-      if (changedFile === undefined) continue;
-      if (!changedFile.added_lines.has(issue.Pos.Line)) continue;
-      findings.push(buildFinding(changedFile.path, issue));
+    let ranAny = false;
+    for (const group of groups) {
+      // Targets are the package directories (relative to the module root),
+      // not the files. Shell-injection guard still applies — directory
+      // names come from PR paths and flow into argv (and through cmd.exe
+      // when the binary is a Windows shim).
+      const { safe, dropped } = filterShellSafePaths(group.dirs, bin.needsShell);
+      if (dropped.length > 0) {
+        await logger.warn(
+          `golangci-lint: skipped ${dropped.length} dir(s) with shell-unsafe paths: ${dropped.slice(0, 3).join(', ')}${dropped.length > 3 ? '...' : ''}`,
+        );
+      }
+      if (safe.length === 0) continue;
+
+      const cwd = group.root === '.' ? deps.workspaceDir : path.join(deps.workspaceDir, group.root);
+
+      let rawOutput: string;
+      try {
+        rawOutput = await runWithFallback(bin, safe, deps, cwd);
+      } catch (err) {
+        const msg = (err as Error).message;
+        // Quiet skip when golangci-lint isn't installed anywhere
+        // resolvable. Same enumeration as ruff/dart — see ruff.ts for the
+        // per-signal rationale. `command not found` is the specific POSIX
+        // match (bare `not found` would swallow real "config not found"
+        // errors); 9009/127 are the locale-independent exit codes. The
+        // binary is the same across module groups, so a miss on one means
+        // a miss on all — stop and report the quiet no-op.
+        if (isMissingBinary(msg)) {
+          return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
+        }
+        errors.push({
+          message: `golangci-lint failed (module ${group.root}): ${msg}`,
+          fatal: false,
+        });
+        continue;
+      }
+      ranAny = true;
+
+      let output: GolangciOutput;
+      try {
+        output = JSON.parse(rawOutput) as GolangciOutput;
+      } catch (err) {
+        errors.push({
+          message: `golangci-lint output parse failed (module ${group.root}): ${(err as Error).message}`,
+          fatal: false,
+        });
+        continue;
+      }
+
+      for (const issue of output.Issues ?? []) {
+        if (issue.Pos === undefined) continue;
+        // golangci-lint reports paths relative to its working dir (the
+        // module root), so re-root onto the workspace before matching.
+        const relPath = issuePathToWorkspaceRel(deps.workspaceDir, group.root, issue.Pos.Filename);
+        const changedFile = filesByPath.get(relPath);
+        if (changedFile === undefined) continue;
+        if (!changedFile.added_lines.has(issue.Pos.Line)) continue;
+        findings.push(buildFinding(changedFile.path, issue));
+      }
     }
 
-    return { findings, errors, filesExamined: targetFiles.length };
+    return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
   },
 };
 
+export interface GoModuleGroup {
+  /** Module root, POSIX, relative to the workspace. `.` = repo root. */
+  root: string;
+  /**
+   * Package-dir targets to pass golangci-lint, relative to `root`:
+   * `./` for the root package, `./<subdir>` for nested packages.
+   */
+  dirs: string[];
+}
+
 /**
- * Map changed .go file paths to the unique set of package directories to
- * hand golangci-lint. Root-level files map to `./` (the module root
- * package); nested files to `./<dir>`. The `./` prefix makes the targets
- * unambiguously relative package patterns rather than import paths.
+ * Walk up from a file's directory to find the nearest ancestor containing
+ * a `go.mod`, bounded at the repo root. Returns that directory (POSIX,
+ * relative to the workspace), or `.` when none is found — which preserves
+ * the prior behavior for repos with a root `go.mod` (or none at all).
  *
- * Exported for testing — the dedup + root-handling is the bit most likely
- * to regress silently (a wrong target means golangci-lint scans the wrong
- * package and every finding drops at the changedFiles lookup).
+ * Exported for testing; `hasGoMod` is injected so the walk can be tested
+ * without touching the filesystem.
  */
-export function dirsForGoFiles(paths: readonly string[]): string[] {
-  const dirs = new Set<string>();
-  for (const p of paths) {
-    // git diff paths are POSIX, so use path.posix to avoid backslash dirs
-    // on Windows runners (which would then mismatch as targets).
-    const dir = path.posix.dirname(p);
-    dirs.add(dir === '.' ? './' : `./${dir}`);
+export function nearestGoModuleRoot(
+  fileDirRel: string,
+  hasGoMod: (dirRel: string) => boolean,
+): string {
+  const parts = fileDirRel === '.' ? [] : fileDirRel.split('/');
+  for (let i = parts.length; i >= 1; i--) {
+    const dir = parts.slice(0, i).join('/');
+    if (hasGoMod(dir)) return dir;
   }
-  return [...dirs];
+  return '.';
+}
+
+/**
+ * Group changed .go file paths by their nearest Go module root, with the
+ * package-dir targets within each module deduped. Repos with Go in a
+ * subdirectory module (e.g. `backend/go.mod`) get a group rooted at
+ * `backend` so golangci-lint can run from there; multi-module repos get
+ * one group per module.
+ *
+ * Exported for testing — the module attribution + target derivation is the
+ * bit most likely to regress silently (a wrong root/target makes
+ * golangci-lint scan the wrong place and every finding drops at the
+ * changedFiles lookup).
+ */
+export function groupByGoModule(
+  paths: readonly string[],
+  hasGoMod: (dirRel: string) => boolean,
+): GoModuleGroup[] {
+  const byRoot = new Map<string, Set<string>>();
+  for (const p of paths) {
+    // git diff paths are POSIX, so use path.posix throughout to avoid
+    // backslash segments on Windows runners.
+    const fileDir = path.posix.dirname(p);
+    const root = nearestGoModuleRoot(fileDir, hasGoMod);
+    const rel = fileDir === root ? '' : root === '.' ? fileDir : fileDir.slice(root.length + 1);
+    const target = rel === '' ? './' : `./${rel}`;
+    let dirs = byRoot.get(root);
+    if (dirs === undefined) {
+      dirs = new Set<string>();
+      byRoot.set(root, dirs);
+    }
+    dirs.add(target);
+  }
+  return [...byRoot.entries()].map(([root, dirs]) => ({ root, dirs: [...dirs] }));
+}
+
+/**
+ * Re-root a path golangci-lint reported (relative to the module root it
+ * ran in, or occasionally absolute) onto a workspace-relative POSIX key
+ * that matches `changedFiles`.
+ */
+function issuePathToWorkspaceRel(
+  workspaceDir: string,
+  moduleRoot: string,
+  filename: string,
+): string {
+  if (path.isAbsolute(filename)) {
+    return normalizeToolPath(workspaceDir, filename);
+  }
+  const posixName = filename.split(path.sep).join('/');
+  const joined = moduleRoot === '.' ? posixName : `${moduleRoot}/${posixName}`;
+  return path.posix.normalize(joined);
 }
 
 function locateBin(workspaceDir: string): ResolvedBinary {
@@ -199,10 +286,11 @@ async function runWithFallback(
   bin: ResolvedBinary,
   dirs: string[],
   deps: ScannerDeps,
+  cwd: string,
 ): Promise<string> {
   const common = ['run', '--issues-exit-code=0', `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`];
   try {
-    return await runCli(bin, [...common, '--out-format=json', ...dirs], deps);
+    return await runCli(bin, [...common, '--out-format=json', ...dirs], deps, cwd);
   } catch (err) {
     const msg = (err as Error).message;
     if (isMissingBinary(msg)) throw err;
@@ -211,6 +299,7 @@ async function runWithFallback(
         bin,
         [...common, '--output.json.path=stdout', '--show-stats=false', ...dirs],
         deps,
+        cwd,
       );
     }
     throw err;
@@ -238,7 +327,12 @@ function looksLikeUnknownFlag(msg: string): boolean {
   );
 }
 
-function runCli(bin: ResolvedBinary, args: string[], deps: ScannerDeps): Promise<string> {
+function runCli(
+  bin: ResolvedBinary,
+  args: string[],
+  deps: ScannerDeps,
+  cwd: string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     // DEP0190 — see eslint.ts for the full rationale. args are already
     // shell-quoted (dirs via filterShellSafePaths, flags are literal).
@@ -248,7 +342,9 @@ function runCli(bin: ResolvedBinary, args: string[], deps: ScannerDeps): Promise
       bin.needsShell,
     );
     const spawnOptions = {
-      cwd: deps.workspaceDir,
+      // The module root, not always the workspace root — so `go list`
+      // resolves the right go.mod for subdirectory/nested modules.
+      cwd,
       env: buildLinterEnv(),
       shell: bin.needsShell,
     };

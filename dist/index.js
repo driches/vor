@@ -67361,6 +67361,7 @@ function renderDescription6(diag) {
 
 // src/scanners/sast/golang.ts
 var import_node_child_process10 = require("node:child_process");
+var import_node_fs5 = require("node:fs");
 var import_node_path12 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
 var TIMEOUT_MS9 = 12e4;
@@ -67374,59 +67375,90 @@ var golangLinter = {
   async run(deps, targetFiles) {
     const errors = [];
     const bin = locateBin3(deps.workspaceDir);
-    const { safe, dropped } = filterShellSafePaths(
-      dirsForGoFiles(targetFiles.map((f2) => f2.path)),
-      bin.needsShell
-    );
-    if (dropped.length > 0) {
-      await logger.warn(
-        `golangci-lint: skipped ${dropped.length} dir(s) with shell-unsafe paths: ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
-      );
-    }
-    if (safe.length === 0) {
-      return { findings: [], errors: [], filesExamined: 0 };
-    }
-    let rawOutput;
-    try {
-      rawOutput = await runWithFallback(bin, safe, deps);
-    } catch (err) {
-      const msg = err.message;
-      if (isMissingBinary(msg)) {
-        return { findings: [], errors: [], filesExamined: 0 };
-      }
-      errors.push({ message: `golangci-lint failed: ${msg}`, fatal: false });
-      return { findings: [], errors, filesExamined: 0 };
-    }
-    let output;
-    try {
-      output = JSON.parse(rawOutput);
-    } catch (err) {
-      errors.push({
-        message: `golangci-lint output parse failed: ${err.message}`,
-        fatal: false
-      });
-      return { findings: [], errors, filesExamined: targetFiles.length };
-    }
     const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
+    const groups2 = groupByGoModule(
+      targetFiles.map((f2) => f2.path),
+      (dirRel) => (0, import_node_fs5.existsSync)(import_node_path12.default.join(deps.workspaceDir, dirRel, "go.mod"))
+    );
     const findings = [];
-    for (const issue2 of output.Issues ?? []) {
-      if (issue2.Pos === void 0) continue;
-      const relPath = normalizeToolPath(deps.workspaceDir, issue2.Pos.Filename);
-      const changedFile = filesByPath.get(relPath);
-      if (changedFile === void 0) continue;
-      if (!changedFile.added_lines.has(issue2.Pos.Line)) continue;
-      findings.push(buildFinding8(changedFile.path, issue2));
+    let ranAny = false;
+    for (const group2 of groups2) {
+      const { safe, dropped } = filterShellSafePaths(group2.dirs, bin.needsShell);
+      if (dropped.length > 0) {
+        await logger.warn(
+          `golangci-lint: skipped ${dropped.length} dir(s) with shell-unsafe paths: ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "..." : ""}`
+        );
+      }
+      if (safe.length === 0) continue;
+      const cwd = group2.root === "." ? deps.workspaceDir : import_node_path12.default.join(deps.workspaceDir, group2.root);
+      let rawOutput;
+      try {
+        rawOutput = await runWithFallback(bin, safe, deps, cwd);
+      } catch (err) {
+        const msg = err.message;
+        if (isMissingBinary(msg)) {
+          return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
+        }
+        errors.push({
+          message: `golangci-lint failed (module ${group2.root}): ${msg}`,
+          fatal: false
+        });
+        continue;
+      }
+      ranAny = true;
+      let output;
+      try {
+        output = JSON.parse(rawOutput);
+      } catch (err) {
+        errors.push({
+          message: `golangci-lint output parse failed (module ${group2.root}): ${err.message}`,
+          fatal: false
+        });
+        continue;
+      }
+      for (const issue2 of output.Issues ?? []) {
+        if (issue2.Pos === void 0) continue;
+        const relPath = issuePathToWorkspaceRel(deps.workspaceDir, group2.root, issue2.Pos.Filename);
+        const changedFile = filesByPath.get(relPath);
+        if (changedFile === void 0) continue;
+        if (!changedFile.added_lines.has(issue2.Pos.Line)) continue;
+        findings.push(buildFinding8(changedFile.path, issue2));
+      }
     }
-    return { findings, errors, filesExamined: targetFiles.length };
+    return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
   }
 };
-function dirsForGoFiles(paths) {
-  const dirs = /* @__PURE__ */ new Set();
-  for (const p2 of paths) {
-    const dir = import_node_path12.default.posix.dirname(p2);
-    dirs.add(dir === "." ? "./" : `./${dir}`);
+function nearestGoModuleRoot(fileDirRel, hasGoMod) {
+  const parts = fileDirRel === "." ? [] : fileDirRel.split("/");
+  for (let i2 = parts.length; i2 >= 1; i2--) {
+    const dir = parts.slice(0, i2).join("/");
+    if (hasGoMod(dir)) return dir;
   }
-  return [...dirs];
+  return ".";
+}
+function groupByGoModule(paths, hasGoMod) {
+  const byRoot = /* @__PURE__ */ new Map();
+  for (const p2 of paths) {
+    const fileDir = import_node_path12.default.posix.dirname(p2);
+    const root = nearestGoModuleRoot(fileDir, hasGoMod);
+    const rel = fileDir === root ? "" : root === "." ? fileDir : fileDir.slice(root.length + 1);
+    const target = rel === "" ? "./" : `./${rel}`;
+    let dirs = byRoot.get(root);
+    if (dirs === void 0) {
+      dirs = /* @__PURE__ */ new Set();
+      byRoot.set(root, dirs);
+    }
+    dirs.add(target);
+  }
+  return [...byRoot.entries()].map(([root, dirs]) => ({ root, dirs: [...dirs] }));
+}
+function issuePathToWorkspaceRel(workspaceDir, moduleRoot, filename) {
+  if (import_node_path12.default.isAbsolute(filename)) {
+    return normalizeToolPath(workspaceDir, filename);
+  }
+  const posixName = filename.split(import_node_path12.default.sep).join("/");
+  const joined = moduleRoot === "." ? posixName : `${moduleRoot}/${posixName}`;
+  return import_node_path12.default.posix.normalize(joined);
 }
 function locateBin3(workspaceDir) {
   const ws = findWorkspaceBinary([import_node_path12.default.join(workspaceDir, "bin", "golangci-lint")]);
@@ -67434,10 +67466,10 @@ function locateBin3(workspaceDir) {
   const isWindows2 = process.platform === "win32";
   return { path: "golangci-lint", needsShell: isWindows2 };
 }
-async function runWithFallback(bin, dirs, deps) {
+async function runWithFallback(bin, dirs, deps, cwd) {
   const common = ["run", "--issues-exit-code=0", `--timeout=${GOLANGCI_INTERNAL_TIMEOUT}`];
   try {
-    return await runCli8(bin, [...common, "--out-format=json", ...dirs], deps);
+    return await runCli8(bin, [...common, "--out-format=json", ...dirs], deps, cwd);
   } catch (err) {
     const msg = err.message;
     if (isMissingBinary(msg)) throw err;
@@ -67445,7 +67477,8 @@ async function runWithFallback(bin, dirs, deps) {
       return runCli8(
         bin,
         [...common, "--output.json.path=stdout", "--show-stats=false", ...dirs],
-        deps
+        deps,
+        cwd
       );
     }
     throw err;
@@ -67457,7 +67490,7 @@ function isMissingBinary(msg) {
 function looksLikeUnknownFlag(msg) {
   return msg.includes("unknown flag") || msg.includes("unknown shorthand") || msg.includes("unknown command") || msg.includes("Usage:");
 }
-function runCli8(bin, args, deps) {
+function runCli8(bin, args, deps, cwd) {
   return new Promise((resolve3, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
@@ -67465,7 +67498,9 @@ function runCli8(bin, args, deps) {
       bin.needsShell
     );
     const spawnOptions = {
-      cwd: deps.workspaceDir,
+      // The module root, not always the workspace root — so `go list`
+      // resolves the right go.mod for subdirectory/nested modules.
+      cwd,
       env: buildLinterEnv(),
       shell: bin.needsShell
     };
@@ -67665,7 +67700,7 @@ var containerScannerStub = {
 
 // src/scanners/coverage-delta.ts
 var import_node_child_process11 = require("node:child_process");
-var import_node_fs5 = require("node:fs");
+var import_node_fs6 = require("node:fs");
 var import_node_path13 = __toESM(require("node:path"), 1);
 var SCANNER_ID4 = "coverage-delta";
 var COVERAGE_TIMEOUT_MS = 24e4;
@@ -67824,8 +67859,8 @@ function hasPythonChange(files) {
 }
 function readJsonIfExists(p2) {
   try {
-    if (!(0, import_node_fs5.existsSync)(p2)) return null;
-    const raw = (0, import_node_fs5.readFileSync)(p2, "utf-8");
+    if (!(0, import_node_fs6.existsSync)(p2)) return null;
+    const raw = (0, import_node_fs6.readFileSync)(p2, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -67840,13 +67875,13 @@ function hasNamedDep(pkg, name) {
   return pkg.dependencies?.[name] !== void 0 || pkg.devDependencies?.[name] !== void 0 || pkg.peerDependencies?.[name] !== void 0 || pkg.optionalDependencies?.[name] !== void 0;
 }
 function hasViteConfig(workspaceDir) {
-  return (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.mjs"));
+  return (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "vitest.config.mjs"));
 }
 function hasJestConfig(workspaceDir) {
-  return (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.json"));
+  return (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "jest.config.json"));
 }
 function hasPythonProject(workspaceDir) {
-  return (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs5.existsSync)(import_node_path13.default.join(workspaceDir, "conftest.py"));
+  return (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs6.existsSync)(import_node_path13.default.join(workspaceDir, "conftest.py"));
 }
 function normalizeReportPath(workspaceDir, toolPath) {
   const normalized = import_node_path13.default.isAbsolute(toolPath) ? import_node_path13.default.relative(workspaceDir, toolPath) : import_node_path13.default.normalize(toolPath);
@@ -67911,7 +67946,7 @@ async function runCoverageCli(tool2, deps) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if ((0, import_node_fs5.existsSync)(tool2.artifact)) {
+      if ((0, import_node_fs6.existsSync)(tool2.artifact)) {
         resolve3({ ok: true });
       } else {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim().slice(0, 500);
@@ -67980,10 +68015,10 @@ function buildCoverageInvocation(tool2, _deps) {
   }
 }
 function loadCoverageMap(tool2, _deps) {
-  if (!(0, import_node_fs5.existsSync)(tool2.artifact)) return null;
+  if (!(0, import_node_fs6.existsSync)(tool2.artifact)) return null;
   let raw;
   try {
-    raw = (0, import_node_fs5.readFileSync)(tool2.artifact, "utf-8");
+    raw = (0, import_node_fs6.readFileSync)(tool2.artifact, "utf-8");
   } catch {
     return null;
   }

@@ -1,34 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { dirsForGoFiles, golangCategory, golangSeverity } from './golang.js';
+import { golangCategory, golangSeverity, groupByGoModule, nearestGoModuleRoot } from './golang.js';
 
 // The Go module's bespoke logic that would regress silently: the
-// file→package-directory mapping we feed golangci-lint (a wrong target
-// makes it scan the wrong package and every finding drops at the
-// changedFiles lookup) and the FromLinter→severity/category mapping
-// (mis-mapping silently mis-prioritizes or mis-categorizes findings).
-describe('dirsForGoFiles', () => {
-  it('maps a nested file to its ./<dir> package target', () => {
-    expect(dirsForGoFiles(['internal/foo/bar.go'])).toEqual(['./internal/foo']);
+// file→module-root attribution and package-target derivation we feed
+// golangci-lint (a wrong root/target makes it scan the wrong place and
+// every finding drops at the changedFiles lookup) and the
+// FromLinter→severity/category mapping (mis-mapping silently
+// mis-prioritizes or mis-categorizes findings).
+describe('nearestGoModuleRoot', () => {
+  it('returns "." when no go.mod exists anywhere', () => {
+    expect(nearestGoModuleRoot('internal/foo', () => false)).toBe('.');
   });
 
-  it('maps a root-level file to ./', () => {
-    expect(dirsForGoFiles(['main.go'])).toEqual(['./']);
+  it('returns "." for a root go.mod', () => {
+    const hasGoMod = (d: string) => d === '.';
+    // walk only inspects ancestor dirs (not "."), so a root-only module
+    // falls through to the "." default — which is what we want.
+    expect(nearestGoModuleRoot('internal/foo', hasGoMod)).toBe('.');
   });
 
-  it('dedups files that share a package directory', () => {
-    expect(dirsForGoFiles(['pkg/a.go', 'pkg/b.go', 'pkg/c.go'])).toEqual(['./pkg']);
+  it('returns the nearest subdirectory module', () => {
+    const hasGoMod = (d: string) => d === 'backend';
+    expect(nearestGoModuleRoot('backend/api/handlers', hasGoMod)).toBe('backend');
   });
 
-  it('returns one target per distinct directory', () => {
-    expect(dirsForGoFiles(['cmd/app/main.go', 'internal/svc/svc.go', 'main.go'])).toEqual([
-      './cmd/app',
-      './internal/svc',
-      './',
+  it('prefers the deepest matching module when modules nest', () => {
+    const hasGoMod = (d: string) => d === 'backend' || d === 'backend/svc';
+    expect(nearestGoModuleRoot('backend/svc/pkg', hasGoMod)).toBe('backend/svc');
+  });
+});
+
+describe('groupByGoModule', () => {
+  it('groups a single root module with deduped, per-directory targets', () => {
+    const hasGoMod = (d: string) => d === '.';
+    expect(
+      groupByGoModule(['cmd/app/main.go', 'pkg/a.go', 'pkg/b.go', 'main.go'], hasGoMod),
+    ).toEqual([{ root: '.', dirs: ['./cmd/app', './pkg', './'] }]);
+  });
+
+  it('roots a subdirectory module at its go.mod with targets relative to it', () => {
+    const hasGoMod = (d: string) => d === 'backend';
+    expect(groupByGoModule(['backend/api/h.go', 'backend/main.go'], hasGoMod)).toEqual([
+      { root: 'backend', dirs: ['./api', './'] },
     ]);
   });
 
-  it('uses POSIX separators regardless of input nesting depth', () => {
-    expect(dirsForGoFiles(['a/b/c/d/e.go'])).toEqual(['./a/b/c/d']);
+  it('splits files across multiple modules', () => {
+    const hasGoMod = (d: string) => d === 'backend' || d === 'tools';
+    expect(groupByGoModule(['backend/a.go', 'tools/gen/g.go', 'scripts/x.go'], hasGoMod)).toEqual([
+      { root: 'backend', dirs: ['./'] },
+      { root: 'tools', dirs: ['./gen'] },
+      // No go.mod ancestor → repo-root group, target keeps its full path.
+      { root: '.', dirs: ['./scripts'] },
+    ]);
   });
 });
 
