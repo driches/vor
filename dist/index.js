@@ -57857,7 +57857,7 @@ function makeGetPrMetadataTool(deps) {
 var import_node_child_process = require("node:child_process");
 var DEFAULT_TIMEOUT_MS = 1e4;
 async function runGitGrep(opts) {
-  const args = ["grep", "-n", "-E"];
+  const args = ["grep", "-n", opts.fixedString ? "-F" : "-E"];
   if (!(opts.caseSensitive ?? true)) args.push("-i");
   if (opts.wholeWord) args.push("-w");
   args.push("--no-color", "--");
@@ -59357,6 +59357,10 @@ async function computeBlastRadius(input) {
         cwd: input.workspaceDir,
         caseSensitive: true,
         wholeWord: true,
+        // Symbols are raw identifiers, not regexes. Match them literally so a
+        // legal `$` in a JS name (`$http`, `foo$`) isn't treated as an ERE
+        // anchor — which would silently drop that symbol's call sites.
+        fixedString: true,
         maxResults: PER_SYMBOL_GREP_CAP
       });
     } catch {

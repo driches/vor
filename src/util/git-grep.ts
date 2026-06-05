@@ -24,13 +24,19 @@ export interface GrepResult {
 }
 
 export interface GitGrepOptions {
-  /** Regex pattern, ERE syntax (git grep -E). */
+  /** The search pattern. Interpreted as ERE (git grep -E) unless `fixedString`
+   *  is set, in which case it's matched literally (git grep -F). */
   pattern: string;
   /** Directory to run git grep in (the checkout root). */
   cwd: string;
   caseSensitive?: boolean;
   /** Match whole words only (git grep -w). */
   wholeWord?: boolean;
+  /** Treat `pattern` as a literal fixed string (git grep -F) instead of a
+   *  regex. Use this when the pattern is a raw identifier that may contain
+   *  regex metacharacters — e.g. a JS symbol like `$http` or `foo$`, where
+   *  `$` under `-E` would be an end-of-line anchor and match nothing. */
+  fixedString?: boolean;
   /** Path glob to restrict the search, e.g. "src/**​/*.ts". */
   pathGlob?: string;
   /** Cap on returned matches. */
@@ -42,7 +48,9 @@ export interface GitGrepOptions {
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
-  const args = ['grep', '-n', '-E'];
+  // -F and -E are mutually exclusive; pick one. Fixed-string mode is for raw
+  // identifiers that may carry regex metacharacters (see `fixedString`).
+  const args = ['grep', '-n', opts.fixedString ? '-F' : '-E'];
   if (!(opts.caseSensitive ?? true)) args.push('-i');
   if (opts.wholeWord) args.push('-w');
   // Limit lines per file is not directly supported; cap globally below.

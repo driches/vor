@@ -65,6 +65,14 @@ describe('computeBlastRadius', () => {
     );
     // A symbol with no external callers.
     writeFileSync(join(repo, 'util.ts'), 'export function loneHelper() {\n  return 42;\n}\n');
+    // A symbol whose legal JS name contains a regex metacharacter (`$`). Under
+    // `git grep -E` the `$` would be an anchor and find nothing; the pre-pass
+    // must match it literally.
+    writeFileSync(join(repo, 'http.ts'), 'export const $httpClient = makeClient();\n');
+    writeFileSync(
+      join(repo, 'routes', 'fetch.ts'),
+      "import { $httpClient } from '../http.js';\n$httpClient.get('/x');\n",
+    );
     // Build artifact + prose references must be filtered out as non-call-sites.
     mkdirSync(join(repo, 'dist'), { recursive: true });
     writeFileSync(join(repo, 'dist', 'index.js'), 'function verifyToken(t){return t}\n');
@@ -107,6 +115,18 @@ describe('computeBlastRadius', () => {
     // Build artifacts and prose are not call sites.
     expect(refPaths).not.toContain('dist/index.js');
     expect(refPaths).not.toContain('CHANGELOG.md');
+  });
+
+  it('matches symbols containing regex metacharacters like $ (fixed-string grep)', async () => {
+    const map = await computeBlastRadius({
+      changedFiles: [changedFile('http.ts', ['export const $httpClient = makeClient();'])],
+      workspaceDir: repo,
+      maxSymbols: 30,
+      maxRefsPerSymbol: 8,
+    });
+    const entry = map.entries.find((e) => e.symbol === '$httpClient');
+    expect(entry).toBeDefined();
+    expect(entry!.referenced_by.map((r) => r.path)).toContain('routes/fetch.ts');
   });
 
   it('omits a symbol that has no external references', async () => {

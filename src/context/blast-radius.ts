@@ -108,6 +108,10 @@ export async function computeBlastRadius(input: ComputeBlastRadiusInput): Promis
         cwd: input.workspaceDir,
         caseSensitive: true,
         wholeWord: true,
+        // Symbols are raw identifiers, not regexes. Match them literally so a
+        // legal `$` in a JS name (`$http`, `foo$`) isn't treated as an ERE
+        // anchor — which would silently drop that symbol's call sites.
+        fixedString: true,
         maxResults: PER_SYMBOL_GREP_CAP,
       });
     } catch {
