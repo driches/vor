@@ -71,6 +71,7 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
     const child = spawn('git', args, { cwd: opts.cwd });
     let stdout = '';
     let stderr = '';
+    let lineCount = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -80,7 +81,25 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
     }, timeoutMs);
 
     child.stdout.on('data', (b) => {
-      stdout += b.toString('utf-8');
+      if (resolved) return;
+      const chunk = b.toString('utf-8');
+      stdout += chunk;
+      // Bound memory and time: git grep on a symbol that's common in a large
+      // repo can stream far more than we keep. Once we've buffered more than
+      // the cap's worth of complete lines, kill the process and parse what we
+      // have — parseGrepOutput discards the excess anyway, and the extra line
+      // past the cap is enough for it to flag `truncated`. Without this, a
+      // single hot symbol could stream output until the timeout (× up to 30
+      // sequential symbols per review).
+      for (let i = 0; i < chunk.length; i++) {
+        if (chunk.charCodeAt(i) === 10) lineCount++;
+      }
+      if (lineCount > opts.maxResults) {
+        resolved = true;
+        clearTimeout(timer);
+        child.kill('SIGKILL');
+        resolve(parseGrepOutput(stdout, opts.maxResults));
+      }
     });
     child.stderr.on('data', (b) => {
       stderr += b.toString('utf-8');

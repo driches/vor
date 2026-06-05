@@ -57869,6 +57869,7 @@ async function runGitGrep(opts) {
     const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
     let stdout = "";
     let stderr = "";
+    let lineCount = 0;
     let resolved = false;
     const timer = setTimeout(() => {
       if (resolved) return;
@@ -57877,7 +57878,18 @@ async function runGitGrep(opts) {
       reject(new Error(`git grep timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child2.stdout.on("data", (b2) => {
-      stdout += b2.toString("utf-8");
+      if (resolved) return;
+      const chunk2 = b2.toString("utf-8");
+      stdout += chunk2;
+      for (let i2 = 0; i2 < chunk2.length; i2++) {
+        if (chunk2.charCodeAt(i2) === 10) lineCount++;
+      }
+      if (lineCount > opts.maxResults) {
+        resolved = true;
+        clearTimeout(timer);
+        child2.kill("SIGKILL");
+        resolve3(parseGrepOutput(stdout, opts.maxResults));
+      }
     });
     child2.stderr.on("data", (b2) => {
       stderr += b2.toString("utf-8");
