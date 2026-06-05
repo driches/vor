@@ -89,6 +89,16 @@ describe('computeBlastRadius', () => {
       'package main\nimport "x/svc"\nfunc main() { svc.ChargeCard() }\n',
     );
 
+    // Aliased re-export: callers reference the public alias, not the local name.
+    writeFileSync(
+      join(repo, 'barrel.ts'),
+      "export { internalWidget as PublicWidget } from './widget.js';\n",
+    );
+    writeFileSync(
+      join(repo, 'uses-alias.ts'),
+      "import { PublicWidget } from './barrel.js';\nPublicWidget();\n",
+    );
+
     // A symbol used far more than the per-symbol grep cap (100) within its own
     // defining file, plus one external caller in a later-sorting file. If the
     // cap were applied before excluding self-hits, the 100 self-references
@@ -151,6 +161,22 @@ describe('computeBlastRadius', () => {
     const entry = map.entries.find((e) => e.symbol === 'heavyUsed');
     expect(entry).toBeDefined();
     expect(entry!.referenced_by.map((r) => r.path)).toContain('zzz-consumer.ts');
+  });
+
+  it('greps the public alias of a re-export, not the local name', async () => {
+    const map = await computeBlastRadius({
+      changedFiles: [
+        changedFile('barrel.ts', ["export { internalWidget as PublicWidget } from './widget.js';"]),
+      ],
+      workspaceDir: repo,
+      maxSymbols: 30,
+      maxRefsPerSymbol: 8,
+    });
+    const entry = map.entries.find((e) => e.symbol === 'PublicWidget');
+    expect(entry).toBeDefined();
+    expect(entry!.referenced_by.map((r) => r.path)).toContain('uses-alias.ts');
+    // The local name is not what external callers reference.
+    expect(map.entries.find((e) => e.symbol === 'internalWidget')).toBeUndefined();
   });
 
   it('omits a symbol that has no external references', async () => {

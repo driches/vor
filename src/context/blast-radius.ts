@@ -225,16 +225,23 @@ function extractTsJsSymbols(line: string): string[] {
     const m = line.match(re);
     if (m?.[1]) out.push(m[1]);
   }
-  // Re-export / named export list: `export { foo, bar as baz }`. The LOCAL
-  // name (left of `as`) is what's referenced inside this repo.
+  // Named export / re-export list: `export { foo, bar as baz }`. External
+  // callers reference the EXPORTED name — the right side of `as` when aliased
+  // (`export { internalName as publicName }` is imported as `publicName`),
+  // otherwise the bare name. The last whitespace token handles a leading
+  // type-only modifier (`export { type Foo }` → `Foo`). `default` is skipped:
+  // a default re-export isn't referenced by that keyword.
   const list = line.match(/\bexport\s*\{([^}]*)\}/);
   if (list?.[1]) {
     for (const part of list[1].split(',')) {
-      const local = part
-        .trim()
-        .split(/\s+as\s+/)[0]
-        ?.trim();
-      if (local && /^[A-Za-z_$][\w$]*$/.test(local)) out.push(local);
+      const seg = part.trim();
+      if (!seg) continue;
+      const asParts = seg.split(/\s+as\s+/);
+      const exportedRaw = asParts.length > 1 ? asParts[1]! : asParts[0]!;
+      const exported = exportedRaw.trim().split(/\s+/).pop();
+      if (exported && exported !== 'default' && /^[A-Za-z_$][\w$]*$/.test(exported)) {
+        out.push(exported);
+      }
     }
   }
   return out;

@@ -59443,8 +59443,14 @@ function extractTsJsSymbols(line) {
   const list = line.match(/\bexport\s*\{([^}]*)\}/);
   if (list?.[1]) {
     for (const part of list[1].split(",")) {
-      const local = part.trim().split(/\s+as\s+/)[0]?.trim();
-      if (local && /^[A-Za-z_$][\w$]*$/.test(local)) out.push(local);
+      const seg = part.trim();
+      if (!seg) continue;
+      const asParts = seg.split(/\s+as\s+/);
+      const exportedRaw = asParts.length > 1 ? asParts[1] : asParts[0];
+      const exported = exportedRaw.trim().split(/\s+/).pop();
+      if (exported && exported !== "default" && /^[A-Za-z_$][\w$]*$/.test(exported)) {
+        out.push(exported);
+      }
     }
   }
   return out;
