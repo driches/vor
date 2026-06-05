@@ -17,7 +17,11 @@ import type { ChangedFile } from '../src/types.js';
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../..');
 
 function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 });
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
 }
 
 function inferLanguage(path: string): string {
