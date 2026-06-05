@@ -18,6 +18,12 @@ describe('runGitGrep', () => {
     writeFileSync(join(repo, 'vendor', 'skip.txt'), 'needle in vendor\n');
     // A literal `$` token, to exercise fixed-string mode.
     writeFileSync(join(repo, 'weird.ts'), 'const $cfg = load();\nuse($cfg);\n');
+    // Two sibling routes whose paths contain pathspec metacharacters. Excluding
+    // the `[id]` one must not also drop the `i` one under glob matching.
+    mkdirSync(join(repo, 'app', '[id]'), { recursive: true });
+    mkdirSync(join(repo, 'app', 'i'), { recursive: true });
+    writeFileSync(join(repo, 'app', '[id]', 'page.tsx'), 'needle dynamic\n');
+    writeFileSync(join(repo, 'app', 'i', 'page.tsx'), 'needle static\n');
 
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['add', '-A'], { cwd: repo });
@@ -65,6 +71,20 @@ describe('runGitGrep', () => {
     // matches nothing here — confirming why fixedString is required.
     const asRegex = await runGitGrep({ pattern: '$cfg', cwd: repo, maxResults: 50 });
     expect(asRegex.matches).toHaveLength(0);
+  });
+
+  it('excludes a path with pathspec metacharacters literally, not as a glob', async () => {
+    const r = await runGitGrep({
+      pattern: 'needle',
+      cwd: repo,
+      maxResults: 100,
+      excludePaths: ['app/[id]/page.tsx'],
+    });
+    const paths = r.matches.map((m) => m.path);
+    // The exact metacharacter path is excluded...
+    expect(paths).not.toContain('app/[id]/page.tsx');
+    // ...but the sibling that a glob `[id]` would also match is NOT dropped.
+    expect(paths).toContain('app/i/page.tsx');
   });
 
   it('returns empty on no match without throwing', async () => {

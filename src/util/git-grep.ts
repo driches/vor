@@ -39,9 +39,13 @@ export interface GitGrepOptions {
   fixedString?: boolean;
   /** Path glob to restrict the search, e.g. "src/**​/*.ts". */
   pathGlob?: string;
-  /** Paths/dirs to exclude, applied as git `:(exclude)` pathspecs so the match
-   *  cap is spent on candidates that survive — not on hits in, say, the
-   *  defining file or `node_modules/` that a caller would filter out anyway. */
+  /** Paths/dirs to exclude, applied as git `:(exclude,literal)` pathspecs so
+   *  the match cap is spent on candidates that survive — not on hits in, say,
+   *  the defining file or `node_modules/` that a caller would filter out
+   *  anyway. Matched literally (no glob), so a real path containing pathspec
+   *  metacharacters — e.g. a Next.js route `app/[id]/page.tsx` — excludes only
+   *  itself, not `app/i/page.tsx`. Leading-directory matching still applies, so
+   *  a bare dir name like `node_modules` excludes everything under it. */
   excludePaths?: string[];
   /** Cap on returned matches. */
   maxResults: number;
@@ -61,9 +65,11 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
   args.push('--no-color', '--');
   args.push(opts.pattern);
   if (opts.pathGlob) args.push(opts.pathGlob);
-  // Exclude pathspecs. When every pathspec is an exclude, git applies them to
-  // the implicit top-level tree (i.e. "everything except these").
-  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude)${ex}`);
+  // Exclude pathspecs. `literal` magic keeps glob metacharacters in real paths
+  // (e.g. `app/[id]/page.tsx`) from over-excluding siblings. When every
+  // pathspec is an exclude, git applies them to the implicit top-level tree
+  // (i.e. "everything except these").
+  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude,literal)${ex}`);
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

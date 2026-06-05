@@ -57863,7 +57863,7 @@ async function runGitGrep(opts) {
   args.push("--no-color", "--");
   args.push(opts.pattern);
   if (opts.pathGlob) args.push(opts.pathGlob);
-  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude)${ex}`);
+  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude,literal)${ex}`);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
