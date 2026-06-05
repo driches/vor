@@ -53,4 +53,3 @@ export function makeGrepRepoAtRefTool(deps: ToolDeps) {
     },
   );
 }
-

@@ -211,7 +211,10 @@ function extractTsJsSymbols(line: string): string[] {
   const list = line.match(/\bexport\s*\{([^}]*)\}/);
   if (list?.[1]) {
     for (const part of list[1].split(',')) {
-      const local = part.trim().split(/\s+as\s+/)[0]?.trim();
+      const local = part
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.trim();
       if (local && /^[A-Za-z_$][\w$]*$/.test(local)) out.push(local);
     }
   }
@@ -221,7 +224,8 @@ function extractTsJsSymbols(line: string): string[] {
 function extractPythonSymbols(line: string): string[] {
   // Module-scope only: a def/class at column 0. Indented members are usually
   // not referenced by bare name across files. Skip dunder/private (`_`).
-  const m = line.match(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/) ?? line.match(/^class\s+([A-Za-z_]\w*)/);
+  const m =
+    line.match(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/) ?? line.match(/^class\s+([A-Za-z_]\w*)/);
   const name = m?.[1];
   if (!name || name.startsWith('_')) return [];
   return [name];

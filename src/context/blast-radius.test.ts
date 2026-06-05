@@ -10,7 +10,11 @@ import type { ChangedFile } from '../types.js';
  * Build a ChangedFile whose added lines carry the given source text, so the
  * symbol extractor sees the declaration. Mirrors what pr-context produces.
  */
-function changedFile(path: string, addedText: string[], over: Partial<ChangedFile> = {}): ChangedFile {
+function changedFile(
+  path: string,
+  addedText: string[],
+  over: Partial<ChangedFile> = {},
+): ChangedFile {
   const added_lines = new Set<number>();
   const head_line_text = new Map<number, string>();
   addedText.forEach((text, i) => {
@@ -67,9 +71,15 @@ describe('computeBlastRadius', () => {
     writeFileSync(join(repo, 'CHANGELOG.md'), '- verifyToken now stricter\n');
     // Python + Go definitions for the multi-language extraction test.
     writeFileSync(repo + '/handlers.py', 'def process_payment(amount):\n    return amount\n');
-    writeFileSync(repo + '/caller.py', 'from handlers import process_payment\nprocess_payment(10)\n');
+    writeFileSync(
+      repo + '/caller.py',
+      'from handlers import process_payment\nprocess_payment(10)\n',
+    );
     writeFileSync(repo + '/svc.go', 'package svc\nfunc ChargeCard() error { return nil }\n');
-    writeFileSync(repo + '/main.go', 'package main\nimport "x/svc"\nfunc main() { svc.ChargeCard() }\n');
+    writeFileSync(
+      repo + '/main.go',
+      'package main\nimport "x/svc"\nfunc main() { svc.ChargeCard() }\n',
+    );
 
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['add', '-A'], { cwd: repo });
@@ -126,9 +136,7 @@ describe('computeBlastRadius', () => {
   it('skips generic / too-short symbol names', async () => {
     const map = await computeBlastRadius({
       // `id` (too short) and `config` (generic denylist) must not be looked up.
-      changedFiles: [
-        changedFile('x.ts', ['export const id = 1;', 'export const config = {};']),
-      ],
+      changedFiles: [changedFile('x.ts', ['export const id = 1;', 'export const config = {};'])],
       workspaceDir: repo,
       maxSymbols: 30,
       maxRefsPerSymbol: 8,
