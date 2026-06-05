@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildUserPrompt, renderScannerFindings, renderPriorReviewThreads } from './user-prompt.js';
+import {
+  buildUserPrompt,
+  renderScannerFindings,
+  renderPriorReviewThreads,
+  renderBlastRadius,
+} from './user-prompt.js';
 import type { ScanFinding } from '../scanners/types.js';
 import type { PriorReviewThread } from '../github/prior-review-threads.js';
+import type { BlastRadiusMap } from '../context/blast-radius.js';
 
 function makeThread(overrides: Partial<PriorReviewThread> = {}): PriorReviewThread {
   return {
@@ -74,6 +80,104 @@ describe('renderScannerFindings', () => {
     const out = renderScannerFindings([makeFinding()], 0);
     expect(out).toContain('(0 shown / 1 total)');
     expect(out).toContain('1 additional');
+  });
+});
+
+describe('renderBlastRadius', () => {
+  const map: BlastRadiusMap = {
+    entries: [
+      {
+        symbol: 'verifyToken',
+        defined_in: 'src/auth.ts',
+        referenced_by: [
+          { path: 'src/routes/login.ts', line: 12, excerpt: 'verifyToken(req.token)' },
+          { path: 'src/routes/session.ts', line: 5, excerpt: 'if (!verifyToken(t))' },
+        ],
+        reference_count: 2,
+      },
+    ],
+    truncated: false,
+  };
+
+  it('renders symbols with their referencing sites', () => {
+    const out = renderBlastRadius(map)!;
+    expect(out).toContain('Cross-file impact (blast radius)');
+    expect(out).toContain('`verifyToken` (defined in src/auth.ts)');
+    expect(out).toContain('src/routes/login.ts:12');
+    expect(out).toContain('src/routes/session.ts:5');
+  });
+
+  it('notes when references were capped beyond what is shown', () => {
+    const capped: BlastRadiusMap = {
+      entries: [{ ...map.entries[0]!, reference_count: 9 }],
+      truncated: true,
+    };
+    const out = renderBlastRadius(capped)!;
+    expect(out).toContain('+7 more file(s)');
+  });
+
+  it('returns null for an empty map so the block is omitted', () => {
+    expect(renderBlastRadius({ entries: [], truncated: false })).toBeNull();
+  });
+
+  it('honors the byte cap by dropping entries past the budget', () => {
+    const many: BlastRadiusMap = {
+      entries: Array.from({ length: 50 }, (_, i) => ({
+        symbol: `symbol_number_${i}`,
+        defined_in: `src/module-${i}.ts`,
+        referenced_by: [{ path: `src/caller-${i}.ts`, line: i, excerpt: 'x' }],
+        reference_count: 1,
+      })),
+      truncated: false,
+    };
+    const full = renderBlastRadius(many, 100_000)!;
+    const capped = renderBlastRadius(many, 1_200)!;
+    expect(capped.length).toBeLessThan(full.length);
+    // Header + early entries survive; later entries are dropped past the budget.
+    expect(capped).toContain('Cross-file impact (blast radius)');
+    expect(capped).toContain('`symbol_number_0`');
+    expect(capped).not.toContain('`symbol_number_49`');
+    expect(capped).toContain('this is a bounded sample');
+    expect(full).toContain('`symbol_number_49`');
+  });
+});
+
+describe('buildUserPrompt blast-radius injection', () => {
+  it('omits the block when no map is provided', () => {
+    const out = buildUserPrompt({ owner: 'driches', repo: 'vor', pull_number: 1 });
+    expect(out).not.toContain('Cross-file impact');
+  });
+
+  it('injects the block when the map has entries', () => {
+    const out = buildUserPrompt({
+      owner: 'driches',
+      repo: 'vor',
+      pull_number: 1,
+      blast_radius: {
+        entries: [
+          {
+            symbol: 'verifyToken',
+            defined_in: 'src/auth.ts',
+            referenced_by: [{ path: 'src/routes/login.ts', line: 12, excerpt: 'x' }],
+            reference_count: 1,
+          },
+        ],
+        truncated: false,
+      },
+    });
+    expect(out).toContain('Cross-file impact (blast radius)');
+    expect(out).toContain('`verifyToken`');
+    expect(out).toContain('Start by calling get_pr_metadata');
+  });
+
+  it('omits the block when the map is present but empty', () => {
+    const out = buildUserPrompt({
+      owner: 'driches',
+      repo: 'vor',
+      pull_number: 1,
+      blast_radius: { entries: [], truncated: false },
+    });
+    expect(out).not.toContain('Cross-file impact');
   });
 });
 

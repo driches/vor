@@ -35,6 +35,7 @@ export interface ReviewConfig {
   context: {
     include: string[];
     max_context_bytes: number;
+    blast_radius: BlastRadiusConfig;
   };
 
   prompt: {
@@ -62,6 +63,21 @@ export interface ReviewConfig {
    * without changing behavior for anyone who hasn't opted in.
    */
   experimental: ExperimentalConfig;
+}
+
+/**
+ * Deterministic cross-file impact ("blast radius") pre-pass. For each public
+ * symbol the PR changes, finds references elsewhere in the checkout (via
+ * `git grep`) and injects a compact map into the agent prompt so it reviews
+ * call-site compatibility proactively. Zero LLM cost, so on by default; only
+ * adds (byte-capped) prompt text.
+ */
+export interface BlastRadiusConfig {
+  enabled: boolean;
+  /** Max distinct changed symbols to look up per run. */
+  max_symbols: number;
+  /** Max distinct referencing files reported per symbol. */
+  max_refs_per_symbol: number;
 }
 
 export interface ProviderConfig {

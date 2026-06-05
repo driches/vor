@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runAgent } from './agent/runner.js';
 import { buildAgentScopeNotice, scopePrContextForAgent } from './agent/pr-scope.js';
+import { computeBlastRadius, type BlastRadiusMap } from './context/blast-radius.js';
 import { createRunContext } from './agent/run-context.js';
 import { buildSystemPrompt, type RepoContextEntry } from './agent/system-prompt.js';
 import { buildUserPrompt } from './agent/user-prompt.js';
@@ -332,6 +333,34 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     return !losesBacking || t.has_pushback;
   });
 
+  // Deterministic cross-file impact pre-pass: for each public symbol the PR
+  // changes, find references elsewhere in the checkout so the agent reviews
+  // call-site compatibility proactively (breaking-change / missed-call-site
+  // detection) instead of only when it thinks to grep. Best-effort: a failure
+  // (e.g. no git in the workspace) degrades to no map rather than failing the
+  // review, mirroring the prior-threads fetch above. Skipped when there are no
+  // LLM-scoped files (the agent won't run) or when disabled in config.
+  let blastRadius: BlastRadiusMap | undefined;
+  if (config.context.blast_radius.enabled && agentScope.prContext.files.length > 0) {
+    try {
+      blastRadius = await computeBlastRadius({
+        changedFiles: agentScope.prContext.files,
+        workspaceDir: input.workspace_dir,
+        maxSymbols: config.context.blast_radius.max_symbols,
+        maxRefsPerSymbol: config.context.blast_radius.max_refs_per_symbol,
+      });
+      if (blastRadius.entries.length > 0) {
+        await logger.info(
+          `Blast radius: ${blastRadius.entries.length} changed symbol(s) referenced elsewhere in the repo.`,
+        );
+      }
+    } catch (err) {
+      await logger.warn(
+        `Failed to compute blast radius: ${(err as Error).message}. Proceeding without it.`,
+      );
+    }
+  }
+
   // The user prompt is FINALIZED below, after deciding whether to inject
   // scanner findings. If the experimental flag is OFF we use the empty-
   // findings form immediately (current behavior). If ON we wait for the
@@ -347,6 +376,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       // (a user lowering that cap to reduce posted noise must not also lose
       // pushback context). Falls through to the renderer's own default cap.
       ...(promptThreads.length > 0 ? { prior_threads: promptThreads } : {}),
+      ...(blastRadius && blastRadius.entries.length > 0 ? { blast_radius: blastRadius } : {}),
       ...(findings.length > 0
         ? {
             scanner_findings: findings,

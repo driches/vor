@@ -9,12 +9,20 @@
 
 import type { ScanFinding } from '../scanners/types.js';
 import type { PriorReviewThread } from '../github/prior-review-threads.js';
+import type { BlastRadiusMap } from '../context/blast-radius.js';
 
 export function buildUserPrompt(input: {
   owner: string;
   repo: string;
   pull_number: number;
   scanner_findings?: ReadonlyArray<ScanFinding>;
+  /**
+   * Deterministic cross-file impact map (src/context/blast-radius.ts): symbols
+   * this PR changes that are referenced elsewhere in the repo. Injected so the
+   * agent reviews call-site compatibility proactively rather than only when it
+   * thinks to grep. Omitted when empty.
+   */
+  blast_radius?: BlastRadiusMap;
   /**
    * Cap on the number of scanner findings rendered into the prompt. The
    * orchestrator passes `severity.max_comments_total` here — findings that
@@ -55,6 +63,15 @@ export function buildUserPrompt(input: {
       ),
     );
     parts.push('');
+  }
+
+  const blastRadius = input.blast_radius;
+  if (blastRadius && blastRadius.entries.length > 0) {
+    const block = renderBlastRadius(blastRadius);
+    if (block) {
+      parts.push(block);
+      parts.push('');
+    }
   }
 
   parts.push(
@@ -231,4 +248,69 @@ export function renderPriorReviewThreads(
     lines.push('', `(${truncated} additional prior thread(s) omitted from this block.)`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Byte budget for the blast-radius block. The map is already bounded by
+ * maxSymbols / maxRefsPerSymbol; this is a final guard so a pathological set of
+ * very long paths can't dominate the agent's first input.
+ */
+const MAX_BLAST_RADIUS_BYTES = 4_000;
+
+/**
+ * Render the deterministic cross-file impact map as a block the agent can scan
+ * in one glance. One line per changed symbol, listing the files that reference
+ * it elsewhere in the repo.
+ *
+ * Framing rules:
+ *   - "Verify call-site compatibility" — the point of the block is to make the
+ *     agent CHECK these references before claiming (or missing) a breaking
+ *     change, not to flag them blindly.
+ *   - "Read before flagging" — keeps verification discipline: a breaking-change
+ *     finding still requires reading the referencing site via read_file_at_ref.
+ *   - "Absence is not proof of safety" — the extractor is conservative, so a
+ *     symbol missing here may still have callers; don't treat the list as
+ *     exhaustive.
+ *
+ * Exported for unit tests so the framing language stays pinned. Returns null
+ * when there are no entries to render.
+ */
+export function renderBlastRadius(
+  map: BlastRadiusMap,
+  maxBytes: number = MAX_BLAST_RADIUS_BYTES,
+): string | null {
+  if (map.entries.length === 0) return null;
+
+  const header = [
+    '## Cross-file impact (blast radius)',
+    '',
+    'Deterministic pre-pass: symbols this PR changes that are referenced elsewhere in the repo (definition file excluded). Before you post — or decide NOT to post — a breaking-change or missed-call-site finding, read the referencing sites with `read_file_at_ref` and confirm the change is compatible with them.',
+    '',
+    'This list is NOT exhaustive (the extractor is conservative); a symbol missing here may still have callers. Use it as a starting point, not proof of safety.',
+    '',
+  ].join('\n');
+
+  const lines: string[] = [];
+  let bytes = header.length;
+  let rendered = 0;
+  for (const entry of map.entries) {
+    const refs = entry.referenced_by.map((r) => `${r.path}:${r.line}`).join(', ');
+    const extra =
+      entry.reference_count > entry.referenced_by.length
+        ? ` (+${entry.reference_count - entry.referenced_by.length} more file(s))`
+        : '';
+    const line = `- \`${entry.symbol}\` (defined in ${entry.defined_in}) — referenced by ${entry.reference_count} file(s): ${refs}${extra}`;
+    if (bytes + line.length + 1 > maxBytes) break;
+    lines.push(line);
+    bytes += line.length + 1;
+    rendered += 1;
+  }
+
+  if (rendered === 0) return null;
+
+  const omitted = map.entries.length - rendered;
+  if (map.truncated || omitted > 0) {
+    lines.push('', `(additional changed symbols omitted; this is a bounded sample.)`);
+  }
+  return `${header}${lines.join('\n')}`;
 }
