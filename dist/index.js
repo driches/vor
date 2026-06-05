@@ -57863,6 +57863,7 @@ async function runGitGrep(opts) {
   args.push("--no-color", "--");
   args.push(opts.pattern);
   if (opts.pathGlob) args.push(opts.pathGlob);
+  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude)${ex}`);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
@@ -59321,6 +59322,7 @@ function filterDiffByPaths2(diff, wanted) {
 
 // src/context/blast-radius.ts
 var PER_SYMBOL_GREP_CAP = 100;
+var GREP_EXCLUDE_DIRS = ["dist", "build", "vendor", "node_modules", "coverage", ".git"];
 var MIN_SYMBOL_LENGTH = 4;
 var GENERIC_NAMES = /* @__PURE__ */ new Set([
   "main",
@@ -59361,6 +59363,11 @@ async function computeBlastRadius(input) {
         // legal `$` in a JS name (`$http`, `foo$`) isn't treated as an ERE
         // anchor — which would silently drop that symbol's call sites.
         fixedString: true,
+        // Exclude the defining file (self-references aren't blast radius) and
+        // the heavy build/vendor dirs BEFORE the cap, so a symbol used 100+
+        // times in its own file (or in dist/) can't crowd real call sites out
+        // of the capped result set.
+        excludePaths: [sym.definedIn, ...GREP_EXCLUDE_DIRS],
         maxResults: PER_SYMBOL_GREP_CAP
       });
     } catch {

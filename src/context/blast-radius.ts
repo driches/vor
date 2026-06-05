@@ -54,6 +54,16 @@ export interface ComputeBlastRadiusInput {
 const PER_SYMBOL_GREP_CAP = 100;
 
 /**
+ * Directories excluded at the `git grep` level (as `:(exclude)` pathspecs), so
+ * the match cap isn't consumed by hits that `isCallSitePath` would drop anyway
+ * — which would otherwise let, say, hundreds of `dist/index.js` occurrences
+ * push every real call site past the cap and report zero callers. These are the
+ * common heavy offenders; `isCallSitePath` still backstops nested/odd paths and
+ * non-source file extensions after the grep.
+ */
+const GREP_EXCLUDE_DIRS = ['dist', 'build', 'vendor', 'node_modules', 'coverage', '.git'];
+
+/**
  * Identifier names too generic to be worth a cross-file grep — they'd match
  * everywhere and add noise, not signal. Length < MIN_SYMBOL_LENGTH is also
  * filtered (catches `id`, `fn`, `db`, single letters).
@@ -112,6 +122,11 @@ export async function computeBlastRadius(input: ComputeBlastRadiusInput): Promis
         // legal `$` in a JS name (`$http`, `foo$`) isn't treated as an ERE
         // anchor — which would silently drop that symbol's call sites.
         fixedString: true,
+        // Exclude the defining file (self-references aren't blast radius) and
+        // the heavy build/vendor dirs BEFORE the cap, so a symbol used 100+
+        // times in its own file (or in dist/) can't crowd real call sites out
+        // of the capped result set.
+        excludePaths: [sym.definedIn, ...GREP_EXCLUDE_DIRS],
         maxResults: PER_SYMBOL_GREP_CAP,
       });
     } catch {

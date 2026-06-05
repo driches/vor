@@ -89,6 +89,18 @@ describe('computeBlastRadius', () => {
       'package main\nimport "x/svc"\nfunc main() { svc.ChargeCard() }\n',
     );
 
+    // A symbol used far more than the per-symbol grep cap (100) within its own
+    // defining file, plus one external caller in a later-sorting file. If the
+    // cap were applied before excluding self-hits, the 100 self-references
+    // (which sort first) would crowd out the real caller and report zero.
+    const heavyLines = ['export function heavyUsed() {\n  return 1;\n}'];
+    for (let i = 0; i < 150; i++) heavyLines.push(`const local_${i} = heavyUsed();`);
+    writeFileSync(join(repo, 'heavy-defs.ts'), heavyLines.join('\n') + '\n');
+    writeFileSync(
+      join(repo, 'zzz-consumer.ts'),
+      "import { heavyUsed } from './heavy-defs.js';\nheavyUsed();\n",
+    );
+
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['add', '-A'], { cwd: repo });
   });
@@ -127,6 +139,18 @@ describe('computeBlastRadius', () => {
     const entry = map.entries.find((e) => e.symbol === '$httpClient');
     expect(entry).toBeDefined();
     expect(entry!.referenced_by.map((r) => r.path)).toContain('routes/fetch.ts');
+  });
+
+  it('still finds external callers when self-references exceed the grep cap', async () => {
+    const map = await computeBlastRadius({
+      changedFiles: [changedFile('heavy-defs.ts', ['export function heavyUsed() {'])],
+      workspaceDir: repo,
+      maxSymbols: 30,
+      maxRefsPerSymbol: 8,
+    });
+    const entry = map.entries.find((e) => e.symbol === 'heavyUsed');
+    expect(entry).toBeDefined();
+    expect(entry!.referenced_by.map((r) => r.path)).toContain('zzz-consumer.ts');
   });
 
   it('omits a symbol that has no external references', async () => {

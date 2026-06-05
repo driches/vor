@@ -39,6 +39,10 @@ export interface GitGrepOptions {
   fixedString?: boolean;
   /** Path glob to restrict the search, e.g. "src/**​/*.ts". */
   pathGlob?: string;
+  /** Paths/dirs to exclude, applied as git `:(exclude)` pathspecs so the match
+   *  cap is spent on candidates that survive — not on hits in, say, the
+   *  defining file or `node_modules/` that a caller would filter out anyway. */
+  excludePaths?: string[];
   /** Cap on returned matches. */
   maxResults: number;
   /** Spawn timeout. Defaults to DEFAULT_TIMEOUT_MS. */
@@ -57,6 +61,9 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
   args.push('--no-color', '--');
   args.push(opts.pattern);
   if (opts.pathGlob) args.push(opts.pathGlob);
+  // Exclude pathspecs. When every pathspec is an exclude, git applies them to
+  // the implicit top-level tree (i.e. "everything except these").
+  for (const ex of opts.excludePaths ?? []) args.push(`:(exclude)${ex}`);
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
