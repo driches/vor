@@ -50,6 +50,14 @@ export const DEFAULT_CONFIG: ReviewConfig = {
   context: {
     include: ['AGENTS.md', 'CLAUDE.md'],
     max_context_bytes: 50_000,
+    // Deterministic cross-file impact pre-pass. Zero LLM cost (a few `git grep`
+    // calls over the checkout), so on by default; opt out per-repo via
+    // `context.blast_radius.enabled: false`.
+    blast_radius: {
+      enabled: true,
+      max_symbols: 30,
+      max_refs_per_symbol: 8,
+    },
   },
 
   prompt: {

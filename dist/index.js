@@ -57853,49 +57853,17 @@ function makeGetPrMetadataTool(deps) {
   );
 }
 
-// src/tools/grep-repo-at-ref.ts
+// src/util/git-grep.ts
 var import_node_child_process = require("node:child_process");
-var HARD_RESULT_CAP = 200;
-var TIMEOUT_MS = 1e4;
-function makeGrepRepoAtRefTool(deps) {
-  return tool(
-    "grep_repo_at_ref",
-    'Searches the repo for a regex pattern at HEAD. Use this BEFORE commenting "this is unused" / "we have a helper for this" / "breaks the pattern". Optional path_glob to restrict scope. Runs against the local working tree (checked out at PR HEAD).',
-    {
-      pattern: external_exports.string().min(1).describe("Regex pattern, ERE syntax (git grep -E)."),
-      ref: external_exports.enum(["head"]).default("head").describe('Only "head" is supported (the checkout reflects PR HEAD).'),
-      path_glob: external_exports.string().optional().describe('Path glob to restrict the search, e.g., "src/**/*.ts".'),
-      max_results: external_exports.number().int().positive().max(HARD_RESULT_CAP).default(50).describe("Max matches to return."),
-      case_sensitive: external_exports.boolean().default(true)
-    },
-    async (args) => {
-      const cap = Math.min(args.max_results, HARD_RESULT_CAP);
-      try {
-        const result = await runGitGrep({
-          pattern: args.pattern,
-          cwd: deps.workspaceDir,
-          caseSensitive: args.case_sensitive,
-          pathGlob: args.path_glob,
-          maxResults: cap
-        });
-        return jsonResult(result);
-      } catch (err) {
-        return jsonResult({
-          matches: [],
-          total: 0,
-          truncated: false,
-          error: err.message
-        });
-      }
-    }
-  );
-}
+var DEFAULT_TIMEOUT_MS = 1e4;
 async function runGitGrep(opts) {
   const args = ["grep", "-n", "-E"];
-  if (!opts.caseSensitive) args.push("-i");
+  if (!(opts.caseSensitive ?? true)) args.push("-i");
+  if (opts.wholeWord) args.push("-w");
   args.push("--no-color", "--");
   args.push(opts.pattern);
   if (opts.pathGlob) args.push(opts.pathGlob);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve3, reject) => {
     const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
     let stdout = "";
@@ -57905,8 +57873,8 @@ async function runGitGrep(opts) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`git grep timed out after ${TIMEOUT_MS}ms`));
-    }, TIMEOUT_MS);
+      reject(new Error(`git grep timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     child2.stdout.on("data", (b2) => {
       stdout += b2.toString("utf-8");
     });
@@ -57949,6 +57917,42 @@ function parseGrepOutput(out, cap) {
     total: lines.length,
     truncated: lines.length > cap
   };
+}
+
+// src/tools/grep-repo-at-ref.ts
+var HARD_RESULT_CAP = 200;
+function makeGrepRepoAtRefTool(deps) {
+  return tool(
+    "grep_repo_at_ref",
+    'Searches the repo for a regex pattern at HEAD. Use this BEFORE commenting "this is unused" / "we have a helper for this" / "breaks the pattern". Optional path_glob to restrict scope. Runs against the local working tree (checked out at PR HEAD).',
+    {
+      pattern: external_exports.string().min(1).describe("Regex pattern, ERE syntax (git grep -E)."),
+      ref: external_exports.enum(["head"]).default("head").describe('Only "head" is supported (the checkout reflects PR HEAD).'),
+      path_glob: external_exports.string().optional().describe('Path glob to restrict the search, e.g., "src/**/*.ts".'),
+      max_results: external_exports.number().int().positive().max(HARD_RESULT_CAP).default(50).describe("Max matches to return."),
+      case_sensitive: external_exports.boolean().default(true)
+    },
+    async (args) => {
+      const cap = Math.min(args.max_results, HARD_RESULT_CAP);
+      try {
+        const result = await runGitGrep({
+          pattern: args.pattern,
+          cwd: deps.workspaceDir,
+          caseSensitive: args.case_sensitive,
+          pathGlob: args.path_glob,
+          maxResults: cap
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return jsonResult({
+          matches: [],
+          total: 0,
+          truncated: false,
+          error: err.message
+        });
+      }
+    }
+  );
 }
 
 // src/github/reviewable-lines.ts
@@ -59315,6 +59319,139 @@ function filterDiffByPaths2(diff, wanted) {
   }).join("");
 }
 
+// src/context/blast-radius.ts
+var PER_SYMBOL_GREP_CAP = 100;
+var MIN_SYMBOL_LENGTH = 4;
+var GENERIC_NAMES = /* @__PURE__ */ new Set([
+  "main",
+  "init",
+  "name",
+  "type",
+  "data",
+  "item",
+  "list",
+  "value",
+  "index",
+  "props",
+  "state",
+  "config",
+  "result",
+  "handler",
+  "callback"
+]);
+function isCallSitePath(path23) {
+  if (/(^|\/)(dist|build|vendor|node_modules|coverage|\.git)\//.test(path23)) return false;
+  if (/\.(md|lock|snap|map)$/.test(path23)) return false;
+  return true;
+}
+async function computeBlastRadius(input) {
+  const symbols = collectChangedSymbols(input.changedFiles, input.maxSymbols);
+  const cappedSymbols = symbols.slice(0, input.maxSymbols);
+  let truncated = symbols.length > cappedSymbols.length;
+  const entries = [];
+  for (const sym of cappedSymbols) {
+    let result;
+    try {
+      result = await runGitGrep({
+        pattern: sym.name,
+        cwd: input.workspaceDir,
+        caseSensitive: true,
+        wholeWord: true,
+        maxResults: PER_SYMBOL_GREP_CAP
+      });
+    } catch {
+      continue;
+    }
+    const byFile = /* @__PURE__ */ new Map();
+    for (const m2 of result.matches) {
+      if (m2.path === sym.definedIn) continue;
+      if (!isCallSitePath(m2.path)) continue;
+      if (byFile.has(m2.path)) continue;
+      byFile.set(m2.path, { path: m2.path, line: m2.line, excerpt: m2.text.trim().slice(0, 120) });
+    }
+    if (byFile.size === 0) continue;
+    const refs = [...byFile.values()];
+    const shown = refs.slice(0, input.maxRefsPerSymbol);
+    if (refs.length > shown.length || result.truncated) truncated = true;
+    entries.push({
+      symbol: sym.name,
+      defined_in: sym.definedIn,
+      referenced_by: shown,
+      reference_count: refs.length
+    });
+  }
+  return { entries, truncated };
+}
+function collectChangedSymbols(files, limit2) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    if (file.is_binary || file.is_generated || file.status === "removed") continue;
+    const extractor = extractorFor(file.language, file.path);
+    if (!extractor) continue;
+    for (const lineNo of file.added_lines) {
+      const text = file.head_line_text.get(lineNo);
+      if (!text) continue;
+      for (const name of extractor(text)) {
+        if (!isUsefulSymbol(name) || seen.has(name)) continue;
+        seen.set(name, { name, definedIn: file.path });
+        if (seen.size > limit2) return [...seen.values()];
+      }
+    }
+  }
+  return [...seen.values()];
+}
+function isUsefulSymbol(name) {
+  if (name.length < MIN_SYMBOL_LENGTH) return false;
+  if (GENERIC_NAMES.has(name.toLowerCase())) return false;
+  return true;
+}
+function extractorFor(language, path23) {
+  const lang = language.toLowerCase();
+  if (lang === "typescript" || lang === "javascript" || /\.[mc]?[jt]sx?$/.test(path23)) {
+    return extractTsJsSymbols;
+  }
+  if (lang === "python" || path23.endsWith(".py")) return extractPythonSymbols;
+  if (lang === "go" || path23.endsWith(".go")) return extractGoSymbols;
+  return void 0;
+}
+var TS_DECL_PATTERNS = [
+  /\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+interface\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+type\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+enum\s+([A-Za-z_$][\w$]*)/,
+  /\bexport\s+default\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/
+];
+function extractTsJsSymbols(line) {
+  const out = [];
+  for (const re2 of TS_DECL_PATTERNS) {
+    const m2 = line.match(re2);
+    if (m2?.[1]) out.push(m2[1]);
+  }
+  const list = line.match(/\bexport\s*\{([^}]*)\}/);
+  if (list?.[1]) {
+    for (const part of list[1].split(",")) {
+      const local = part.trim().split(/\s+as\s+/)[0]?.trim();
+      if (local && /^[A-Za-z_$][\w$]*$/.test(local)) out.push(local);
+    }
+  }
+  return out;
+}
+function extractPythonSymbols(line) {
+  const m2 = line.match(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/) ?? line.match(/^class\s+([A-Za-z_]\w*)/);
+  const name = m2?.[1];
+  if (!name || name.startsWith("_")) return [];
+  return [name];
+}
+function extractGoSymbols(line) {
+  const fn = line.match(/^func\s+(?:\([^)]*\)\s+)?([A-Z]\w*)/);
+  if (fn?.[1]) return [fn[1]];
+  const decl = line.match(/^(?:type|var|const)\s+([A-Z]\w*)/);
+  if (decl?.[1]) return [decl[1]];
+  return [];
+}
+
 // src/agent/system-prompt.ts
 function buildSystemPrompt(input) {
   const sections = [BASE_PROMPT];
@@ -59369,7 +59506,7 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
    - "This throws on null" \u2192 \`read_file_at_ref\` to see actual call sites
    - "This duplicates X" \u2192 \`grep_repo_at_ref\` to find X
    - "This breaks the pattern" \u2192 read existing usage
-   Do NOT take the diff at face value. The author may have made related changes you can't see in the hunk.
+   Do NOT take the diff at face value. The author may have made related changes you can't see in the hunk. If your user prompt includes a "Cross-file impact (blast radius)" block, it lists call sites of the symbols this PR changes \u2014 read those sites before claiming (or dismissing) a breaking change.
 6. Post findings via \`post_inline_comment\`, one per distinct issue.
 7. END with exactly one \`post_summary\` call. The runner terminates after this.
 
@@ -59508,6 +59645,14 @@ function buildUserPrompt(input) {
     );
     parts.push("");
   }
+  const blastRadius = input.blast_radius;
+  if (blastRadius && blastRadius.entries.length > 0) {
+    const block = renderBlastRadius(blastRadius);
+    if (block) {
+      parts.push(block);
+      parts.push("");
+    }
+  }
   parts.push(
     "Start by calling get_pr_metadata, then read_repo_context_file, then list_changed_files.",
     "Work through the changes and post each finding via post_inline_comment. End with post_summary."
@@ -59599,6 +59744,36 @@ function renderPriorReviewThreads(threads, maxThreads = MAX_INJECTED_PRIOR_THREA
   }
   return lines.join("\n");
 }
+var MAX_BLAST_RADIUS_BYTES = 4e3;
+function renderBlastRadius(map, maxBytes = MAX_BLAST_RADIUS_BYTES) {
+  if (map.entries.length === 0) return null;
+  const header = [
+    "## Cross-file impact (blast radius)",
+    "",
+    "Deterministic pre-pass: symbols this PR changes that are referenced elsewhere in the repo (definition file excluded). Before you post \u2014 or decide NOT to post \u2014 a breaking-change or missed-call-site finding, read the referencing sites with `read_file_at_ref` and confirm the change is compatible with them.",
+    "",
+    "This list is NOT exhaustive (the extractor is conservative); a symbol missing here may still have callers. Use it as a starting point, not proof of safety.",
+    ""
+  ].join("\n");
+  const lines = [];
+  let bytes = header.length;
+  let rendered = 0;
+  for (const entry of map.entries) {
+    const refs = entry.referenced_by.map((r2) => `${r2.path}:${r2.line}`).join(", ");
+    const extra = entry.reference_count > entry.referenced_by.length ? ` (+${entry.reference_count - entry.referenced_by.length} more file(s))` : "";
+    const line = `- \`${entry.symbol}\` (defined in ${entry.defined_in}) \u2014 referenced by ${entry.reference_count} file(s): ${refs}${extra}`;
+    if (bytes + line.length + 1 > maxBytes) break;
+    lines.push(line);
+    bytes += line.length + 1;
+    rendered += 1;
+  }
+  if (rendered === 0) return null;
+  const omitted = map.entries.length - rendered;
+  if (map.truncated || omitted > 0) {
+    lines.push("", `(additional changed symbols omitted; this is a bounded sample.)`);
+  }
+  return `${header}${lines.join("\n")}`;
+}
 
 // src/config/loader.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -59643,7 +59818,15 @@ var DEFAULT_CONFIG = {
   },
   context: {
     include: ["AGENTS.md", "CLAUDE.md"],
-    max_context_bytes: 5e4
+    max_context_bytes: 5e4,
+    // Deterministic cross-file impact pre-pass. Zero LLM cost (a few `git grep`
+    // calls over the checkout), so on by default; opt out per-repo via
+    // `context.blast_radius.enabled: false`.
+    blast_radius: {
+      enabled: true,
+      max_symbols: 30,
+      max_refs_per_symbol: 8
+    }
   },
   prompt: {
     additions: ""
@@ -59802,7 +59985,12 @@ var configSchema = external_exports.object({
   }),
   context: external_exports.object({
     include: external_exports.array(external_exports.string()),
-    max_context_bytes: external_exports.number().int().positive().max(5e5)
+    max_context_bytes: external_exports.number().int().positive().max(5e5),
+    blast_radius: external_exports.object({
+      enabled: external_exports.boolean(),
+      max_symbols: external_exports.number().int().positive().max(200),
+      max_refs_per_symbol: external_exports.number().int().positive().max(50)
+    })
   }),
   prompt: external_exports.object({
     additions: external_exports.string()
@@ -65017,7 +65205,7 @@ var pythonRequirementsParser = new PythonRequirementsParser();
 
 // src/scanners/osv-client.ts
 var DEFAULT_ENDPOINT = "https://api.osv.dev";
-var DEFAULT_TIMEOUT_MS = 3e4;
+var DEFAULT_TIMEOUT_MS2 = 3e4;
 var DEFAULT_MAX_RETRIES = 3;
 var QUERY_BATCH_LIMIT = 100;
 var BACKOFF_BASE_MS = 500;
@@ -65033,7 +65221,7 @@ var OsvClientError = class extends Error {
 function resolveOptions(opts) {
   return {
     endpoint: (opts?.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, ""),
-    timeoutMs: opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeoutMs: opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS2,
     maxRetries: opts?.maxRetries ?? DEFAULT_MAX_RETRIES,
     fetch: opts?.fetch ?? fetch
   };
@@ -66176,7 +66364,7 @@ function findWorkspaceBinary(candidates) {
 
 // src/scanners/sast/eslint.ts
 var ID = "eslint";
-var TIMEOUT_MS2 = 6e4;
+var TIMEOUT_MS = 6e4;
 var TARGET_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 var eslintLinter = {
   id: ID,
@@ -66265,8 +66453,8 @@ function runCli(bin, files, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`eslint timed out after ${TIMEOUT_MS2}ms`));
-    }, TIMEOUT_MS2);
+      reject(new Error(`eslint timed out after ${TIMEOUT_MS}ms`));
+    }, TIMEOUT_MS);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -66363,7 +66551,7 @@ ${message.message}`;
 var import_node_child_process4 = require("node:child_process");
 var import_node_path8 = __toESM(require("node:path"), 1);
 var ID2 = "ruff";
-var TIMEOUT_MS3 = 6e4;
+var TIMEOUT_MS2 = 6e4;
 var TARGET_EXTENSIONS2 = /\.(py|pyi)$/;
 var ruffLinter = {
   id: ID2,
@@ -66451,8 +66639,8 @@ function runCli2(bin, files, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`ruff timed out after ${TIMEOUT_MS3}ms`));
-    }, TIMEOUT_MS3);
+      reject(new Error(`ruff timed out after ${TIMEOUT_MS2}ms`));
+    }, TIMEOUT_MS2);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -66545,7 +66733,7 @@ ${message}`;
 // src/scanners/sast/dart.ts
 var import_node_child_process5 = require("node:child_process");
 var ID3 = "dart";
-var TIMEOUT_MS4 = 9e4;
+var TIMEOUT_MS3 = 9e4;
 var TARGET_EXTENSION = /\.dart$/;
 var dartLinter = {
   id: ID3,
@@ -66629,8 +66817,8 @@ function runCli3(files, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`dart analyze timed out after ${TIMEOUT_MS4}ms`));
-    }, TIMEOUT_MS4);
+      reject(new Error(`dart analyze timed out after ${TIMEOUT_MS3}ms`));
+    }, TIMEOUT_MS3);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -66716,7 +66904,7 @@ ${finding.message}`;
 // src/scanners/sast/actionlint.ts
 var import_node_child_process6 = require("node:child_process");
 var ID4 = "actionlint";
-var TIMEOUT_MS5 = 3e4;
+var TIMEOUT_MS4 = 3e4;
 var WORKFLOW_PATH_RE = /^\.github\/workflows\/.+\.ya?ml$/;
 var actionlintLinter = {
   id: ID4,
@@ -66786,8 +66974,8 @@ function runCli4(files, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`actionlint timed out after ${TIMEOUT_MS5}ms`));
-    }, TIMEOUT_MS5);
+      reject(new Error(`actionlint timed out after ${TIMEOUT_MS4}ms`));
+    }, TIMEOUT_MS4);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -66874,7 +67062,7 @@ ${message.message}`;
 var import_node_child_process7 = require("node:child_process");
 var import_node_path9 = __toESM(require("node:path"), 1);
 var ID5 = "knip";
-var TIMEOUT_MS6 = 12e4;
+var TIMEOUT_MS5 = 12e4;
 var TARGET_EXTENSIONS3 = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 var knipLinter = {
   id: ID5,
@@ -66996,8 +67184,8 @@ function runCli5(bin, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`knip timed out after ${TIMEOUT_MS6}ms`));
-    }, TIMEOUT_MS6);
+      reject(new Error(`knip timed out after ${TIMEOUT_MS5}ms`));
+    }, TIMEOUT_MS5);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -67103,7 +67291,7 @@ var import_node_child_process8 = require("node:child_process");
 var import_node_fs3 = require("node:fs");
 var import_node_path10 = __toESM(require("node:path"), 1);
 var ID6 = "semgrep";
-var TIMEOUT_MS7 = 18e4;
+var TIMEOUT_MS6 = 18e4;
 var PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|m|mm|scala|clj|ex|exs|sh|bash|yaml|yml|tf|hcl)$/;
 var semgrepLinter = {
   id: ID6,
@@ -67235,8 +67423,8 @@ function runCli6(files, deps, customRulesPath) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`semgrep timed out after ${TIMEOUT_MS7}ms`));
-    }, TIMEOUT_MS7);
+      reject(new Error(`semgrep timed out after ${TIMEOUT_MS6}ms`));
+    }, TIMEOUT_MS6);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -67349,7 +67537,7 @@ var import_node_child_process9 = require("node:child_process");
 var import_node_fs4 = require("node:fs");
 var import_node_path11 = __toESM(require("node:path"), 1);
 var ID7 = "tsc";
-var TIMEOUT_MS8 = 12e4;
+var TIMEOUT_MS7 = 12e4;
 var TARGET_EXTENSIONS4 = /\.(ts|tsx|cts|mts)$/;
 var DIAG_LINE_REGEX = /^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s*(.*)$/;
 var tscLinter = {
@@ -67457,8 +67645,8 @@ function runCli7(bin, deps) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`tsc timed out after ${TIMEOUT_MS8}ms`));
-    }, TIMEOUT_MS8);
+      reject(new Error(`tsc timed out after ${TIMEOUT_MS7}ms`));
+    }, TIMEOUT_MS7);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -67538,7 +67726,7 @@ var import_node_fs5 = require("node:fs");
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path12 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
-var TIMEOUT_MS9 = 12e4;
+var TIMEOUT_MS8 = 12e4;
 var TARGET_EXTENSION2 = /\.go$/;
 var GOLANGCI_INTERNAL_TIMEOUT = "110s";
 var golangLinter = {
@@ -67709,8 +67897,8 @@ function runCli8(bin, args, deps, cwd) {
       if (resolved) return;
       resolved = true;
       child2.kill("SIGKILL");
-      reject(new Error(`golangci-lint timed out after ${TIMEOUT_MS9}ms`));
-    }, TIMEOUT_MS9);
+      reject(new Error(`golangci-lint timed out after ${TIMEOUT_MS8}ms`));
+    }, TIMEOUT_MS8);
     child2.stdout.on("data", (b2) => {
       stdoutChunks.push(b2);
     });
@@ -69188,6 +69376,26 @@ async function runOrchestrator(input) {
     const losesBacking = t2.already_dismissed || config.review.sticky && t2.from_dismissable_review;
     return !losesBacking || t2.has_pushback;
   });
+  let blastRadius;
+  if (config.context.blast_radius.enabled && agentScope.prContext.files.length > 0) {
+    try {
+      blastRadius = await computeBlastRadius({
+        changedFiles: agentScope.prContext.files,
+        workspaceDir: input.workspace_dir,
+        maxSymbols: config.context.blast_radius.max_symbols,
+        maxRefsPerSymbol: config.context.blast_radius.max_refs_per_symbol
+      });
+      if (blastRadius.entries.length > 0) {
+        await logger.info(
+          `Blast radius: ${blastRadius.entries.length} changed symbol(s) referenced elsewhere in the repo.`
+        );
+      }
+    } catch (err) {
+      await logger.warn(
+        `Failed to compute blast radius: ${err.message}. Proceeding without it.`
+      );
+    }
+  }
   const buildPrompt = (findings = []) => {
     const base = buildUserPrompt({
       owner: input.owner,
@@ -69198,6 +69406,7 @@ async function runOrchestrator(input) {
       // (a user lowering that cap to reduce posted noise must not also lose
       // pushback context). Falls through to the renderer's own default cap.
       ...promptThreads.length > 0 ? { prior_threads: promptThreads } : {},
+      ...blastRadius && blastRadius.entries.length > 0 ? { blast_radius: blastRadius } : {},
       ...findings.length > 0 ? {
         scanner_findings: findings,
         // Share the post-filter cap with the prompt so we don't render

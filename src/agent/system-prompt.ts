@@ -105,7 +105,7 @@ Find real problems and propose concrete fixes. A review with 3 sharp critical fi
    - "This throws on null" → \`read_file_at_ref\` to see actual call sites
    - "This duplicates X" → \`grep_repo_at_ref\` to find X
    - "This breaks the pattern" → read existing usage
-   Do NOT take the diff at face value. The author may have made related changes you can't see in the hunk.
+   Do NOT take the diff at face value. The author may have made related changes you can't see in the hunk. If your user prompt includes a "Cross-file impact (blast radius)" block, it lists call sites of the symbols this PR changes — read those sites before claiming (or dismissing) a breaking change.
 6. Post findings via \`post_inline_comment\`, one per distinct issue.
 7. END with exactly one \`post_summary\` call. The runner terminates after this.
 

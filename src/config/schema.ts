@@ -100,6 +100,11 @@ export const configSchema = z
     context: z.object({
       include: z.array(z.string()),
       max_context_bytes: z.number().int().positive().max(500_000),
+      blast_radius: z.object({
+        enabled: z.boolean(),
+        max_symbols: z.number().int().positive().max(200),
+        max_refs_per_symbol: z.number().int().positive().max(50),
+      }),
     }),
 
     prompt: z.object({
