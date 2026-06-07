@@ -72,6 +72,12 @@ export function csrfRejection(
   return null;
 }
 
+/** Bracket an IPv6 literal (e.g. `::1` → `[::1]`) so it's valid in an HTTP URL
+ *  authority. IPv4 / hostnames pass through unchanged. */
+export function hostForUrl(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}
+
 /** Reject requests whose Host header isn't loopback (DNS-rebinding guard). */
 function hostAllowed(req: IncomingMessage, port: number): boolean {
   const host = req.headers.host;
@@ -95,6 +101,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 export async function startDashboard(opts: DashboardOptions): Promise<void> {
   const host = opts.host ?? '127.0.0.1';
   assertLoopbackBind(host); // before anything else — never bind externally
+  const authority = `${hostForUrl(host)}:${opts.port}`;
   const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
   const assetDir = materializeDashboard(pkg.version);
 
@@ -105,7 +112,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
         res.end('Forbidden');
         return;
       }
-      const url = new URL(req.url ?? '/', `http://${host}:${opts.port}`);
+      const url = new URL(req.url ?? '/', `http://${authority}`);
       const method = req.method ?? 'GET';
 
       if (url.pathname.startsWith('/api/')) {
@@ -138,7 +145,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     server.listen(opts.port, host, resolveListen);
   });
 
-  const urlStr = `http://${host}:${opts.port}`;
+  const urlStr = `http://${authority}`;
   await logger.info(`VOR dashboard running at ${urlStr} (workspace: ${process.cwd()})`);
   await logger.info('Press Ctrl+C to stop.');
   if (opts.open) openBrowser(urlStr);

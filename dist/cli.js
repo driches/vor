@@ -86056,6 +86056,9 @@ function csrfRejection(method, headers, port) {
   }
   return null;
 }
+function hostForUrl(host) {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
 function hostAllowed(req, port) {
   const host = req.headers.host;
   if (!host) return false;
@@ -86076,6 +86079,7 @@ async function readBody(req) {
 async function startDashboard(opts) {
   const host = opts.host ?? "127.0.0.1";
   assertLoopbackBind(host);
+  const authority = `${hostForUrl(host)}:${opts.port}`;
   const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
   const assetDir = materializeDashboard(package_default.version);
   const server = (0, import_node_http.createServer)((req, res) => {
@@ -86085,7 +86089,7 @@ async function startDashboard(opts) {
         res.end("Forbidden");
         return;
       }
-      const url = new URL(req.url ?? "/", `http://${host}:${opts.port}`);
+      const url = new URL(req.url ?? "/", `http://${authority}`);
       const method = req.method ?? "GET";
       if (url.pathname.startsWith("/api/")) {
         const rejection = csrfRejection(
@@ -86114,7 +86118,7 @@ async function startDashboard(opts) {
   await new Promise((resolveListen) => {
     server.listen(opts.port, host, resolveListen);
   });
-  const urlStr = `http://${host}:${opts.port}`;
+  const urlStr = `http://${authority}`;
   await logger.info(`VOR dashboard running at ${urlStr} (workspace: ${process.cwd()})`);
   await logger.info("Press Ctrl+C to stop.");
   if (opts.open) openBrowser(urlStr);

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { csrfRejection, startDashboard } from './server.js';
+import { csrfRejection, hostForUrl, startDashboard } from './server.js';
+
+describe('hostForUrl', () => {
+  it('brackets IPv6 literals and leaves IPv4/hostnames alone', () => {
+    expect(hostForUrl('::1')).toBe('[::1]');
+    expect(hostForUrl('127.0.0.1')).toBe('127.0.0.1');
+    expect(hostForUrl('localhost')).toBe('localhost');
+    expect(hostForUrl('[::1]')).toBe('[::1]'); // already bracketed
+  });
+
+  it('produces a URL Node can parse for an IPv6 host', () => {
+    expect(() => new URL('/api/runs', `http://${hostForUrl('::1')}:4310`)).not.toThrow();
+  });
+});
 
 describe('startDashboard bind guard', () => {
   it('refuses to bind to a non-loopback host', async () => {
