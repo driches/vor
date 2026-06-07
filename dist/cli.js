@@ -95070,7 +95070,7 @@ function fail(message) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 function createHandlers(deps) {
-  const workspace2 = deps.workspace ?? process.cwd();
+  const workspace2 = repoRoot(deps.workspace ?? process.cwd());
   return {
     review_local_changes: async (args) => {
       try {

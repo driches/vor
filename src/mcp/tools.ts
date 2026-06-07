@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loadConfigFromString } from '../config/loader.js';
+import { repoRoot } from '../local/git.js';
 import { runLocalReview as defaultRunLocalReview } from '../local/review.js';
 import {
   getRun as defaultGetRun,
@@ -72,7 +73,11 @@ function fail(message: string): ToolResult {
 }
 
 export function createHandlers(deps: VorToolDeps) {
-  const workspace = deps.workspace ?? process.cwd();
+  // Resolve to the repo root so review writes, history reads (list_runs/get_run),
+  // and get_config all key off the same path — matching runLocalReview, which
+  // normalizes internally. Otherwise an MCP session in a subdir would save runs
+  // under the root slug but read them under the subdir slug.
+  const workspace = repoRoot(deps.workspace ?? process.cwd());
 
   return {
     review_local_changes: async (args: ReviewArgs): Promise<ToolResult> => {

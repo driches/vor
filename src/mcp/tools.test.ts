@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { repoRoot } from '../local/git.js';
 import type { LocalRunRecord } from '../local/types.js';
 import { createHandlers, type VorToolDeps } from './tools.js';
 
@@ -94,5 +99,19 @@ describe('MCP tool handlers', () => {
     expect((parse(await h.get_run({ id: 'r1' })) as { id: string }).id).toBe('r1');
     const missing = await h.get_run({ id: 'nope' });
     expect(missing.isError).toBe(true);
+  });
+
+  it('keys history off the repo root when started in a subdirectory', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-mcp-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(join(repo, 'pkg', 'nested'), { recursive: true });
+    try {
+      const d = deps({ workspace: join(repo, 'pkg', 'nested') });
+      await createHandlers(d).list_runs({});
+      // Resolved to the repo root, not the nested subdirectory.
+      expect(d.listRuns).toHaveBeenCalledWith(repoRoot(repo), expect.anything());
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
