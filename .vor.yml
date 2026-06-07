@@ -1,0 +1,5 @@
+security:
+  scanners:
+    image_ocr:
+      enabled: true
+      # Default 10 MB cap left in place to exercise the size-cap skip path.
