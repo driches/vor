@@ -85,6 +85,42 @@ function isImageFile(f: ChangedFile): boolean {
   return f.is_binary && IMAGE_EXTENSIONS.test(f.path) && f.status !== 'removed';
 }
 
+/**
+ * Run a single OCR call so it can be cancelled. `tesseract.recognize` ignores
+ * abort signals and can spend minutes on a malformed/huge screenshot, so a scan
+ * that loses the per-scanner timeout race (see scanners/runner.ts) would keep a
+ * live `worker_threads` thread running long after the timeout result was
+ * returned. When the signal fires we terminate the worker — which tears down
+ * that thread — and report the call as aborted so the loop stops promptly.
+ * Returns `'aborted'` on cancellation, otherwise the OCR result. `recognize` is
+ * contracted not to throw; a rejection means the worker was torn down, which we
+ * also treat as aborted.
+ */
+function recognizeCancellable(
+  engine: OcrEngine,
+  bytes: Buffer,
+  signal: AbortSignal,
+): Promise<{ text: string; confidence: number } | 'aborted'> {
+  if (signal.aborted) return Promise.resolve('aborted');
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      void engine.terminate();
+      resolve('aborted');
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void engine.recognize(bytes).then(
+      (res) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(res);
+      },
+      () => {
+        signal.removeEventListener('abort', onAbort);
+        resolve('aborted');
+      },
+    );
+  });
+}
+
 export function createImageOcrScanner(options: ImageOcrScannerOptions = {}): Scanner {
   const log = options.logger ?? defaultLogger;
   const patterns = options.patterns ?? DEFAULT_SECRET_PATTERNS;
@@ -144,7 +180,9 @@ export function createImageOcrScanner(options: ImageOcrScannerOptions = {}): Sca
           }
           if (bytes === null) continue;
 
-          const { text, confidence } = await ocrEngine.recognize(bytes);
+          const ocr = await recognizeCancellable(ocrEngine, bytes, deps.signal);
+          if (ocr === 'aborted') break;
+          const { text, confidence } = ocr;
           if (text.trim() === '') continue;
 
           let matchOrdinal = 0;

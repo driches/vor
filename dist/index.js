@@ -70679,6 +70679,26 @@ function buildDescription3(pattern) {
 function isImageFile(f2) {
   return f2.is_binary && IMAGE_EXTENSIONS2.test(f2.path) && f2.status !== "removed";
 }
+function recognizeCancellable(engine, bytes, signal) {
+  if (signal.aborted) return Promise.resolve("aborted");
+  return new Promise((resolve3) => {
+    const onAbort = () => {
+      void engine.terminate();
+      resolve3("aborted");
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void engine.recognize(bytes).then(
+      (res) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve3(res);
+      },
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve3("aborted");
+      }
+    );
+  });
+}
 function createImageOcrScanner(options = {}) {
   const log2 = options.logger ?? logger;
   const patterns = options.patterns ?? DEFAULT_SECRET_PATTERNS;
@@ -70730,7 +70750,9 @@ function createImageOcrScanner(options = {}) {
             continue;
           }
           if (bytes === null) continue;
-          const { text, confidence } = await ocrEngine.recognize(bytes);
+          const ocr = await recognizeCancellable(ocrEngine, bytes, deps.signal);
+          if (ocr === "aborted") break;
+          const { text, confidence } = ocr;
           if (text.trim() === "") continue;
           let matchOrdinal = 0;
           for (const pattern of patterns) {

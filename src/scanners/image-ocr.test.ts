@@ -128,6 +128,36 @@ describe('createImageOcrScanner scan()', () => {
     expect(engine.terminated()).toBe(true);
   });
 
+  it('cancels a hung recognize when the signal aborts and terminates the worker', async () => {
+    // recognize() never resolves on its own — only the abort path can unblock
+    // the scan, proving the OCR call observes the signal rather than outliving
+    // the per-scanner timeout with a live worker thread.
+    let terminated = false;
+    const engine: OcrEngine = {
+      recognize: vi.fn().mockReturnValue(new Promise<OcrResult>(() => {})),
+      terminate: vi.fn().mockImplementation(async () => {
+        terminated = true;
+      }),
+    };
+    const controller = new AbortController();
+    const scanner = createImageOcrScanner({ engine });
+    const scanPromise = scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'docs/big.png' })],
+        signal: controller.signal,
+      }),
+    );
+    // Let the scan reach the in-flight recognize (and attach its abort
+    // listener), then abort as the per-scanner timeout would.
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
+
+    const result = await scanPromise;
+    expect(engine.recognize).toHaveBeenCalledTimes(1);
+    expect(result.findings).toHaveLength(0);
+    expect(terminated).toBe(true);
+  });
+
   it('registers surfaced secrets with the redactor', async () => {
     const engine = makeEngine({ text: `${PLANTED_AWS_KEY}`, confidence: 90 });
     const scanner = createImageOcrScanner({ engine });
