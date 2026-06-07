@@ -1,6 +1,6 @@
 {
   "name": "@driches/vor",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Vor — AI code review GitHub Action with inline comments and parallel vulnerability scanning, via Claude or OpenAI",
   "license": "MIT",
   "author": "Doug Riches",
