@@ -11,13 +11,17 @@
  */
 
 import { runOrchestrator } from '../orchestrator.js';
+import { logger } from '../util/logger.js';
 import {
+  addDetachedWorktree,
   authorFromHead,
   bodyFromHead,
   changedFiles,
+  currentHeadSha,
   fileContentAtRef,
   fileContentOnDisk,
   hasWorkingTreeChanges,
+  removeWorktree,
   repoRoot,
   resolveRef,
   titleFromHead,
@@ -145,21 +149,46 @@ export async function runLocalReview(
     resolveContent,
   });
 
-  const result = await runner({
-    owner: 'local',
-    repo: 'local',
-    pull_number: 0,
-    anthropic_api_key: opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY?.trim() ?? '',
-    openai_api_key: opts.openaiApiKey ?? process.env.OPENAI_API_KEY?.trim() ?? '',
-    // Unused by the FakeOctokit, but the orchestrator passes it to
-    // logger.setSecret(); a non-empty placeholder keeps that contract happy.
-    github_token: 'local-review-placeholder-token',
-    ...(opts.model !== undefined ? { model_override: opts.model } : {}),
-    config_path: configPath,
-    dry_run: true,
-    workspace_dir: workspace,
-    octokitFactory: () => octokit,
-  });
+  // Disk-backed scanners (eslint/tsc) and grep/blast-radius run against
+  // `workspace_dir`. In range mode where the requested head isn't what's checked
+  // out, materialize that head in a throwaway worktree so their findings match
+  // the diff instead of the current branch. The agent diff/content already come
+  // from the object DB via the FakeOctokit, so they're unaffected.
+  let orchestratorWorkspace = workspace;
+  let cleanupWorktree: (() => void) | undefined;
+  if (resolved === 'range') {
+    const current = currentHeadSha(workspace);
+    if (current && current !== headSha) {
+      const tree = addDetachedWorktree(workspace, headSha);
+      orchestratorWorkspace = tree;
+      cleanupWorktree = () => removeWorktree(workspace, tree);
+      await logger.info(
+        `Requested head ${headSha.slice(0, 7)} differs from the checkout ` +
+          `(${current.slice(0, 7)}); running disk-backed scanners against a temporary worktree.`,
+      );
+    }
+  }
+
+  let result;
+  try {
+    result = await runner({
+      owner: 'local',
+      repo: 'local',
+      pull_number: 0,
+      anthropic_api_key: opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY?.trim() ?? '',
+      openai_api_key: opts.openaiApiKey ?? process.env.OPENAI_API_KEY?.trim() ?? '',
+      // Unused by the FakeOctokit, but the orchestrator passes it to
+      // logger.setSecret(); a non-empty placeholder keeps that contract happy.
+      github_token: 'local-review-placeholder-token',
+      ...(opts.model !== undefined ? { model_override: opts.model } : {}),
+      config_path: configPath,
+      dry_run: true,
+      workspace_dir: orchestratorWorkspace,
+      octokitFactory: () => octokit,
+    });
+  } finally {
+    cleanupWorktree?.();
+  }
 
   return {
     id: newRunId(),

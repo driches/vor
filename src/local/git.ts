@@ -10,8 +10,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export interface ChangedFile {
   path: string;
@@ -199,5 +200,52 @@ export function bodyFromHead(workspace: string): string {
     return git(['log', '-1', '--format=%b', 'HEAD'], workspace).trim();
   } catch {
     return '';
+  }
+}
+
+/** SHA currently checked out on disk, or '' when HEAD can't be resolved. */
+export function currentHeadSha(workspace: string): string {
+  try {
+    return resolveRef(workspace, 'HEAD');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Create a detached linked worktree at `sha` so disk-backed scanners and the
+ * grep/blast-radius tools run against the requested tree rather than whatever is
+ * checked out. A fresh worktree has no installed dependencies, so the main
+ * checkout's node_modules is symlinked in (best-effort) — without it the SAST
+ * tools (eslint/tsc/…) would silently no-op. Returns the worktree path; pair
+ * with removeWorktree() in a finally.
+ */
+export function addDetachedWorktree(workspace: string, sha: string): string {
+  // git worktree add wants a path that doesn't yet exist; mkdtemp gives us a
+  // unique parent, and git creates the `tree` child under it.
+  const parent = mkdtempSync(join(tmpdir(), 'vor-worktree-'));
+  const dir = join(parent, 'tree');
+  git(['worktree', 'add', '--detach', '--quiet', dir, sha], workspace);
+  try {
+    const nm = join(workspace, 'node_modules');
+    if (existsSync(nm)) symlinkSync(nm, join(dir, 'node_modules'), 'dir');
+  } catch {
+    // Best-effort: the agent diff/content are still anchored to the head; only
+    // dependency-backed linters degrade to a no-op.
+  }
+  return dir;
+}
+
+/** Remove a worktree created by addDetachedWorktree and its temp parent. */
+export function removeWorktree(workspace: string, dir: string): void {
+  try {
+    git(['worktree', 'remove', '--force', dir], workspace);
+  } catch {
+    // already gone / git refused — fall through to rm the temp parent
+  }
+  try {
+    rmSync(dirname(dir), { recursive: true, force: true });
+  } catch {
+    // best-effort cleanup
   }
 }

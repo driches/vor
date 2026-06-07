@@ -58519,6 +58519,7 @@ function loadConfigStrict(yaml) {
 // src/local/git.ts
 var import_node_child_process = require("node:child_process");
 var import_node_fs = require("node:fs");
+var import_node_os = require("node:os");
 var import_node_path = require("node:path");
 function git(args, cwd) {
   return (0, import_node_child_process.execFileSync)("git", args, {
@@ -58647,6 +58648,34 @@ function bodyFromHead(workspace2) {
     return git(["log", "-1", "--format=%b", "HEAD"], workspace2).trim();
   } catch {
     return "";
+  }
+}
+function currentHeadSha(workspace2) {
+  try {
+    return resolveRef(workspace2, "HEAD");
+  } catch {
+    return "";
+  }
+}
+function addDetachedWorktree(workspace2, sha) {
+  const parent = (0, import_node_fs.mkdtempSync)((0, import_node_path.join)((0, import_node_os.tmpdir)(), "vor-worktree-"));
+  const dir = (0, import_node_path.join)(parent, "tree");
+  git(["worktree", "add", "--detach", "--quiet", dir, sha], workspace2);
+  try {
+    const nm = (0, import_node_path.join)(workspace2, "node_modules");
+    if ((0, import_node_fs.existsSync)(nm)) (0, import_node_fs.symlinkSync)(nm, (0, import_node_path.join)(dir, "node_modules"), "dir");
+  } catch {
+  }
+  return dir;
+}
+function removeWorktree(workspace2, dir) {
+  try {
+    git(["worktree", "remove", "--force", dir], workspace2);
+  } catch {
+  }
+  try {
+    (0, import_node_fs.rmSync)((0, import_node_path.dirname)(dir), { recursive: true, force: true });
+  } catch {
   }
 }
 
@@ -83649,7 +83678,7 @@ function renderDescription6(diag) {
 // src/scanners/sast/golang.ts
 var import_node_child_process11 = require("node:child_process");
 var import_node_fs7 = require("node:fs");
-var import_node_os = __toESM(require("node:os"), 1);
+var import_node_os2 = __toESM(require("node:os"), 1);
 var import_node_path14 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
 var TIMEOUT_MS8 = 12e4;
@@ -83781,7 +83810,7 @@ async function runWithFallback(bin, dirs, deps, cwd) {
   }
 }
 async function runV2ToFile(bin, common, dirs, deps, cwd) {
-  const tmpDir = (0, import_node_fs7.mkdtempSync)(import_node_path14.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
+  const tmpDir = (0, import_node_fs7.mkdtempSync)(import_node_path14.default.join(import_node_os2.default.tmpdir(), "vor-golangci-"));
   const reportPath = import_node_path14.default.join(tmpDir, "report.json");
   const pathArg = bin.needsShell ? `"${reportPath}"` : reportPath;
   try {
@@ -85721,11 +85750,11 @@ function newPathFromSection(section) {
 // src/local/store.ts
 var import_node_crypto6 = require("node:crypto");
 var import_node_fs9 = require("node:fs");
-var import_node_os2 = require("node:os");
+var import_node_os3 = require("node:os");
 var import_node_path20 = require("node:path");
 function vorHome() {
   const override = process.env.VOR_HOME?.trim();
-  return override && override.length > 0 ? (0, import_node_path20.resolve)(override) : (0, import_node_path20.join)((0, import_node_os2.homedir)(), ".vor");
+  return override && override.length > 0 ? (0, import_node_path20.resolve)(override) : (0, import_node_path20.join)((0, import_node_os3.homedir)(), ".vor");
 }
 function projectSlug(workspace2) {
   const abs = (0, import_node_path20.resolve)(workspace2);
@@ -85842,21 +85871,39 @@ async function runLocalReview(opts = {}, deps = {}) {
     },
     resolveContent
   });
-  const result = await runner({
-    owner: "local",
-    repo: "local",
-    pull_number: 0,
-    anthropic_api_key: opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY?.trim() ?? "",
-    openai_api_key: opts.openaiApiKey ?? process.env.OPENAI_API_KEY?.trim() ?? "",
-    // Unused by the FakeOctokit, but the orchestrator passes it to
-    // logger.setSecret(); a non-empty placeholder keeps that contract happy.
-    github_token: "local-review-placeholder-token",
-    ...opts.model !== void 0 ? { model_override: opts.model } : {},
-    config_path: configPath,
-    dry_run: true,
-    workspace_dir: workspace2,
-    octokitFactory: () => octokit
-  });
+  let orchestratorWorkspace = workspace2;
+  let cleanupWorktree;
+  if (resolved === "range") {
+    const current = currentHeadSha(workspace2);
+    if (current && current !== headSha) {
+      const tree = addDetachedWorktree(workspace2, headSha);
+      orchestratorWorkspace = tree;
+      cleanupWorktree = () => removeWorktree(workspace2, tree);
+      await logger.info(
+        `Requested head ${headSha.slice(0, 7)} differs from the checkout (${current.slice(0, 7)}); running disk-backed scanners against a temporary worktree.`
+      );
+    }
+  }
+  let result;
+  try {
+    result = await runner({
+      owner: "local",
+      repo: "local",
+      pull_number: 0,
+      anthropic_api_key: opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY?.trim() ?? "",
+      openai_api_key: opts.openaiApiKey ?? process.env.OPENAI_API_KEY?.trim() ?? "",
+      // Unused by the FakeOctokit, but the orchestrator passes it to
+      // logger.setSecret(); a non-empty placeholder keeps that contract happy.
+      github_token: "local-review-placeholder-token",
+      ...opts.model !== void 0 ? { model_override: opts.model } : {},
+      config_path: configPath,
+      dry_run: true,
+      workspace_dir: orchestratorWorkspace,
+      octokitFactory: () => octokit
+    });
+  } finally {
+    cleanupWorktree?.();
+  }
   return {
     id: newRunId(),
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),

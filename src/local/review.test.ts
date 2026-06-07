@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorInput, OrchestratorOutput } from '../orchestrator.js';
@@ -8,6 +8,10 @@ import { NothingToReviewError, runLocalReview } from './review.js';
 
 function g(repo: string, args: string[]): void {
   execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+}
+
+function gOut(repo: string, args: string[]): string {
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf-8' }).trim();
 }
 
 const cannedResult: OrchestratorOutput = {
@@ -85,5 +89,44 @@ describe('runLocalReview', () => {
     await expect(
       runLocalReview({ workspace: repo, target: 'range', base: 'HEAD', head: 'HEAD' }),
     ).rejects.toBeInstanceOf(NothingToReviewError);
+  });
+
+  it('materializes the head tree in a worktree when the checkout differs', async () => {
+    const r = mkdtempSync(join(tmpdir(), 'vor-wt-'));
+    g(r, ['init', '-q']);
+    g(r, ['config', 'user.email', 'test@example.com']);
+    g(r, ['config', 'user.name', 'Test']);
+    g(r, ['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 1;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'first']);
+    const firstSha = gOut(r, ['rev-parse', 'HEAD']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 2;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'second']);
+    const secondSha = gOut(r, ['rev-parse', 'HEAD']);
+    // Check out the OLD commit so the on-disk tree (v1) differs from head (v2).
+    g(r, ['checkout', '-q', firstSha]);
+
+    try {
+      let seenWorkspace = '';
+      let contentInTree = '';
+      const spy = vi.fn(async (input: OrchestratorInput) => {
+        seenWorkspace = input.workspace_dir;
+        contentInTree = readFileSync(join(seenWorkspace, 'a.ts'), 'utf-8');
+        return cannedResult;
+      });
+      await runLocalReview(
+        { workspace: r, target: 'range', base: firstSha, head: secondSha },
+        { runOrchestratorImpl: spy },
+      );
+      // Ran against a throwaway worktree holding the head tree, not the checkout.
+      expect(seenWorkspace).not.toBe(r);
+      expect(contentInTree).toBe('export const a = 2;\n');
+      // Cleaned up after the run.
+      expect(existsSync(seenWorkspace)).toBe(false);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
   });
 });
