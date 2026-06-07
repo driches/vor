@@ -138,5 +138,29 @@ describe('FileReader', () => {
       await reader.readBinary({ owner: 'o', repo: 'r', path: 'a.png', ref: 'x' });
       expect(oct.rest.repos.getContent).toHaveBeenCalledTimes(1); // second served from cache
     });
+
+    it('falls back to the Git Blobs API when the Contents API omits inline content', async () => {
+      // GitHub returns `encoding: "none"` with empty content for blobs over
+      // 1 MB; readBinary must fetch the blob by SHA rather than choke on it.
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00, 0x10]);
+      const getBlob = vi.fn().mockResolvedValue({
+        data: { content: png.toString('base64'), encoding: 'base64' },
+      });
+      const oct = {
+        rest: {
+          repos: {
+            getContent: vi.fn().mockResolvedValue({
+              data: { type: 'file', content: '', encoding: 'none', sha: 'blobsha123' },
+            }),
+          },
+          git: { getBlob },
+        },
+      };
+      const reader = new FileReader(oct as never);
+      const out = await reader.readBinary({ owner: 'o', repo: 'r', path: 'big.png', ref: 'x' });
+      expect(out).not.toBeNull();
+      expect(Buffer.compare(out!, png)).toBe(0);
+      expect(getBlob).toHaveBeenCalledWith({ owner: 'o', repo: 'r', file_sha: 'blobsha123' });
+    });
   });
 });

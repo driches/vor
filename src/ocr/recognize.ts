@@ -15,6 +15,7 @@
  * throwing — a review must never fail because OCR was unavailable.
  */
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { logger as defaultLogger } from '../util/logger.js';
@@ -116,7 +117,12 @@ export function createTesseractEngine(options: TesseractEngineOptions = {}): Ocr
             langPath: assetsDir,
             cachePath: assetsDir,
             gzip: false,
-            workerPath: requireResolveSafe('tesseract.js/src/worker-script/node/index.js'),
+            workerPath: resolveWorkerPath(assetsDir),
+            // corePath is browser-only — on node, tesseract.js's worker selects
+            // and `require`s the core itself (see scripts/build.ts). Left as a
+            // best-effort dev resolution; undefined in the bundled Action, where
+            // the worker's inlined loaders read the vendored .wasm cores from
+            // `assetsDir`.
             corePath: requireResolveSafe('tesseract.js-core/tesseract-core-simd-lstm.js'),
           });
           return worker;
@@ -195,4 +201,18 @@ function requireResolveSafe(spec: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Resolve the `worker_threads` entry tesseract.js spawns. The shipped Action
+ * has no node_modules, so it can't `require.resolve` the package worker;
+ * `npm run build` bundles a self-contained worker into `assetsDir`
+ * (`tesseract-worker.js`) for exactly this case. Prefer that vendored bundle
+ * when present, falling back to the installed package for local/dev runs (where
+ * the bundle hasn't been built but node_modules exists).
+ */
+function resolveWorkerPath(assetsDir: string): string | undefined {
+  const vendored = path.join(assetsDir, 'tesseract-worker.cjs');
+  if (existsSync(vendored)) return vendored;
+  return requireResolveSafe('tesseract.js/src/worker-script/node/index.js');
 }

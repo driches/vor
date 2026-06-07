@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // driches/vor — built bundle (do not edit by hand)
+const import_meta_url = require("node:url").pathToFileURL(__filename).href;
 "use strict";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -27383,6 +27384,1215 @@ var init_core = __esm({
   }
 });
 
+// node_modules/regenerator-runtime/runtime.js
+var require_runtime = __commonJS({
+  "node_modules/regenerator-runtime/runtime.js"(exports2, module2) {
+    var runtime = (function(exports3) {
+      "use strict";
+      var Op = Object.prototype;
+      var hasOwn3 = Op.hasOwnProperty;
+      var defineProperty = Object.defineProperty || function(obj, key, desc) {
+        obj[key] = desc.value;
+      };
+      var undefined2;
+      var $Symbol = typeof Symbol === "function" ? Symbol : {};
+      var iteratorSymbol = $Symbol.iterator || "@@iterator";
+      var asyncIteratorSymbol = $Symbol.asyncIterator || "@@asyncIterator";
+      var toStringTagSymbol = $Symbol.toStringTag || "@@toStringTag";
+      function define2(obj, key, value) {
+        Object.defineProperty(obj, key, {
+          value,
+          enumerable: true,
+          configurable: true,
+          writable: true
+        });
+        return obj[key];
+      }
+      try {
+        define2({}, "");
+      } catch (err) {
+        define2 = function(obj, key, value) {
+          return obj[key] = value;
+        };
+      }
+      function wrap(innerFn, outerFn, self2, tryLocsList) {
+        var protoGenerator = outerFn && outerFn.prototype instanceof Generator ? outerFn : Generator;
+        var generator = Object.create(protoGenerator.prototype);
+        var context = new Context(tryLocsList || []);
+        defineProperty(generator, "_invoke", { value: makeInvokeMethod(innerFn, self2, context) });
+        return generator;
+      }
+      exports3.wrap = wrap;
+      function tryCatch(fn, obj, arg) {
+        try {
+          return { type: "normal", arg: fn.call(obj, arg) };
+        } catch (err) {
+          return { type: "throw", arg: err };
+        }
+      }
+      var GenStateSuspendedStart = "suspendedStart";
+      var GenStateSuspendedYield = "suspendedYield";
+      var GenStateExecuting = "executing";
+      var GenStateCompleted = "completed";
+      var ContinueSentinel = {};
+      function Generator() {
+      }
+      function GeneratorFunction() {
+      }
+      function GeneratorFunctionPrototype() {
+      }
+      var IteratorPrototype = {};
+      define2(IteratorPrototype, iteratorSymbol, function() {
+        return this;
+      });
+      var getProto = Object.getPrototypeOf;
+      var NativeIteratorPrototype = getProto && getProto(getProto(values([])));
+      if (NativeIteratorPrototype && NativeIteratorPrototype !== Op && hasOwn3.call(NativeIteratorPrototype, iteratorSymbol)) {
+        IteratorPrototype = NativeIteratorPrototype;
+      }
+      var Gp = GeneratorFunctionPrototype.prototype = Generator.prototype = Object.create(IteratorPrototype);
+      GeneratorFunction.prototype = GeneratorFunctionPrototype;
+      defineProperty(Gp, "constructor", { value: GeneratorFunctionPrototype, configurable: true });
+      defineProperty(
+        GeneratorFunctionPrototype,
+        "constructor",
+        { value: GeneratorFunction, configurable: true }
+      );
+      GeneratorFunction.displayName = define2(
+        GeneratorFunctionPrototype,
+        toStringTagSymbol,
+        "GeneratorFunction"
+      );
+      function defineIteratorMethods(prototype) {
+        ["next", "throw", "return"].forEach(function(method) {
+          define2(prototype, method, function(arg) {
+            return this._invoke(method, arg);
+          });
+        });
+      }
+      exports3.isGeneratorFunction = function(genFun) {
+        var ctor = typeof genFun === "function" && genFun.constructor;
+        return ctor ? ctor === GeneratorFunction || // For the native GeneratorFunction constructor, the best we can
+        // do is to check its .name property.
+        (ctor.displayName || ctor.name) === "GeneratorFunction" : false;
+      };
+      exports3.mark = function(genFun) {
+        if (Object.setPrototypeOf) {
+          Object.setPrototypeOf(genFun, GeneratorFunctionPrototype);
+        } else {
+          genFun.__proto__ = GeneratorFunctionPrototype;
+          define2(genFun, toStringTagSymbol, "GeneratorFunction");
+        }
+        genFun.prototype = Object.create(Gp);
+        return genFun;
+      };
+      exports3.awrap = function(arg) {
+        return { __await: arg };
+      };
+      function AsyncIterator(generator, PromiseImpl) {
+        function invoke(method, arg, resolve3, reject) {
+          var record = tryCatch(generator[method], generator, arg);
+          if (record.type === "throw") {
+            reject(record.arg);
+          } else {
+            var result = record.arg;
+            var value = result.value;
+            if (value && typeof value === "object" && hasOwn3.call(value, "__await")) {
+              return PromiseImpl.resolve(value.__await).then(function(value2) {
+                invoke("next", value2, resolve3, reject);
+              }, function(err) {
+                invoke("throw", err, resolve3, reject);
+              });
+            }
+            return PromiseImpl.resolve(value).then(function(unwrapped) {
+              result.value = unwrapped;
+              resolve3(result);
+            }, function(error2) {
+              return invoke("throw", error2, resolve3, reject);
+            });
+          }
+        }
+        var previousPromise;
+        function enqueue(method, arg) {
+          function callInvokeWithMethodAndArg() {
+            return new PromiseImpl(function(resolve3, reject) {
+              invoke(method, arg, resolve3, reject);
+            });
+          }
+          return previousPromise = // If enqueue has been called before, then we want to wait until
+          // all previous Promises have been resolved before calling invoke,
+          // so that results are always delivered in the correct order. If
+          // enqueue has not been called before, then it is important to
+          // call invoke immediately, without waiting on a callback to fire,
+          // so that the async generator function has the opportunity to do
+          // any necessary setup in a predictable way. This predictability
+          // is why the Promise constructor synchronously invokes its
+          // executor callback, and why async functions synchronously
+          // execute code before the first await. Since we implement simple
+          // async functions in terms of async generators, it is especially
+          // important to get this right, even though it requires care.
+          previousPromise ? previousPromise.then(
+            callInvokeWithMethodAndArg,
+            // Avoid propagating failures to Promises returned by later
+            // invocations of the iterator.
+            callInvokeWithMethodAndArg
+          ) : callInvokeWithMethodAndArg();
+        }
+        defineProperty(this, "_invoke", { value: enqueue });
+      }
+      defineIteratorMethods(AsyncIterator.prototype);
+      define2(AsyncIterator.prototype, asyncIteratorSymbol, function() {
+        return this;
+      });
+      exports3.AsyncIterator = AsyncIterator;
+      exports3.async = function(innerFn, outerFn, self2, tryLocsList, PromiseImpl) {
+        if (PromiseImpl === void 0) PromiseImpl = Promise;
+        var iter = new AsyncIterator(
+          wrap(innerFn, outerFn, self2, tryLocsList),
+          PromiseImpl
+        );
+        return exports3.isGeneratorFunction(outerFn) ? iter : iter.next().then(function(result) {
+          return result.done ? result.value : iter.next();
+        });
+      };
+      function makeInvokeMethod(innerFn, self2, context) {
+        var state = GenStateSuspendedStart;
+        return function invoke(method, arg) {
+          if (state === GenStateExecuting) {
+            throw new Error("Generator is already running");
+          }
+          if (state === GenStateCompleted) {
+            if (method === "throw") {
+              throw arg;
+            }
+            return doneResult();
+          }
+          context.method = method;
+          context.arg = arg;
+          while (true) {
+            var delegate = context.delegate;
+            if (delegate) {
+              var delegateResult = maybeInvokeDelegate(delegate, context);
+              if (delegateResult) {
+                if (delegateResult === ContinueSentinel) continue;
+                return delegateResult;
+              }
+            }
+            if (context.method === "next") {
+              context.sent = context._sent = context.arg;
+            } else if (context.method === "throw") {
+              if (state === GenStateSuspendedStart) {
+                state = GenStateCompleted;
+                throw context.arg;
+              }
+              context.dispatchException(context.arg);
+            } else if (context.method === "return") {
+              context.abrupt("return", context.arg);
+            }
+            state = GenStateExecuting;
+            var record = tryCatch(innerFn, self2, context);
+            if (record.type === "normal") {
+              state = context.done ? GenStateCompleted : GenStateSuspendedYield;
+              if (record.arg === ContinueSentinel) {
+                continue;
+              }
+              return {
+                value: record.arg,
+                done: context.done
+              };
+            } else if (record.type === "throw") {
+              state = GenStateCompleted;
+              context.method = "throw";
+              context.arg = record.arg;
+            }
+          }
+        };
+      }
+      function maybeInvokeDelegate(delegate, context) {
+        var methodName = context.method;
+        var method = delegate.iterator[methodName];
+        if (method === undefined2) {
+          context.delegate = null;
+          if (methodName === "throw" && delegate.iterator["return"]) {
+            context.method = "return";
+            context.arg = undefined2;
+            maybeInvokeDelegate(delegate, context);
+            if (context.method === "throw") {
+              return ContinueSentinel;
+            }
+          }
+          if (methodName !== "return") {
+            context.method = "throw";
+            context.arg = new TypeError(
+              "The iterator does not provide a '" + methodName + "' method"
+            );
+          }
+          return ContinueSentinel;
+        }
+        var record = tryCatch(method, delegate.iterator, context.arg);
+        if (record.type === "throw") {
+          context.method = "throw";
+          context.arg = record.arg;
+          context.delegate = null;
+          return ContinueSentinel;
+        }
+        var info2 = record.arg;
+        if (!info2) {
+          context.method = "throw";
+          context.arg = new TypeError("iterator result is not an object");
+          context.delegate = null;
+          return ContinueSentinel;
+        }
+        if (info2.done) {
+          context[delegate.resultName] = info2.value;
+          context.next = delegate.nextLoc;
+          if (context.method !== "return") {
+            context.method = "next";
+            context.arg = undefined2;
+          }
+        } else {
+          return info2;
+        }
+        context.delegate = null;
+        return ContinueSentinel;
+      }
+      defineIteratorMethods(Gp);
+      define2(Gp, toStringTagSymbol, "Generator");
+      define2(Gp, iteratorSymbol, function() {
+        return this;
+      });
+      define2(Gp, "toString", function() {
+        return "[object Generator]";
+      });
+      function pushTryEntry(locs) {
+        var entry = { tryLoc: locs[0] };
+        if (1 in locs) {
+          entry.catchLoc = locs[1];
+        }
+        if (2 in locs) {
+          entry.finallyLoc = locs[2];
+          entry.afterLoc = locs[3];
+        }
+        this.tryEntries.push(entry);
+      }
+      function resetTryEntry(entry) {
+        var record = entry.completion || {};
+        record.type = "normal";
+        delete record.arg;
+        entry.completion = record;
+      }
+      function Context(tryLocsList) {
+        this.tryEntries = [{ tryLoc: "root" }];
+        tryLocsList.forEach(pushTryEntry, this);
+        this.reset(true);
+      }
+      exports3.keys = function(val) {
+        var object = Object(val);
+        var keys = [];
+        for (var key in object) {
+          keys.push(key);
+        }
+        keys.reverse();
+        return function next() {
+          while (keys.length) {
+            var key2 = keys.pop();
+            if (key2 in object) {
+              next.value = key2;
+              next.done = false;
+              return next;
+            }
+          }
+          next.done = true;
+          return next;
+        };
+      };
+      function values(iterable) {
+        if (iterable) {
+          var iteratorMethod = iterable[iteratorSymbol];
+          if (iteratorMethod) {
+            return iteratorMethod.call(iterable);
+          }
+          if (typeof iterable.next === "function") {
+            return iterable;
+          }
+          if (!isNaN(iterable.length)) {
+            var i2 = -1, next = function next2() {
+              while (++i2 < iterable.length) {
+                if (hasOwn3.call(iterable, i2)) {
+                  next2.value = iterable[i2];
+                  next2.done = false;
+                  return next2;
+                }
+              }
+              next2.value = undefined2;
+              next2.done = true;
+              return next2;
+            };
+            return next.next = next;
+          }
+        }
+        return { next: doneResult };
+      }
+      exports3.values = values;
+      function doneResult() {
+        return { value: undefined2, done: true };
+      }
+      Context.prototype = {
+        constructor: Context,
+        reset: function(skipTempReset) {
+          this.prev = 0;
+          this.next = 0;
+          this.sent = this._sent = undefined2;
+          this.done = false;
+          this.delegate = null;
+          this.method = "next";
+          this.arg = undefined2;
+          this.tryEntries.forEach(resetTryEntry);
+          if (!skipTempReset) {
+            for (var name in this) {
+              if (name.charAt(0) === "t" && hasOwn3.call(this, name) && !isNaN(+name.slice(1))) {
+                this[name] = undefined2;
+              }
+            }
+          }
+        },
+        stop: function() {
+          this.done = true;
+          var rootEntry = this.tryEntries[0];
+          var rootRecord = rootEntry.completion;
+          if (rootRecord.type === "throw") {
+            throw rootRecord.arg;
+          }
+          return this.rval;
+        },
+        dispatchException: function(exception) {
+          if (this.done) {
+            throw exception;
+          }
+          var context = this;
+          function handle(loc, caught) {
+            record.type = "throw";
+            record.arg = exception;
+            context.next = loc;
+            if (caught) {
+              context.method = "next";
+              context.arg = undefined2;
+            }
+            return !!caught;
+          }
+          for (var i2 = this.tryEntries.length - 1; i2 >= 0; --i2) {
+            var entry = this.tryEntries[i2];
+            var record = entry.completion;
+            if (entry.tryLoc === "root") {
+              return handle("end");
+            }
+            if (entry.tryLoc <= this.prev) {
+              var hasCatch = hasOwn3.call(entry, "catchLoc");
+              var hasFinally = hasOwn3.call(entry, "finallyLoc");
+              if (hasCatch && hasFinally) {
+                if (this.prev < entry.catchLoc) {
+                  return handle(entry.catchLoc, true);
+                } else if (this.prev < entry.finallyLoc) {
+                  return handle(entry.finallyLoc);
+                }
+              } else if (hasCatch) {
+                if (this.prev < entry.catchLoc) {
+                  return handle(entry.catchLoc, true);
+                }
+              } else if (hasFinally) {
+                if (this.prev < entry.finallyLoc) {
+                  return handle(entry.finallyLoc);
+                }
+              } else {
+                throw new Error("try statement without catch or finally");
+              }
+            }
+          }
+        },
+        abrupt: function(type, arg) {
+          for (var i2 = this.tryEntries.length - 1; i2 >= 0; --i2) {
+            var entry = this.tryEntries[i2];
+            if (entry.tryLoc <= this.prev && hasOwn3.call(entry, "finallyLoc") && this.prev < entry.finallyLoc) {
+              var finallyEntry = entry;
+              break;
+            }
+          }
+          if (finallyEntry && (type === "break" || type === "continue") && finallyEntry.tryLoc <= arg && arg <= finallyEntry.finallyLoc) {
+            finallyEntry = null;
+          }
+          var record = finallyEntry ? finallyEntry.completion : {};
+          record.type = type;
+          record.arg = arg;
+          if (finallyEntry) {
+            this.method = "next";
+            this.next = finallyEntry.finallyLoc;
+            return ContinueSentinel;
+          }
+          return this.complete(record);
+        },
+        complete: function(record, afterLoc) {
+          if (record.type === "throw") {
+            throw record.arg;
+          }
+          if (record.type === "break" || record.type === "continue") {
+            this.next = record.arg;
+          } else if (record.type === "return") {
+            this.rval = this.arg = record.arg;
+            this.method = "return";
+            this.next = "end";
+          } else if (record.type === "normal" && afterLoc) {
+            this.next = afterLoc;
+          }
+          return ContinueSentinel;
+        },
+        finish: function(finallyLoc) {
+          for (var i2 = this.tryEntries.length - 1; i2 >= 0; --i2) {
+            var entry = this.tryEntries[i2];
+            if (entry.finallyLoc === finallyLoc) {
+              this.complete(entry.completion, entry.afterLoc);
+              resetTryEntry(entry);
+              return ContinueSentinel;
+            }
+          }
+        },
+        "catch": function(tryLoc) {
+          for (var i2 = this.tryEntries.length - 1; i2 >= 0; --i2) {
+            var entry = this.tryEntries[i2];
+            if (entry.tryLoc === tryLoc) {
+              var record = entry.completion;
+              if (record.type === "throw") {
+                var thrown = record.arg;
+                resetTryEntry(entry);
+              }
+              return thrown;
+            }
+          }
+          throw new Error("illegal catch attempt");
+        },
+        delegateYield: function(iterable, resultName, nextLoc) {
+          this.delegate = {
+            iterator: values(iterable),
+            resultName,
+            nextLoc
+          };
+          if (this.method === "next") {
+            this.arg = undefined2;
+          }
+          return ContinueSentinel;
+        }
+      };
+      return exports3;
+    })(
+      // If this script is executing as a CommonJS module, use module.exports
+      // as the regeneratorRuntime namespace. Otherwise create a new empty
+      // object. Either way, the resulting object will be used to initialize
+      // the regeneratorRuntime variable at the top of this file.
+      typeof module2 === "object" ? module2.exports : {}
+    );
+    try {
+      regeneratorRuntime = runtime;
+    } catch (accidentalStrictMode) {
+      if (typeof globalThis === "object") {
+        globalThis.regeneratorRuntime = runtime;
+      } else {
+        Function("r", "regeneratorRuntime = r")(runtime);
+      }
+    }
+  }
+});
+
+// node_modules/tesseract.js/src/utils/getId.js
+var require_getId = __commonJS({
+  "node_modules/tesseract.js/src/utils/getId.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (prefix, cnt) => `${prefix}-${cnt}-${Math.random().toString(16).slice(3, 8)}`;
+  }
+});
+
+// node_modules/tesseract.js/src/createJob.js
+var require_createJob = __commonJS({
+  "node_modules/tesseract.js/src/createJob.js"(exports2, module2) {
+    "use strict";
+    var getId = require_getId();
+    var jobCounter = 0;
+    module2.exports = ({
+      id: _id,
+      action,
+      payload = {}
+    }) => {
+      let id = _id;
+      if (typeof id === "undefined") {
+        id = getId("Job", jobCounter);
+        jobCounter += 1;
+      }
+      return {
+        id,
+        action,
+        payload
+      };
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/utils/log.js
+var require_log = __commonJS({
+  "node_modules/tesseract.js/src/utils/log.js"(exports2) {
+    "use strict";
+    var logging = false;
+    exports2.logging = logging;
+    exports2.setLogging = (_logging) => {
+      logging = _logging;
+    };
+    exports2.log = (...args) => logging ? console.log.apply(exports2, args) : null;
+  }
+});
+
+// node_modules/tesseract.js/src/createScheduler.js
+var require_createScheduler = __commonJS({
+  "node_modules/tesseract.js/src/createScheduler.js"(exports2, module2) {
+    "use strict";
+    var createJob = require_createJob();
+    var { log: log2 } = require_log();
+    var getId = require_getId();
+    var schedulerCounter = 0;
+    module2.exports = () => {
+      const id = getId("Scheduler", schedulerCounter);
+      const workers = {};
+      const runningWorkers = {};
+      let jobQueue = [];
+      schedulerCounter += 1;
+      const getQueueLen = () => jobQueue.length;
+      const getNumWorkers = () => Object.keys(workers).length;
+      const dequeue = () => {
+        if (jobQueue.length !== 0) {
+          const wIds = Object.keys(workers);
+          for (let i2 = 0; i2 < wIds.length; i2 += 1) {
+            if (typeof runningWorkers[wIds[i2]] === "undefined") {
+              jobQueue[0](workers[wIds[i2]]);
+              break;
+            }
+          }
+        }
+      };
+      const queue = (action, payload) => new Promise((resolve3, reject) => {
+        const job = createJob({ action, payload });
+        jobQueue.push(async (w2) => {
+          jobQueue.shift();
+          runningWorkers[w2.id] = job;
+          try {
+            resolve3(await w2[action].apply(exports2, [...payload, job.id]));
+          } catch (err) {
+            reject(err);
+          } finally {
+            delete runningWorkers[w2.id];
+            dequeue();
+          }
+        });
+        log2(`[${id}]: Add ${job.id} to JobQueue`);
+        log2(`[${id}]: JobQueue length=${jobQueue.length}`);
+        dequeue();
+      });
+      const addWorker = (w2) => {
+        workers[w2.id] = w2;
+        log2(`[${id}]: Add ${w2.id}`);
+        log2(`[${id}]: Number of workers=${getNumWorkers()}`);
+        dequeue();
+        return w2.id;
+      };
+      const addJob = async (action, ...payload) => {
+        if (getNumWorkers() === 0) {
+          throw Error(`[${id}]: You need to have at least one worker before adding jobs`);
+        }
+        return queue(action, payload);
+      };
+      const terminate = async () => {
+        Object.keys(workers).forEach(async (wid) => {
+          await workers[wid].terminate();
+        });
+        jobQueue = [];
+      };
+      return {
+        addWorker,
+        addJob,
+        terminate,
+        getQueueLen,
+        getNumWorkers
+      };
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/utils/getEnvironment.js
+var require_getEnvironment = __commonJS({
+  "node_modules/tesseract.js/src/utils/getEnvironment.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (key) => {
+      const env = {};
+      if (typeof WorkerGlobalScope !== "undefined") {
+        env.type = "webworker";
+      } else if (typeof document === "object") {
+        env.type = "browser";
+      } else if (typeof process === "object" && typeof require === "function") {
+        env.type = "node";
+      }
+      if (typeof key === "undefined") {
+        return env;
+      }
+      return env[key];
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/utils/resolvePaths.js
+var require_resolvePaths = __commonJS({
+  "node_modules/tesseract.js/src/utils/resolvePaths.js"(exports2, module2) {
+    "use strict";
+    var isBrowser = require_getEnvironment()("type") === "browser";
+    var resolveURL = isBrowser ? (s2) => new URL(s2, window.location.href).href : (s2) => s2;
+    module2.exports = (options) => {
+      const opts = { ...options };
+      ["corePath", "workerPath", "langPath"].forEach((key) => {
+        if (options[key]) {
+          opts[key] = resolveURL(opts[key]);
+        }
+      });
+      return opts;
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/constants/OEM.js
+var require_OEM = __commonJS({
+  "node_modules/tesseract.js/src/constants/OEM.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      TESSERACT_ONLY: 0,
+      LSTM_ONLY: 1,
+      TESSERACT_LSTM_COMBINED: 2,
+      DEFAULT: 3
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/constants/defaultOptions.js
+var require_defaultOptions = __commonJS({
+  "node_modules/tesseract.js/src/constants/defaultOptions.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      /*
+       * Use BlobURL for worker script by default
+       * TODO: remove this option
+       *
+       */
+      workerBlobURL: true,
+      logger: () => {
+      }
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/defaultOptions.js
+var require_defaultOptions2 = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/defaultOptions.js"(exports2, module2) {
+    "use strict";
+    var path25 = require("path");
+    var defaultOptions3 = require_defaultOptions();
+    module2.exports = {
+      ...defaultOptions3,
+      workerPath: path25.join(__dirname, "..", "..", "worker-script", "node", "index.js")
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/spawnWorker.js
+var require_spawnWorker = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/spawnWorker.js"(exports2, module2) {
+    "use strict";
+    var { Worker } = require("worker_threads");
+    module2.exports = ({ workerPath }) => new Worker(workerPath);
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/terminateWorker.js
+var require_terminateWorker = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/terminateWorker.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (worker) => {
+      worker.terminate();
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/onMessage.js
+var require_onMessage = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/onMessage.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (worker, handler2) => {
+      worker.on("message", handler2);
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/send.js
+var require_send = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/send.js"(exports2, module2) {
+    "use strict";
+    module2.exports = async (worker, packet) => {
+      worker.postMessage(packet);
+    };
+  }
+});
+
+// node_modules/is-url/index.js
+var require_is_url = __commonJS({
+  "node_modules/is-url/index.js"(exports2, module2) {
+    module2.exports = isUrl;
+    var protocolAndDomainRE = /^(?:\w+:)?\/\/(\S+)$/;
+    var localhostDomainRE = /^localhost[\:?\d]*(?:[^\:?\d]\S*)?$/;
+    var nonLocalhostDomainRE = /^[^\s\.]+\.\S{2,}$/;
+    function isUrl(string) {
+      if (typeof string !== "string") {
+        return false;
+      }
+      var match = string.match(protocolAndDomainRE);
+      if (!match) {
+        return false;
+      }
+      var everythingAfterProtocol = match[1];
+      if (!everythingAfterProtocol) {
+        return false;
+      }
+      if (localhostDomainRE.test(everythingAfterProtocol) || nonLocalhostDomainRE.test(everythingAfterProtocol)) {
+        return true;
+      }
+      return false;
+    }
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/loadImage.js
+var require_loadImage = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/loadImage.js"(exports2, module2) {
+    "use strict";
+    var util2 = require("util");
+    var fs4 = require("fs");
+    var fetch3 = global.fetch || require_lib2();
+    var isURL = require_is_url();
+    var readFile3 = util2.promisify(fs4.readFile);
+    module2.exports = async (image) => {
+      let data = image;
+      if (typeof image === "undefined") {
+        return image;
+      }
+      if (typeof image === "string") {
+        if (isURL(image) || image.startsWith("moz-extension://") || image.startsWith("chrome-extension://") || image.startsWith("file://")) {
+          const resp = await fetch3(image);
+          data = await resp.arrayBuffer();
+        } else if (/data:image\/([a-zA-Z]*);base64,([^"]*)/.test(image)) {
+          data = Buffer.from(image.split(",")[1], "base64");
+        } else {
+          data = await readFile3(image);
+        }
+      } else if (Buffer.isBuffer(image)) {
+        data = image;
+      }
+      return new Uint8Array(data);
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/worker/node/index.js
+var require_node = __commonJS({
+  "node_modules/tesseract.js/src/worker/node/index.js"(exports2, module2) {
+    "use strict";
+    var defaultOptions3 = require_defaultOptions2();
+    var spawnWorker = require_spawnWorker();
+    var terminateWorker = require_terminateWorker();
+    var onMessage = require_onMessage();
+    var send = require_send();
+    var loadImage = require_loadImage();
+    module2.exports = {
+      defaultOptions: defaultOptions3,
+      spawnWorker,
+      terminateWorker,
+      onMessage,
+      send,
+      loadImage
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/createWorker.js
+var require_createWorker = __commonJS({
+  "node_modules/tesseract.js/src/createWorker.js"(exports2, module2) {
+    "use strict";
+    var resolvePaths = require_resolvePaths();
+    var createJob = require_createJob();
+    var { log: log2 } = require_log();
+    var getId = require_getId();
+    var OEM = require_OEM();
+    var {
+      defaultOptions: defaultOptions3,
+      spawnWorker,
+      terminateWorker,
+      onMessage,
+      loadImage,
+      send
+    } = require_node();
+    var workerCounter = 0;
+    module2.exports = async (langs = "eng", oem = OEM.LSTM_ONLY, _options = {}, config = {}) => {
+      const id = getId("Worker", workerCounter);
+      const {
+        logger: logger2,
+        errorHandler,
+        ...options
+      } = resolvePaths({
+        ...defaultOptions3,
+        ..._options
+      });
+      const promises3 = {};
+      const currentLangs = typeof langs === "string" ? langs.split("+") : langs;
+      let currentOem = oem;
+      let currentConfig = config;
+      const lstmOnlyCore = [OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore;
+      let workerResReject;
+      let workerResResolve;
+      const workerRes = new Promise((resolve3, reject) => {
+        workerResResolve = resolve3;
+        workerResReject = reject;
+      });
+      const workerError = (event) => {
+        workerResReject(event.message);
+      };
+      let worker = spawnWorker(options);
+      worker.onerror = workerError;
+      workerCounter += 1;
+      const startJob = ({ id: jobId, action, payload }) => new Promise((resolve3, reject) => {
+        log2(`[${id}]: Start ${jobId}, action=${action}`);
+        const promiseId = `${action}-${jobId}`;
+        promises3[promiseId] = { resolve: resolve3, reject };
+        send(worker, {
+          workerId: id,
+          jobId,
+          action,
+          payload
+        });
+      });
+      const load = () => console.warn("`load` is depreciated and should be removed from code (workers now come pre-loaded)");
+      const loadInternal = (jobId) => startJob(createJob({
+        id: jobId,
+        action: "load",
+        payload: { options: { lstmOnly: lstmOnlyCore, corePath: options.corePath, logging: options.logging } }
+      }));
+      const writeText = (path25, text, jobId) => startJob(createJob({
+        id: jobId,
+        action: "FS",
+        payload: { method: "writeFile", args: [path25, text] }
+      }));
+      const readText = (path25, jobId) => startJob(createJob({
+        id: jobId,
+        action: "FS",
+        payload: { method: "readFile", args: [path25, { encoding: "utf8" }] }
+      }));
+      const removeFile = (path25, jobId) => startJob(createJob({
+        id: jobId,
+        action: "FS",
+        payload: { method: "unlink", args: [path25] }
+      }));
+      const FS = (method, args, jobId) => startJob(createJob({
+        id: jobId,
+        action: "FS",
+        payload: { method, args }
+      }));
+      const loadLanguageInternal = (_langs, jobId) => startJob(createJob({
+        id: jobId,
+        action: "loadLanguage",
+        payload: {
+          langs: _langs,
+          options: {
+            langPath: options.langPath,
+            dataPath: options.dataPath,
+            cachePath: options.cachePath,
+            cacheMethod: options.cacheMethod,
+            gzip: options.gzip,
+            lstmOnly: [OEM.DEFAULT, OEM.LSTM_ONLY].includes(currentOem) && !options.legacyLang
+          }
+        }
+      }));
+      const initializeInternal = (_langs, _oem, _config, jobId) => startJob(createJob({
+        id: jobId,
+        action: "initialize",
+        payload: { langs: _langs, oem: _oem, config: _config }
+      }));
+      const reinitialize = (langs2 = "eng", oem2, config2, jobId) => {
+        if (lstmOnlyCore && [OEM.TESSERACT_ONLY, OEM.TESSERACT_LSTM_COMBINED].includes(oem2)) throw Error("Legacy model requested but code missing.");
+        const _oem = oem2 || currentOem;
+        currentOem = _oem;
+        const _config = config2 || currentConfig;
+        currentConfig = _config;
+        const langsArr = typeof langs2 === "string" ? langs2.split("+") : langs2;
+        const _langs = langsArr.filter((x2) => !currentLangs.includes(x2));
+        currentLangs.push(..._langs);
+        if (_langs.length > 0) {
+          return loadLanguageInternal(_langs, jobId).then(() => initializeInternal(langs2, _oem, _config, jobId));
+        }
+        return initializeInternal(langs2, _oem, _config, jobId);
+      };
+      const setParameters = (params = {}, jobId) => startJob(createJob({
+        id: jobId,
+        action: "setParameters",
+        payload: { params }
+      }));
+      const recognize = async (image, opts = {}, output = {
+        text: true
+      }, jobId) => startJob(createJob({
+        id: jobId,
+        action: "recognize",
+        payload: { image: await loadImage(image), options: opts, output }
+      }));
+      const detect = async (image, jobId) => {
+        if (lstmOnlyCore) throw Error("`worker.detect` requires Legacy model, which was not loaded.");
+        return startJob(createJob({
+          id: jobId,
+          action: "detect",
+          payload: { image: await loadImage(image) }
+        }));
+      };
+      const terminate = async () => {
+        if (worker !== null) {
+          terminateWorker(worker);
+          worker = null;
+        }
+        return Promise.resolve();
+      };
+      onMessage(worker, ({
+        workerId,
+        jobId,
+        status,
+        action,
+        data
+      }) => {
+        const promiseId = `${action}-${jobId}`;
+        if (status === "resolve") {
+          log2(`[${workerId}]: Complete ${jobId}`);
+          promises3[promiseId].resolve({ jobId, data });
+          delete promises3[promiseId];
+        } else if (status === "reject") {
+          promises3[promiseId].reject(data);
+          delete promises3[promiseId];
+          if (action === "load") workerResReject(data);
+          if (errorHandler) {
+            errorHandler(data);
+          } else {
+            throw Error(data);
+          }
+        } else if (status === "progress") {
+          logger2({ ...data, userJobId: jobId });
+        }
+      });
+      const resolveObj = {
+        id,
+        worker,
+        load,
+        writeText,
+        readText,
+        removeFile,
+        FS,
+        reinitialize,
+        setParameters,
+        recognize,
+        detect,
+        terminate
+      };
+      loadInternal().then(() => loadLanguageInternal(langs)).then(() => initializeInternal(langs, oem, config)).then(() => workerResResolve(resolveObj)).catch(() => {
+      });
+      return workerRes;
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/Tesseract.js
+var require_Tesseract = __commonJS({
+  "node_modules/tesseract.js/src/Tesseract.js"(exports2, module2) {
+    "use strict";
+    var createWorker = require_createWorker();
+    var recognize = async (image, langs, options) => {
+      const worker = await createWorker(langs, 1, options);
+      return worker.recognize(image).finally(async () => {
+        await worker.terminate();
+      });
+    };
+    var detect = async (image, options) => {
+      const worker = await createWorker("osd", 0, options);
+      return worker.detect(image).finally(async () => {
+        await worker.terminate();
+      });
+    };
+    module2.exports = {
+      recognize,
+      detect
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/constants/languages.js
+var require_languages = __commonJS({
+  "node_modules/tesseract.js/src/constants/languages.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      AFR: "afr",
+      AMH: "amh",
+      ARA: "ara",
+      ASM: "asm",
+      AZE: "aze",
+      AZE_CYRL: "aze_cyrl",
+      BEL: "bel",
+      BEN: "ben",
+      BOD: "bod",
+      BOS: "bos",
+      BUL: "bul",
+      CAT: "cat",
+      CEB: "ceb",
+      CES: "ces",
+      CHI_SIM: "chi_sim",
+      CHI_TRA: "chi_tra",
+      CHR: "chr",
+      CYM: "cym",
+      DAN: "dan",
+      DEU: "deu",
+      DZO: "dzo",
+      ELL: "ell",
+      ENG: "eng",
+      ENM: "enm",
+      EPO: "epo",
+      EST: "est",
+      EUS: "eus",
+      FAS: "fas",
+      FIN: "fin",
+      FRA: "fra",
+      FRK: "frk",
+      FRM: "frm",
+      GLE: "gle",
+      GLG: "glg",
+      GRC: "grc",
+      GUJ: "guj",
+      HAT: "hat",
+      HEB: "heb",
+      HIN: "hin",
+      HRV: "hrv",
+      HUN: "hun",
+      IKU: "iku",
+      IND: "ind",
+      ISL: "isl",
+      ITA: "ita",
+      ITA_OLD: "ita_old",
+      JAV: "jav",
+      JPN: "jpn",
+      KAN: "kan",
+      KAT: "kat",
+      KAT_OLD: "kat_old",
+      KAZ: "kaz",
+      KHM: "khm",
+      KIR: "kir",
+      KOR: "kor",
+      KUR: "kur",
+      LAO: "lao",
+      LAT: "lat",
+      LAV: "lav",
+      LIT: "lit",
+      MAL: "mal",
+      MAR: "mar",
+      MKD: "mkd",
+      MLT: "mlt",
+      MSA: "msa",
+      MYA: "mya",
+      NEP: "nep",
+      NLD: "nld",
+      NOR: "nor",
+      ORI: "ori",
+      PAN: "pan",
+      POL: "pol",
+      POR: "por",
+      PUS: "pus",
+      RON: "ron",
+      RUS: "rus",
+      SAN: "san",
+      SIN: "sin",
+      SLK: "slk",
+      SLV: "slv",
+      SPA: "spa",
+      SPA_OLD: "spa_old",
+      SQI: "sqi",
+      SRP: "srp",
+      SRP_LATN: "srp_latn",
+      SWA: "swa",
+      SWE: "swe",
+      SYR: "syr",
+      TAM: "tam",
+      TEL: "tel",
+      TGK: "tgk",
+      TGL: "tgl",
+      THA: "tha",
+      TIR: "tir",
+      TUR: "tur",
+      UIG: "uig",
+      UKR: "ukr",
+      URD: "urd",
+      UZB: "uzb",
+      UZB_CYRL: "uzb_cyrl",
+      VIE: "vie",
+      YID: "yid"
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/constants/PSM.js
+var require_PSM = __commonJS({
+  "node_modules/tesseract.js/src/constants/PSM.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      OSD_ONLY: "0",
+      AUTO_OSD: "1",
+      AUTO_ONLY: "2",
+      AUTO: "3",
+      SINGLE_COLUMN: "4",
+      SINGLE_BLOCK_VERT_TEXT: "5",
+      SINGLE_BLOCK: "6",
+      SINGLE_LINE: "7",
+      SINGLE_WORD: "8",
+      CIRCLE_WORD: "9",
+      SINGLE_CHAR: "10",
+      SPARSE_TEXT: "11",
+      SPARSE_TEXT_OSD: "12",
+      RAW_LINE: "13"
+    };
+  }
+});
+
+// node_modules/tesseract.js/src/index.js
+var require_src = __commonJS({
+  "node_modules/tesseract.js/src/index.js"(exports2, module2) {
+    "use strict";
+    require_runtime();
+    var createScheduler = require_createScheduler();
+    var createWorker = require_createWorker();
+    var Tesseract = require_Tesseract();
+    var languages = require_languages();
+    var OEM = require_OEM();
+    var PSM = require_PSM();
+    var { setLogging } = require_log();
+    module2.exports = {
+      languages,
+      OEM,
+      PSM,
+      createScheduler,
+      createWorker,
+      setLogging,
+      ...Tesseract
+    };
+  }
+});
+
 // node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS({
   "node_modules/yaml/dist/nodes/identity.js"(exports2) {
@@ -29018,7 +30228,7 @@ ${ctx.indent}`;
 });
 
 // node_modules/yaml/dist/log.js
-var require_log = __commonJS({
+var require_log2 = __commonJS({
   "node_modules/yaml/dist/log.js"(exports2) {
     "use strict";
     var node_process = require("process");
@@ -29103,7 +30313,7 @@ var require_merge = __commonJS({
 var require_addPairToJSMap = __commonJS({
   "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports2) {
     "use strict";
-    var log2 = require_log();
+    var log2 = require_log2();
     var merge2 = require_merge();
     var stringify2 = require_stringify();
     var identity = require_identity();
@@ -34568,7 +35778,7 @@ var require_public_api2 = __commonJS({
     var composer = require_composer();
     var Document = require_Document();
     var errors = require_errors2();
-    var log2 = require_log();
+    var log2 = require_log2();
     var identity = require_identity();
     var lineCounter = require_line_counter();
     var parser = require_parser();
@@ -58489,15 +59699,15 @@ function makeReadRepoContextFileTool(deps) {
 
 // src/ocr/recognize.ts
 var import_node_path = __toESM(require("node:path"), 1);
+var import_node_fs2 = require("node:fs");
 var import_node_module = require("node:module");
 var import_node_url = require("node:url");
-var import_meta = {};
-var localRequire = (0, import_node_module.createRequire)(import_meta.url);
+var localRequire = (0, import_node_module.createRequire)(import_meta_url);
 var DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 function defaultAssetsDir() {
   const fromEnv = process.env.VOR_OCR_ASSETS_DIR;
   if (fromEnv !== void 0 && fromEnv !== "") return fromEnv;
-  const here = import_node_path.default.dirname((0, import_node_url.fileURLToPath)(import_meta.url));
+  const here = import_node_path.default.dirname((0, import_node_url.fileURLToPath)(import_meta_url));
   return import_node_path.default.resolve(here, "..", "assets", "ocr");
 }
 function createTesseractEngine(options = {}) {
@@ -58513,12 +59723,17 @@ function createTesseractEngine(options = {}) {
     if (workerPromise === void 0) {
       workerPromise = (async () => {
         try {
-          const tesseract = await import("tesseract.js");
+          const tesseract = await Promise.resolve().then(() => __toESM(require_src(), 1));
           const worker = await tesseract.createWorker(langKey, 1, {
             langPath: assetsDir,
             cachePath: assetsDir,
             gzip: false,
-            workerPath: requireResolveSafe("tesseract.js/src/worker-script/node/index.js"),
+            workerPath: resolveWorkerPath(assetsDir),
+            // corePath is browser-only — on node, tesseract.js's worker selects
+            // and `require`s the core itself (see scripts/build.ts). Left as a
+            // best-effort dev resolution; undefined in the bundled Action, where
+            // the worker's inlined loaders read the vendored .wasm cores from
+            // `assetsDir`.
             corePath: requireResolveSafe("tesseract.js-core/tesseract-core-simd-lstm.js")
           });
           return worker;
@@ -58575,6 +59790,11 @@ function requireResolveSafe(spec) {
   } catch {
     return void 0;
   }
+}
+function resolveWorkerPath(assetsDir) {
+  const vendored = import_node_path.default.join(assetsDir, "tesseract-worker.cjs");
+  if ((0, import_node_fs2.existsSync)(vendored)) return vendored;
+  return requireResolveSafe("tesseract.js/src/worker-script/node/index.js");
 }
 
 // src/vision/describe-image.ts
@@ -64264,7 +65484,17 @@ var FileReader = class {
       if (Array.isArray(r2.data) || r2.data.type !== "file") {
         return null;
       }
-      const buf = Buffer.from(r2.data.content, r2.data.encoding);
+      let buf;
+      if (r2.data.encoding === "base64" && r2.data.content) {
+        buf = Buffer.from(r2.data.content, "base64");
+      } else {
+        const blob = await this.octokit.rest.git.getBlob({
+          owner: ref.owner,
+          repo: ref.repo,
+          file_sha: r2.data.sha
+        });
+        buf = Buffer.from(blob.data.content, blob.data.encoding);
+      }
       this.setBinary(key, buf);
       return buf;
     } catch (err) {
@@ -66539,7 +67769,7 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_path8 = __toESM(require("node:path"), 1);
 
 // src/scanners/sast/linter.ts
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 var import_node_path7 = __toESM(require("node:path"), 1);
 function normalizeToolPath(workspaceDir, toolPath) {
   const normalized = import_node_path7.default.isAbsolute(toolPath) ? import_node_path7.default.relative(workspaceDir, toolPath) : import_node_path7.default.normalize(toolPath);
@@ -66704,7 +67934,7 @@ function findWorkspaceBinary(candidates) {
   for (const base of candidates) {
     for (const ext of exts) {
       const full = base + ext;
-      if ((0, import_node_fs2.existsSync)(full)) {
+      if ((0, import_node_fs3.existsSync)(full)) {
         return {
           path: full,
           needsShell: ext === ".cmd" || ext === ".bat"
@@ -67641,7 +68871,7 @@ function truncate(s2, maxLen) {
 
 // src/scanners/sast/semgrep.ts
 var import_node_child_process8 = require("node:child_process");
-var import_node_fs3 = require("node:fs");
+var import_node_fs4 = require("node:fs");
 var import_node_path11 = __toESM(require("node:path"), 1);
 var ID6 = "semgrep";
 var TIMEOUT_MS6 = 18e4;
@@ -67719,14 +68949,14 @@ async function resolveCustomRulesPath(deps) {
     return null;
   }
   const absPath = import_node_path11.default.isAbsolute(customRulesPath) ? customRulesPath : import_node_path11.default.resolve(deps.workspaceDir, customRulesPath);
-  if (!(0, import_node_fs3.existsSync)(absPath)) {
+  if (!(0, import_node_fs4.existsSync)(absPath)) {
     await logger.debug(
       `semgrep: custom_rules_path ${customRulesPath} not found at ${absPath}, skipping`
     );
     return null;
   }
   try {
-    (0, import_node_fs3.statSync)(absPath);
+    (0, import_node_fs4.statSync)(absPath);
   } catch (err) {
     await logger.debug(
       `semgrep: custom_rules_path ${absPath} stat failed (${err.message}), skipping`
@@ -67887,7 +69117,7 @@ ${result.extra.message.trim()}${metaStr}`;
 
 // src/scanners/sast/tsc.ts
 var import_node_child_process9 = require("node:child_process");
-var import_node_fs4 = require("node:fs");
+var import_node_fs5 = require("node:fs");
 var import_node_path12 = __toESM(require("node:path"), 1);
 var ID7 = "tsc";
 var TIMEOUT_MS7 = 12e4;
@@ -67910,7 +69140,7 @@ var tscLinter = {
       return { findings: [], errors: [], filesExamined: 0 };
     }
     const tsconfigPath = import_node_path12.default.join(deps.workspaceDir, "tsconfig.json");
-    if (!(0, import_node_fs4.existsSync)(tsconfigPath)) {
+    if (!(0, import_node_fs5.existsSync)(tsconfigPath)) {
       await logger.debug(`tsc: skipped \u2014 no tsconfig.json at ${tsconfigPath}`);
       return { findings: [], errors: [], filesExamined: 0 };
     }
@@ -68075,7 +69305,7 @@ function renderDescription6(diag) {
 
 // src/scanners/sast/golang.ts
 var import_node_child_process10 = require("node:child_process");
-var import_node_fs5 = require("node:fs");
+var import_node_fs6 = require("node:fs");
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path13 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
@@ -68093,7 +69323,7 @@ var golangLinter = {
     const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const groups2 = groupByGoModule(
       targetFiles.map((f2) => f2.path),
-      (dirRel) => (0, import_node_fs5.existsSync)(import_node_path13.default.join(deps.workspaceDir, dirRel, "go.mod"))
+      (dirRel) => (0, import_node_fs6.existsSync)(import_node_path13.default.join(deps.workspaceDir, dirRel, "go.mod"))
     );
     const findings = [];
     let ranAny = false;
@@ -68208,18 +69438,18 @@ async function runWithFallback(bin, dirs, deps, cwd) {
   }
 }
 async function runV2ToFile(bin, common, dirs, deps, cwd) {
-  const tmpDir = (0, import_node_fs5.mkdtempSync)(import_node_path13.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
+  const tmpDir = (0, import_node_fs6.mkdtempSync)(import_node_path13.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
   const reportPath = import_node_path13.default.join(tmpDir, "report.json");
   const pathArg = bin.needsShell ? `"${reportPath}"` : reportPath;
   try {
     await runCli8(bin, [...common, `--output.json.path=${pathArg}`, ...dirs], deps, cwd);
     try {
-      return (0, import_node_fs5.readFileSync)(reportPath, "utf-8");
+      return (0, import_node_fs6.readFileSync)(reportPath, "utf-8");
     } catch {
       return '{"Issues":null}';
     }
   } finally {
-    (0, import_node_fs5.rmSync)(tmpDir, { recursive: true, force: true });
+    (0, import_node_fs6.rmSync)(tmpDir, { recursive: true, force: true });
   }
 }
 function isMissingBinary(msg) {
@@ -68446,7 +69676,7 @@ var containerScannerStub = {
 
 // src/scanners/coverage-delta.ts
 var import_node_child_process11 = require("node:child_process");
-var import_node_fs6 = require("node:fs");
+var import_node_fs7 = require("node:fs");
 var import_node_path14 = __toESM(require("node:path"), 1);
 var SCANNER_ID4 = "coverage-delta";
 var COVERAGE_TIMEOUT_MS = 24e4;
@@ -68605,8 +69835,8 @@ function hasPythonChange(files) {
 }
 function readJsonIfExists(p2) {
   try {
-    if (!(0, import_node_fs6.existsSync)(p2)) return null;
-    const raw = (0, import_node_fs6.readFileSync)(p2, "utf-8");
+    if (!(0, import_node_fs7.existsSync)(p2)) return null;
+    const raw = (0, import_node_fs7.readFileSync)(p2, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -68621,13 +69851,13 @@ function hasNamedDep(pkg, name) {
   return pkg.dependencies?.[name] !== void 0 || pkg.devDependencies?.[name] !== void 0 || pkg.peerDependencies?.[name] !== void 0 || pkg.optionalDependencies?.[name] !== void 0;
 }
 function hasViteConfig(workspaceDir) {
-  return (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.mjs"));
+  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.mjs"));
 }
 function hasJestConfig(workspaceDir) {
-  return (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.json"));
+  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.json"));
 }
 function hasPythonProject(workspaceDir) {
-  return (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs6.existsSync)(import_node_path14.default.join(workspaceDir, "conftest.py"));
+  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "conftest.py"));
 }
 function normalizeReportPath(workspaceDir, toolPath) {
   const normalized = import_node_path14.default.isAbsolute(toolPath) ? import_node_path14.default.relative(workspaceDir, toolPath) : import_node_path14.default.normalize(toolPath);
@@ -68692,7 +69922,7 @@ async function runCoverageCli(tool2, deps) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if ((0, import_node_fs6.existsSync)(tool2.artifact)) {
+      if ((0, import_node_fs7.existsSync)(tool2.artifact)) {
         resolve3({ ok: true });
       } else {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim().slice(0, 500);
@@ -68761,10 +69991,10 @@ function buildCoverageInvocation(tool2, _deps) {
   }
 }
 function loadCoverageMap(tool2, _deps) {
-  if (!(0, import_node_fs6.existsSync)(tool2.artifact)) return null;
+  if (!(0, import_node_fs7.existsSync)(tool2.artifact)) return null;
   let raw;
   try {
-    raw = (0, import_node_fs6.readFileSync)(tool2.artifact, "utf-8");
+    raw = (0, import_node_fs7.readFileSync)(tool2.artifact, "utf-8");
   } catch {
     return null;
   }

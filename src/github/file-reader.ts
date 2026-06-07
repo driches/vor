@@ -106,7 +106,24 @@ export class FileReader {
       if (Array.isArray(r.data) || r.data.type !== 'file') {
         return null;
       }
-      const buf = Buffer.from(r.data.content, r.data.encoding as BufferEncoding);
+      // The Contents API only inlines base64 content up to 1 MB; for larger
+      // blobs it returns `encoding: "none"` with an empty `content`.
+      // `Buffer.from('', 'none')` would throw "Unknown encoding: none" and the
+      // caller would treat a perfectly readable multi-MB screenshot as a read
+      // error — exactly the size range OCR cares about (the default cap is
+      // 10 MB). Fall back to the Git Blobs API, which base64-encodes blobs up
+      // to 100 MB, keyed by the blob SHA the Contents API still returns.
+      let buf: Buffer;
+      if (r.data.encoding === 'base64' && r.data.content) {
+        buf = Buffer.from(r.data.content, 'base64');
+      } else {
+        const blob = await this.octokit.rest.git.getBlob({
+          owner: ref.owner,
+          repo: ref.repo,
+          file_sha: r.data.sha,
+        });
+        buf = Buffer.from(blob.data.content, blob.data.encoding as BufferEncoding);
+      }
       this.setBinary(key, buf);
       return buf;
     } catch (err) {
