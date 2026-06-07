@@ -6,6 +6,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import pkg from '../../package.json' with { type: 'json' };
+import { repoRoot } from '../local/git.js';
 import { logger } from '../util/logger.js';
 import { defaultDashboardDeps, handleApi, type DashboardDeps } from './api.js';
 import { materializeDashboard, serveStatic } from './static.js';
@@ -102,7 +103,10 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
   const host = opts.host ?? '127.0.0.1';
   assertLoopbackBind(host); // before anything else — never bind externally
   const authority = `${hostForUrl(host)}:${opts.port}`;
-  const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
+  // Read history under the repo root so it matches the slug runLocalReview saves
+  // to (it normalizes to the root); otherwise a review started from a nested dir
+  // would never appear in /api/runs.
+  const deps = opts.deps ?? defaultDashboardDeps(repoRoot(process.cwd()));
   const assetDir = materializeDashboard(pkg.version);
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {

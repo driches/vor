@@ -54165,8 +54165,8 @@ function status(line = "") {
 }
 
 // src/cli/commands/config.ts
-var import_node_fs = require("node:fs");
-var import_node_path = require("node:path");
+var import_node_fs2 = require("node:fs");
+var import_node_path2 = require("node:path");
 var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/config/loader.ts
@@ -58516,9 +58516,143 @@ function loadConfigStrict(yaml) {
   return deepMerge(DEFAULT_CONFIG, result.data);
 }
 
+// src/local/git.ts
+var import_node_child_process = require("node:child_process");
+var import_node_fs = require("node:fs");
+var import_node_path = require("node:path");
+function git(args, cwd) {
+  return (0, import_node_child_process.execFileSync)("git", args, {
+    cwd,
+    encoding: "utf-8",
+    maxBuffer: 256 * 1024 * 1024,
+    // 256 MB — large diffs / file contents
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+function resolveRef(workspace2, ref) {
+  return git(["rev-parse", ref], workspace2).trim();
+}
+function repoRoot(workspace2) {
+  try {
+    return git(["rev-parse", "--show-toplevel"], workspace2).trim() || workspace2;
+  } catch {
+    return workspace2;
+  }
+}
+function hasWorkingTreeChanges(workspace2) {
+  const out2 = git(["status", "--porcelain"], workspace2);
+  return out2.split("\n").some((line) => line.trim().length > 0);
+}
+function untrackedFiles(workspace2) {
+  const out2 = git(["ls-files", "--others", "--exclude-standard"], workspace2);
+  return out2.split("\n").filter((line) => line.trim().length > 0);
+}
+function untrackedPatch(workspace2, path23) {
+  try {
+    return git(["diff", "--no-index", "--no-color", "--", "/dev/null", path23], workspace2);
+  } catch (err) {
+    const e2 = err;
+    if (e2.status === 1 && e2.stdout != null) return e2.stdout.toString();
+    return "";
+  }
+}
+function workingTreeChanges(workspace2) {
+  const files = changedFiles(workspace2, ["HEAD"]);
+  const diffs = [unifiedDiff(workspace2, ["HEAD"])];
+  for (const path23 of untrackedFiles(workspace2)) {
+    const patch = untrackedPatch(workspace2, path23);
+    if (!patch.trim()) continue;
+    diffs.push(patch);
+    const additions = patch.split("\n").filter((l2) => l2.startsWith("+") && !l2.startsWith("+++")).length;
+    files.push({ path: path23, status: "added", additions, deletions: 0 });
+  }
+  return { files, diff: diffs.filter((d2) => d2.trim().length > 0).join("\n") };
+}
+function changedFiles(workspace2, diffArgs) {
+  const status2 = git(["diff", "--name-status", ...diffArgs], workspace2);
+  const numstat = git(["diff", "--numstat", ...diffArgs], workspace2);
+  const stats = /* @__PURE__ */ new Map();
+  for (const line of numstat.split("\n")) {
+    const m2 = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/);
+    if (!m2) continue;
+    const add = m2[1] === "-" ? 0 : Number.parseInt(m2[1], 10);
+    const del = m2[2] === "-" ? 0 : Number.parseInt(m2[2], 10);
+    stats.set(m2[3], { add, del });
+  }
+  const files = [];
+  for (const line of status2.split("\n")) {
+    if (!line.trim()) continue;
+    const parts = line.split("	");
+    const code = parts[0];
+    if (code.startsWith("A")) {
+      const p2 = parts[1];
+      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
+      files.push({ path: p2, status: "added", additions: s2.add, deletions: s2.del });
+    } else if (code.startsWith("M")) {
+      const p2 = parts[1];
+      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
+      files.push({ path: p2, status: "modified", additions: s2.add, deletions: s2.del });
+    } else if (code.startsWith("D")) {
+      const p2 = parts[1];
+      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
+      files.push({ path: p2, status: "removed", additions: s2.add, deletions: s2.del });
+    } else if (code.startsWith("R")) {
+      const previous = parts[1];
+      const current = parts[2];
+      const s2 = stats.get(current) ?? stats.get(`${previous} => ${current}`) ?? { add: 0, del: 0 };
+      files.push({
+        path: current,
+        status: "renamed",
+        additions: s2.add,
+        deletions: s2.del,
+        previous_path: previous
+      });
+    }
+  }
+  return files;
+}
+function unifiedDiff(workspace2, diffArgs) {
+  return git(["diff", "--no-color", "--unified=3", ...diffArgs], workspace2);
+}
+function fileContentAtRef(workspace2, ref, path23) {
+  try {
+    return git(["show", `${ref}:${path23}`], workspace2);
+  } catch {
+    return null;
+  }
+}
+function fileContentOnDisk(workspace2, path23) {
+  try {
+    return (0, import_node_fs.readFileSync)((0, import_node_path.join)(workspace2, path23), "utf-8");
+  } catch {
+    return null;
+  }
+}
+function authorFromHead(workspace2) {
+  try {
+    return git(["log", "-1", "--format=%aN", "HEAD"], workspace2).trim();
+  } catch {
+    return "local-user";
+  }
+}
+function titleFromHead(workspace2) {
+  try {
+    return git(["log", "-1", "--format=%s", "HEAD"], workspace2).trim();
+  } catch {
+    return "Local review";
+  }
+}
+function bodyFromHead(workspace2) {
+  try {
+    return git(["log", "-1", "--format=%b", "HEAD"], workspace2).trim();
+  } catch {
+    return "";
+  }
+}
+
 // src/cli/commands/shared.ts
 function workspace() {
-  return process.cwd();
+  return repoRoot(process.cwd());
 }
 function requireApiKey() {
   const hasKey = (process.env.ANTHROPIC_API_KEY?.trim().length ?? 0) > 0 || (process.env.OPENAI_API_KEY?.trim().length ?? 0) > 0;
@@ -58531,7 +58665,7 @@ function requireApiKey() {
 // src/cli/commands/config.ts
 function readConfigFile(configPath) {
   try {
-    return (0, import_node_fs.readFileSync)((0, import_node_path.join)(workspace(), configPath), "utf-8");
+    return (0, import_node_fs2.readFileSync)((0, import_node_path2.join)(workspace(), configPath), "utf-8");
   } catch {
     return null;
   }
@@ -58569,7 +58703,7 @@ var import_node_path21 = require("node:path");
 
 // src/orchestrator.ts
 var import_promises = require("node:fs/promises");
-var import_node_path18 = require("node:path");
+var import_node_path19 = require("node:path");
 
 // node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION = "0.39.0";
@@ -58761,7 +58895,7 @@ init_File();
 // node_modules/@anthropic-ai/sdk/_shims/node-runtime.mjs
 var import_agentkeepalive = __toESM(require_agentkeepalive(), 1);
 var import_abort_controller = __toESM(require_abort_controller(), 1);
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 
 // node_modules/form-data-encoder/lib/esm/util/createBoundary.js
 var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -58988,7 +59122,7 @@ function getRuntime() {
     getMultipartRequestOptions: getMultipartRequestOptions2,
     getDefaultAgent: (url) => url.startsWith("https") ? defaultHttpsAgent : defaultHttpAgent,
     fileFromPath: fileFromPath3,
-    isFsReadStream: (value) => value instanceof import_node_fs2.ReadStream
+    isFsReadStream: (value) => value instanceof import_node_fs3.ReadStream
   };
 }
 
@@ -73886,7 +74020,7 @@ function makeGetPrMetadataTool(deps) {
 }
 
 // src/util/git-grep.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var DEFAULT_TIMEOUT_MS = 1e4;
 async function runGitGrep(opts) {
   const args = ["grep", "-n", opts.fixedString ? "-F" : "-E"];
@@ -73898,7 +74032,7 @@ async function runGitGrep(opts) {
   for (const ex of opts.excludePaths ?? []) args.push(`:(exclude,literal)${ex}`);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve5, reject) => {
-    const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
+    const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd: opts.cwd });
     let stdout = "";
     let stderr = "";
     let lineCount = 0;
@@ -74544,7 +74678,7 @@ function makeSkipFileTool(deps) {
 }
 
 // src/tools/worker-check-usage-claim.ts
-var import_node_child_process2 = require("node:child_process");
+var import_node_child_process3 = require("node:child_process");
 var GREP_RESULT_CAP = 30;
 var GREP_TIMEOUT_MS = 1e4;
 var READ_FILE_LINES_PER_CALL = 200;
@@ -74714,7 +74848,7 @@ async function runGitGrep2(pattern, cwd, pathGlob) {
   const args = ["grep", "-n", "-E", "--no-color", "--", pattern];
   if (pathGlob !== void 0) args.push(pathGlob);
   return new Promise((resolve5, reject) => {
-    const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd });
+    const child2 = (0, import_node_child_process3.spawn)("git", args, { cwd });
     let stdout = "";
     let stderr = "";
     let resolved = false;
@@ -80721,7 +80855,7 @@ var import_node_crypto = require("node:crypto");
 var import_semver2 = __toESM(require_semver2(), 1);
 
 // src/scanners/parsers/npm-package-lock.ts
-var import_node_path2 = __toESM(require("node:path"), 1);
+var import_node_path3 = __toESM(require("node:path"), 1);
 var LOOKAHEAD_LINES = 30;
 function packageNameFromKey(key) {
   const marker = "node_modules/";
@@ -80754,7 +80888,7 @@ function findVersionLine(lines, installKey) {
 var NpmPackageLockParser = class {
   ecosystem = "npm";
   matches(file) {
-    return import_node_path2.default.basename(file.path) === "package-lock.json";
+    return import_node_path3.default.basename(file.path) === "package-lock.json";
   }
   parse(content) {
     let parsed;
@@ -80785,7 +80919,7 @@ var NpmPackageLockParser = class {
 var npmPackageLockParser = new NpmPackageLockParser();
 
 // src/scanners/parsers/yarn-lock.ts
-var import_node_path3 = __toESM(require("node:path"), 1);
+var import_node_path4 = __toESM(require("node:path"), 1);
 function extractName(specifier) {
   let s2 = specifier.trim();
   if (s2.startsWith('"') && s2.endsWith('"')) {
@@ -80802,7 +80936,7 @@ function extractName(specifier) {
 var YarnLockParser = class {
   ecosystem = "npm";
   matches(file) {
-    return import_node_path3.default.basename(file.path) === "yarn.lock";
+    return import_node_path4.default.basename(file.path) === "yarn.lock";
   }
   parse(content) {
     const lines = content.split(/\r?\n/);
@@ -80861,7 +80995,7 @@ var YarnLockParser = class {
 var yarnLockParser = new YarnLockParser();
 
 // src/scanners/parsers/pnpm-lock.ts
-var import_node_path4 = __toESM(require("node:path"), 1);
+var import_node_path5 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
 function parsePnpmKey(rawKey) {
   if (!rawKey.startsWith("/")) return null;
@@ -80928,7 +81062,7 @@ function findKeyLine(lines, rawKey) {
 var PnpmLockParser = class {
   ecosystem = "npm";
   matches(file) {
-    return import_node_path4.default.basename(file.path) === "pnpm-lock.yaml";
+    return import_node_path5.default.basename(file.path) === "pnpm-lock.yaml";
   }
   parse(content) {
     let doc;
@@ -80962,12 +81096,12 @@ var PnpmLockParser = class {
 var pnpmLockParser = new PnpmLockParser();
 
 // src/scanners/parsers/python-requirements.ts
-var import_node_path5 = __toESM(require("node:path"), 1);
+var import_node_path6 = __toESM(require("node:path"), 1);
 var PIN_RE = /^\s*([A-Za-z0-9._-]+)(?:\[[^\]]+\])?\s*==\s*([^\s;#]+)/;
 var PythonRequirementsParser = class {
   ecosystem = "PyPI";
   matches(file) {
-    const base = import_node_path5.default.basename(file.path);
+    const base = import_node_path6.default.basename(file.path);
     return base.startsWith("requirements") && base.endsWith(".txt");
   }
   parse(content) {
@@ -81642,7 +81776,7 @@ function buildFinding(r2, vuln) {
 
 // src/scanners/secrets.ts
 var import_node_crypto2 = require("node:crypto");
-var import_node_path6 = __toESM(require("node:path"), 1);
+var import_node_path7 = __toESM(require("node:path"), 1);
 
 // src/scanners/secrets-patterns.ts
 function shannonEntropy(s2) {
@@ -81879,7 +82013,7 @@ function createSecretsScanner(options = {}) {
                   severity: pattern.severity,
                   category: "vulnerability",
                   confidence: pattern.confidence,
-                  title: `Possible ${pattern.display_name} in ${import_node_path6.default.basename(file.path)}`,
+                  title: `Possible ${pattern.display_name} in ${import_node_path7.default.basename(file.path)}`,
                   description: buildDescription2(pattern),
                   evidence,
                   // Per-line ordinal of this match within (file, line,
@@ -81974,15 +82108,15 @@ function emptyResult(scanner, durationMs = 0) {
 }
 
 // src/scanners/sast/eslint.ts
-var import_node_child_process3 = require("node:child_process");
-var import_node_path8 = __toESM(require("node:path"), 1);
+var import_node_child_process4 = require("node:child_process");
+var import_node_path9 = __toESM(require("node:path"), 1);
 
 // src/scanners/sast/linter.ts
-var import_node_fs3 = require("node:fs");
-var import_node_path7 = __toESM(require("node:path"), 1);
+var import_node_fs4 = require("node:fs");
+var import_node_path8 = __toESM(require("node:path"), 1);
 function normalizeToolPath(workspaceDir, toolPath) {
-  const normalized = import_node_path7.default.isAbsolute(toolPath) ? import_node_path7.default.relative(workspaceDir, toolPath) : import_node_path7.default.normalize(toolPath);
-  return normalized.split(import_node_path7.default.sep).join("/");
+  const normalized = import_node_path8.default.isAbsolute(toolPath) ? import_node_path8.default.relative(workspaceDir, toolPath) : import_node_path8.default.normalize(toolPath);
+  return normalized.split(import_node_path8.default.sep).join("/");
 }
 var LINTER_ENV_ALLOWLIST = [
   "PATH",
@@ -82143,7 +82277,7 @@ function findWorkspaceBinary(candidates) {
   for (const base of candidates) {
     for (const ext of exts) {
       const full = base + ext;
-      if ((0, import_node_fs3.existsSync)(full)) {
+      if ((0, import_node_fs4.existsSync)(full)) {
         return {
           path: full,
           needsShell: ext === ".cmd" || ext === ".bat"
@@ -82166,7 +82300,7 @@ var eslintLinter = {
   async run(deps, targetFiles) {
     const errors = [];
     const bin = findWorkspaceBinary([
-      import_node_path8.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint")
+      import_node_path9.default.join(deps.workspaceDir, "node_modules", ".bin", "eslint")
     ]);
     if (bin === null) {
       await logger.debug(
@@ -82237,7 +82371,7 @@ function runCli(bin, files, deps) {
       // one of those.
       shell: bin.needsShell
     };
-    const child2 = argsForSpawn === null ? (0, import_node_child_process3.spawn)(command, spawnOptions) : (0, import_node_child_process3.spawn)(command, argsForSpawn, spawnOptions);
+    const child2 = argsForSpawn === null ? (0, import_node_child_process4.spawn)(command, spawnOptions) : (0, import_node_child_process4.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -82340,8 +82474,8 @@ ${message.message}`;
 }
 
 // src/scanners/sast/ruff.ts
-var import_node_child_process4 = require("node:child_process");
-var import_node_path9 = __toESM(require("node:path"), 1);
+var import_node_child_process5 = require("node:child_process");
+var import_node_path10 = __toESM(require("node:path"), 1);
 var ID2 = "ruff";
 var TIMEOUT_MS2 = 6e4;
 var TARGET_EXTENSIONS2 = /\.(py|pyi)$/;
@@ -82403,9 +82537,9 @@ var ruffLinter = {
 };
 function locateBin(workspaceDir) {
   const ws = findWorkspaceBinary([
-    import_node_path9.default.join(workspaceDir, ".venv", "bin", "ruff"),
-    import_node_path9.default.join(workspaceDir, ".venv", "Scripts", "ruff"),
-    import_node_path9.default.join(workspaceDir, "node_modules", ".bin", "ruff")
+    import_node_path10.default.join(workspaceDir, ".venv", "bin", "ruff"),
+    import_node_path10.default.join(workspaceDir, ".venv", "Scripts", "ruff"),
+    import_node_path10.default.join(workspaceDir, "node_modules", ".bin", "ruff")
   ]);
   if (ws !== null) return ws;
   const isWindows2 = process.platform === "win32";
@@ -82423,7 +82557,7 @@ function runCli2(bin, files, deps) {
       env: buildLinterEnv(),
       shell: bin.needsShell
     };
-    const child2 = argsForSpawn === null ? (0, import_node_child_process4.spawn)(command, spawnOptions) : (0, import_node_child_process4.spawn)(command, argsForSpawn, spawnOptions);
+    const child2 = argsForSpawn === null ? (0, import_node_child_process5.spawn)(command, spawnOptions) : (0, import_node_child_process5.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -82523,7 +82657,7 @@ ${message}`;
 }
 
 // src/scanners/sast/dart.ts
-var import_node_child_process5 = require("node:child_process");
+var import_node_child_process6 = require("node:child_process");
 var ID3 = "dart";
 var TIMEOUT_MS3 = 9e4;
 var TARGET_EXTENSION = /\.dart$/;
@@ -82598,7 +82732,7 @@ function parseDartLine(line) {
 }
 function runCli3(files, deps) {
   return new Promise((resolve5, reject) => {
-    const child2 = (0, import_node_child_process5.spawn)("dart", ["analyze", "--format=machine", ...files], {
+    const child2 = (0, import_node_child_process6.spawn)("dart", ["analyze", "--format=machine", ...files], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv()
     });
@@ -82694,7 +82828,7 @@ ${finding.message}`;
 }
 
 // src/scanners/sast/actionlint.ts
-var import_node_child_process6 = require("node:child_process");
+var import_node_child_process7 = require("node:child_process");
 var ID4 = "actionlint";
 var TIMEOUT_MS4 = 3e4;
 var WORKFLOW_PATH_RE = /^\.github\/workflows\/.+\.ya?ml$/;
@@ -82755,7 +82889,7 @@ var actionlintLinter = {
 };
 function runCli4(files, deps) {
   return new Promise((resolve5, reject) => {
-    const child2 = (0, import_node_child_process6.spawn)("actionlint", ["-no-color", "-format", "{{json .}}", ...files], {
+    const child2 = (0, import_node_child_process7.spawn)("actionlint", ["-no-color", "-format", "{{json .}}", ...files], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv()
     });
@@ -82851,8 +82985,8 @@ ${message.message}`;
 }
 
 // src/scanners/sast/knip.ts
-var import_node_child_process7 = require("node:child_process");
-var import_node_path10 = __toESM(require("node:path"), 1);
+var import_node_child_process8 = require("node:child_process");
+var import_node_path11 = __toESM(require("node:path"), 1);
 var ID5 = "knip";
 var TIMEOUT_MS5 = 12e4;
 var TARGET_EXTENSIONS3 = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
@@ -82951,7 +83085,7 @@ var knipLinter = {
   }
 };
 function locateBin2(workspaceDir) {
-  const ws = findWorkspaceBinary([import_node_path10.default.join(workspaceDir, "node_modules", ".bin", "knip")]);
+  const ws = findWorkspaceBinary([import_node_path11.default.join(workspaceDir, "node_modules", ".bin", "knip")]);
   if (ws !== null) return ws;
   const isWindows2 = process.platform === "win32";
   return { path: "knip", needsShell: isWindows2 };
@@ -82968,7 +83102,7 @@ function runCli5(bin, deps) {
       env: buildLinterEnv(),
       shell: bin.needsShell
     };
-    const child2 = argsForSpawn === null ? (0, import_node_child_process7.spawn)(command, spawnOptions) : (0, import_node_child_process7.spawn)(command, argsForSpawn, spawnOptions);
+    const child2 = argsForSpawn === null ? (0, import_node_child_process8.spawn)(command, spawnOptions) : (0, import_node_child_process8.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -83079,9 +83213,9 @@ function truncate(s2, maxLen) {
 }
 
 // src/scanners/sast/semgrep.ts
-var import_node_child_process8 = require("node:child_process");
-var import_node_fs4 = require("node:fs");
-var import_node_path11 = __toESM(require("node:path"), 1);
+var import_node_child_process9 = require("node:child_process");
+var import_node_fs5 = require("node:fs");
+var import_node_path12 = __toESM(require("node:path"), 1);
 var ID6 = "semgrep";
 var TIMEOUT_MS6 = 18e4;
 var PROBABLY_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|py|pyi|go|rs|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|m|mm|scala|clj|ex|exs|sh|bash|yaml|yml|tf|hcl)$/;
@@ -83157,15 +83291,15 @@ async function resolveCustomRulesPath(deps) {
   if (customRulesPath === void 0 || customRulesPath.length === 0) {
     return null;
   }
-  const absPath = import_node_path11.default.isAbsolute(customRulesPath) ? customRulesPath : import_node_path11.default.resolve(deps.workspaceDir, customRulesPath);
-  if (!(0, import_node_fs4.existsSync)(absPath)) {
+  const absPath = import_node_path12.default.isAbsolute(customRulesPath) ? customRulesPath : import_node_path12.default.resolve(deps.workspaceDir, customRulesPath);
+  if (!(0, import_node_fs5.existsSync)(absPath)) {
     await logger.debug(
       `semgrep: custom_rules_path ${customRulesPath} not found at ${absPath}, skipping`
     );
     return null;
   }
   try {
-    (0, import_node_fs4.statSync)(absPath);
+    (0, import_node_fs5.statSync)(absPath);
   } catch (err) {
     await logger.debug(
       `semgrep: custom_rules_path ${absPath} stat failed (${err.message}), skipping`
@@ -83200,7 +83334,7 @@ function runCli6(files, deps, customRulesPath) {
       "--",
       ...files
     ];
-    const child2 = (0, import_node_child_process8.spawn)("semgrep", args, {
+    const child2 = (0, import_node_child_process9.spawn)("semgrep", args, {
       cwd: deps.workspaceDir,
       // SEMGREP_EXTRA_ENV_KEYS is per-linter scoped (not in the shared
       // allowlist) so SEMGREP_APP_TOKEN only reaches semgrep — a
@@ -83325,9 +83459,9 @@ ${result.extra.message.trim()}${metaStr}`;
 }
 
 // src/scanners/sast/tsc.ts
-var import_node_child_process9 = require("node:child_process");
-var import_node_fs5 = require("node:fs");
-var import_node_path12 = __toESM(require("node:path"), 1);
+var import_node_child_process10 = require("node:child_process");
+var import_node_fs6 = require("node:fs");
+var import_node_path13 = __toESM(require("node:path"), 1);
 var ID7 = "tsc";
 var TIMEOUT_MS7 = 12e4;
 var TARGET_EXTENSIONS4 = /\.(ts|tsx|cts|mts)$/;
@@ -83348,12 +83482,12 @@ var tscLinter = {
     if (tscConfig?.enabled === false) {
       return { findings: [], errors: [], filesExamined: 0 };
     }
-    const tsconfigPath = import_node_path12.default.join(deps.workspaceDir, "tsconfig.json");
-    if (!(0, import_node_fs5.existsSync)(tsconfigPath)) {
+    const tsconfigPath = import_node_path13.default.join(deps.workspaceDir, "tsconfig.json");
+    if (!(0, import_node_fs6.existsSync)(tsconfigPath)) {
       await logger.debug(`tsc: skipped \u2014 no tsconfig.json at ${tsconfigPath}`);
       return { findings: [], errors: [], filesExamined: 0 };
     }
-    const bin = findWorkspaceBinary([import_node_path12.default.join(deps.workspaceDir, "node_modules", ".bin", "tsc")]);
+    const bin = findWorkspaceBinary([import_node_path13.default.join(deps.workspaceDir, "node_modules", ".bin", "tsc")]);
     if (bin === null) {
       await logger.debug(
         `tsc: skipped \u2014 no tsc binary at ${deps.workspaceDir}/node_modules/.bin/tsc (workspace not npm-installed?)`
@@ -83429,7 +83563,7 @@ function runCli7(bin, deps) {
       env: buildLinterEnv(),
       shell: bin.needsShell
     };
-    const child2 = argsForSpawn === null ? (0, import_node_child_process9.spawn)(command, spawnOptions) : (0, import_node_child_process9.spawn)(command, argsForSpawn, spawnOptions);
+    const child2 = argsForSpawn === null ? (0, import_node_child_process10.spawn)(command, spawnOptions) : (0, import_node_child_process10.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -83513,10 +83647,10 @@ function renderDescription6(diag) {
 }
 
 // src/scanners/sast/golang.ts
-var import_node_child_process10 = require("node:child_process");
-var import_node_fs6 = require("node:fs");
+var import_node_child_process11 = require("node:child_process");
+var import_node_fs7 = require("node:fs");
 var import_node_os = __toESM(require("node:os"), 1);
-var import_node_path13 = __toESM(require("node:path"), 1);
+var import_node_path14 = __toESM(require("node:path"), 1);
 var ID8 = "golangci-lint";
 var TIMEOUT_MS8 = 12e4;
 var TARGET_EXTENSION2 = /\.go$/;
@@ -83532,7 +83666,7 @@ var golangLinter = {
     const filesByPath = new Map(targetFiles.map((f2) => [f2.path, f2]));
     const groups2 = groupByGoModule(
       targetFiles.map((f2) => f2.path),
-      (dirRel) => (0, import_node_fs6.existsSync)(import_node_path13.default.join(deps.workspaceDir, dirRel, "go.mod"))
+      (dirRel) => (0, import_node_fs7.existsSync)(import_node_path14.default.join(deps.workspaceDir, dirRel, "go.mod"))
     );
     const findings = [];
     let ranAny = false;
@@ -83544,7 +83678,7 @@ var golangLinter = {
         );
       }
       if (safe.length === 0) continue;
-      const cwd = group2.root === "." ? deps.workspaceDir : import_node_path13.default.join(deps.workspaceDir, group2.root);
+      const cwd = group2.root === "." ? deps.workspaceDir : import_node_path14.default.join(deps.workspaceDir, group2.root);
       let rawOutput;
       try {
         rawOutput = await runWithFallback(bin, safe, deps, cwd);
@@ -83596,7 +83730,7 @@ function nearestGoModuleRoot(fileDirRel, hasGoMod) {
 function groupByGoModule(paths, hasGoMod) {
   const byRoot = /* @__PURE__ */ new Map();
   for (const p2 of paths) {
-    const fileDir = import_node_path13.default.posix.dirname(p2);
+    const fileDir = import_node_path14.default.posix.dirname(p2);
     const root = nearestGoModuleRoot(fileDir, hasGoMod);
     const rel = fileDir === root ? "" : root === "." ? fileDir : fileDir.slice(root.length + 1);
     const target = rel === "" ? "./" : `./${rel}`;
@@ -83610,18 +83744,18 @@ function groupByGoModule(paths, hasGoMod) {
   return [...byRoot.entries()].map(([root, dirs]) => ({ root, dirs: [...dirs] }));
 }
 function issuePathCandidates(workspaceDir, moduleRoot, filename) {
-  if (import_node_path13.default.isAbsolute(filename)) {
+  if (import_node_path14.default.isAbsolute(filename)) {
     return [normalizeToolPath(workspaceDir, filename)];
   }
-  const posixName = import_node_path13.default.posix.normalize(filename.split(import_node_path13.default.sep).join("/"));
+  const posixName = import_node_path14.default.posix.normalize(filename.split(import_node_path14.default.sep).join("/"));
   if (moduleRoot === ".") {
     return [posixName];
   }
-  const moduleRooted = import_node_path13.default.posix.normalize(`${moduleRoot}/${posixName}`);
+  const moduleRooted = import_node_path14.default.posix.normalize(`${moduleRoot}/${posixName}`);
   return posixName.startsWith(`${moduleRoot}/`) ? [posixName, moduleRooted] : [moduleRooted, posixName];
 }
 function locateBin3(workspaceDir) {
-  const ws = findWorkspaceBinary([import_node_path13.default.join(workspaceDir, "bin", "golangci-lint")]);
+  const ws = findWorkspaceBinary([import_node_path14.default.join(workspaceDir, "bin", "golangci-lint")]);
   if (ws !== null) return ws;
   const isWindows2 = process.platform === "win32";
   return { path: "golangci-lint", needsShell: isWindows2 };
@@ -83647,18 +83781,18 @@ async function runWithFallback(bin, dirs, deps, cwd) {
   }
 }
 async function runV2ToFile(bin, common, dirs, deps, cwd) {
-  const tmpDir = (0, import_node_fs6.mkdtempSync)(import_node_path13.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
-  const reportPath = import_node_path13.default.join(tmpDir, "report.json");
+  const tmpDir = (0, import_node_fs7.mkdtempSync)(import_node_path14.default.join(import_node_os.default.tmpdir(), "vor-golangci-"));
+  const reportPath = import_node_path14.default.join(tmpDir, "report.json");
   const pathArg = bin.needsShell ? `"${reportPath}"` : reportPath;
   try {
     await runCli8(bin, [...common, `--output.json.path=${pathArg}`, ...dirs], deps, cwd);
     try {
-      return (0, import_node_fs6.readFileSync)(reportPath, "utf-8");
+      return (0, import_node_fs7.readFileSync)(reportPath, "utf-8");
     } catch {
       return '{"Issues":null}';
     }
   } finally {
-    (0, import_node_fs6.rmSync)(tmpDir, { recursive: true, force: true });
+    (0, import_node_fs7.rmSync)(tmpDir, { recursive: true, force: true });
   }
 }
 function isMissingBinary(msg) {
@@ -83681,7 +83815,7 @@ function runCli8(bin, args, deps, cwd) {
       env: buildLinterEnv(),
       shell: bin.needsShell
     };
-    const child2 = argsForSpawn === null ? (0, import_node_child_process10.spawn)(command, spawnOptions) : (0, import_node_child_process10.spawn)(command, argsForSpawn, spawnOptions);
+    const child2 = argsForSpawn === null ? (0, import_node_child_process11.spawn)(command, spawnOptions) : (0, import_node_child_process11.spawn)(command, argsForSpawn, spawnOptions);
     const stdoutChunks = [];
     const stderrChunks = [];
     let resolved = false;
@@ -83884,9 +84018,9 @@ var containerScannerStub = {
 };
 
 // src/scanners/coverage-delta.ts
-var import_node_child_process11 = require("node:child_process");
-var import_node_fs7 = require("node:fs");
-var import_node_path14 = __toESM(require("node:path"), 1);
+var import_node_child_process12 = require("node:child_process");
+var import_node_fs8 = require("node:fs");
+var import_node_path15 = __toESM(require("node:path"), 1);
 var SCANNER_ID4 = "coverage-delta";
 var COVERAGE_TIMEOUT_MS = 24e4;
 var MAX_COVERAGE_JSON_BYTES = 50 * 1024 * 1024;
@@ -83996,7 +84130,7 @@ function createCoverageDeltaScanner(options = {}) {
 }
 function detectCoverageTool(deps) {
   const ws = deps.workspaceDir;
-  const pkgJson = readJsonIfExists(import_node_path14.default.join(ws, "package.json"));
+  const pkgJson = readJsonIfExists(import_node_path15.default.join(ws, "package.json"));
   if (pkgJson !== null && (hasCoverageScript(pkgJson) || hasNamedDep(pkgJson, "vitest")) && hasJsOrTsChange(deps.changedFiles)) {
     if (hasNamedDep(pkgJson, "vitest") || hasViteConfig(ws)) {
       return {
@@ -84006,14 +84140,14 @@ function detectCoverageTool(deps) {
         // istanbul reporter under the hood). We read this artifact rather
         // than the stdout reporter so the parsing path stays consistent
         // across CI configs that customize stdout reporters.
-        artifact: import_node_path14.default.join(ws, "coverage", "coverage-final.json")
+        artifact: import_node_path15.default.join(ws, "coverage", "coverage-final.json")
       };
     }
   }
   if (pkgJson !== null && (hasNamedDep(pkgJson, "jest") || pkgJson.jest !== void 0 || hasJestConfig(ws)) && hasJsOrTsChange(deps.changedFiles)) {
     return {
       id: "jest",
-      artifact: import_node_path14.default.join(ws, "coverage", "coverage-final.json")
+      artifact: import_node_path15.default.join(ws, "coverage", "coverage-final.json")
     };
   }
   if (hasPythonProject(ws) && hasPythonChange(deps.changedFiles)) {
@@ -84023,7 +84157,7 @@ function detectCoverageTool(deps) {
       // current working directory by default. We pin the path explicitly
       // via `--cov-report=json:<path>` in runCoverageCli so this stays in
       // sync.
-      artifact: import_node_path14.default.join(ws, "coverage.json")
+      artifact: import_node_path15.default.join(ws, "coverage.json")
     };
   }
   return null;
@@ -84044,8 +84178,8 @@ function hasPythonChange(files) {
 }
 function readJsonIfExists(p2) {
   try {
-    if (!(0, import_node_fs7.existsSync)(p2)) return null;
-    const raw = (0, import_node_fs7.readFileSync)(p2, "utf-8");
+    if (!(0, import_node_fs8.existsSync)(p2)) return null;
+    const raw = (0, import_node_fs8.readFileSync)(p2, "utf-8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -84060,17 +84194,17 @@ function hasNamedDep(pkg, name) {
   return pkg.dependencies?.[name] !== void 0 || pkg.devDependencies?.[name] !== void 0 || pkg.peerDependencies?.[name] !== void 0 || pkg.optionalDependencies?.[name] !== void 0;
 }
 function hasViteConfig(workspaceDir) {
-  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "vitest.config.mjs"));
+  return (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "vitest.config.ts")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "vitest.config.js")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "vitest.config.mjs"));
 }
 function hasJestConfig(workspaceDir) {
-  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "jest.config.json"));
+  return (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "jest.config.js")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "jest.config.ts")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "jest.config.mjs")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "jest.config.cjs")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "jest.config.json"));
 }
 function hasPythonProject(workspaceDir) {
-  return (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs7.existsSync)(import_node_path14.default.join(workspaceDir, "conftest.py"));
+  return (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "pyproject.toml")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "pytest.ini")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "setup.cfg")) || (0, import_node_fs8.existsSync)(import_node_path15.default.join(workspaceDir, "conftest.py"));
 }
 function normalizeReportPath(workspaceDir, toolPath) {
-  const normalized = import_node_path14.default.isAbsolute(toolPath) ? import_node_path14.default.relative(workspaceDir, toolPath) : import_node_path14.default.normalize(toolPath);
-  return normalized.split(import_node_path14.default.sep).join("/");
+  const normalized = import_node_path15.default.isAbsolute(toolPath) ? import_node_path15.default.relative(workspaceDir, toolPath) : import_node_path15.default.normalize(toolPath);
+  return normalized.split(import_node_path15.default.sep).join("/");
 }
 function uncoveredLines(fc) {
   const maxHitsByLine = /* @__PURE__ */ new Map();
@@ -84107,7 +84241,7 @@ function buildFinding9(tool2, file_path, line) {
     line,
     severity: "minor",
     category: "test-gap",
-    title: `Untested line in ${import_node_path14.default.basename(file_path)}:${line}`,
+    title: `Untested line in ${import_node_path15.default.basename(file_path)}:${line}`,
     description: "This added line is not exercised by the test suite. Consider adding a test that covers this path, or move the logic behind a tested entry point.",
     confidence: "medium",
     evidence: { kind: "coverage", tool: tool2.id },
@@ -84117,7 +84251,7 @@ function buildFinding9(tool2, file_path, line) {
 async function runCoverageCli(tool2, deps) {
   const { command, args, env } = buildCoverageInvocation(tool2, deps);
   return new Promise((resolve5) => {
-    const child2 = (0, import_node_child_process11.spawn)(command, args, {
+    const child2 = (0, import_node_child_process12.spawn)(command, args, {
       cwd: deps.workspaceDir,
       env,
       // We never run under shell:true here. Coverage commands always go
@@ -84131,7 +84265,7 @@ async function runCoverageCli(tool2, deps) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if ((0, import_node_fs7.existsSync)(tool2.artifact)) {
+      if ((0, import_node_fs8.existsSync)(tool2.artifact)) {
         resolve5({ ok: true });
       } else {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim().slice(0, 500);
@@ -84200,10 +84334,10 @@ function buildCoverageInvocation(tool2, _deps) {
   }
 }
 function loadCoverageMap(tool2, _deps) {
-  if (!(0, import_node_fs7.existsSync)(tool2.artifact)) return null;
+  if (!(0, import_node_fs8.existsSync)(tool2.artifact)) return null;
   let raw;
   try {
-    raw = (0, import_node_fs7.readFileSync)(tool2.artifact, "utf-8");
+    raw = (0, import_node_fs8.readFileSync)(tool2.artifact, "utf-8");
   } catch {
     return null;
   }
@@ -84278,7 +84412,7 @@ function finalize(started, findings, errors, files_examined) {
 
 // src/scanners/debris.ts
 var import_node_crypto3 = require("node:crypto");
-var import_node_path15 = __toESM(require("node:path"), 1);
+var import_node_path16 = __toESM(require("node:path"), 1);
 var SCANNER_ID5 = "debris";
 var JS_TS_EXT = /\.(?:m|c)?[jt]sx?$/i;
 var PY_EXT = /\.py$/i;
@@ -84411,7 +84545,7 @@ function createDebrisScanner(options = {}) {
                   severity: rule.severity,
                   category: rule.category,
                   confidence: rule.confidence,
-                  title: `${rule.title} in ${import_node_path15.default.basename(file.path)}`,
+                  title: `${rule.title} in ${import_node_path16.default.basename(file.path)}`,
                   description: rule.description,
                   evidence: { kind: "debris", rule: rule.id, snippet: snippetOf(text) },
                   fingerprint: fingerprintOf3(rule_id, file.path, lineNo, matchIndex++)
@@ -84460,7 +84594,7 @@ function buildMetrics3(started, files_examined) {
 
 // src/scanners/migration-safety.ts
 var import_node_crypto4 = require("node:crypto");
-var import_node_path16 = __toESM(require("node:path"), 1);
+var import_node_path17 = __toESM(require("node:path"), 1);
 var SCANNER_ID6 = "migration-safety";
 var MIGRATION_PATH = /(?:^|\/)(?:migrations?|db\/migrate|alembic\/versions)\/|\.sql$/i;
 function isMigration(file) {
@@ -84562,7 +84696,7 @@ function createMigrationSafetyScanner(options = {}) {
                   severity: rule.severity,
                   category: rule.category,
                   confidence: rule.confidence,
-                  title: `${rule.title} (${import_node_path16.default.basename(file.path)})`,
+                  title: `${rule.title} (${import_node_path17.default.basename(file.path)})`,
                   description: rule.description,
                   evidence: { kind: "migration", statement: statementOf(text) },
                   fingerprint: fingerprintOf4(rule_id, file.path, lineNo, matchIndex++)
@@ -84611,7 +84745,7 @@ function buildMetrics4(started, files_examined) {
 
 // src/scanners/dependency-hygiene.ts
 var import_node_crypto5 = require("node:crypto");
-var import_node_path17 = __toESM(require("node:path"), 1);
+var import_node_path18 = __toESM(require("node:path"), 1);
 var import_parse_diff2 = __toESM(require_parse_diff(), 1);
 var SCANNER_ID7 = "dependency-hygiene";
 var MANIFEST_BASENAME = "package.json";
@@ -84630,10 +84764,10 @@ var DEPENDENCY_SECTIONS = [
 var JSON_PAIR_RE = /^\s*"([^"]+)"\s*:\s*"([^"]*)"\s*,?\s*$/;
 var NON_REGISTRY_SPEC_RE = /^(?:git(?:\+|:|@)|https?:|github:|gitlab:|bitbucket:|file:)/i;
 function isManifest(file) {
-  return !file.is_generated && import_node_path17.default.basename(file.path) === MANIFEST_BASENAME;
+  return !file.is_generated && import_node_path18.default.basename(file.path) === MANIFEST_BASENAME;
 }
 function isLockfile(file) {
-  return LOCKFILE_BASENAMES.has(import_node_path17.default.basename(file.path));
+  return LOCKFILE_BASENAMES.has(import_node_path18.default.basename(file.path));
 }
 function dirOf(p2) {
   const i2 = p2.lastIndexOf("/");
@@ -84673,7 +84807,7 @@ function manifestsWithRemovedDependency(diff) {
   }
   for (const f2 of parsed) {
     const p2 = f2.to && f2.to !== "/dev/null" ? f2.to : f2.from ?? "";
-    if (import_node_path17.default.basename(p2) !== MANIFEST_BASENAME) continue;
+    if (import_node_path18.default.basename(p2) !== MANIFEST_BASENAME) continue;
     for (const chunk2 of f2.chunks) {
       for (const change of chunk2.changes) {
         if (change.type !== "del") continue;
@@ -84796,7 +84930,7 @@ function createDependencyHygieneScanner(options = {}) {
             severity: "minor",
             category: "bug",
             confidence: "medium",
-            title: `Dependency change without a lockfile update (${import_node_path17.default.basename(file.path)})`,
+            title: `Dependency change without a lockfile update (${import_node_path18.default.basename(file.path)})`,
             description: "This PR adds, changes, or removes a dependency in `package.json` but does not update a lockfile (`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`). `npm ci` and reproducible installs require the lockfile to match the manifest \u2014 run your package manager install and commit the updated lockfile.",
             evidence: { kind: "dependency", issue: "lockfile-drift" },
             fingerprint: fingerprintOf5(rule_id, file.path, "drift")
@@ -85452,7 +85586,7 @@ async function loadConfig(input, fileReader, headSha) {
     );
   }
   try {
-    const localPath = (0, import_node_path18.resolve)(input.workspace_dir, input.config_path);
+    const localPath = (0, import_node_path19.resolve)(input.workspace_dir, input.config_path);
     const content = await (0, import_promises.readFile)(localPath, "utf-8");
     return loadConfigFromString(content);
   } catch {
@@ -85468,140 +85602,6 @@ async function loadRepoContextFiles(fileReader, owner, repo, ref, files) {
     }
   }
   return entries;
-}
-
-// src/local/git.ts
-var import_node_child_process12 = require("node:child_process");
-var import_node_fs8 = require("node:fs");
-var import_node_path19 = require("node:path");
-function git(args, cwd) {
-  return (0, import_node_child_process12.execFileSync)("git", args, {
-    cwd,
-    encoding: "utf-8",
-    maxBuffer: 256 * 1024 * 1024,
-    // 256 MB — large diffs / file contents
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-}
-function resolveRef(workspace2, ref) {
-  return git(["rev-parse", ref], workspace2).trim();
-}
-function repoRoot(workspace2) {
-  try {
-    return git(["rev-parse", "--show-toplevel"], workspace2).trim() || workspace2;
-  } catch {
-    return workspace2;
-  }
-}
-function hasWorkingTreeChanges(workspace2) {
-  const out2 = git(["status", "--porcelain"], workspace2);
-  return out2.split("\n").some((line) => line.trim().length > 0);
-}
-function untrackedFiles(workspace2) {
-  const out2 = git(["ls-files", "--others", "--exclude-standard"], workspace2);
-  return out2.split("\n").filter((line) => line.trim().length > 0);
-}
-function untrackedPatch(workspace2, path23) {
-  try {
-    return git(["diff", "--no-index", "--no-color", "--", "/dev/null", path23], workspace2);
-  } catch (err) {
-    const e2 = err;
-    if (e2.status === 1 && e2.stdout != null) return e2.stdout.toString();
-    return "";
-  }
-}
-function workingTreeChanges(workspace2) {
-  const files = changedFiles(workspace2, ["HEAD"]);
-  const diffs = [unifiedDiff(workspace2, ["HEAD"])];
-  for (const path23 of untrackedFiles(workspace2)) {
-    const patch = untrackedPatch(workspace2, path23);
-    if (!patch.trim()) continue;
-    diffs.push(patch);
-    const additions = patch.split("\n").filter((l2) => l2.startsWith("+") && !l2.startsWith("+++")).length;
-    files.push({ path: path23, status: "added", additions, deletions: 0 });
-  }
-  return { files, diff: diffs.filter((d2) => d2.trim().length > 0).join("\n") };
-}
-function changedFiles(workspace2, diffArgs) {
-  const status2 = git(["diff", "--name-status", ...diffArgs], workspace2);
-  const numstat = git(["diff", "--numstat", ...diffArgs], workspace2);
-  const stats = /* @__PURE__ */ new Map();
-  for (const line of numstat.split("\n")) {
-    const m2 = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/);
-    if (!m2) continue;
-    const add = m2[1] === "-" ? 0 : Number.parseInt(m2[1], 10);
-    const del = m2[2] === "-" ? 0 : Number.parseInt(m2[2], 10);
-    stats.set(m2[3], { add, del });
-  }
-  const files = [];
-  for (const line of status2.split("\n")) {
-    if (!line.trim()) continue;
-    const parts = line.split("	");
-    const code = parts[0];
-    if (code.startsWith("A")) {
-      const p2 = parts[1];
-      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
-      files.push({ path: p2, status: "added", additions: s2.add, deletions: s2.del });
-    } else if (code.startsWith("M")) {
-      const p2 = parts[1];
-      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
-      files.push({ path: p2, status: "modified", additions: s2.add, deletions: s2.del });
-    } else if (code.startsWith("D")) {
-      const p2 = parts[1];
-      const s2 = stats.get(p2) ?? { add: 0, del: 0 };
-      files.push({ path: p2, status: "removed", additions: s2.add, deletions: s2.del });
-    } else if (code.startsWith("R")) {
-      const previous = parts[1];
-      const current = parts[2];
-      const s2 = stats.get(current) ?? stats.get(`${previous} => ${current}`) ?? { add: 0, del: 0 };
-      files.push({
-        path: current,
-        status: "renamed",
-        additions: s2.add,
-        deletions: s2.del,
-        previous_path: previous
-      });
-    }
-  }
-  return files;
-}
-function unifiedDiff(workspace2, diffArgs) {
-  return git(["diff", "--no-color", "--unified=3", ...diffArgs], workspace2);
-}
-function fileContentAtRef(workspace2, ref, path23) {
-  try {
-    return git(["show", `${ref}:${path23}`], workspace2);
-  } catch {
-    return null;
-  }
-}
-function fileContentOnDisk(workspace2, path23) {
-  try {
-    return (0, import_node_fs8.readFileSync)((0, import_node_path19.join)(workspace2, path23), "utf-8");
-  } catch {
-    return null;
-  }
-}
-function authorFromHead(workspace2) {
-  try {
-    return git(["log", "-1", "--format=%aN", "HEAD"], workspace2).trim();
-  } catch {
-    return "local-user";
-  }
-}
-function titleFromHead(workspace2) {
-  try {
-    return git(["log", "-1", "--format=%s", "HEAD"], workspace2).trim();
-  } catch {
-    return "Local review";
-  }
-}
-function bodyFromHead(workspace2) {
-  try {
-    return git(["log", "-1", "--format=%b", "HEAD"], workspace2).trim();
-  } catch {
-    return "";
-  }
 }
 
 // src/local/git-octokit.ts
@@ -86087,7 +86087,7 @@ async function startDashboard(opts) {
   const host = opts.host ?? "127.0.0.1";
   assertLoopbackBind(host);
   const authority = `${hostForUrl(host)}:${opts.port}`;
-  const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
+  const deps = opts.deps ?? defaultDashboardDeps(repoRoot(process.cwd()));
   const assetDir = materializeDashboard(package_default.version);
   const server = (0, import_node_http.createServer)((req, res) => {
     void (async () => {

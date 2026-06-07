@@ -1,8 +1,14 @@
+import { repoRoot } from '../../local/git.js';
 import { status } from '../output.js';
 
-/** Resolve the workspace a CLI command operates on. */
+/**
+ * Resolve the workspace a CLI command operates on — the repository root, not the
+ * raw cwd. `runLocalReview` saves run records under the repo-root project slug,
+ * so the history commands (`runs list/show`) must read from the same root or a
+ * review started in a subdirectory would be invisible to them.
+ */
 export function workspace(): string {
-  return process.cwd();
+  return repoRoot(process.cwd());
 }
 
 /**
