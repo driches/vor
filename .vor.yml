@@ -1,0 +1,7 @@
+# Enable the image-ocr scanner so the dogfood review on this PR will OCR
+# the screenshots under src/_test-fixtures/ocr-screenshots/ and run the
+# existing secret patterns over the extracted text.
+security:
+  scanners:
+    image_ocr:
+      enabled: true
