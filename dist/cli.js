@@ -86160,16 +86160,19 @@ function hostAllowed(req, port) {
   const name = host.replace(new RegExp(`:${port}$`), "").trim();
   return ALLOWED_HOSTS.has(name);
 }
+function parseBody(text) {
+  if (text.trim().length === 0) return { kind: "empty" };
+  try {
+    return { kind: "json", value: JSON.parse(text) };
+  } catch {
+    return { kind: "invalid" };
+  }
+}
 async function readBody(req) {
   const chunks = [];
   for await (const chunk2 of req) chunks.push(chunk2);
-  if (chunks.length === 0) return void 0;
-  const text = Buffer.concat(chunks).toString("utf-8");
-  try {
-    return JSON.parse(text);
-  } catch {
-    return void 0;
-  }
+  if (chunks.length === 0) return { kind: "empty" };
+  return parseBody(Buffer.concat(chunks).toString("utf-8"));
 }
 async function startDashboard(opts) {
   const host = opts.host ?? "127.0.0.1";
@@ -86197,7 +86200,18 @@ async function startDashboard(opts) {
           res.end(rejection.message);
           return;
         }
-        const body = method === "POST" ? await readBody(req) : void 0;
+        let body;
+        if (method === "POST") {
+          const parsed = await readBody(req);
+          if (parsed.kind === "invalid") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({ error: "invalid_json", message: "Request body is not valid JSON." })
+            );
+            return;
+          }
+          body = parsed.kind === "json" ? parsed.value : void 0;
+        }
         const result = await handleApi(method, url.pathname, body, deps);
         res.writeHead(result.status, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(result.body));

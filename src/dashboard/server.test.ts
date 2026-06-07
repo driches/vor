@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { csrfRejection, hostForUrl, startDashboard } from './server.js';
+import { csrfRejection, hostForUrl, parseBody, startDashboard } from './server.js';
 
 describe('hostForUrl', () => {
   it('brackets IPv6 literals and leaves IPv4/hostnames alone', () => {
@@ -18,6 +18,25 @@ describe('startDashboard bind guard', () => {
   it('refuses to bind to a non-loopback host', async () => {
     await expect(startDashboard({ port: 0, host: '0.0.0.0' })).rejects.toThrow(/loopback/i);
     await expect(startDashboard({ port: 0, host: '192.168.1.10' })).rejects.toThrow(/loopback/i);
+  });
+});
+
+describe('parseBody', () => {
+  it('treats an empty or whitespace body as a defaults review, not an error', () => {
+    expect(parseBody('')).toEqual({ kind: 'empty' });
+    expect(parseBody('   \n')).toEqual({ kind: 'empty' });
+  });
+
+  it('parses valid JSON', () => {
+    expect(parseBody('{"target":"working-tree"}')).toEqual({
+      kind: 'json',
+      value: { target: 'working-tree' },
+    });
+  });
+
+  it('flags malformed/truncated JSON as invalid rather than empty', () => {
+    expect(parseBody('{"target":')).toEqual({ kind: 'invalid' });
+    expect(parseBody('not json')).toEqual({ kind: 'invalid' });
   });
 });
 

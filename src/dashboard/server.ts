@@ -87,16 +87,31 @@ function hostAllowed(req: IncomingMessage, port: number): boolean {
   return ALLOWED_HOSTS.has(name);
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+/**
+ * Classify a request body. Distinguishes an empty body (no body sent — a
+ * "review now with defaults" POST) from a non-empty body that isn't valid JSON,
+ * so the caller can 400 the latter instead of silently starting a default
+ * review (which would spend LLM credits and ignore the caller's intent).
+ */
+export type ParsedBody =
+  | { kind: 'empty' }
+  | { kind: 'json'; value: unknown }
+  | { kind: 'invalid' };
+
+export function parseBody(text: string): ParsedBody {
+  if (text.trim().length === 0) return { kind: 'empty' };
+  try {
+    return { kind: 'json', value: JSON.parse(text) };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
+
+async function readBody(req: IncomingMessage): Promise<ParsedBody> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
-  if (chunks.length === 0) return undefined;
-  const text = Buffer.concat(chunks).toString('utf-8');
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+  if (chunks.length === 0) return { kind: 'empty' };
+  return parseBody(Buffer.concat(chunks).toString('utf-8'));
 }
 
 export async function startDashboard(opts: DashboardOptions): Promise<void> {
@@ -130,7 +145,18 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
           res.end(rejection.message);
           return;
         }
-        const body = method === 'POST' ? await readBody(req) : undefined;
+        let body: unknown;
+        if (method === 'POST') {
+          const parsed = await readBody(req);
+          if (parsed.kind === 'invalid') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({ error: 'invalid_json', message: 'Request body is not valid JSON.' }),
+            );
+            return;
+          }
+          body = parsed.kind === 'json' ? parsed.value : undefined;
+        }
         const result = await handleApi(method, url.pathname, body, deps);
         res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result.body));
