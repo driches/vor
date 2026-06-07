@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +8,7 @@ import {
   fileContentAtRef,
   fileContentOnDisk,
   hasWorkingTreeChanges,
+  repoRoot,
   resolveRef,
   unifiedDiff,
   untrackedFiles,
@@ -97,6 +98,19 @@ describe('local git helpers', () => {
       expect(diff).toContain('+export const secret = "x";');
     } finally {
       rmSync(join(repo, 'brand-new.ts'));
+    }
+  });
+
+  it('resolves a subdirectory to the repository root', () => {
+    mkdirSync(join(repo, 'pkg', 'nested'), { recursive: true });
+    // Both the root and a nested dir resolve to the same top-level.
+    expect(repoRoot(join(repo, 'pkg', 'nested'))).toBe(repoRoot(repo));
+    // A non-repo path falls back to itself rather than throwing.
+    const outside = mkdtempSync(join(tmpdir(), 'vor-norepo-'));
+    try {
+      expect(repoRoot(outside)).toBe(outside);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });

@@ -18,6 +18,7 @@ import {
   fileContentAtRef,
   fileContentOnDisk,
   hasWorkingTreeChanges,
+  repoRoot,
   resolveRef,
   titleFromHead,
   unifiedDiff,
@@ -53,7 +54,10 @@ export async function runLocalReview(
   opts: LocalReviewOptions = {},
   deps: RunLocalReviewDeps = {},
 ): Promise<LocalRunRecord> {
-  const workspace = opts.workspace ?? process.cwd();
+  // Resolve to the repo root: git reports diff paths relative to the top-level,
+  // so a review launched from a subdirectory must operate from the root or
+  // file lookups and scanner roots land in the wrong place.
+  const workspace = repoRoot(opts.workspace ?? process.cwd());
   const configPath = opts.configPath ?? '.vor.yml';
   const runner = deps.runOrchestratorImpl ?? runOrchestrator;
   const overrides = deps.contentOverrides ?? new Map<string, string>();

@@ -35,6 +35,21 @@ export function resolveRef(workspace: string, ref: string): string {
 }
 
 /**
+ * Resolve a path inside a repo to the repository top-level. `git diff` reports
+ * paths relative to the repo root, so a review launched from a subdirectory must
+ * operate from the root or file-content lookups and scanner roots (tsconfig,
+ * node_modules) point at the wrong place. Falls back to the input when it isn't
+ * a git checkout — downstream git calls then surface the error loudly.
+ */
+export function repoRoot(workspace: string): string {
+  try {
+    return git(['rev-parse', '--show-toplevel'], workspace).trim() || workspace;
+  } catch {
+    return workspace;
+  }
+}
+
+/**
  * True when the working tree has staged/unstaged changes OR untracked files
  * (respecting .gitignore). Untracked files are included because the canonical
  * pre-push review case is "I just created a file and haven't committed it" —

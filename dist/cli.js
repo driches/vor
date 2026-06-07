@@ -85486,6 +85486,13 @@ function git(args, cwd) {
 function resolveRef(workspace2, ref) {
   return git(["rev-parse", ref], workspace2).trim();
 }
+function repoRoot(workspace2) {
+  try {
+    return git(["rev-parse", "--show-toplevel"], workspace2).trim() || workspace2;
+  } catch {
+    return workspace2;
+  }
+}
 function hasWorkingTreeChanges(workspace2) {
   const out2 = git(["status", "--porcelain"], workspace2);
   return out2.split("\n").some((line) => line.trim().length > 0);
@@ -85774,7 +85781,7 @@ var NothingToReviewError = class extends Error {
   }
 };
 async function runLocalReview(opts = {}, deps = {}) {
-  const workspace2 = opts.workspace ?? process.cwd();
+  const workspace2 = repoRoot(opts.workspace ?? process.cwd());
   const configPath = opts.configPath ?? ".vor.yml";
   const runner = deps.runOrchestratorImpl ?? runOrchestrator;
   const overrides = deps.contentOverrides ?? /* @__PURE__ */ new Map();
