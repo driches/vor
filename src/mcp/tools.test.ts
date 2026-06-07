@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { repoRoot } from '../local/git.js';
@@ -99,6 +99,27 @@ describe('MCP tool handlers', () => {
     expect((parse(await h.get_run({ id: 'r1' })) as { id: string }).id).toBe('r1');
     const missing = await h.get_run({ id: 'nope' });
     expect(missing.isError).toBe(true);
+  });
+
+  it('get_config confines config_path to the workspace', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-cfg-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    // Recognizable in-repo config, plus an out-of-repo file a traversal would hit.
+    writeFileSync(join(repo, '.vor.yml'), 'max_turns: 13\n');
+    writeFileSync(join(repo, '..', 'outside.yml'), 'max_turns: 7\n');
+    try {
+      const h = createHandlers(deps({ workspace: repo }));
+      const inside = parse(await h.get_config({})) as { max_turns: number };
+      expect(inside.max_turns).toBe(13);
+      // A '../' escape must not read outside.yml; it falls back to defaults (40).
+      const escaped = parse(await h.get_config({ config_path: '../outside.yml' })) as {
+        max_turns: number;
+      };
+      expect(escaped.max_turns).toBe(40);
+    } finally {
+      rmSync(join(repo, '..', 'outside.yml'), { force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('keys history off the repo root when started in a subdirectory', async () => {

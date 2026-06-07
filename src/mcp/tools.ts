@@ -9,7 +9,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { loadConfigFromString } from '../config/loader.js';
 import { repoRoot } from '../local/git.js';
@@ -108,12 +108,20 @@ export function createHandlers(deps: VorToolDeps) {
     },
 
     get_config: async (args: GetConfigArgs): Promise<ToolResult> => {
-      const path = join(workspace, args.config_path ?? '.vor.yml');
+      // config_path is client-supplied; confine it to the workspace so `../`
+      // can't coax get_config into reading (and returning) a file outside the
+      // repo. An escaping path falls back to defaults, as a missing file would.
+      const root = resolve(workspace);
+      const path = resolve(root, args.config_path ?? '.vor.yml');
+      const rel = relative(root, path);
+      const inside = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
       let raw: string | null = null;
-      try {
-        raw = readFileSync(path, 'utf-8');
-      } catch {
-        raw = null; // defaults apply
+      if (inside) {
+        try {
+          raw = readFileSync(path, 'utf-8');
+        } catch {
+          raw = null; // defaults apply
+        }
       }
       return ok(loadConfigFromString(raw));
     },
