@@ -46,20 +46,35 @@ export interface ScoreInput {
 export function scoreRun(input: ScoreInput): ScoreResult {
   // Collapse scanner fan-out before matching. A deterministic scanner that
   // emits several rows for one underlying issue at one location (e.g. multiple
-  // OSV CVEs for a single vulnerable dependency, all anchored to the same
-  // lockfile line) should count once, not N times. Keep one representative per
-  // (scanner, file, line); the rest are `duplicates`, excluded from precision.
+  // OSV CVEs for a single vulnerable dependency, all on the same lockfile line)
+  // should count once, not N times.
+  //
+  // The collapse key is the tuple the matcher actually uses — scanner + side +
+  // file + line(s) + category — and NOT rule_id. Keying on every match-relevant
+  // attribute makes collapsing provably recall-safe: rows sharing the key are
+  // interchangeable for matching, so dropping all but one can never turn a hit
+  // into a miss. rule_id is deliberately excluded — the matcher ignores it, and
+  // CVE fan-out is precisely many rule_ids for one dependency, so keying on it
+  // would not fold the fan-out at all. Rows that differ in a match-relevant
+  // attribute (e.g. a sast run emitting a `security` and a `performance` finding
+  // on one line) get distinct keys and both reach the matcher. Codex P2 3370154410.
+  //
   // Agent findings are never collapsed — a co-located LLM comment is a distinct
-  // signal precision must measure, so it falls through to the matcher and counts
-  // as a FP when it doesn't match a truth. Earlier the scorer kept every row and
-  // then treated any unmatched-but-truth-compatible finding as a duplicate,
-  // which silently hid co-located agent noise. Codex P2 3370136471.
+  // signal precision must measure, so it reaches the matcher and counts as a FP
+  // when it doesn't match a truth. Codex P2 3370136471.
   const findings: PostedComment[] = [];
   const duplicates: PostedComment[] = [];
   const seenScannerKeys = new Set<string>();
   for (const f of input.findings) {
     if (f.source?.kind === 'scanner') {
-      const key = `${f.source.scanner}|${f.file_path}|${f.start_line ?? f.line}|${f.line}`;
+      const key = [
+        f.source.scanner,
+        f.side,
+        f.file_path,
+        f.start_line ?? f.line,
+        f.line,
+        f.category,
+      ].join('|');
       if (seenScannerKeys.has(key)) {
         duplicates.push(f);
         continue;

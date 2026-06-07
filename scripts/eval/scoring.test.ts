@@ -371,6 +371,38 @@ describe('scoreRun', () => {
     expect(result.unaligned).toHaveLength(1);
   });
 
+  it('does NOT collapse same-scanner same-line rows that differ in a match attribute (Codex P2 3370154410)', () => {
+    // One scanner emits two rows on the same line: an unrelated `performance`
+    // finding first, then a `security` finding that matches the planted truth.
+    // Collapsing by (scanner, file, line) alone would drop the matchable row and
+    // turn a hit into a miss. The key includes category (a match-relevant
+    // attribute), so both survive: the security row matches, the other is a FP.
+    const t = truth({ file: 'src/a.ts', line_range: [10, 10], category: ['security'] });
+    const unrelated = finding({
+      file_path: 'src/a.ts',
+      line: 10,
+      category: 'performance',
+      source: { kind: 'scanner', scanner: 'sast', rule_id: 'r1' },
+    });
+    const matchesTruth = finding({
+      file_path: 'src/a.ts',
+      line: 10,
+      category: 'security',
+      source: { kind: 'scanner', scanner: 'sast', rule_id: 'r2' },
+    });
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [t],
+      findings: [unrelated, matchesTruth],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fn).toBe(0);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+  });
+
   it('counts an extra finding from a DIFFERENT scanner at the same line as a FP', () => {
     // Fan-out absorption is per-scanner: a different scanner flagging the same
     // line is a distinct signal, not a redundant row, so it stays a FP.
