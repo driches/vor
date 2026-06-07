@@ -21,6 +21,18 @@ interface CoreLike {
 
 let coreImpl: CoreLike | null = null;
 
+/**
+ * When true, all log output goes to stderr instead of @actions/core / stdout.
+ * The MCP server (`vor mcp`) sets this because stdout is reserved for JSON-RPC
+ * framing — a stray log line on stdout corrupts the protocol stream.
+ */
+let stderrOnly = false;
+
+/** Route every subsequent log line to stderr. One-way: there is no un-set. */
+export function useStderr(): void {
+  stderrOnly = true;
+}
+
 async function getCore(): Promise<CoreLike> {
   if (coreImpl) return coreImpl;
   try {
@@ -56,8 +68,14 @@ async function getCore(): Promise<CoreLike> {
 }
 
 async function log(level: Level, message: string): Promise<void> {
-  const core = await getCore();
   const safe = redact(message);
+  if (stderrOnly) {
+    // Bypass @actions/core entirely — it writes to stdout, which the MCP
+    // transport owns. Keep the level as a prefix so stderr stays readable.
+    process.stderr.write(`${level === 'info' ? '' : `[${level}] `}${safe}\n`);
+    return;
+  }
+  const core = await getCore();
   core[level](safe);
 }
 
@@ -69,14 +87,24 @@ export const logger = {
   error: (m: string) => log('error', m),
   /** Tells GitHub Actions to mask this string in all subsequent logs. */
   setSecret: async (s: string) => {
+    // In stderr-only (MCP) mode, skip core entirely — `core.setSecret` emits a
+    // `::add-mask::` workflow command on stdout, which would corrupt JSON-RPC.
+    // Redaction still applies to our own log lines via `redact()`.
+    if (stderrOnly) return;
     const core = await getCore();
     core.setSecret(s);
   },
   setOutput: async (k: string, v: string | number | boolean) => {
+    if (stderrOnly) return; // `::set-output` would land on stdout — see setSecret.
     const core = await getCore();
     core.setOutput(k, v);
   },
   setFailed: async (m: string) => {
+    if (stderrOnly) {
+      process.stderr.write(`[error] ${redact(m)}\n`);
+      process.exitCode = 1;
+      return;
+    }
     const core = await getCore();
     core.setFailed(redact(m));
   },

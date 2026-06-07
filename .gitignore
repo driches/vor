@@ -6,10 +6,15 @@ site/node_modules/
 site/dist/
 site/.astro/
 
-# Build outputs (we COMMIT dist/index.js for the GitHub Action)
-# Only ignore dist/ subdirectories that aren't the action bundle
+# Build outputs (we COMMIT dist/index.js and dist/cli.js)
+# The Svelte dashboard build is large and rebuilt on publish — shipped via npm
+# `files`, but kept out of git.
+dist/dashboard/
 .tsbuildinfo
 *.tsbuildinfo
+
+# Local dashboard frontend build deps (the dashboard/ subproject)
+dashboard/node_modules/
 
 # Test outputs
 coverage/

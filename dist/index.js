@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// driches/vor — built bundle (do not edit by hand)
+// driches/vor — action bundle (do not edit by hand)
 const import_meta_url = require("node:url").pathToFileURL(__filename).href;
 "use strict";
 var __create = Object.create;
@@ -48678,6 +48678,7 @@ function redact(input) {
 
 // src/util/logger.ts
 var coreImpl = null;
+var stderrOnly = false;
 async function getCore() {
   if (coreImpl) return coreImpl;
   try {
@@ -48711,8 +48712,13 @@ async function getCore() {
   return coreImpl;
 }
 async function log(level, message) {
-  const core = await getCore();
   const safe = redact(message);
+  if (stderrOnly) {
+    process.stderr.write(`${level === "info" ? "" : `[${level}] `}${safe}
+`);
+    return;
+  }
+  const core = await getCore();
   core[level](safe);
 }
 var logger = {
@@ -48723,14 +48729,22 @@ var logger = {
   error: (m2) => log("error", m2),
   /** Tells GitHub Actions to mask this string in all subsequent logs. */
   setSecret: async (s2) => {
+    if (stderrOnly) return;
     const core = await getCore();
     core.setSecret(s2);
   },
   setOutput: async (k2, v2) => {
+    if (stderrOnly) return;
     const core = await getCore();
     core.setOutput(k2, v2);
   },
   setFailed: async (m2) => {
+    if (stderrOnly) {
+      process.stderr.write(`[error] ${redact(m2)}
+`);
+      process.exitCode = 1;
+      return;
+    }
     const core = await getCore();
     core.setFailed(redact(m2));
   }

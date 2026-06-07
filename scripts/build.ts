@@ -8,68 +8,76 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const rootDir = resolve(__dirname, '..');
 const distDir = resolve(rootDir, 'dist');
 
-const result = await build({
-  entryPoints: [resolve(rootDir, 'src/index.ts')],
-  outfile: resolve(distDir, 'index.js'),
-  bundle: true,
-  platform: 'node',
-  target: 'node20',
-  format: 'cjs',
-  minify: false,
-  sourcemap: false,
-  metafile: true,
-  logLevel: 'info',
-  banner: {
-    // Give the CJS bundle a real `import.meta.url`. esbuild otherwise emits
-    // `import.meta = {}` for CJS output, leaving `import.meta.url` undefined —
-    // which makes `createRequire(import.meta.url)` and the assetsDir resolution
-    // in src/ocr/recognize.ts throw the moment OCR loads in the shipped Action.
-    // The `define` below rewrites every `import.meta.url` to this identifier.
-    js:
-      '#!/usr/bin/env node\n// driches/vor — built bundle (do not edit by hand)\n' +
-      'const import_meta_url = require("node:url").pathToFileURL(__filename).href;',
-  },
-  define: { 'import.meta.url': 'import_meta_url' },
-  // tesseract.js's main thread is bundled in so the guarded dynamic import in
-  // src/ocr/recognize.ts resolves with no node_modules present (the shipped
-  // Action runs `node dist/index.js` directly). The worker thread can't inline
-  // — it runs from an on-disk file and pulls in tesseract.js-core's emscripten
-  // loaders — so it's bundled separately into assets/ocr/ below.
-});
+/**
+ * Two self-contained CJS bundles share this dist/:
+ *   - index.js: the GitHub Action runtime (entry src/index.ts).
+ *   - cli.js:   the `vor` local CLI (entry src/cli/index.ts) — review,
+ *               dashboard, and MCP. Never imported by index.ts, so the action
+ *               bundle stays lean (enforced by scripts/verify-dist.ts).
+ *
+ * Both run the orchestrator, which can load OCR/vision (src/ocr/recognize.ts),
+ * so both need a real `import.meta.url`: esbuild otherwise emits
+ * `import.meta = {}` for CJS output, leaving `import.meta.url` undefined — which
+ * makes `createRequire(import.meta.url)` and the assetsDir resolution throw the
+ * moment OCR loads. The banner defines `import_meta_url` and the `define` below
+ * rewrites every `import.meta.url` to it.
+ */
+async function bundle(entry: string, outName: string, label: string): Promise<number> {
+  const result = await build({
+    entryPoints: [resolve(rootDir, entry)],
+    outfile: resolve(distDir, outName),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    minify: false,
+    sourcemap: false,
+    metafile: true,
+    logLevel: 'info',
+    banner: {
+      js:
+        `#!/usr/bin/env node\n// driches/vor — ${label} (do not edit by hand)\n` +
+        'const import_meta_url = require("node:url").pathToFileURL(__filename).href;',
+    },
+    define: { 'import.meta.url': 'import_meta_url' },
+    external: [],
+  });
 
-// Write a dist/package.json so Node treats the CJS bundle correctly even though
-// the root package is "type": "module".
+  // Normalise node_modules paths so the bundle is reproducible across
+  // environments (git worktrees emit `../../../node_modules/…` in both the
+  // `// …` comment lines and the string keys passed to __commonJS helpers).
+  // Strip the leading `../` segments so output matches a regular CI checkout.
+  const bundlePath = resolve(distDir, outName);
+  const normalised = readFileSync(bundlePath, 'utf-8').replace(
+    /((?:\.\.\/)+)node_modules\//g,
+    'node_modules/',
+  );
+  writeFileSync(bundlePath, normalised);
+
+  return Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);
+}
+
 await mkdir(distDir, { recursive: true });
+
+const actionBytes = await bundle('src/index.ts', 'index.js', 'action bundle');
+const cliBytes = await bundle('src/cli/index.ts', 'cli.js', 'CLI bundle');
+
+// Write a dist/package.json so Node treats the CJS bundles correctly even though
+// the root package is "type": "module".
 await writeFile(
   resolve(distDir, 'package.json'),
   JSON.stringify({ type: 'commonjs', private: true }, null, 2) + '\n',
 );
 
-// Normalise node_modules paths so the bundle is reproducible across
-// environments. In a git worktree, node_modules lives in the main checkout
-// rather than the worktree directory, so esbuild emits relative paths like
-// `../../../node_modules/…` in BOTH the `// …` comment lines AND the string
-// keys passed to __commonJS helpers. Strip the leading `../` segments from
-// every occurrence so the output always matches what a regular CI checkout
-// produces (`node_modules/…`).
-const bundlePath = resolve(distDir, 'index.js');
-const normalised = readFileSync(bundlePath, 'utf-8').replace(
-  /((?:\.\.\/)+)node_modules\//g,
-  'node_modules/',
-);
-writeFileSync(bundlePath, normalised);
-
-const totalBytes = Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);
-console.log(`Bundle: ${(totalBytes / 1024).toFixed(1)} KB`);
-
 // Bundle the tesseract.js node worker into a single self-contained file shipped
-// in assets/ocr/. On node, tesseract.js loads the OCR core via
-// `require('tesseract.js-core/…')` inside this worker; esbuild inlines those
-// emscripten loaders so the worker needs no node_modules at runtime. The
-// loaders still read their `.wasm` core and `eng.traineddata` from disk, so the
-// vendored cores live alongside this bundle (emscripten's `locateFile`
-// resolves them relative to the worker's own directory). Minified so the output
-// is reproducible (no absolute node_modules paths in comments).
+// in assets/ocr/, shared by both the action and CLI bundles. On node,
+// tesseract.js loads the OCR core via `require('tesseract.js-core/…')` inside
+// this worker; esbuild inlines those emscripten loaders so the worker needs no
+// node_modules at runtime. The loaders still read their `.wasm` core and
+// `eng.traineddata` from disk, so the vendored cores live alongside this bundle
+// (emscripten's `locateFile` resolves them relative to the worker's own
+// directory). Minified so the output is reproducible (no absolute node_modules
+// paths in comments).
 const ocrAssetsDir = resolve(rootDir, 'assets', 'ocr');
 await build({
   entryPoints: [resolve(rootDir, 'node_modules/tesseract.js/src/worker-script/node/index.js')],
@@ -84,4 +92,7 @@ await build({
   minify: true,
   logLevel: 'info',
 });
-console.log('OCR worker: assets/ocr/tesseract-worker.cjs');
+
+console.log(`Action bundle: ${(actionBytes / 1024).toFixed(1)} KB`);
+console.log(`CLI bundle:    ${(cliBytes / 1024).toFixed(1)} KB`);
+console.log('OCR worker:    assets/ocr/tesseract-worker.cjs');

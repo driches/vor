@@ -1,0 +1,192 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #262b36;
+  --text: #e6e9ef;
+  --dim: #8b93a7;
+  --critical: #ff6b6b;
+  --important: #ffb454;
+  --minor: #5a9bff;
+  --nit: #8b93a7;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.18em;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+select,
+button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 0;
+  height: calc(100vh - 56px);
+}
+
+aside {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+aside h2,
+section h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+aside ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+button.run {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+
+button.run.active {
+  border-color: var(--minor);
+}
+
+.when {
+  font-size: 0.85rem;
+}
+
+.meta,
+.dim {
+  color: var(--dim);
+  font-size: 0.78rem;
+}
+
+section {
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+}
+
+.finding {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.5rem 0;
+  background: var(--panel);
+}
+
+.finding.critical {
+  border-left-color: var(--critical);
+}
+.finding.important {
+  border-left-color: var(--important);
+}
+.finding.minor {
+  border-left-color: var(--minor);
+}
+.finding.nit {
+  border-left-color: var(--nit);
+}
+
+.finding-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.finding-head .title {
+  font-weight: 600;
+}
+
+.loc {
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.why {
+  margin: 0.4rem 0 0;
+  color: var(--text);
+}
+
+.suggestion {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: #0c0e12;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
+h3.sev {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+h3.sev.critical {
+  color: var(--critical);
+}
+h3.sev.important {
+  color: var(--important);
+}
+h3.sev.minor {
+  color: var(--minor);
+}
+h3.sev.nit {
+  color: var(--nit);
+}
+
+.error {
+  margin: 0.75rem 1.25rem;
+  color: var(--critical);
+}
+
+.clean {
+  color: var(--dim);
+}
