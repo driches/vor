@@ -111,7 +111,15 @@ export interface ScoreResult {
   fp: number;
   cost_per_tp_usd: number;
   outcomes: TruthOutcome[];
-  /** Findings that didn't map to any truth — noise candidates. */
+  /** Findings compatible with no truth — genuine noise candidates (the FPs). */
   unaligned: PostedComment[];
+  /**
+   * Unmatched findings that ARE compatible with an already-matched truth:
+   * duplicate reports of a credited bug (e.g. several CVEs on one planted
+   * vulnerable dependency, or two comments on the same secret). Tracked for
+   * transparency but excluded from `fp`/precision — they are neither new
+   * detections nor spurious noise.
+   */
+  duplicates: PostedComment[];
   cost: RunRecord['cost'];
 }

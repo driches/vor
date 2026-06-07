@@ -262,24 +262,27 @@ describe('scoreRun', () => {
   });
 
   it('finds optimal matching when truth compat sets overlap (regression: greedy bias)', () => {
-    // Truth A is permissive: matches both 'security' and 'vulnerability'.
-    // Truth B is restrictive: matches only 'security'.
-    // Finding F1 is 'security'; F2 is 'vulnerability'.
+    // Truth A is permissive: matches both 'performance' and 'bug'.
+    // Truth B is restrictive: matches only 'performance'.
+    // Finding F1 is 'performance'; F2 is 'bug'.
     // Greedy in input order (A, B) would pair A→F1, leaving B with no
-    // compatible finding (F2 is 'vulnerability', not in B's category list).
+    // compatible finding (F2 is 'bug', not in B's category list).
     // Optimal pairs A→F2, B→F1, achieving 2 TPs.
+    // (Categories deliberately avoid the security family, which scoring now
+    // treats as interchangeable — security/vulnerability would make B match
+    // both findings and erase the asymmetry this test guards.)
     const truthA = truth({
       plant_id: 0,
       line_range: [10, 10],
-      category: ['security', 'vulnerability'],
+      category: ['performance', 'bug'],
     });
     const truthB = truth({
       plant_id: 1,
       line_range: [10, 10],
-      category: ['security'],
+      category: ['performance'],
     });
-    const f1 = finding({ line: 10, category: 'security' });
-    const f2 = finding({ line: 10, category: 'vulnerability' });
+    const f1 = finding({ line: 10, category: 'performance' });
+    const f2 = finding({ line: 10, category: 'bug' });
     const result = scoreRun({
       case_id: 'opt',
       config_name: 'cfg',
@@ -290,5 +293,95 @@ describe('scoreRun', () => {
     expect(result.tp).toBe(2);
     expect(result.fn).toBe(0);
     expect(result.fp).toBe(0);
+  });
+
+  it('treats `vulnerability` and `security` as interchangeable categories', () => {
+    // The LLM labels the same finding `security` or `vulnerability` run-to-run
+    // (an RCE is equally both). A truth whose allow-list names one must accept
+    // the other, or recall on security cases becomes a coin-flip on wording.
+    const found = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ bug_type: 'sql-injection', category: ['security', 'bug'] })],
+      findings: [finding({ category: 'vulnerability' })],
+      cost,
+    });
+    expect(found.tp).toBe(1);
+    expect(found.fn).toBe(0);
+    expect(found.fp).toBe(0);
+
+    // Reverse direction: truth allows `vulnerability`, finding says `security`.
+    const reverse = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ category: ['vulnerability'] })],
+      findings: [finding({ category: 'security' })],
+      cost,
+    });
+    expect(reverse.tp).toBe(1);
+    expect(reverse.fp).toBe(0);
+  });
+
+  it('counts a duplicate report of a matched truth as a duplicate, not a FP', () => {
+    // The agent comments twice on the same secret: one matches the truth, the
+    // other has nowhere to land. Because it IS compatible with an already-
+    // matched truth, it is a duplicate — not spurious noise — so it must not
+    // depress precision.
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [finding(), finding({ category: 'security' })],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(0);
+    expect(result.precision).toBe(1);
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.unaligned).toHaveLength(0);
+  });
+
+  it('counts multiple CVEs on one planted dependency as one TP (CVE fan-out)', () => {
+    // OSV reports every known CVE for a vulnerable package; the case plants one
+    // vulnerable dependency. The extra CVE rows land on the same file+line and
+    // are all compatible with the single vuln-dep truth → 1 TP, 0 FP, the rest
+    // duplicates.
+    const depTruth = truth({
+      file: 'package-lock.json',
+      line_range: [11, 11],
+      bug_type: 'vuln-dep:npm',
+      category: ['vulnerability', 'security'],
+    });
+    const cve = (): PostedComment =>
+      finding({ file_path: 'package-lock.json', line: 11, category: 'vulnerability' });
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [depTruth],
+      findings: [cve(), cve(), cve(), cve(), cve()],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(0);
+    expect(result.precision).toBe(1);
+    expect(result.duplicates).toHaveLength(4);
+  });
+
+  it('still counts a finding compatible with no truth as a FP (duplicate logic does not swallow noise)', () => {
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [
+        finding(),
+        finding({ file_path: 'src/unrelated.ts', line: 99, category: 'performance' }),
+      ],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+    expect(result.unaligned).toHaveLength(1);
+    expect(result.unaligned[0]!.file_path).toBe('src/unrelated.ts');
   });
 });

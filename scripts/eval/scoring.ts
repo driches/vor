@@ -25,10 +25,15 @@
  * line numbers coincidentally overlap an after/-anchored truth. See PR #10
  * Codex P2 3295113234.
  */
-import type { PostedComment } from '../../src/types.js';
+import type { PostedComment, Category } from '../../src/types.js';
 import type { RunRecord, TruthEntry, ScoreResult, TruthOutcome } from './types.js';
 
 const LINE_SLACK = 3;
+
+// `security` and `vulnerability` name the same class of finding; the LLM picks
+// one or the other for the same bug run-to-run. Treat them as interchangeable
+// when matching a finding's category against a truth's allow-list.
+const SECURITY_FAMILY: ReadonlySet<Category> = new Set<Category>(['security', 'vulnerability']);
 
 export interface ScoreInput {
   case_id: string;
@@ -106,7 +111,22 @@ export function scoreRun(input: ScoreInput): ScoreResult {
 
   const tp = outcomes.filter((o) => o.status === 'matched').length;
   const fn = outcomes.length - tp;
-  const unaligned = input.findings.filter((_f, i) => !matchedFindings.has(i));
+
+  // Split the unmatched findings into genuine false positives vs. duplicates.
+  // In a maximum matching, an unmatched finding that is still compatible with
+  // SOME truth means that truth was paired with a different finding — so this
+  // one is a duplicate report of an already-credited bug (multiple CVEs on one
+  // planted vulnerable dependency, or the agent commenting twice on the same
+  // secret), not spurious noise. Only findings compatible with NO truth are
+  // FPs. Counting duplicates as FPs made precision a function of scanner
+  // fan-out and double-reporting rather than review quality.
+  const unaligned: PostedComment[] = [];
+  const duplicates: PostedComment[] = [];
+  for (let f = 0; f < F; f++) {
+    if (matchedFindings.has(f)) continue;
+    const compatibleWithSomeTruth = compat.some((row) => row[f]);
+    (compatibleWithSomeTruth ? duplicates : unaligned).push(input.findings[f]!);
+  }
   const fp = unaligned.length;
 
   const recall = tp + fn === 0 ? 1 : tp / (tp + fn);
@@ -125,13 +145,22 @@ export function scoreRun(input: ScoreInput): ScoreResult {
     f1,
     cost_per_tp_usd,
     outcomes,
-    unaligned: [...unaligned],
+    unaligned,
+    duplicates,
     cost: input.cost,
   };
 }
 
 function categoryMatches(truth: TruthEntry, finding: PostedComment): boolean {
   if (truth.category.includes(finding.category)) return true;
+  // `security` ⇔ `vulnerability`: the LLM labels the same security finding
+  // either way from run to run, so a truth that allows one must accept the
+  // other. Without this, recall on security/vuln cases flips on wording alone
+  // (a correctly-located SQLi labeled `vulnerability` scored as a full miss
+  // against a `[security, bug]` truth).
+  if (SECURITY_FAMILY.has(finding.category) && truth.category.some((c) => SECURITY_FAMILY.has(c))) {
+    return true;
+  }
   // `Array.forEach(async ...)` is both async-control-flow and race behavior:
   // the outer function returns before the inner awaits settle. Treat an LLM's
   // `race-condition` categorization as compatible with the existing planted
