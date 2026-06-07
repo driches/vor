@@ -91,6 +91,40 @@ describe('runLocalReview', () => {
     ).rejects.toBeInstanceOf(NothingToReviewError);
   });
 
+  it('uses merge-base (three-dot) so base-side advances are not counted', async () => {
+    const r = mkdtempSync(join(tmpdir(), 'vor-mb-'));
+    g(r, ['init', '-q']);
+    g(r, ['config', 'user.email', 'test@example.com']);
+    g(r, ['config', 'user.name', 'Test']);
+    g(r, ['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 1;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'c0']);
+    g(r, ['branch', '-M', 'main']);
+    // Feature branch adds one file.
+    g(r, ['checkout', '-q', '-b', 'feature']);
+    writeFileSync(join(r, 'feature.ts'), 'export const f = 1;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'c1']);
+    // Base advances after the split (edits a.ts) — must NOT appear in the diff.
+    g(r, ['checkout', '-q', 'main']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 2;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'c2']);
+
+    try {
+      const spy = vi.fn(async (_in: OrchestratorInput) => cannedResult);
+      const rec = await runLocalReview(
+        { workspace: r, target: 'range', base: 'main', head: 'feature' },
+        { runOrchestratorImpl: spy },
+      );
+      // Only feature.ts — not a.ts (a two-dot tip diff would report 2).
+      expect(rec.files).toBe(1);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
+
   it('materializes the head tree in a worktree when the checkout differs', async () => {
     const r = mkdtempSync(join(tmpdir(), 'vor-wt-'));
     g(r, ['init', '-q']);

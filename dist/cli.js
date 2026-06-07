@@ -85838,7 +85838,7 @@ async function runLocalReview(opts = {}, deps = {}) {
         `Base and head resolve to the same commit (${baseSha.slice(0, 7)}). Nothing to review.`
       );
     }
-    diffArgs = [`${baseSha}..${headSha}`];
+    diffArgs = [`${baseSha}...${headSha}`];
     baseLabel = baseRef;
     headLabel = headRef;
     headShaForRecord = headSha;

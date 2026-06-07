@@ -101,7 +101,11 @@ export async function runLocalReview(
         `Base and head resolve to the same commit (${baseSha.slice(0, 7)}). Nothing to review.`,
       );
     }
-    diffArgs = [`${baseSha}..${headSha}`];
+    // Three-dot: diff from the merge-base to head, matching GitHub PR
+    // semantics. Two-dot would compare tips directly and fold base-side
+    // advances (commits added to base after the branch split) into the review
+    // as spurious removals/edits to files the branch never touched.
+    diffArgs = [`${baseSha}...${headSha}`];
     baseLabel = baseRef;
     headLabel = headRef;
     headShaForRecord = headSha;
