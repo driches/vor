@@ -15,6 +15,7 @@
   },
   "files": [
     "dist/",
+    "assets/ocr/",
     "action.yml",
     "README.md",
     "CHANGELOG.md",
@@ -59,6 +60,10 @@
     "yaml": "^2.7.0",
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.2"
+  },
+  "optionalDependencies": {
+    "tesseract.js": "^7.0.0",
+    "tesseract.js-core": "^7.0.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PostedComment, ReviewDraft, SummaryInput } from '../types.js';
+import type { ScanFinding } from '../scanners/types.js';
 import { renderSummary } from './formatter.js';
 
 const baseSummary = (over: Partial<SummaryInput> = {}): SummaryInput => ({
@@ -363,5 +364,83 @@ describe('renderSummary — event selection (unchanged)', () => {
       modelName: 'm',
     });
     expect(r.event).toBe('REQUEST_CHANGES');
+  });
+});
+
+describe('renderSummary — binary-file findings (non-inline channel)', () => {
+  const ocrFinding = (over: Partial<ScanFinding> = {}): ScanFinding => ({
+    scanner: 'image-ocr',
+    rule_id: 'aws-access-key-id',
+    file_path: 'docs/login.png',
+    line: 1,
+    severity: 'critical',
+    category: 'security',
+    title: 'AWS access key in image',
+    description: 'A live-looking AWS key was OCR’d out of a committed screenshot.',
+    confidence: 'high',
+    evidence: {
+      kind: 'ocr',
+      masked_match: 'AKIA…WXYZ',
+      pattern_id: 'aws-access-key-id',
+      ocr_confidence: 92.4,
+    },
+    fingerprint: 'aws-access-key-id:docs/login.png',
+    ...over,
+  });
+
+  it('renders a dedicated section with masked match, pattern, and OCR confidence', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      binaryFindings: [ocrFinding()],
+    });
+    expect(r.body).toContain('### Security findings in binary files');
+    expect(r.body).toContain('`docs/login.png`');
+    expect(r.body).toContain('AWS access key in image');
+    expect(r.body).toContain('pattern `aws-access-key-id`');
+    expect(r.body).toContain('OCR confidence 92%');
+    expect(r.body).toContain('masked match `AKIA…WXYZ`');
+  });
+
+  it('counts a binary finding toward the severity headline even with no inline comments', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: undefined }),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      binaryFindings: [ocrFinding({ severity: 'critical' })],
+    });
+    expect(r.body).toContain('### Critical findings');
+    expect(r.body).not.toContain('### No findings');
+  });
+
+  it('omits the section entirely when there are no binary findings', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [c('minor')],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).not.toContain('Security findings in binary files');
+  });
+
+  it('caps the list and appends a "+N more" tail', () => {
+    const many = Array.from({ length: 23 }, (_, i) =>
+      ocrFinding({ file_path: `img/${i}.png`, fingerprint: `k:${i}` }),
+    );
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      binaryFindings: many,
+    });
+    expect(r.body).toContain('_+3 more_');
   });
 });

@@ -303,6 +303,24 @@ vi.mock('./scanners/osv-client.js', () => {
 });
 
 // -----------------------------------------------------------------
+// vi.mock — OCR engine (tesseract)
+// -----------------------------------------------------------------
+//
+// The image-ocr scanner lazily builds a tesseract engine via
+// `createTesseractEngine()`. We swap it for a deterministic stub so a test can
+// plant a credential "inside" an image without bundling tesseract or a real
+// PNG — the returned text runs through the same secret patterns. The `mock`
+// prefix is required: vitest hoists the factory above the file's other
+// statements and only lets it close over variables named `mock*`.
+let mockOcrText = '';
+vi.mock('./ocr/recognize.js', () => ({
+  createTesseractEngine: () => ({
+    recognize: async () => ({ text: mockOcrText, confidence: 90 }),
+    terminate: async () => {},
+  }),
+}));
+
+// -----------------------------------------------------------------
 // Now the orchestrator import — `vi.mock` calls above have already swapped
 // the dependency graph for this module.
 // -----------------------------------------------------------------
@@ -475,6 +493,7 @@ beforeEach(() => {
   octokitState.createReviewCalls = [];
   agentTurnGate = undefined;
   onFirstOsvCall = undefined;
+  mockOcrText = '';
   osvBatchSpy.mockReset();
   osvVulnSpy.mockReset();
 });
@@ -2032,5 +2051,63 @@ describe('runOrchestrator — prior review threads injected into the agent promp
     const firstCall = JSON.stringify(anthropicCreateCalls[0]);
     expect(firstCall).not.toContain('## Your prior review threads on this PR');
     expect(firstCall).not.toContain('Race on the shared counter');
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario: image-ocr findings route around binary inline-validation.
+//
+// A secret OCR'd out of a committed image lands on a binary file, which GitHub
+// can't anchor an inline comment to. Rather than dropping the finding at the
+// validator, the orchestrator surfaces it in a dedicated "Security findings in
+// binary files" summary section. This is the P1 fix: without it the opt-in
+// scanner would silently report nothing.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — image-ocr binary findings route to the summary', () => {
+  it("reports a secret OCR'd from a committed image in the summary, never inline", async () => {
+    const imgDiff = [
+      'diff --git a/docs/leak.png b/docs/leak.png',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      'Binary files /dev/null and b/docs/leak.png differ',
+    ].join('\n');
+    octokitState.diff = `${imgDiff}\n`;
+    octokitState.filesApi = [{ filename: 'docs/leak.png', changes: 0, patch: null }];
+    // readBinary() goes through getContent() — value is irrelevant since OCR is
+    // stubbed, but the path must resolve so the scanner gets non-null bytes.
+    octokitState.contents.set('docs/leak.png', 'fake-png-bytes');
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    secrets:',
+        '      enabled: false',
+        '    image_ocr:',
+        '      enabled: true',
+      ].join('\n'),
+    );
+
+    mockOcrText = `aws_key=${PLANTED_AWS_KEY}`;
+    scriptSummaryOnly();
+
+    await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string }>;
+      body: string;
+    };
+
+    // The binary-file finding is never posted as an inline comment.
+    expect(call.comments.map((c) => c.path)).not.toContain('docs/leak.png');
+    // It surfaces in the dedicated summary section instead.
+    expect(call.body).toContain('### Security findings in binary files');
+    expect(call.body).toContain('`docs/leak.png`');
+    expect(call.body).toContain('OCR confidence 90%');
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FileReader } from '../github/file-reader.js';
 import { buildLocalOctokit, splitPatchesByFile } from './git-octokit.js';
 import type { ChangedFile } from './git.js';
 
@@ -46,7 +47,7 @@ describe('buildLocalOctokit listFiles', () => {
       files: FILES,
       diff: DIFF,
       prMeta: { title: 't', body: '', author: 'me', additions: 2, deletions: 1 },
-      resolveContent: () => null,
+      resolveBytes: () => null,
     });
     const res = await octokit.rest.pulls.listFiles({
       owner: 'local',
@@ -76,7 +77,7 @@ describe('buildLocalOctokit listFiles', () => {
       files: many,
       diff: '',
       prMeta: { title: 't', body: '', author: 'me', additions: 150, deletions: 0 },
-      resolveContent: () => null,
+      resolveBytes: () => null,
     });
     const lf = octokit.rest.pulls.listFiles;
     const page1 = (await lf({ owner: 'l', repo: 'l', pull_number: 0, per_page: 100, page: 1 }))
@@ -88,5 +89,58 @@ describe('buildLocalOctokit listFiles', () => {
     expect(page1).toHaveLength(100);
     expect(page2).toHaveLength(50); // < per_page → fetch loop breaks here
     expect(page3).toHaveLength(0);
+  });
+});
+
+describe('buildLocalOctokit getContent', () => {
+  // A FileReader reads back through getContent the way the OCR scanner and the
+  // describe_image_at_ref tool do; binary bytes must survive intact.
+  function octokitFor(resolveBytes: (path: string, ref: string) => Buffer | null) {
+    return buildLocalOctokit({
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      files: FILES,
+      diff: DIFF,
+      prMeta: { title: 't', body: '', author: 'me', additions: 2, deletions: 1 },
+      resolveBytes,
+    });
+  }
+
+  it('serves binary bytes faithfully for readBinary (no UTF-8 corruption)', async () => {
+    // Bytes that are not valid UTF-8 — a UTF-8 round-trip would mangle them.
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, 0x80,
+    ]);
+    const reader = new FileReader(octokitFor(() => png));
+    const got = await reader.readBinary({
+      owner: 'local',
+      repo: 'local',
+      path: 'shot.png',
+      ref: 'b'.repeat(40),
+    });
+    expect(got).not.toBeNull();
+    expect(Buffer.compare(got!, png)).toBe(0);
+  });
+
+  it('serves text faithfully for read()', async () => {
+    const reader = new FileReader(octokitFor(() => Buffer.from('export const a = 2;\n', 'utf-8')));
+    const got = await reader.read({
+      owner: 'local',
+      repo: 'local',
+      path: 'src/a.ts',
+      ref: 'b'.repeat(40),
+    });
+    expect(got).toBe('export const a = 2;\n');
+  });
+
+  it('maps a missing path to a 404 (read returns null)', async () => {
+    const reader = new FileReader(octokitFor(() => null));
+    const got = await reader.read({
+      owner: 'local',
+      repo: 'local',
+      path: 'gone.ts',
+      ref: 'b'.repeat(40),
+    });
+    expect(got).toBeNull();
   });
 });

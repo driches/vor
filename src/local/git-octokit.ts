@@ -5,7 +5,7 @@
  *
  * Generalized from scripts/local-review.ts so the head side can be either a
  * committed ref (range mode) or the working tree (working-tree mode). The
- * caller supplies a `resolveContent(path, ref)` so this module stays agnostic
+ * caller supplies a `resolveBytes(path, ref)` so this module stays agnostic
  * about where head content lives; review.ts wires disk vs `git show`.
  */
 
@@ -26,13 +26,17 @@ export interface FakeOctokitOptions {
     deletions: number;
   };
   /**
-   * Resolve file content for a `repos.getContent` call. `ref` is whatever the
-   * caller passed (or the head SHA when omitted). Returns null when the path
+   * Resolve the raw file bytes for a `repos.getContent` call. `ref` is whatever
+   * the caller passed (or the head SHA when omitted). Returns null when the path
    * does not exist at that ref, which is mapped to a 404 the way the GitHub API
    * would respond. Content overrides (e.g. a synthetic `.vor.yml`) should be
    * honored inside this resolver by the caller.
+   *
+   * Bytes (not a decoded string) so binary blobs survive: the OCR scanner and
+   * `describe_image_at_ref` tool read images back via `FileReader.readBinary`,
+   * which expects faithful bytes — a UTF-8 round-trip would corrupt them.
    */
-  resolveContent: (path: string, ref: string) => string | null;
+  resolveBytes: (path: string, ref: string) => Buffer | null;
 }
 
 export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
@@ -111,15 +115,19 @@ export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
       repos: {
         getContent: async (args: { path: string; ref?: string }) => {
           const ref = args.ref ?? opts.headSha;
-          const content = opts.resolveContent(args.path, ref);
-          if (content === null) {
+          const bytes = opts.resolveBytes(args.path, ref);
+          if (bytes === null) {
             const err = Object.assign(new Error('Not Found'), { status: 404 });
             throw err;
           }
+          // base64 of the raw bytes serves both reads faithfully:
+          // FileReader.read() decodes as UTF-8 (text), readBinary() keeps the
+          // bytes (images). The real Contents API inlines base64 the same way.
           return {
             data: {
               type: 'file',
-              content: Buffer.from(content, 'utf-8').toString('base64'),
+              sha: opts.headSha,
+              content: bytes.toString('base64'),
               encoding: 'base64',
             },
           };

@@ -18,8 +18,8 @@ import {
   bodyFromHead,
   changedFiles,
   currentHeadSha,
-  fileContentAtRef,
-  fileContentOnDisk,
+  fileBytesAtRef,
+  fileBytesOnDisk,
   hasWorkingTreeChanges,
   removeWorktree,
   repoRoot,
@@ -143,13 +143,14 @@ export async function runLocalReview(
   const additions = files.reduce((s, f) => s + f.additions, 0);
   const deletions = files.reduce((s, f) => s + f.deletions, 0);
 
-  const resolveContent = (path: string, ref: string): string | null => {
+  const resolveBytes = (path: string, ref: string): Buffer | null => {
     // Explicit overrides win (A/B a synthetic .vor.yml without git churn).
     const override = overrides.get(path);
-    if (override !== undefined) return override;
+    if (override !== undefined) return Buffer.from(override, 'utf-8');
     // The working-tree head is on disk; every committed ref goes through git.
-    if (ref === WORKTREE) return fileContentOnDisk(workspace, path);
-    return fileContentAtRef(workspace, ref, path);
+    // Raw bytes so images survive for the OCR scanner / describe_image tool.
+    if (ref === WORKTREE) return fileBytesOnDisk(workspace, path);
+    return fileBytesAtRef(workspace, ref, path);
   };
 
   // Range reviews describe the requested head, which may not be the checkout;
@@ -169,7 +170,7 @@ export async function runLocalReview(
       additions,
       deletions,
     },
-    resolveContent,
+    resolveBytes,
   });
 
   // Disk-backed scanners (eslint/tsc) and grep/blast-radius run against

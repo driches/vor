@@ -1,0 +1,280 @@
+/**
+ * Optical character recognition over image bytes, used to pull text out of
+ * screenshots committed to a PR (so the secrets scanner can see credentials
+ * baked into a PNG, and the agent can read what a screenshot says).
+ *
+ * The concrete engine is `tesseract.js` (offline WASM, no API key), but the
+ * scanner and tool depend only on the {@link OcrEngine} seam so tests run
+ * against a deterministic fake with no WASM and no network. This mirrors the
+ * DI pattern the scanner registry uses for the OSV client.
+ *
+ * Graceful degradation is load-bearing: OCR is opt-in and the tesseract
+ * runtime/assets may be absent in the shipped Action bundle (the worker is a
+ * `worker_threads` file that can't inline into `dist/index.js`). When the
+ * engine can't initialize, every call resolves to empty text rather than
+ * throwing — a review must never fail because OCR was unavailable.
+ */
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { logger as defaultLogger } from '../util/logger.js';
+
+const localRequire = createRequire(import.meta.url);
+
+export interface OcrResult {
+  /** Extracted text. Empty string when nothing was recognized or OCR is unavailable. */
+  text: string;
+  /** Tesseract's 0–100 mean confidence. 0 when no text / unavailable. */
+  confidence: number;
+}
+
+/**
+ * The seam every consumer depends on. `recognize` MUST NOT throw — failures
+ * resolve to `{ text: '', confidence: 0 }`. `terminate` releases the worker.
+ */
+export interface OcrEngine {
+  recognize(image: Buffer): Promise<OcrResult>;
+  terminate(): Promise<void>;
+}
+
+export type Logger = Pick<typeof defaultLogger, 'debug' | 'notice' | 'warn'>;
+
+export interface TesseractEngineOptions {
+  /**
+   * Directory holding the vendored runtime assets — `eng.traineddata` (plain,
+   * not gzipped) and the tesseract-core `.wasm`/`.wasm.js`. Defaults to
+   * `assets/ocr` resolved relative to the built bundle, overridable via the
+   * `VOR_OCR_ASSETS_DIR` env var so operators can point at a vendored copy.
+   */
+  assetsDir?: string;
+  /** OCR language(s). Defaults to `['eng']`. */
+  languages?: readonly string[];
+  /** Skip images larger than this many bytes (OCR cost scales with pixels). */
+  maxImageBytes?: number;
+  logger?: Logger;
+}
+
+const DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Resolve the default vendored-assets directory, which holds `eng.traineddata`,
+ * the WASM cores, and the bundled OCR worker. `VOR_OCR_ASSETS_DIR` overrides.
+ */
+function defaultAssetsDir(): string {
+  const fromEnv = process.env.VOR_OCR_ASSETS_DIR;
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // The committed assets live at `<repo>/assets/ocr`, but `here` differs by
+  // runtime: the bundle runs from `dist/` (root one up), while tsx
+  // (`npm run local-review`) runs from `src/ocr/` (root two up). Probe both
+  // layouts rather than hard-coding one — otherwise tsx resolves to a
+  // nonexistent `src/assets/ocr` and OCR silently degrades to empty text.
+  for (const up of ['..', path.join('..', '..')]) {
+    const candidate = path.resolve(here, up, 'assets', 'ocr');
+    if (existsSync(candidate)) return candidate;
+  }
+  // Neither exists yet (e.g. a pre-build checkout) — fall back to the bundle
+  // layout so the graceful-degrade warning names a sensible directory.
+  return path.resolve(here, '..', 'assets', 'ocr');
+}
+
+/**
+ * A `tesseract.js`-backed engine. The worker is created lazily on first
+ * `recognize` and reused across calls; if creation fails (module or assets
+ * missing) the engine logs once and degrades to empty results for the rest of
+ * the run.
+ */
+export function createTesseractEngine(options: TesseractEngineOptions = {}): OcrEngine {
+  const log = options.logger ?? defaultLogger;
+  const assetsDir = options.assetsDir ?? defaultAssetsDir();
+  const languages = options.languages ?? ['eng'];
+  const langKey = languages.join('+');
+  const maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+
+  // `unknown`-typed because tesseract.js is loaded via dynamic import and may
+  // be absent; we only call a tiny, runtime-checked slice of its surface.
+  type TesseractWorker = {
+    recognize(image: Buffer): Promise<{ data: { text: string; confidence: number } }>;
+    terminate(): Promise<unknown>;
+  };
+  let workerPromise: Promise<TesseractWorker | null> | undefined;
+  let disabled = false;
+
+  async function getWorker(): Promise<TesseractWorker | null> {
+    if (disabled) return null;
+    if (workerPromise === undefined) {
+      workerPromise = (async (): Promise<TesseractWorker | null> => {
+        try {
+          // Cast through `unknown`: tesseract.js's published `createWorker`
+          // overloads don't line up with the minimal shape we call, and the
+          // module may be absent entirely in the shipped bundle.
+          const tesseract = (await import('tesseract.js')) as unknown as {
+            createWorker: (
+              langs: string,
+              oem?: number,
+              opts?: Record<string, unknown>,
+            ) => Promise<TesseractWorker>;
+          };
+          // Vendored, fully-offline configuration (proven by spike): point the
+          // worker at local traineddata + wasm core so it never reaches a CDN.
+          const worker = await tesseract.createWorker(langKey, 1, {
+            langPath: assetsDir,
+            cachePath: assetsDir,
+            gzip: false,
+            workerPath: resolveWorkerPath(assetsDir),
+            // corePath is browser-only — on node, tesseract.js's worker selects
+            // and `require`s the core itself (see scripts/build.ts). Left as a
+            // best-effort dev resolution; undefined in the bundled Action, where
+            // the worker's inlined loaders read the vendored .wasm cores from
+            // `assetsDir`.
+            corePath: requireResolveSafe('tesseract.js-core/tesseract-core-simd-lstm.js'),
+          });
+          return worker;
+        } catch (err) {
+          disabled = true;
+          void log.warn(
+            `ocr: tesseract.js engine unavailable (${(err as Error).message}); ` +
+              'image OCR disabled for this run. Ensure tesseract.js and the ' +
+              'vendored assets/ocr/ files are present.',
+          );
+          return null;
+        }
+      })();
+    }
+    return workerPromise;
+  }
+
+  return {
+    async recognize(image: Buffer): Promise<OcrResult> {
+      if (image.length > maxImageBytes) {
+        void log.debug(`ocr: skipping ${image.length}-byte image (over ${maxImageBytes}-byte cap)`);
+        return { text: '', confidence: 0 };
+      }
+      const worker = await getWorker();
+      if (worker === null) return { text: '', confidence: 0 };
+      try {
+        const { data } = await worker.recognize(image);
+        return { text: data.text, confidence: data.confidence };
+      } catch (err) {
+        void log.warn(`ocr: recognize failed: ${(err as Error).message}`);
+        return { text: '', confidence: 0 };
+      }
+    },
+
+    async terminate(): Promise<void> {
+      if (workerPromise === undefined) return;
+      const worker = await workerPromise;
+      if (worker !== null) {
+        try {
+          await worker.terminate();
+        } catch {
+          /* terminate is best-effort cleanup; a failure here is not actionable */
+        }
+      }
+    },
+  };
+}
+
+/** Bound for a single recognize call: cancel it after a timeout or on abort. */
+export interface RecognizeLimit {
+  /** Terminate the worker and give up after this many ms. */
+  timeoutMs?: number;
+  /** Terminate the worker and give up when this signal aborts. */
+  signal?: AbortSignal;
+}
+
+export interface RecognizeOnceOptions extends TesseractEngineOptions, RecognizeLimit {}
+
+/**
+ * Run one recognize so it can't hang a caller indefinitely: `tesseract.recognize`
+ * ignores abort signals and can spend minutes on a malformed/huge image. On
+ * timeout or abort we {@link OcrEngine.terminate | terminate} the worker — which
+ * tears down its `worker_threads` thread — and resolve to empty text. Used by
+ * the `describe_image_at_ref` tool, whose handler the agent loop awaits directly
+ * (a hung worker would otherwise stall the whole review past abort/budget).
+ */
+export function recognizeWithLimit(
+  engine: OcrEngine,
+  image: Buffer,
+  limit: RecognizeLimit = {},
+): Promise<OcrResult> {
+  const { timeoutMs, signal } = limit;
+  if (timeoutMs === undefined && signal === undefined) return engine.recognize(image);
+  return new Promise<OcrResult>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: OcrResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (signal !== undefined) signal.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = () => {
+      // Kill the worker thread so the in-flight recognize() stops instead of
+      // outliving the deadline / aborted run.
+      void engine.terminate();
+      finish({ text: '', confidence: 0 });
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    if (timeoutMs !== undefined) timer = setTimeout(onAbort, timeoutMs);
+    if (signal !== undefined) signal.addEventListener('abort', onAbort, { once: true });
+    void engine.recognize(image).then(
+      (res) => finish(res),
+      // recognize is contracted not to throw; a rejection means the worker was
+      // torn down (timeout/abort) — resolve empty rather than reject.
+      () => finish({ text: '', confidence: 0 }),
+    );
+  });
+}
+
+/**
+ * Convenience for callers that OCR a single image and don't manage a long-lived
+ * worker (e.g. the `describe_image_at_ref` tool): create an engine, recognize
+ * (optionally time-bounded / abortable via {@link RecognizeLimit}), and always
+ * terminate so no `worker_threads` instance lingers and blocks process exit.
+ */
+export async function recognizeOnce(
+  image: Buffer,
+  options: RecognizeOnceOptions = {},
+): Promise<OcrResult> {
+  const { timeoutMs, signal, ...engineOptions } = options;
+  const engine = createTesseractEngine(engineOptions);
+  try {
+    return await recognizeWithLimit(engine, image, { timeoutMs, signal });
+  } finally {
+    await engine.terminate();
+  }
+}
+
+/**
+ * `require.resolve` a package path, returning `undefined` (rather than
+ * throwing) when it can't be located. Lets tesseract fall back to its own
+ * default resolution when we can't pin an explicit worker/core path — and
+ * keeps the dynamic-import degrade path intact when the package is absent.
+ */
+function requireResolveSafe(spec: string): string | undefined {
+  try {
+    return localRequire.resolve(spec);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve the `worker_threads` entry tesseract.js spawns. The shipped Action
+ * has no node_modules, so it can't `require.resolve` the package worker;
+ * `npm run build` bundles a self-contained worker into `assetsDir`
+ * (`tesseract-worker.js`) for exactly this case. Prefer that vendored bundle
+ * when present, falling back to the installed package for local/dev runs (where
+ * the bundle hasn't been built but node_modules exists).
+ */
+function resolveWorkerPath(assetsDir: string): string | undefined {
+  const vendored = path.join(assetsDir, 'tesseract-worker.cjs');
+  if (existsSync(vendored)) return vendored;
+  return requireResolveSafe('tesseract.js/src/worker-script/node/index.js');
+}

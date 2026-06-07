@@ -17,19 +17,25 @@ const rootDir = resolve(__dirname, '..');
 console.log('Running build...');
 execSync('npm run build', { stdio: 'inherit', cwd: rootDir });
 
-console.log('Checking dist/ is clean...');
+console.log('Checking dist/ and the OCR worker bundle are clean...');
+// The OCR worker bundle (assets/ocr/tesseract-worker.js) is build output too —
+// guard it alongside dist/ so it can't drift from the installed tesseract.js.
+const BUILT_PATHS = ['dist/', 'assets/ocr/tesseract-worker.cjs'];
 try {
-  const diff = execSync('git diff --exit-code -- dist/', { cwd: rootDir, encoding: 'utf-8' });
+  const diff = execSync(`git diff --exit-code -- ${BUILT_PATHS.join(' ')}`, {
+    cwd: rootDir,
+    encoding: 'utf-8',
+  });
   if (diff.trim()) {
-    console.error('dist/ is stale after build:');
+    console.error('Build output is stale after build:');
     console.error(diff);
     process.exit(1);
   }
-  console.log('dist/ is up to date with src/');
+  console.log('dist/ and the OCR worker bundle are up to date');
 } catch (err: unknown) {
   const e = err as { stdout?: string; status?: number };
   if (e.status === 1 && e.stdout) {
-    console.error('dist/ is stale after build. Run `npm run build` and commit dist/.');
+    console.error('Build output is stale after build. Run `npm run build` and commit the result.');
     console.error(e.stdout);
     process.exit(1);
   }

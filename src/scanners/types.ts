@@ -117,6 +117,16 @@ export type ScanEvidence =
       cvss?: number;
     }
   | { kind: 'secret'; masked_match: string; pattern_id: string }
+  | {
+      /** A secret pattern matched text OCR'd out of a committed image. */
+      kind: 'ocr';
+      /** Masked form of the credential found in the image (never the raw value). */
+      masked_match: string;
+      /** The secret pattern id that fired (e.g. `aws-access-key-id`). */
+      pattern_id: string;
+      /** Tesseract's 0–100 confidence for the OCR pass that produced the text. */
+      ocr_confidence: number;
+    }
   | { kind: 'sast'; cwe?: string[] }
   | {
       /** Left-behind development artifact (merge marker, debugger, focused test, …). */

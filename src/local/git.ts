@@ -31,6 +31,16 @@ export function git(args: string[], cwd: string): string {
   });
 }
 
+/** Like {@link git} but returns the raw stdout bytes (no UTF-8 decode), for
+ *  reading binary blobs such as committed images faithfully. */
+export function gitBytes(args: string[], cwd: string): Buffer {
+  return execFileSync('git', args, {
+    cwd,
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
 export function resolveRef(workspace: string, ref: string): string {
   return git(['rev-parse', ref], workspace).trim();
 }
@@ -161,13 +171,18 @@ export function unifiedDiff(workspace: string, diffArgs: string[]): string {
   return git(['diff', '--no-color', '--unified=3', ...diffArgs], workspace);
 }
 
-/** File content at a committed ref, or null when the path doesn't exist there. */
-export function fileContentAtRef(workspace: string, ref: string, path: string): string | null {
+/** Raw bytes at a committed ref, or null when the path doesn't exist there. */
+export function fileBytesAtRef(workspace: string, ref: string, path: string): Buffer | null {
   try {
-    return git(['show', `${ref}:${path}`], workspace);
+    return gitBytes(['show', `${ref}:${path}`], workspace);
   } catch {
     return null; // file doesn't exist at this ref (added/removed)
   }
+}
+
+/** File content at a committed ref as UTF-8, or null when it doesn't exist. */
+export function fileContentAtRef(workspace: string, ref: string, path: string): string | null {
+  return fileBytesAtRef(workspace, ref, path)?.toString('utf-8') ?? null;
 }
 
 /** Whether `target` is `root` or sits strictly inside it (no '..' escape). */
@@ -177,8 +192,8 @@ function contains(root: string, target: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-/** File content from the working tree on disk, or null when it's absent. */
-export function fileContentOnDisk(workspace: string, path: string): string | null {
+/** Raw bytes from the working tree on disk, or null when it's absent. */
+export function fileBytesOnDisk(workspace: string, path: string): Buffer | null {
   // The real GitHub Contents API can't read outside the repo; this fake one
   // serves read_file_at_ref for working-tree HEAD, so a model-supplied path
   // like `../../.ssh/id_rsa` must not escape the checkout. Reject anything that
@@ -201,10 +216,15 @@ export function fileContentOnDisk(workspace: string, path: string): string | nul
   }
   if (!contains(realRoot, realTarget)) return null;
   try {
-    return readFileSync(realTarget, 'utf-8');
+    return readFileSync(realTarget);
   } catch {
     return null; // deleted in the working tree, or unreadable
   }
+}
+
+/** File content from the working tree on disk as UTF-8, or null when absent. */
+export function fileContentOnDisk(workspace: string, path: string): string | null {
+  return fileBytesOnDisk(workspace, path)?.toString('utf-8') ?? null;
 }
 
 export function authorFromHead(workspace: string, ref = 'HEAD'): string {
