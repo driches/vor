@@ -3,3 +3,6 @@ node_modules/
 coverage/
 *.md
 tests/fixtures/
+# Self-contained Svelte/Vite subproject; Prettier can't parse .svelte without a
+# plugin, and it has its own formatting story.
+dashboard/

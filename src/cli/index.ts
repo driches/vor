@@ -1,0 +1,59 @@
+/**
+ * `vor` CLI entry point. Bundled separately to dist/cli.js (never part of the
+ * GitHub Action bundle, dist/index.js). Wires the local-review core, dashboard,
+ * and MCP server behind a single binary.
+ */
+
+import { Command } from 'commander';
+import { pathToFileURL } from 'node:url';
+import pkg from '../../package.json' with { type: 'json' };
+import { status } from './output.js';
+import { registerConfig } from './commands/config.js';
+import { registerDashboard } from './commands/dashboard.js';
+import { registerMcp } from './commands/mcp.js';
+import { registerReview } from './commands/review.js';
+import { registerRuns } from './commands/runs.js';
+
+export function buildProgram(): Command {
+  const program = new Command();
+  program
+    .name('vor')
+    .description('VOR — local AI code review: review, dashboard, and MCP for your working tree')
+    .version(pkg.version, '-v, --version');
+
+  registerReview(program);
+  registerRuns(program);
+  registerConfig(program);
+  registerDashboard(program);
+  registerMcp(program);
+
+  return program;
+}
+
+export async function main(): Promise<void> {
+  const program = buildProgram();
+  await program.parseAsync(process.argv);
+}
+
+/** True only when this module is the process entry point (the `vor` binary),
+ *  not when it's imported (e.g. by tests). Handles both the shipped CJS bundle
+ *  (require.main === module) and the ESM dev/test path (import.meta.url). */
+function invokedDirectly(): boolean {
+  if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+    return require.main === module;
+  }
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(entry).href;
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
+  main().catch((err: Error) => {
+    status(err.stack ?? err.message);
+    process.exit(1);
+  });
+}

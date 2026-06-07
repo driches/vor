@@ -206,6 +206,55 @@ Every review has:
 
 By default, the agent **never auto-blocks** — all reviews are posted as `COMMENT`. To opt into `REQUEST_CHANGES` on critical findings, see Configuration below.
 
+## Run locally (CLI, dashboard, MCP)
+
+Vor also runs entirely on your machine — no GitHub round-trip — so you can review
+changes _before_ you push. The same orchestrator (scanners + agent) that powers the
+Action runs against your local git, in dry-run mode. Set `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY` first.
+
+```sh
+# Review your uncommitted changes (auto-detects working tree vs branch range)
+npx @driches/vor review
+
+# Review a branch against a base
+npx @driches/vor review --range --base origin/main --head HEAD
+
+# Browse past runs (stored under ~/.vor/runs)
+npx @driches/vor runs list
+npx @driches/vor runs show <id>
+
+# Inspect the resolved .vor.yml
+npx @driches/vor config show
+```
+
+Install it once for a shorter command:
+
+```sh
+npm i -g @driches/vor
+vor review --json        # machine-readable output
+```
+
+### Local dashboard
+
+A small web UI to browse run history and kick off reviews:
+
+```sh
+vor dashboard            # serves http://127.0.0.1:4310 (loopback only)
+```
+
+### MCP server
+
+Expose Vor to agents (e.g. Claude Code) over stdio. Tools: `review_local_changes`,
+`list_runs`, `get_run`, `get_config`.
+
+```sh
+claude mcp add vor -- npx -y @driches/vor mcp
+```
+
+Run history and the dashboard's assets live under `~/.vor/` (override the root with
+`VOR_HOME`). Nothing is posted anywhere — local reviews are dry-run only.
+
 ## Inputs
 
 | Input | Required | Default | Description |

@@ -36,8 +36,10 @@ try {
   throw err;
 }
 
-// Guard: eval-only modules must not appear in the action bundle.
-console.log('Checking dist/index.js does not include src/eval/*...');
+// Guard: modules that belong only to local-only / CLI surfaces must not appear
+// in the action bundle. eval/* is local-only; cli/dashboard/mcp/local power the
+// `vor` CLI (dist/cli.js) and must never bloat the GitHub Action runtime.
+console.log('Checking dist/index.js does not include local-only modules...');
 const bundlePath = resolve(rootDir, 'dist/index.js');
 const bundle = readFileSync(bundlePath, 'utf-8');
 const FORBIDDEN_MARKERS = [
@@ -46,14 +48,20 @@ const FORBIDDEN_MARKERS = [
   'src/eval/compare',
   'src/eval/report',
   'src/eval/finding',
+  'src/cli/',
+  'src/dashboard/',
+  'src/mcp/',
+  'src/local/',
 ];
 const leaked = FORBIDDEN_MARKERS.filter((m) => bundle.includes(m));
 if (leaked.length > 0) {
   console.error(
-    'dist/index.js contains eval-only modules — eval code leaked into the action bundle:',
+    'dist/index.js contains local-only modules — non-action code leaked into the action bundle:',
   );
   for (const m of leaked) console.error(`  - ${m}`);
-  console.error('Verify that src/index.ts (and its imports) never reach src/eval/*.');
+  console.error(
+    'Verify that src/index.ts (and its imports) never reach eval/cli/dashboard/mcp/local.',
+  );
   process.exit(1);
 }
-console.log('dist/index.js is free of eval modules.');
+console.log('dist/index.js is free of local-only modules.');

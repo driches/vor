@@ -11,6 +11,9 @@ export default [
       // The docs site is a self-contained subproject with its own toolchain
       // (own package.json/tsconfig, Astro's own checks). Don't lint it from root.
       'site/**',
+      // The dashboard SPA is likewise self-contained (Svelte + Vite, browser
+      // globals, its own build). Linted/typechecked by Vite, not the root.
+      'dashboard/**',
       '**/*.config.ts',
       '**/*.config.mjs',
       // Synthetic-bug eval fixtures. `before/` files intentionally declare
