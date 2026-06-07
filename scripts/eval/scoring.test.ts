@@ -262,24 +262,27 @@ describe('scoreRun', () => {
   });
 
   it('finds optimal matching when truth compat sets overlap (regression: greedy bias)', () => {
-    // Truth A is permissive: matches both 'security' and 'vulnerability'.
-    // Truth B is restrictive: matches only 'security'.
-    // Finding F1 is 'security'; F2 is 'vulnerability'.
+    // Truth A is permissive: matches both 'performance' and 'bug'.
+    // Truth B is restrictive: matches only 'performance'.
+    // Finding F1 is 'performance'; F2 is 'bug'.
     // Greedy in input order (A, B) would pair A→F1, leaving B with no
-    // compatible finding (F2 is 'vulnerability', not in B's category list).
+    // compatible finding (F2 is 'bug', not in B's category list).
     // Optimal pairs A→F2, B→F1, achieving 2 TPs.
+    // (Categories deliberately avoid the security family, which scoring now
+    // treats as interchangeable — security/vulnerability would make B match
+    // both findings and erase the asymmetry this test guards.)
     const truthA = truth({
       plant_id: 0,
       line_range: [10, 10],
-      category: ['security', 'vulnerability'],
+      category: ['performance', 'bug'],
     });
     const truthB = truth({
       plant_id: 1,
       line_range: [10, 10],
-      category: ['security'],
+      category: ['performance'],
     });
-    const f1 = finding({ line: 10, category: 'security' });
-    const f2 = finding({ line: 10, category: 'vulnerability' });
+    const f1 = finding({ line: 10, category: 'performance' });
+    const f2 = finding({ line: 10, category: 'bug' });
     const result = scoreRun({
       case_id: 'opt',
       config_name: 'cfg',
@@ -290,5 +293,131 @@ describe('scoreRun', () => {
     expect(result.tp).toBe(2);
     expect(result.fn).toBe(0);
     expect(result.fp).toBe(0);
+  });
+
+  it('treats `vulnerability` and `security` as interchangeable categories', () => {
+    // The LLM labels the same finding `security` or `vulnerability` run-to-run
+    // (an RCE is equally both). A truth whose allow-list names one must accept
+    // the other, or recall on security cases becomes a coin-flip on wording.
+    const found = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ bug_type: 'sql-injection', category: ['security', 'bug'] })],
+      findings: [finding({ category: 'vulnerability' })],
+      cost,
+    });
+    expect(found.tp).toBe(1);
+    expect(found.fn).toBe(0);
+    expect(found.fp).toBe(0);
+
+    // Reverse direction: truth allows `vulnerability`, finding says `security`.
+    const reverse = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth({ category: ['vulnerability'] })],
+      findings: [finding({ category: 'security' })],
+      cost,
+    });
+    expect(reverse.tp).toBe(1);
+    expect(reverse.fp).toBe(0);
+  });
+
+  it('absorbs scanner fan-out (same scanner, same location) as duplicates, not FPs', () => {
+    // One planted vulnerable dependency, but the dependency-cve scanner emits
+    // several CVE rows at the same lockfile line. One matches the truth; the
+    // rest are fan-out of an already-credited finding and must not depress
+    // precision.
+    const depTruth = truth({
+      file: 'package-lock.json',
+      line_range: [11, 11],
+      bug_type: 'vuln-dep:npm',
+      category: ['vulnerability', 'security'],
+    });
+    const cve = (ghsa: string): PostedComment =>
+      finding({
+        file_path: 'package-lock.json',
+        line: 11,
+        category: 'vulnerability',
+        source: { kind: 'scanner', scanner: 'dependency-cve', rule_id: `osv:${ghsa}` },
+      });
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [depTruth],
+      findings: [cve('a'), cve('b'), cve('c'), cve('d'), cve('e')],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(0);
+    expect(result.precision).toBe(1);
+    expect(result.duplicates).toHaveLength(4);
+  });
+
+  it('counts a co-located AGENT finding as a FP, not a duplicate (Codex P2 3370136471)', () => {
+    // A noisy agent posts a SECOND, distinct comment on the same file/line/
+    // category as a real finding. It is NOT scanner fan-out (no scanner source),
+    // so it must count against precision — this is exactly the noise the eval
+    // exists to measure, and the coarse "compatible with any truth" rule hid it.
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [finding(), finding({ category: 'security' })],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+    expect(result.unaligned).toHaveLength(1);
+  });
+
+  it('counts an extra finding from a DIFFERENT scanner at the same line as a FP', () => {
+    // Fan-out absorption is per-scanner: a different scanner flagging the same
+    // line is a distinct signal, not a redundant row, so it stays a FP.
+    const t = truth({
+      file: 'package-lock.json',
+      line_range: [11, 11],
+      category: ['vulnerability'],
+    });
+    const credited = finding({
+      file_path: 'package-lock.json',
+      line: 11,
+      category: 'vulnerability',
+      source: { kind: 'scanner', scanner: 'dependency-cve', rule_id: 'osv:a' },
+    });
+    const otherScanner = finding({
+      file_path: 'package-lock.json',
+      line: 11,
+      category: 'vulnerability',
+      source: { kind: 'scanner', scanner: 'secrets', rule_id: 'secret:x' },
+    });
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [t],
+      findings: [credited, otherScanner],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+  });
+
+  it('still counts a finding compatible with no truth as a FP (duplicate logic does not swallow noise)', () => {
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [truth()],
+      findings: [
+        finding(),
+        finding({ file_path: 'src/unrelated.ts', line: 99, category: 'performance' }),
+      ],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+    expect(result.unaligned).toHaveLength(1);
+    expect(result.unaligned[0]!.file_path).toBe('src/unrelated.ts');
   });
 });

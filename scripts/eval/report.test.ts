@@ -14,6 +14,7 @@ function score(over: Partial<ScoreResult> & { config_name: string }): ScoreResul
     cost_per_tp_usd: 0.5,
     outcomes: [],
     unaligned: [],
+    duplicates: [],
     cost: {
       provider: 'anthropic',
       input_tokens: 100,

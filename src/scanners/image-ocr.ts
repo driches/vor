@@ -47,6 +47,20 @@ const SCANNER_ID: ScannerId = 'image-ocr';
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
+// Tesseract frequently renders ASCII punctuation as visually-identical Unicode
+// confusables — most commonly the dash family (em/en dash, figure dash, minus
+// sign) for `-`. The secret patterns are ASCII-literal (e.g. the PEM header
+// `-----BEGIN ... PRIVATE KEY-----`), so a faithful OCR of a real key can miss
+// purely on glyph substitution: an actual PEM screenshot OCRs as
+// `—----BEGIN RSA PRIVATE KEY--—-—` and never matches. Fold the dash family
+// back to ASCII hyphen before matching. OCR-path only — the text-diff secrets
+// scanner reads real source bytes and must not be normalized.
+const OCR_DASH_CONFUSABLES = /[‐‑‒–—―−]/g;
+
+function normalizeOcrConfusables(text: string): string {
+  return text.replace(OCR_DASH_CONFUSABLES, '-');
+}
+
 // OCR + WASM init is slow relative to regex scanners; give it more than the
 // 60s runner default so a couple of screenshots don't trip the per-scanner cap.
 const OCR_SCANNER_TIMEOUT_MS = 120_000;
@@ -189,7 +203,10 @@ export function createImageOcrScanner(options: ImageOcrScannerOptions = {}): Sca
 
           const ocr = await recognizeCancellable(ocrEngine, bytes, deps.signal);
           if (ocr === 'aborted') break;
-          const { text, confidence } = ocr;
+          const { confidence } = ocr;
+          // Normalize OCR glyph confusables (e.g. em-dash → `-`) so ASCII-literal
+          // secret patterns match a faithful OCR of a real credential.
+          const text = normalizeOcrConfusables(ocr.text);
           if (text.trim() === '') continue;
 
           let matchOrdinal = 0;

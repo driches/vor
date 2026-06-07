@@ -25,10 +25,15 @@
  * line numbers coincidentally overlap an after/-anchored truth. See PR #10
  * Codex P2 3295113234.
  */
-import type { PostedComment } from '../../src/types.js';
+import type { PostedComment, Category } from '../../src/types.js';
 import type { RunRecord, TruthEntry, ScoreResult, TruthOutcome } from './types.js';
 
 const LINE_SLACK = 3;
+
+// `security` and `vulnerability` name the same class of finding; the LLM picks
+// one or the other for the same bug run-to-run. Treat them as interchangeable
+// when matching a finding's category against a truth's allow-list.
+const SECURITY_FAMILY: ReadonlySet<Category> = new Set<Category>(['security', 'vulnerability']);
 
 export interface ScoreInput {
   case_id: string;
@@ -39,17 +44,42 @@ export interface ScoreInput {
 }
 
 export function scoreRun(input: ScoreInput): ScoreResult {
+  // Collapse scanner fan-out before matching. A deterministic scanner that
+  // emits several rows for one underlying issue at one location (e.g. multiple
+  // OSV CVEs for a single vulnerable dependency, all anchored to the same
+  // lockfile line) should count once, not N times. Keep one representative per
+  // (scanner, file, line); the rest are `duplicates`, excluded from precision.
+  // Agent findings are never collapsed — a co-located LLM comment is a distinct
+  // signal precision must measure, so it falls through to the matcher and counts
+  // as a FP when it doesn't match a truth. Earlier the scorer kept every row and
+  // then treated any unmatched-but-truth-compatible finding as a duplicate,
+  // which silently hid co-located agent noise. Codex P2 3370136471.
+  const findings: PostedComment[] = [];
+  const duplicates: PostedComment[] = [];
+  const seenScannerKeys = new Set<string>();
+  for (const f of input.findings) {
+    if (f.source?.kind === 'scanner') {
+      const key = `${f.source.scanner}|${f.file_path}|${f.start_line ?? f.line}|${f.line}`;
+      if (seenScannerKeys.has(key)) {
+        duplicates.push(f);
+        continue;
+      }
+      seenScannerKeys.add(key);
+    }
+    findings.push(f);
+  }
+
   // Build a compatibility matrix: compat[t][f] === true iff finding f satisfies
   // truth t's file + line-range (with slack) + category constraints.
   const T = input.truths.length;
-  const F = input.findings.length;
+  const F = findings.length;
   const compat: boolean[][] = [];
   for (let t = 0; t < T; t++) {
     const truth = input.truths[t]!;
     const [truthStart, truthEnd] = truth.line_range;
     const row: boolean[] = [];
     for (let i = 0; i < F; i++) {
-      const finding = input.findings[i]!;
+      const finding = findings[i]!;
       // GitHub's PostedComment may carry a multi-line range via `start_line`;
       // a single-line comment has `start_line` absent and `line` carries the
       // single anchor. Treat the finding as [findingStart, findingEnd] and
@@ -97,7 +127,7 @@ export function scoreRun(input: ScoreInput): ScoreResult {
   for (let t = 0; t < T; t++) {
     const f = matchFinding[t]!;
     if (f >= 0) {
-      outcomes.push({ truth: input.truths[t]!, status: 'matched', finding: input.findings[f]! });
+      outcomes.push({ truth: input.truths[t]!, status: 'matched', finding: findings[f]! });
     } else {
       outcomes.push({ truth: input.truths[t]!, status: 'missed' });
     }
@@ -106,7 +136,9 @@ export function scoreRun(input: ScoreInput): ScoreResult {
 
   const tp = outcomes.filter((o) => o.status === 'matched').length;
   const fn = outcomes.length - tp;
-  const unaligned = input.findings.filter((_f, i) => !matchedFindings.has(i));
+  // Any kept finding (after scanner fan-out was collapsed above) that didn't
+  // match a truth is a false positive — including a co-located agent comment.
+  const unaligned = findings.filter((_f, i) => !matchedFindings.has(i));
   const fp = unaligned.length;
 
   const recall = tp + fn === 0 ? 1 : tp / (tp + fn);
@@ -125,13 +157,22 @@ export function scoreRun(input: ScoreInput): ScoreResult {
     f1,
     cost_per_tp_usd,
     outcomes,
-    unaligned: [...unaligned],
+    unaligned,
+    duplicates,
     cost: input.cost,
   };
 }
 
 function categoryMatches(truth: TruthEntry, finding: PostedComment): boolean {
   if (truth.category.includes(finding.category)) return true;
+  // `security` ⇔ `vulnerability`: the LLM labels the same security finding
+  // either way from run to run, so a truth that allows one must accept the
+  // other. Without this, recall on security/vuln cases flips on wording alone
+  // (a correctly-located SQLi labeled `vulnerability` scored as a full miss
+  // against a `[security, bug]` truth).
+  if (SECURITY_FAMILY.has(finding.category) && truth.category.some((c) => SECURITY_FAMILY.has(c))) {
+    return true;
+  }
   // `Array.forEach(async ...)` is both async-control-flow and race behavior:
   // the outer function returns before the inner awaits settle. Treat an LLM's
   // `race-condition` categorization as compatible with the existing planted

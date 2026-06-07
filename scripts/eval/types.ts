@@ -111,7 +111,16 @@ export interface ScoreResult {
   fp: number;
   cost_per_tp_usd: number;
   outcomes: TruthOutcome[];
-  /** Findings that didn't map to any truth — noise candidates. */
+  /** Findings compatible with no truth — genuine noise candidates (the FPs). */
   unaligned: PostedComment[];
+  /**
+   * Unmatched findings that are scanner fan-out of an already-credited finding:
+   * the same deterministic scanner emitting several rows for one underlying
+   * issue at one location (e.g. multiple OSV CVEs for a single vulnerable
+   * dependency). Tracked for transparency but excluded from `fp`/precision —
+   * they are neither new detections nor spurious noise. Agent findings never
+   * land here: a co-located LLM comment counts as a false positive.
+   */
+  duplicates: PostedComment[];
   cost: RunRecord['cost'];
 }
