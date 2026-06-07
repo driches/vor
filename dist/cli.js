@@ -55179,7 +55179,7 @@ var import_node_url3 = require("node:url");
 // package.json
 var package_default = {
   name: "@driches/vor",
-  version: "0.5.2",
+  version: "0.6.0",
   description: "Vor \u2014 AI code review GitHub Action with inline comments and parallel vulnerability scanning, via Claude or OpenAI",
   license: "MIT",
   author: "Doug Riches",
