@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileReader } from '../github/file-reader.js';
-import type { OcrEngine } from '../ocr/recognize.js';
+import type { OcrEngine, OcrResult } from '../ocr/recognize.js';
 import type { VisionClient } from '../vision/describe-image.js';
 import type { ToolDeps } from './types.js';
 import { makeDescribeImageAtRefTool } from './describe-image-at-ref.js';
@@ -21,6 +21,7 @@ function depsWith(over: {
   reader?: Partial<FileReader>;
   ocrEngine?: OcrEngine;
   visionClient?: VisionClient;
+  signal?: AbortSignal;
 }): ToolDeps {
   const reader: Partial<FileReader> = {
     readBinary: vi.fn().mockResolvedValue(Buffer.from('PNG')),
@@ -31,6 +32,7 @@ function depsWith(over: {
     ...base,
     ...(over.ocrEngine ? { ocrEngine: over.ocrEngine } : {}),
     ...(over.visionClient ? { visionClient: over.visionClient } : {}),
+    ...(over.signal ? { signal: over.signal } : {}),
   };
 }
 
@@ -102,6 +104,30 @@ describe('describe_image_at_ref tool', () => {
     };
     expect(r.text_truncated).toBe(false);
     expect(r.text).toBe('short');
+  });
+
+  it('cancels a hung OCR when the run signal aborts and terminates the worker', async () => {
+    // recognize() never resolves on its own — only the abort path unblocks the
+    // tool, proving a slow/malformed image can't hang the agent loop (which
+    // awaits the handler directly) past an aborted run.
+    let terminated = false;
+    const engine: OcrEngine = {
+      recognize: vi.fn().mockReturnValue(new Promise<OcrResult>(() => {})),
+      terminate: vi.fn().mockImplementation(async () => {
+        terminated = true;
+      }),
+    };
+    const controller = new AbortController();
+    const deps = depsWith({ ocrEngine: engine, signal: controller.signal });
+    const tool = makeDescribeImageAtRefTool(deps);
+    const resultPromise = callTool(tool, { path: 'big.png' });
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
+
+    const r = getResultJson(await resultPromise) as { ok: boolean; text: string };
+    expect(r.ok).toBe(true);
+    expect(r.text).toBe('');
+    expect(terminated).toBe(true);
   });
 
   it('rejects non-image paths without reading', async () => {

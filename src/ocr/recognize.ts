@@ -176,19 +176,76 @@ export function createTesseractEngine(options: TesseractEngineOptions = {}): Ocr
   };
 }
 
+/** Bound for a single recognize call: cancel it after a timeout or on abort. */
+export interface RecognizeLimit {
+  /** Terminate the worker and give up after this many ms. */
+  timeoutMs?: number;
+  /** Terminate the worker and give up when this signal aborts. */
+  signal?: AbortSignal;
+}
+
+export interface RecognizeOnceOptions extends TesseractEngineOptions, RecognizeLimit {}
+
+/**
+ * Run one recognize so it can't hang a caller indefinitely: `tesseract.recognize`
+ * ignores abort signals and can spend minutes on a malformed/huge image. On
+ * timeout or abort we {@link OcrEngine.terminate | terminate} the worker — which
+ * tears down its `worker_threads` thread — and resolve to empty text. Used by
+ * the `describe_image_at_ref` tool, whose handler the agent loop awaits directly
+ * (a hung worker would otherwise stall the whole review past abort/budget).
+ */
+export function recognizeWithLimit(
+  engine: OcrEngine,
+  image: Buffer,
+  limit: RecognizeLimit = {},
+): Promise<OcrResult> {
+  const { timeoutMs, signal } = limit;
+  if (timeoutMs === undefined && signal === undefined) return engine.recognize(image);
+  return new Promise<OcrResult>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: OcrResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (signal !== undefined) signal.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = () => {
+      // Kill the worker thread so the in-flight recognize() stops instead of
+      // outliving the deadline / aborted run.
+      void engine.terminate();
+      finish({ text: '', confidence: 0 });
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    if (timeoutMs !== undefined) timer = setTimeout(onAbort, timeoutMs);
+    if (signal !== undefined) signal.addEventListener('abort', onAbort, { once: true });
+    void engine.recognize(image).then(
+      (res) => finish(res),
+      // recognize is contracted not to throw; a rejection means the worker was
+      // torn down (timeout/abort) — resolve empty rather than reject.
+      () => finish({ text: '', confidence: 0 }),
+    );
+  });
+}
+
 /**
  * Convenience for callers that OCR a single image and don't manage a long-lived
- * worker (e.g. the `describe_image_at_ref` tool): create an engine, recognize,
- * and always terminate so no `worker_threads` instance lingers and blocks
- * process exit.
+ * worker (e.g. the `describe_image_at_ref` tool): create an engine, recognize
+ * (optionally time-bounded / abortable via {@link RecognizeLimit}), and always
+ * terminate so no `worker_threads` instance lingers and blocks process exit.
  */
 export async function recognizeOnce(
   image: Buffer,
-  options: TesseractEngineOptions = {},
+  options: RecognizeOnceOptions = {},
 ): Promise<OcrResult> {
-  const engine = createTesseractEngine(options);
+  const { timeoutMs, signal, ...engineOptions } = options;
+  const engine = createTesseractEngine(engineOptions);
   try {
-    return await engine.recognize(image);
+    return await recognizeWithLimit(engine, image, { timeoutMs, signal });
   } finally {
     await engine.terminate();
   }

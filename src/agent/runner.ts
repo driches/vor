@@ -221,6 +221,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     ...input.deps,
     ...(worker !== undefined ? { worker } : {}),
     ...(visionClient !== undefined ? { visionClient } : {}),
+    ...(input.abortController !== undefined ? { signal: input.abortController.signal } : {}),
   };
   const tools = buildToolDefinitions(fullDeps);
 

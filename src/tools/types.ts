@@ -44,6 +44,12 @@ export interface ToolDeps {
    * provider supports it; absent means OCR-only.
    */
   visionClient?: VisionClient;
+  /**
+   * Run-level abort signal (the agent's AbortController). Lets long tool work —
+   * notably `describe_image_at_ref`'s OCR — stop when the run is aborted instead
+   * of hanging the loop, which awaits each tool handler directly.
+   */
+  signal?: AbortSignal;
 }
 
 /** Helper: build the text-content shape MCP tools return. */

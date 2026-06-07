@@ -59780,10 +59780,42 @@ function createTesseractEngine(options = {}) {
     }
   };
 }
+function recognizeWithLimit(engine, image, limit2 = {}) {
+  const { timeoutMs, signal } = limit2;
+  if (timeoutMs === void 0 && signal === void 0) return engine.recognize(image);
+  return new Promise((resolve3) => {
+    let settled = false;
+    let timer;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== void 0) clearTimeout(timer);
+      if (signal !== void 0) signal.removeEventListener("abort", onAbort);
+      resolve3(result);
+    };
+    const onAbort = () => {
+      void engine.terminate();
+      finish({ text: "", confidence: 0 });
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    if (timeoutMs !== void 0) timer = setTimeout(onAbort, timeoutMs);
+    if (signal !== void 0) signal.addEventListener("abort", onAbort, { once: true });
+    void engine.recognize(image).then(
+      (res) => finish(res),
+      // recognize is contracted not to throw; a rejection means the worker was
+      // torn down (timeout/abort) — resolve empty rather than reject.
+      () => finish({ text: "", confidence: 0 })
+    );
+  });
+}
 async function recognizeOnce(image, options = {}) {
-  const engine = createTesseractEngine(options);
+  const { timeoutMs, signal, ...engineOptions } = options;
+  const engine = createTesseractEngine(engineOptions);
   try {
-    return await engine.recognize(image);
+    return await recognizeWithLimit(engine, image, { timeoutMs, signal });
   } finally {
     await engine.terminate();
   }
@@ -59857,6 +59889,7 @@ function mediaTypeForPath(filePath) {
 
 // src/tools/describe-image-at-ref.ts
 var IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
+var OCR_TIMEOUT_MS = 6e4;
 var MAX_OCR_TEXT_CHARS = 2e4;
 function makeDescribeImageAtRefTool(deps) {
   const maxImages = deps.config.image_understanding.max_images;
@@ -59890,7 +59923,11 @@ function makeDescribeImageAtRefTool(deps) {
           hint: "Check list_changed_files for the exact paths in this PR."
         });
       }
-      const ocr = deps.ocrEngine ? await deps.ocrEngine.recognize(bytes) : await recognizeOnce(bytes);
+      const limit2 = {
+        timeoutMs: OCR_TIMEOUT_MS,
+        ...deps.signal ? { signal: deps.signal } : {}
+      };
+      const ocr = deps.ocrEngine ? await recognizeWithLimit(deps.ocrEngine, bytes, limit2) : await recognizeOnce(bytes, limit2);
       let description = "";
       const mediaType = mediaTypeForPath(args.path);
       const underCap = maxImages === void 0 || visionCalls < maxImages;
@@ -60450,7 +60487,8 @@ async function runAgent(input) {
   const fullDeps = {
     ...input.deps,
     ...worker !== void 0 ? { worker } : {},
-    ...visionClient !== void 0 ? { visionClient } : {}
+    ...visionClient !== void 0 ? { visionClient } : {},
+    ...input.abortController !== void 0 ? { signal: input.abortController.signal } : {}
   };
   const tools = buildToolDefinitions(fullDeps);
   const canonicalTools = tools.map((t2) => ({

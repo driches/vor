@@ -18,10 +18,16 @@
 import { z } from 'zod';
 import { tool } from './tool-helper.js';
 import { jsonResult, type ToolDeps } from './types.js';
-import { recognizeOnce } from '../ocr/recognize.js';
+import { recognizeOnce, recognizeWithLimit, type RecognizeLimit } from '../ocr/recognize.js';
 import { mediaTypeForPath } from '../vision/describe-image.js';
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+// Bound a single OCR call: tesseract.recognize ignores abort and can run for
+// minutes on a malformed/huge screenshot, and the agent loop awaits this
+// handler directly — an unbounded call would hang the whole review past abort
+// or budget exhaustion. 60s is generous for a legitimate large image.
+const OCR_TIMEOUT_MS = 60_000;
 
 // Cap the OCR transcript returned to the agent. The image cap is 10 MB, and a
 // dense screenshot can OCR to a lot of text — returned unbounded, it lands in
@@ -76,9 +82,13 @@ export function makeDescribeImageAtRefTool(deps: ToolDeps) {
         });
       }
 
+      const limit: RecognizeLimit = {
+        timeoutMs: OCR_TIMEOUT_MS,
+        ...(deps.signal ? { signal: deps.signal } : {}),
+      };
       const ocr = deps.ocrEngine
-        ? await deps.ocrEngine.recognize(bytes)
-        : await recognizeOnce(bytes);
+        ? await recognizeWithLimit(deps.ocrEngine, bytes, limit)
+        : await recognizeOnce(bytes, limit);
 
       // Visual understanding is optional (config-gated) and best-effort — a
       // failure here resolves to an empty description, never an error. The
