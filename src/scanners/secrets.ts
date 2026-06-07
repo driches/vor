@@ -83,7 +83,7 @@ export interface SecretsScannerOptions {
  * around `...` so reviewers can correlate the finding with the leaked value
  * without seeing the full credential.
  */
-function maskSecret(match: string): string {
+export function maskSecret(match: string): string {
   if (match.length <= 8) return '****';
   return `${match.slice(0, 4)}...${match.slice(-4)}`;
 }

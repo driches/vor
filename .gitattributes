@@ -1,0 +1,6 @@
+# Vendored OCR binaries and generated bundles — mark binary / generated so they
+# don't pollute diffs, blame, or language stats.
+assets/ocr/*.wasm binary linguist-generated
+assets/ocr/*.traineddata binary linguist-generated
+assets/ocr/tesseract-worker.cjs linguist-generated
+dist/** linguist-generated

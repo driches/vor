@@ -121,6 +121,8 @@ function renderProvenanceTag(c: PostedComment): string {
       return '\n\n_via migration safety scan_';
     case 'dependency-hygiene':
       return '\n\n_via dependency hygiene scan_';
+    case 'image-ocr':
+      return '\n\n_via image OCR scan_';
     default: {
       // Exhaustiveness check: if a new ScannerId is added to the union
       // without updating this switch, TypeScript will error here at

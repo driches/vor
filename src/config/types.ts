@@ -58,6 +58,9 @@ export interface ReviewConfig {
   /** Provider-specific request controls. Defaults are conservative. */
   providers: ProviderConfig;
 
+  /** Cost-effective vision model for image visual-understanding. Off by default. */
+  image_understanding: ImageUnderstandingConfig;
+
   /**
    * Opt-in feature flags. Default-disabled features land here so they ship
    * without changing behavior for anyone who hasn't opted in.
@@ -82,6 +85,20 @@ export interface BlastRadiusConfig {
 
 export interface ProviderConfig {
   openai: OpenAIProviderConfig;
+}
+
+/**
+ * Visual understanding of images committed to a PR, via an isolated one-shot
+ * call to a cheap vision model (default `claude-haiku-4-5` for Anthropic).
+ * Powers the `describe_image_at_ref` agent tool. Off by default — each call
+ * spends image-input tokens against the run budget.
+ */
+export interface ImageUnderstandingConfig {
+  enabled: boolean;
+  /** Override the vision model. Defaults per provider when omitted. */
+  model?: string;
+  /** Cap on vision calls per run (defends the budget). */
+  max_images?: number;
 }
 
 export interface OpenAIProviderConfig {
@@ -173,9 +190,24 @@ export interface SecurityConfig {
      * from non-registry locations (git/url/file). No network. On by default.
      */
     dependency_hygiene: ScannerConfig;
+    /**
+     * Deterministic OCR scanner. Reads image files added by the PR, OCRs them
+     * with bundled tesseract.js, and runs the same secret patterns the text
+     * `secrets` scanner uses over the extracted text — catching credentials
+     * leaked inside committed screenshots. Off by default: it needs the
+     * vendored OCR assets and OCR adds wall-clock latency.
+     */
+    image_ocr: ImageOcrConfig;
   };
   cache: { enabled: boolean };
   persistence: { enabled: boolean };
+}
+
+export interface ImageOcrConfig extends ScannerConfig {
+  /** Skip images larger than this many bytes. */
+  max_image_bytes?: number;
+  /** OCR language packs to load. Defaults to `['eng']`. */
+  languages?: string[];
 }
 
 export interface SastConfig extends ScannerConfig {

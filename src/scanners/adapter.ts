@@ -39,7 +39,10 @@ function buildSource(f: ScanFinding): FindingSource {
         ...(f.evidence.ghsa_id !== undefined ? { ghsa_id: f.evidence.ghsa_id } : {}),
       };
     case 'secret':
-      // No CVE/GHSA — `rule_id` carries the pattern attribution.
+    case 'ocr':
+      // No CVE/GHSA — `rule_id` carries the pattern attribution. OCR findings
+      // are secret-pattern matches over image-extracted text, so they marshal
+      // the same way; the masked match + OCR confidence live in evidence.
       return { kind: 'scanner', scanner: f.scanner, rule_id: f.rule_id };
     case 'sast':
       // No CVE/GHSA — `rule_id` carries the SAST rule id; CWE lives in the

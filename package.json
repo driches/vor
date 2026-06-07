@@ -43,6 +43,10 @@
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.2"
   },
+  "optionalDependencies": {
+    "tesseract.js": "^7.0.0",
+    "tesseract.js-core": "^7.0.0"
+  },
   "devDependencies": {
     "@types/diff": "^7.0.2",
     "@types/node": "^20.17.10",

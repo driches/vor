@@ -304,9 +304,28 @@ security:
       include_generic_entropy: false                  # opt-in; high false-positive rate
     sast:           { enabled: false }                # v2 — stub in v1
     container_cve:  { enabled: false }                # v2 — stub in v1
+    image_ocr:                                        # off by default
+      enabled: false                                  # OCR committed images, scan extracted text for secrets
+      # max_image_bytes: 10485760                     # skip images larger than this
+      # languages: [eng]                              # tesseract language packs
   cache:       { enabled: true }
   persistence: { enabled: false }                     # v2 hook point
+
+# Visual understanding of images via a cost-effective vision model. Off by
+# default — each call spends image-input tokens. Powers the
+# `describe_image_at_ref` agent tool (OCR text + a short description of what the
+# image shows). Anthropic provider only; OpenAI consumers get OCR-only.
+image_understanding:
+  enabled: false
+  # model: claude-haiku-4-5                           # default cheap vision model
+  # max_images: 10                                    # cap vision calls per run
 ```
+
+> **OCR assets.** `image_ocr` and the OCR half of `describe_image_at_ref` need
+> the bundled `tesseract.js` runtime and vendored language/WASM assets under
+> `assets/ocr/` (see that directory's README). When absent they degrade to
+> "no text" rather than failing the review. The vision half needs no local
+> assets — it calls the configured model.
 
 ## Security scanning
 

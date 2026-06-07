@@ -32,6 +32,7 @@ import { createCoverageDeltaScanner } from './coverage-delta.js';
 import { createDebrisScanner } from './debris.js';
 import { createMigrationSafetyScanner } from './migration-safety.js';
 import { createDependencyHygieneScanner } from './dependency-hygiene.js';
+import { createImageOcrScanner } from './image-ocr.js';
 import { createOsvClient } from './osv-client.js';
 
 /**
@@ -136,6 +137,24 @@ export function buildEnabledScanners(
   if (config.scanners.dependency_hygiene.enabled) {
     const factory: () => Scanner =
       overrides['dependency-hygiene'] ?? (() => createDependencyHygieneScanner());
+    out.push(factory());
+  }
+
+  // image-ocr (opt-in) — OCRs committed images and runs secret patterns over
+  // the extracted text. Last in the order: it's the only scanner that consumes
+  // binary files, and its (slower) OCR pass shouldn't gate the cheap scanners.
+  if (config.scanners.image_ocr.enabled) {
+    const factory: () => Scanner =
+      overrides['image-ocr'] ??
+      (() =>
+        createImageOcrScanner({
+          ...(config.scanners.image_ocr.max_image_bytes !== undefined
+            ? { maxImageBytes: config.scanners.image_ocr.max_image_bytes }
+            : {}),
+          ...(config.scanners.image_ocr.languages !== undefined
+            ? { languages: config.scanners.image_ocr.languages }
+            : {}),
+        }));
     out.push(factory());
   }
 
