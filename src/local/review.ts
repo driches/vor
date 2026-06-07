@@ -167,13 +167,22 @@ export async function runLocalReview(
   let cleanupWorktree: (() => void) | undefined;
   if (resolved === 'range') {
     const current = currentHeadSha(workspace);
-    if (current && current !== headSha) {
+    // Materialize a clean head tree when the checkout is at a different commit,
+    // OR when it's at the right commit but has uncommitted edits — otherwise the
+    // disk-backed scanners would read working-copy changes that aren't part of
+    // the committed range.
+    const shaDiffers = Boolean(current) && current !== headSha;
+    const dirty = hasWorkingTreeChanges(workspace);
+    if (shaDiffers || dirty) {
       const tree = addDetachedWorktree(workspace, headSha);
       orchestratorWorkspace = tree;
       cleanupWorktree = () => removeWorktree(workspace, tree);
+      const reason = shaDiffers
+        ? `differs from the checkout (${current.slice(0, 7)})`
+        : 'matches a checkout with uncommitted changes';
       await logger.info(
-        `Requested head ${headSha.slice(0, 7)} differs from the checkout ` +
-          `(${current.slice(0, 7)}); running disk-backed scanners against a temporary worktree.`,
+        `Requested head ${headSha.slice(0, 7)} ${reason}; ` +
+          `running disk-backed scanners against a temporary worktree.`,
       );
     }
   }

@@ -85897,12 +85897,15 @@ async function runLocalReview(opts = {}, deps = {}) {
   let cleanupWorktree;
   if (resolved === "range") {
     const current = currentHeadSha(workspace2);
-    if (current && current !== headSha) {
+    const shaDiffers = Boolean(current) && current !== headSha;
+    const dirty = hasWorkingTreeChanges(workspace2);
+    if (shaDiffers || dirty) {
       const tree = addDetachedWorktree(workspace2, headSha);
       orchestratorWorkspace = tree;
       cleanupWorktree = () => removeWorktree(workspace2, tree);
+      const reason = shaDiffers ? `differs from the checkout (${current.slice(0, 7)})` : "matches a checkout with uncommitted changes";
       await logger.info(
-        `Requested head ${headSha.slice(0, 7)} differs from the checkout (${current.slice(0, 7)}); running disk-backed scanners against a temporary worktree.`
+        `Requested head ${headSha.slice(0, 7)} ${reason}; running disk-backed scanners against a temporary worktree.`
       );
     }
   }

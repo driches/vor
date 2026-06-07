@@ -163,4 +163,42 @@ describe('runLocalReview', () => {
       rmSync(r, { recursive: true, force: true });
     }
   });
+
+  it('materializes a clean head tree when the checkout is at head but dirty', async () => {
+    const r = mkdtempSync(join(tmpdir(), 'vor-dirty-'));
+    g(r, ['init', '-q']);
+    g(r, ['config', 'user.email', 'test@example.com']);
+    g(r, ['config', 'user.name', 'Test']);
+    g(r, ['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 1;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'first']);
+    const firstSha = gOut(r, ['rev-parse', 'HEAD']);
+    writeFileSync(join(r, 'a.ts'), 'export const a = 2;\n');
+    g(r, ['add', '-A']);
+    g(r, ['commit', '-qm', 'second']);
+    const secondSha = gOut(r, ['rev-parse', 'HEAD']);
+    // Stay at head, but dirty the working copy with an unrelated edit.
+    writeFileSync(join(r, 'a.ts'), 'export const a = 999; // uncommitted\n');
+
+    try {
+      let seenWorkspace = '';
+      let contentInTree = '';
+      const spy = vi.fn(async (input: OrchestratorInput) => {
+        seenWorkspace = input.workspace_dir;
+        contentInTree = readFileSync(join(seenWorkspace, 'a.ts'), 'utf-8');
+        return cannedResult;
+      });
+      await runLocalReview(
+        { workspace: r, target: 'range', base: firstSha, head: secondSha },
+        { runOrchestratorImpl: spy },
+      );
+      // Scanners saw the committed head (v2), not the dirty working copy.
+      expect(seenWorkspace).not.toBe(r);
+      expect(contentInTree).toBe('export const a = 2;\n');
+      expect(existsSync(seenWorkspace)).toBe(false);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
 });
