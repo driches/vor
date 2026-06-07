@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -81,13 +81,22 @@ describe('local git helpers', () => {
       expect(fileContentOnDisk(repo, '../escape-secret.txt')).toBeNull();
       expect(fileContentOnDisk(repo, '../../etc/hostname')).toBeNull();
       expect(fileContentOnDisk(repo, '/etc/hostname')).toBeNull();
+      // A symlink inside the repo pointing outside it must not be followed,
+      // even though its lexical path stays within the workspace.
+      symlinkSync(secret, join(repo, 'link-out.txt'));
+      expect(fileContentOnDisk(repo, 'link-out.txt')).toBeNull();
       // A normal nested path inside the repo still reads.
       mkdirSync(join(repo, 'sub'), { recursive: true });
       writeFileSync(join(repo, 'sub', 'in.ts'), 'inside\n');
       expect(fileContentOnDisk(repo, 'sub/in.ts')).toBe('inside\n');
+      // An in-repo symlink (target stays inside) is fine to follow.
+      symlinkSync(join(repo, 'sub', 'in.ts'), join(repo, 'link-in.txt'));
+      expect(fileContentOnDisk(repo, 'link-in.txt')).toBe('inside\n');
     } finally {
       rmSync(secret, { force: true });
       rmSync(join(repo, 'sub'), { recursive: true, force: true });
+      rmSync(join(repo, 'link-out.txt'), { force: true });
+      rmSync(join(repo, 'link-in.txt'), { force: true });
     }
   });
 

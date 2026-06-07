@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -170,6 +170,13 @@ export function fileContentAtRef(workspace: string, ref: string, path: string): 
   }
 }
 
+/** Whether `target` is `root` or sits strictly inside it (no '..' escape). */
+function contains(root: string, target: string): boolean {
+  if (target === root) return true;
+  const rel = relative(root, target);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 /** File content from the working tree on disk, or null when it's absent. */
 export function fileContentOnDisk(workspace: string, path: string): string | null {
   // The real GitHub Contents API can't read outside the repo; this fake one
@@ -179,12 +186,22 @@ export function fileContentOnDisk(workspace: string, path: string): string | nul
   // absolute path when the target isn't contained).
   const root = resolve(workspace);
   const target = resolve(root, path);
-  const rel = relative(root, target);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    return null;
-  }
+  if (!contains(root, target)) return null;
+  // The lexical check above is defeated by a symlink inside the repo that
+  // points outside it, since readFileSync would follow it. Resolve the full
+  // symlink chain (of both ends, so a repo reached through a symlinked path
+  // still matches) and re-confine before reading.
+  let realRoot: string;
+  let realTarget: string;
   try {
-    return readFileSync(target, 'utf-8');
+    realRoot = realpathSync(root);
+    realTarget = realpathSync(target);
+  } catch {
+    return null; // missing path or dangling symlink
+  }
+  if (!contains(realRoot, realTarget)) return null;
+  try {
+    return readFileSync(realTarget, 'utf-8');
   } catch {
     return null; // deleted in the working tree, or unreadable
   }

@@ -58622,15 +58622,26 @@ function fileContentAtRef(workspace2, ref, path23) {
     return null;
   }
 }
+function contains(root, target) {
+  if (target === root) return true;
+  const rel = (0, import_node_path.relative)(root, target);
+  return rel !== "" && !rel.startsWith("..") && !(0, import_node_path.isAbsolute)(rel);
+}
 function fileContentOnDisk(workspace2, path23) {
   const root = (0, import_node_path.resolve)(workspace2);
   const target = (0, import_node_path.resolve)(root, path23);
-  const rel = (0, import_node_path.relative)(root, target);
-  if (rel === "" || rel.startsWith("..") || (0, import_node_path.isAbsolute)(rel)) {
+  if (!contains(root, target)) return null;
+  let realRoot;
+  let realTarget;
+  try {
+    realRoot = (0, import_node_fs.realpathSync)(root);
+    realTarget = (0, import_node_fs.realpathSync)(target);
+  } catch {
     return null;
   }
+  if (!contains(realRoot, realTarget)) return null;
   try {
-    return (0, import_node_fs.readFileSync)(target, "utf-8");
+    return (0, import_node_fs.readFileSync)(realTarget, "utf-8");
   } catch {
     return null;
   }
