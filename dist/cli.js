@@ -85830,6 +85830,12 @@ var NothingToReviewError = class extends Error {
     this.name = "NothingToReviewError";
   }
 };
+var ReviewSkippedError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReviewSkippedError";
+  }
+};
 async function runLocalReview(opts = {}, deps = {}) {
   const workspace2 = repoRoot(opts.workspace ?? process.cwd());
   const configPath = opts.configPath ?? ".vor.yml";
@@ -85928,6 +85934,13 @@ async function runLocalReview(opts = {}, deps = {}) {
     });
   } finally {
     cleanupWorktree?.();
+  }
+  if (result.ended.startsWith("skipped_no_key_")) {
+    const provider = result.ended.slice("skipped_no_key_".length);
+    const envVar = provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+    throw new ReviewSkippedError(
+      `Review skipped: the resolved provider (${provider}) has no API key. Set ${envVar} and retry.`
+    );
   }
   return {
     id: newRunId(),
@@ -86028,6 +86041,9 @@ async function handleApi(method, pathname, body, deps) {
     } catch (err) {
       if (err instanceof NothingToReviewError) {
         return { status: 422, body: { error: "nothing_to_review", message: err.message } };
+      }
+      if (err instanceof ReviewSkippedError) {
+        return { status: 400, body: { error: "no_api_key", message: err.message } };
       }
       return { status: 500, body: { error: "review_failed", message: err.message } };
     }
@@ -95328,6 +95344,10 @@ function registerReview(program2) {
       if (err instanceof NothingToReviewError) {
         status(err.message);
         return;
+      }
+      if (err instanceof ReviewSkippedError) {
+        status(err.message);
+        process.exit(2);
       }
       throw err;
     }

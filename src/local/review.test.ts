@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorInput, OrchestratorOutput } from '../orchestrator.js';
-import { NothingToReviewError, runLocalReview } from './review.js';
+import { NothingToReviewError, ReviewSkippedError, runLocalReview } from './review.js';
 
 function g(repo: string, args: string[]): void {
   execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
@@ -89,6 +89,19 @@ describe('runLocalReview', () => {
     await expect(
       runLocalReview({ workspace: repo, target: 'range', base: 'HEAD', head: 'HEAD' }),
     ).rejects.toBeInstanceOf(NothingToReviewError);
+  });
+
+  it('throws ReviewSkippedError when the orchestrator skips for a missing key', async () => {
+    const spy = vi.fn(async (_in: OrchestratorInput) => ({
+      ...cannedResult,
+      ended: 'skipped_no_key_openai' as const,
+    }));
+    await expect(
+      runLocalReview(
+        { workspace: repo, target: 'range', base: 'HEAD~1', head: 'HEAD' },
+        { runOrchestratorImpl: spy },
+      ),
+    ).rejects.toBeInstanceOf(ReviewSkippedError);
   });
 
   it('uses merge-base (three-dot) so base-side advances are not counted', async () => {

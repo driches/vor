@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LocalRunRecord } from '../local/types.js';
-import { NothingToReviewError } from '../local/review.js';
+import { NothingToReviewError, ReviewSkippedError } from '../local/review.js';
 import { handleApi, type DashboardDeps } from './api.js';
 
 function record(id: string): LocalRunRecord {
@@ -71,6 +71,17 @@ describe('dashboard API', () => {
     });
     const res = await handleApi('POST', '/api/review', {}, d);
     expect(res.status).toBe(422);
+  });
+
+  it('maps ReviewSkippedError to 400 no_api_key', async () => {
+    const d = deps({
+      runLocalReview: vi.fn(async () => {
+        throw new ReviewSkippedError('no key');
+      }),
+    });
+    const res = await handleApi('POST', '/api/review', {}, d);
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toBe('no_api_key');
   });
 
   it('404s unknown routes', async () => {

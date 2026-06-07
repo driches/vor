@@ -43,6 +43,20 @@ export class NothingToReviewError extends Error {
   }
 }
 
+/**
+ * Thrown when the orchestrator skipped the run because the resolved provider's
+ * API key is missing. `requireApiKey` only checks that *some* key exists, but
+ * config/`--model` can select a provider whose key is absent — and the
+ * dashboard/MCP paths don't gate on a key at all. Without this, a skipped run
+ * would persist and render as a clean "No findings" review.
+ */
+export class ReviewSkippedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReviewSkippedError';
+  }
+}
+
 export interface RunLocalReviewDeps {
   /** Override for tests so no real LLM/orchestrator call happens. */
   runOrchestratorImpl?: typeof runOrchestrator;
@@ -206,6 +220,18 @@ export async function runLocalReview(
     });
   } finally {
     cleanupWorktree?.();
+  }
+
+  // The orchestrator resolves the provider from config/model, then skips with
+  // `skipped_no_key_<provider>` when that provider's key is absent rather than
+  // throwing. Surface it as an error so a skipped run is never saved or shown
+  // as a clean review.
+  if (result.ended.startsWith('skipped_no_key_')) {
+    const provider = result.ended.slice('skipped_no_key_'.length);
+    const envVar = provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+    throw new ReviewSkippedError(
+      `Review skipped: the resolved provider (${provider}) has no API key. Set ${envVar} and retry.`,
+    );
   }
 
   return {

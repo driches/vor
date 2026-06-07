@@ -14,7 +14,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loadConfigFromString } from '../config/loader.js';
-import { NothingToReviewError, runLocalReview as defaultRunLocalReview } from '../local/review.js';
+import {
+  NothingToReviewError,
+  ReviewSkippedError,
+  runLocalReview as defaultRunLocalReview,
+} from '../local/review.js';
 import {
   getRun as defaultGetRun,
   listRuns as defaultListRuns,
@@ -102,6 +106,9 @@ export async function handleApi(
     } catch (err) {
       if (err instanceof NothingToReviewError) {
         return { status: 422, body: { error: 'nothing_to_review', message: err.message } };
+      }
+      if (err instanceof ReviewSkippedError) {
+        return { status: 400, body: { error: 'no_api_key', message: err.message } };
       }
       return { status: 500, body: { error: 'review_failed', message: (err as Error).message } };
     }

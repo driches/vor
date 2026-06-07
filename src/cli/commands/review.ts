@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { NothingToReviewError, runLocalReview } from '../../local/review.js';
+import { NothingToReviewError, ReviewSkippedError, runLocalReview } from '../../local/review.js';
 import { saveRun } from '../../local/store.js';
 import type { ReviewTarget } from '../../local/types.js';
 import { out, status } from '../output.js';
@@ -62,6 +62,10 @@ export function registerReview(program: Command): void {
         if (err instanceof NothingToReviewError) {
           status(err.message);
           return; // exit 0 — nothing to review is not a failure
+        }
+        if (err instanceof ReviewSkippedError) {
+          status(err.message);
+          process.exit(2); // a skipped review is a failure, not a clean run
         }
         throw err;
       }
