@@ -118,6 +118,11 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       debris: { enabled: true },
       migration_safety: { enabled: true },
       dependency_hygiene: { enabled: true },
+      // image-ocr OCRs committed image files and runs the secret patterns over
+      // the extracted text (credentials leaked inside screenshots). Off by
+      // default — it needs the vendored OCR assets and adds OCR latency. Enable
+      // via `security.scanners.image_ocr.enabled: true`.
+      image_ocr: { enabled: false },
     },
     cache: { enabled: true },
     persistence: { enabled: false },
@@ -125,6 +130,13 @@ export const DEFAULT_CONFIG: ReviewConfig = {
 
   providers: {
     openai: {},
+  },
+
+  // Visual understanding of images via a cheap vision model. Off by default —
+  // each call spends image-input tokens. Enable via
+  // `image_understanding.enabled: true`; the model defaults per provider.
+  image_understanding: {
+    enabled: false,
   },
 
   experimental: {

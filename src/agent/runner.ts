@@ -52,11 +52,13 @@ import { makePostInlineCommentTool } from '../tools/post-inline-comment.js';
 import { makePostSummaryTool } from '../tools/post-summary.js';
 import { makeReadFileAtRefTool } from '../tools/read-file-at-ref.js';
 import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js';
+import { makeDescribeImageAtRefTool } from '../tools/describe-image-at-ref.js';
 import { makeSkipFileTool } from '../tools/skip-file.js';
 import { makeWorkerCheckUsageClaimTool } from '../tools/worker-check-usage-claim.js';
 import type { ToolDeps } from '../tools/types.js';
 import { renderPreflightSection, runPreflight } from './preflight.js';
 import { WorkerClient } from './worker.js';
+import { AnthropicVisionClient, type VisionClient } from '../vision/describe-image.js';
 
 /**
  * Default sampling temperature. PR #14 pinned this at 0.1 and saw recall
@@ -192,7 +194,34 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     }
   }
 
-  const fullDeps: ToolDeps = { ...input.deps, ...(worker !== undefined ? { worker } : {}) };
+  // Wire optional visual understanding. Like worker delegation, this is an
+  // isolated Anthropic-only sub-call to a cheap model (default Haiku); OpenAI
+  // consumers get a warning and OCR-only image handling. Reuse the worker's
+  // Anthropic client when one already exists so we keep a single connection
+  // pool per run; both share the same Budget so vision spend is metered.
+  const visionConfig = input.deps.config.image_understanding;
+  let visionClient: VisionClient | undefined;
+  if (visionConfig.enabled) {
+    if (provider.id !== 'anthropic') {
+      await logger.warn(
+        `image_understanding.enabled is true but resolved provider is ${provider.id}. ` +
+          'Visual understanding is Anthropic-only; describe_image_at_ref will return OCR only.',
+      );
+    } else {
+      anthropicClient ??= new Anthropic({ apiKey: input.apiKey });
+      visionClient = new AnthropicVisionClient(
+        anthropicClient,
+        budget,
+        visionConfig.model ?? 'claude-haiku-4-5',
+      );
+    }
+  }
+
+  const fullDeps: ToolDeps = {
+    ...input.deps,
+    ...(worker !== undefined ? { worker } : {}),
+    ...(visionClient !== undefined ? { visionClient } : {}),
+  };
   const tools = buildToolDefinitions(fullDeps);
 
   // Strip handlers for the provider call — adapters only need the schema
@@ -495,6 +524,7 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
+    makeDescribeImageAtRefTool(deps),
     ...(deps.worker !== undefined ? [makeWorkerCheckUsageClaimTool(deps)] : []),
   ];
 

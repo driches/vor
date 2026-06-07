@@ -52,6 +52,7 @@ const SCANNER_CONFIG_KEY = {
   debris: 'debris',
   'migration-safety': 'migration_safety',
   'dependency-hygiene': 'dependency_hygiene',
+  'image-ocr': 'image_ocr',
 } as const satisfies Record<ScannerId, string>;
 
 /**

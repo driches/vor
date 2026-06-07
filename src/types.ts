@@ -52,7 +52,8 @@ export type ScannerId =
   | 'coverage-delta'
   | 'debris'
   | 'migration-safety'
-  | 'dependency-hygiene';
+  | 'dependency-hygiene'
+  | 'image-ocr';
 
 /**
  * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;

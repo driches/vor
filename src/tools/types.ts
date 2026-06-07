@@ -8,6 +8,8 @@ import type { RunContext } from '../agent/run-context.js';
 import type { WorkerClient } from '../agent/worker.js';
 import type { ReviewAggregator } from '../output/aggregator.js';
 import type { ReviewConfig } from '../config/types.js';
+import type { OcrEngine } from '../ocr/recognize.js';
+import type { VisionClient } from '../vision/describe-image.js';
 
 export interface ToolDeps {
   octokit: Octokit;
@@ -31,6 +33,17 @@ export interface ToolDeps {
    * need it should fail fast when it's missing.
    */
   worker?: WorkerClient;
+  /**
+   * OCR engine for `describe_image_at_ref`. Injected mainly so tests supply a
+   * fake; when absent the tool falls back to a one-shot tesseract engine.
+   */
+  ocrEngine?: OcrEngine;
+  /**
+   * Vision client for `describe_image_at_ref`'s visual-understanding pass.
+   * Present only when `image_understanding.enabled` is true and the resolved
+   * provider supports it; absent means OCR-only.
+   */
+  visionClient?: VisionClient;
 }
 
 /** Helper: build the text-content shape MCP tools return. */

@@ -73,6 +73,7 @@ function makeConfig(over: Partial<SecurityConfig> = {}): SecurityConfig {
       debris: { enabled: false },
       migration_safety: { enabled: false },
       dependency_hygiene: { enabled: false },
+      image_ocr: { enabled: false },
     },
     cache: { enabled: true },
     persistence: { enabled: false },
@@ -100,6 +101,26 @@ describe('buildEnabledScanners — default config', () => {
     buildEnabledScanners(makeConfig());
     expect(createOsvClientSpy).not.toHaveBeenCalled();
   });
+
+  it('registers image-ocr (last) only when enabled', () => {
+    expect(buildEnabledScanners(makeConfig()).map((s) => s.id)).not.toContain('image-ocr');
+    const out = buildEnabledScanners(
+      makeConfig({
+        scanners: {
+          dependency_cve: { enabled: false },
+          secrets: { enabled: false, include_generic_entropy: false },
+          sast: { enabled: false },
+          container_cve: { enabled: false },
+          coverage_delta: { enabled: false },
+          debris: { enabled: false },
+          migration_safety: { enabled: false },
+          dependency_hygiene: { enabled: false },
+          image_ocr: { enabled: true },
+        },
+      }),
+    );
+    expect(out.map((s) => s.id)).toEqual(['image-ocr']);
+  });
 });
 
 // -----------------------------------------------------------------
@@ -120,6 +141,7 @@ describe('buildEnabledScanners — security.enabled=false', () => {
           debris: { enabled: true },
           migration_safety: { enabled: true },
           dependency_hygiene: { enabled: true },
+          image_ocr: { enabled: false },
         },
       }),
     );
@@ -146,6 +168,7 @@ describe('buildEnabledScanners — all scanners disabled individually', () => {
           debris: { enabled: false },
           migration_safety: { enabled: false },
           dependency_hygiene: { enabled: false },
+          image_ocr: { enabled: false },
         },
       }),
     );
@@ -172,6 +195,7 @@ describe('buildEnabledScanners — secrets.include_generic_entropy threading', (
           debris: { enabled: false },
           migration_safety: { enabled: false },
           dependency_hygiene: { enabled: false },
+          image_ocr: { enabled: false },
         },
       }),
     );
@@ -203,6 +227,7 @@ describe('buildEnabledScanners — dependency_cve.osv_endpoint threading', () =>
           debris: { enabled: false },
           migration_safety: { enabled: false },
           dependency_hygiene: { enabled: false },
+          image_ocr: { enabled: false },
         },
       }),
     );
@@ -251,6 +276,7 @@ describe('buildEnabledScanners — factory overrides', () => {
           debris: { enabled: false },
           migration_safety: { enabled: false },
           dependency_hygiene: { enabled: false },
+          image_ocr: { enabled: false },
         },
       }),
       {

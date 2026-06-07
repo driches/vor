@@ -22,7 +22,13 @@ const result = await build({
   banner: {
     js: '#!/usr/bin/env node\n// driches/vor — built bundle (do not edit by hand)',
   },
-  external: [],
+  // tesseract.js is loaded via a guarded dynamic import in src/ocr/recognize.ts
+  // and kept OUT of the bundle: it spawns a worker_threads worker from an
+  // on-disk file and pulls in multi-MB WASM cores that can't inline into a
+  // single CJS file. Marking it external leaves the `import('tesseract.js')`
+  // as a runtime require; when the package/assets are absent (the default
+  // shipped Action), the OCR engine degrades gracefully to empty results.
+  external: ['tesseract.js'],
 });
 
 // Write a dist/package.json so Node treats the CJS bundle correctly even though

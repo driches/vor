@@ -92,4 +92,51 @@ describe('FileReader', () => {
     await reader.read({ owner: 'o', repo: 'r', path: 'a', ref: 'x' });
     expect(oct.rest.repos.getContent).toHaveBeenCalledTimes(4); // a re-fetched
   });
+
+  describe('readBinary', () => {
+    /** getContent mock that returns raw bytes (base64-encoded) for given paths. */
+    function mockBinaryGetContent(byPath: Record<string, Buffer | null>) {
+      return {
+        rest: {
+          repos: {
+            getContent: vi.fn().mockImplementation(async ({ path }: { path: string }) => {
+              const buf = byPath[path];
+              if (buf === null || buf === undefined) {
+                throw Object.assign(new Error('Not Found'), { status: 404 });
+              }
+              return {
+                data: { type: 'file', content: buf.toString('base64'), encoding: 'base64' },
+              };
+            }),
+          },
+        },
+      };
+    }
+
+    it('returns the raw bytes without UTF-8 decoding', async () => {
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const oct = mockBinaryGetContent({ 'a.png': png });
+      const reader = new FileReader(oct as never);
+      const out = await reader.readBinary({ owner: 'o', repo: 'r', path: 'a.png', ref: 'x' });
+      expect(out).not.toBeNull();
+      expect(Buffer.compare(out!, png)).toBe(0);
+    });
+
+    it('returns null on 404', async () => {
+      const oct = mockBinaryGetContent({ 'gone.png': null });
+      const reader = new FileReader(oct as never);
+      expect(
+        await reader.readBinary({ owner: 'o', repo: 'r', path: 'gone.png', ref: 'x' }),
+      ).toBeNull();
+    });
+
+    it('caches binary reads independently of text reads', async () => {
+      const png = Buffer.from([1, 2, 3]);
+      const oct = mockBinaryGetContent({ 'a.png': png });
+      const reader = new FileReader(oct as never);
+      await reader.readBinary({ owner: 'o', repo: 'r', path: 'a.png', ref: 'x' });
+      await reader.readBinary({ owner: 'o', repo: 'r', path: 'a.png', ref: 'x' });
+      expect(oct.rest.repos.getContent).toHaveBeenCalledTimes(1); // second served from cache
+    });
+  });
 });

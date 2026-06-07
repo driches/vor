@@ -44,9 +44,24 @@ const securitySchema = z.object({
     debris: scannerCommon,
     migration_safety: scannerCommon,
     dependency_hygiene: scannerCommon,
+    image_ocr: scannerCommon.extend({
+      max_image_bytes: z.number().int().positive().optional(),
+      languages: z.array(z.string().min(1)).optional(),
+    }),
   }),
   cache: z.object({ enabled: z.boolean() }),
   persistence: z.object({ enabled: z.boolean() }),
+});
+
+/**
+ * Visual understanding of images via a cost-effective vision model. Off by
+ * default — adds per-image token cost. When `model` is omitted the orchestrator
+ * picks a cheap default for the resolved provider (Anthropic → claude-haiku-4-5).
+ */
+const imageUnderstandingSchema = z.object({
+  enabled: z.boolean(),
+  model: z.string().min(1).optional(),
+  max_images: z.number().int().positive().optional(),
 });
 
 const experimentalSchema = z.object({
@@ -125,6 +140,8 @@ export const configSchema = z
     security: securitySchema,
 
     providers: providerConfigSchema,
+
+    image_understanding: imageUnderstandingSchema,
 
     experimental: experimentalSchema,
   })

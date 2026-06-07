@@ -140,6 +140,7 @@ function makeDeps(
       debris: { enabled: false },
       migration_safety: { enabled: false },
       dependency_hygiene: { enabled: false },
+      image_ocr: { enabled: false },
     },
     cache: { enabled: false },
     persistence: { enabled: false },
