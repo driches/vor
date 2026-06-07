@@ -37,6 +37,41 @@ function assertLoopbackBind(host: string): void {
   }
 }
 
+/** Allow a request Origin only when absent (non-browser clients like the CLI or
+ *  curl) or a same-origin loopback value. A foreign Origin is rejected. */
+function originAllowed(origin: string | undefined, port: number): boolean {
+  if (!origin) return true;
+  const allowed = new Set([
+    `http://127.0.0.1:${port}`,
+    `http://localhost:${port}`,
+    `http://[::1]:${port}`,
+  ]);
+  return allowed.has(origin);
+}
+
+/**
+ * CSRF check for state-changing API requests. A malicious page can make the
+ * browser POST to loopback with a simple form, but it cannot set
+ * `Content-Type: application/json` (that forces a CORS preflight we never
+ * approve) nor a same-origin Origin. Require both, so a drive-by POST can't
+ * trigger a paid review. GET is read-only and the same-origin policy already
+ * blocks reading responses cross-site. Returns a rejection or null (allowed).
+ */
+export function csrfRejection(
+  method: string,
+  headers: { contentType?: string; origin?: string },
+  port: number,
+): { status: number; message: string } | null {
+  if (method === 'GET') return null;
+  if (!(headers.contentType ?? '').includes('application/json')) {
+    return { status: 415, message: 'Unsupported Media Type: send application/json' };
+  }
+  if (!originAllowed(headers.origin, port)) {
+    return { status: 403, message: 'Forbidden: cross-origin request' };
+  }
+  return null;
+}
+
 /** Reject requests whose Host header isn't loopback (DNS-rebinding guard). */
 function hostAllowed(req: IncomingMessage, port: number): boolean {
   const host = req.headers.host;
@@ -74,6 +109,16 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       const method = req.method ?? 'GET';
 
       if (url.pathname.startsWith('/api/')) {
+        const rejection = csrfRejection(
+          method,
+          { contentType: req.headers['content-type'], origin: req.headers.origin },
+          opts.port,
+        );
+        if (rejection) {
+          res.writeHead(rejection.status, { 'Content-Type': 'text/plain' });
+          res.end(rejection.message);
+          return;
+        }
         const body = method === 'POST' ? await readBody(req) : undefined;
         const result = await handleApi(method, url.pathname, body, deps);
         res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });

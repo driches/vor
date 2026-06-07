@@ -35,16 +35,59 @@ export function resolveRef(workspace: string, ref: string): string {
 }
 
 /**
- * True when the working tree has staged or unstaged changes to tracked files.
- * Untracked files are ignored — a review needs a diff against HEAD, and a
- * brand-new untracked file has no committed counterpart to diff against. Mirrors
- * what `git diff HEAD` will actually surface.
+ * True when the working tree has staged/unstaged changes OR untracked files
+ * (respecting .gitignore). Untracked files are included because the canonical
+ * pre-push review case is "I just created a file and haven't committed it" —
+ * skipping those would silently miss new code and secrets.
  */
 export function hasWorkingTreeChanges(workspace: string): boolean {
-  // --porcelain lines for tracked changes start with a status code in the first
-  // two columns; untracked files are reported as '??'. Filter those out.
-  const out = git(['status', '--porcelain', '--untracked-files=no'], workspace);
+  const out = git(['status', '--porcelain'], workspace);
   return out.split('\n').some((line) => line.trim().length > 0);
+}
+
+/** Untracked, non-ignored files in the working tree (new files not yet added). */
+export function untrackedFiles(workspace: string): string[] {
+  const out = git(['ls-files', '--others', '--exclude-standard'], workspace);
+  return out.split('\n').filter((line) => line.trim().length > 0);
+}
+
+/**
+ * A new-file patch for an untracked file, synthesized with `git diff --no-index`
+ * against /dev/null. This does NOT touch the index (no `git add`), so the user's
+ * staging state is untouched. git exits 1 when differences exist; that carries
+ * the patch on stdout, which execFileSync surfaces via the thrown error.
+ */
+function untrackedPatch(workspace: string, path: string): string {
+  try {
+    return git(['diff', '--no-index', '--no-color', '--', '/dev/null', path], workspace);
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string | Buffer };
+    if (e.status === 1 && e.stdout != null) return e.stdout.toString();
+    return ''; // unreadable / binary edge — skip rather than fail the review
+  }
+}
+
+/**
+ * The full working-tree change set: tracked modifications (HEAD vs disk) plus
+ * untracked new files, as a combined file list and unified diff. Used by
+ * working-tree reviews so `vor review` covers exactly what you'd commit next.
+ */
+export function workingTreeChanges(workspace: string): { files: ChangedFile[]; diff: string } {
+  const files = changedFiles(workspace, ['HEAD']);
+  const diffs = [unifiedDiff(workspace, ['HEAD'])];
+
+  for (const path of untrackedFiles(workspace)) {
+    const patch = untrackedPatch(workspace, path);
+    if (!patch.trim()) continue;
+    diffs.push(patch);
+    // Count added lines from the patch (binary files yield 0).
+    const additions = patch
+      .split('\n')
+      .filter((l) => l.startsWith('+') && !l.startsWith('+++')).length;
+    files.push({ path, status: 'added', additions, deletions: 0 });
+  }
+
+  return { files, diff: diffs.filter((d) => d.trim().length > 0).join('\n') };
 }
 
 /**

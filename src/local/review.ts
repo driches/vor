@@ -21,6 +21,7 @@ import {
   resolveRef,
   titleFromHead,
   unifiedDiff,
+  workingTreeChanges,
 } from './git.js';
 import { buildLocalOctokit } from './git-octokit.js';
 import { newRunId, projectSlug } from './store.js';
@@ -78,7 +79,7 @@ export async function runLocalReview(
   if (resolved === 'working-tree') {
     baseSha = resolveRef(workspace, 'HEAD');
     headSha = WORKTREE;
-    diffArgs = ['HEAD'];
+    diffArgs = ['HEAD']; // unused for working-tree; files/diff come from workingTreeChanges
     baseLabel = 'HEAD';
     headLabel = 'working-tree';
     headShaForRecord = null;
@@ -98,16 +99,21 @@ export async function runLocalReview(
     headShaForRecord = headSha;
   }
 
-  const files = changedFiles(workspace, diffArgs);
+  // Working-tree mode includes untracked new files (respecting .gitignore);
+  // range mode diffs two committed refs.
+  const { files, diff } =
+    resolved === 'working-tree'
+      ? workingTreeChanges(workspace)
+      : { files: changedFiles(workspace, diffArgs), diff: unifiedDiff(workspace, diffArgs) };
+
   if (files.length === 0) {
     throw new NothingToReviewError(
       resolved === 'working-tree'
-        ? 'No uncommitted changes to tracked files. Nothing to review.'
+        ? 'No uncommitted changes (tracked or untracked) to review.'
         : `No changed files between ${baseLabel} and ${headLabel}.`,
     );
   }
 
-  const diff = unifiedDiff(workspace, diffArgs);
   const additions = files.reduce((s, f) => s + f.additions, 0);
   const deletions = files.reduce((s, f) => s + f.deletions, 0);
 

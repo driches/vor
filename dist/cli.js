@@ -85487,8 +85487,33 @@ function resolveRef(workspace2, ref) {
   return git(["rev-parse", ref], workspace2).trim();
 }
 function hasWorkingTreeChanges(workspace2) {
-  const out2 = git(["status", "--porcelain", "--untracked-files=no"], workspace2);
+  const out2 = git(["status", "--porcelain"], workspace2);
   return out2.split("\n").some((line) => line.trim().length > 0);
+}
+function untrackedFiles(workspace2) {
+  const out2 = git(["ls-files", "--others", "--exclude-standard"], workspace2);
+  return out2.split("\n").filter((line) => line.trim().length > 0);
+}
+function untrackedPatch(workspace2, path23) {
+  try {
+    return git(["diff", "--no-index", "--no-color", "--", "/dev/null", path23], workspace2);
+  } catch (err) {
+    const e2 = err;
+    if (e2.status === 1 && e2.stdout != null) return e2.stdout.toString();
+    return "";
+  }
+}
+function workingTreeChanges(workspace2) {
+  const files = changedFiles(workspace2, ["HEAD"]);
+  const diffs = [unifiedDiff(workspace2, ["HEAD"])];
+  for (const path23 of untrackedFiles(workspace2)) {
+    const patch = untrackedPatch(workspace2, path23);
+    if (!patch.trim()) continue;
+    diffs.push(patch);
+    const additions = patch.split("\n").filter((l2) => l2.startsWith("+") && !l2.startsWith("+++")).length;
+    files.push({ path: path23, status: "added", additions, deletions: 0 });
+  }
+  return { files, diff: diffs.filter((d2) => d2.trim().length > 0).join("\n") };
 }
 function changedFiles(workspace2, diffArgs) {
   const status2 = git(["diff", "--name-status", ...diffArgs], workspace2);
@@ -85782,13 +85807,12 @@ async function runLocalReview(opts = {}, deps = {}) {
     headLabel = headRef;
     headShaForRecord = headSha;
   }
-  const files = changedFiles(workspace2, diffArgs);
+  const { files, diff } = resolved === "working-tree" ? workingTreeChanges(workspace2) : { files: changedFiles(workspace2, diffArgs), diff: unifiedDiff(workspace2, diffArgs) };
   if (files.length === 0) {
     throw new NothingToReviewError(
-      resolved === "working-tree" ? "No uncommitted changes to tracked files. Nothing to review." : `No changed files between ${baseLabel} and ${headLabel}.`
+      resolved === "working-tree" ? "No uncommitted changes (tracked or untracked) to review." : `No changed files between ${baseLabel} and ${headLabel}.`
     );
   }
-  const diff = unifiedDiff(workspace2, diffArgs);
   const additions = files.reduce((s2, f2) => s2 + f2.additions, 0);
   const deletions = files.reduce((s2, f2) => s2 + f2.deletions, 0);
   const resolveContent = (path23, ref) => {
@@ -86013,6 +86037,25 @@ function assertLoopbackBind(host) {
     );
   }
 }
+function originAllowed(origin, port) {
+  if (!origin) return true;
+  const allowed = /* @__PURE__ */ new Set([
+    `http://127.0.0.1:${port}`,
+    `http://localhost:${port}`,
+    `http://[::1]:${port}`
+  ]);
+  return allowed.has(origin);
+}
+function csrfRejection(method, headers, port) {
+  if (method === "GET") return null;
+  if (!(headers.contentType ?? "").includes("application/json")) {
+    return { status: 415, message: "Unsupported Media Type: send application/json" };
+  }
+  if (!originAllowed(headers.origin, port)) {
+    return { status: 403, message: "Forbidden: cross-origin request" };
+  }
+  return null;
+}
 function hostAllowed(req, port) {
   const host = req.headers.host;
   if (!host) return false;
@@ -86045,6 +86088,16 @@ async function startDashboard(opts) {
       const url = new URL(req.url ?? "/", `http://${host}:${opts.port}`);
       const method = req.method ?? "GET";
       if (url.pathname.startsWith("/api/")) {
+        const rejection = csrfRejection(
+          method,
+          { contentType: req.headers["content-type"], origin: req.headers.origin },
+          opts.port
+        );
+        if (rejection) {
+          res.writeHead(rejection.status, { "Content-Type": "text/plain" });
+          res.end(rejection.message);
+          return;
+        }
         const body = method === "POST" ? await readBody(req) : void 0;
         const result = await handleApi(method, url.pathname, body, deps);
         res.writeHead(result.status, { "Content-Type": "application/json; charset=utf-8" });

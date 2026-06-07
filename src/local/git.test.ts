@@ -10,6 +10,8 @@ import {
   hasWorkingTreeChanges,
   resolveRef,
   unifiedDiff,
+  untrackedFiles,
+  workingTreeChanges,
 } from './git.js';
 
 function g(repo: string, args: string[]): void {
@@ -77,5 +79,24 @@ describe('local git helpers', () => {
     // restore so the suite is order-independent
     writeFileSync(join(repo, 'keep.ts'), 'export const a = 2;\n');
     expect(hasWorkingTreeChanges(repo)).toBe(false);
+  });
+
+  it('includes untracked new files in working-tree changes', () => {
+    writeFileSync(join(repo, 'brand-new.ts'), 'export const secret = "x";\n');
+    try {
+      // An untracked-only change still counts as a working-tree change.
+      expect(hasWorkingTreeChanges(repo)).toBe(true);
+      expect(untrackedFiles(repo)).toContain('brand-new.ts');
+
+      const { files, diff } = workingTreeChanges(repo);
+      const newFile = files.find((f) => f.path === 'brand-new.ts');
+      expect(newFile).toBeDefined();
+      expect(newFile!.status).toBe('added');
+      expect(newFile!.additions).toBe(1);
+      expect(diff).toContain('+++ b/brand-new.ts');
+      expect(diff).toContain('+export const secret = "x";');
+    } finally {
+      rmSync(join(repo, 'brand-new.ts'));
+    }
   });
 });
