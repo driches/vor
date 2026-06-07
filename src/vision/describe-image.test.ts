@@ -6,18 +6,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { Budget } from '../util/budget.js';
-import {
-  AnthropicVisionClient,
-  mediaTypeForPath,
-  type Logger,
-} from './describe-image.js';
+import { AnthropicVisionClient, mediaTypeForPath, type Logger } from './describe-image.js';
 
 function makeBudget(): Budget {
   return new Budget({ maxTurns: 10, warnFraction: 0.8, maxInputTokens: 1e6, maxOutputTokens: 1e6 });
 }
 
 function makeLogger(): Logger {
-  return { debug: vi.fn().mockResolvedValue(undefined), warn: vi.fn().mockResolvedValue(undefined) };
+  return {
+    debug: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 const USAGE = { input_tokens: 120, output_tokens: 30 } as Anthropic.Message['usage'];
@@ -51,7 +50,12 @@ describe('AnthropicVisionClient.describe', () => {
   it('returns an empty description (never throws) on API error', async () => {
     const create = vi.fn().mockRejectedValue(new Error('overloaded'));
     const client = { messages: { create } } as unknown as Anthropic;
-    const vision = new AnthropicVisionClient(client, makeBudget(), 'claude-haiku-4-5', makeLogger());
+    const vision = new AnthropicVisionClient(
+      client,
+      makeBudget(),
+      'claude-haiku-4-5',
+      makeLogger(),
+    );
     const out = await vision.describe(Buffer.from('x'), 'image/png');
     expect(out.description).toBe('');
   });

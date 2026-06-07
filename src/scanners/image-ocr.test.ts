@@ -102,7 +102,7 @@ describe('createImageOcrScanner applies()', () => {
 });
 
 describe('createImageOcrScanner scan()', () => {
-  it('flags an AWS key OCR\'d out of an image, masked', async () => {
+  it("flags an AWS key OCR'd out of an image, masked", async () => {
     const engine = makeEngine({ text: `key = ${PLANTED_AWS_KEY}\n`, confidence: 87 });
     const scanner = createImageOcrScanner({ engine });
     const result = await scanner.scan(
@@ -131,18 +131,14 @@ describe('createImageOcrScanner scan()', () => {
   it('registers surfaced secrets with the redactor', async () => {
     const engine = makeEngine({ text: `${PLANTED_AWS_KEY}`, confidence: 90 });
     const scanner = createImageOcrScanner({ engine });
-    await scanner.scan(
-      makeScannerDeps({ changedFiles: [makeChangedFile({ path: 'a.png' })] }),
-    );
+    await scanner.scan(makeScannerDeps({ changedFiles: [makeChangedFile({ path: 'a.png' })] }));
     expect(redact(`leaked ${PLANTED_AWS_KEY} here`)).not.toContain(PLANTED_AWS_KEY);
   });
 
   it('produces no findings when OCR yields no text', async () => {
     const engine = makeEngine({ text: '   \n', confidence: 0 });
     const scanner = createImageOcrScanner({ engine });
-    const result = await scanner.scan(
-      makeScannerDeps({ changedFiles: [makeChangedFile()] }),
-    );
+    const result = await scanner.scan(makeScannerDeps({ changedFiles: [makeChangedFile()] }));
     expect(result.findings).toHaveLength(0);
   });
 
@@ -173,7 +169,9 @@ describe('createImageOcrScanner scan()', () => {
 
   it('skips files the reader reports missing (null)', async () => {
     const engine = makeEngine({ text: PLANTED_AWS_KEY, confidence: 90 });
-    const reader = makeReader({ readBinary: vi.fn().mockResolvedValue(null) } as Partial<FileReader>);
+    const reader = makeReader({
+      readBinary: vi.fn().mockResolvedValue(null),
+    } as Partial<FileReader>);
     const scanner = createImageOcrScanner({ engine });
     const result = await scanner.scan(
       makeScannerDeps({ changedFiles: [makeChangedFile()], fileReader: reader }),

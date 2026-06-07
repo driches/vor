@@ -137,9 +137,7 @@ export function createTesseractEngine(options: TesseractEngineOptions = {}): Ocr
   return {
     async recognize(image: Buffer): Promise<OcrResult> {
       if (image.length > maxImageBytes) {
-        void log.debug(
-          `ocr: skipping ${image.length}-byte image (over ${maxImageBytes}-byte cap)`,
-        );
+        void log.debug(`ocr: skipping ${image.length}-byte image (over ${maxImageBytes}-byte cap)`);
         return { text: '', confidence: 0 };
       }
       const worker = await getWorker();

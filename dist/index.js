@@ -58536,9 +58536,7 @@ function createTesseractEngine(options = {}) {
   return {
     async recognize(image) {
       if (image.length > maxImageBytes) {
-        void log2.debug(
-          `ocr: skipping ${image.length}-byte image (over ${maxImageBytes}-byte cap)`
-        );
+        void log2.debug(`ocr: skipping ${image.length}-byte image (over ${maxImageBytes}-byte cap)`);
         return { text: "", confidence: 0 };
       }
       const worker = await getWorker();
