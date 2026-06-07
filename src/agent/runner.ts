@@ -506,6 +506,11 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
  * Bridge MCP tool definitions (from the tools/ modules) into our internal
  * shape with JSON Schema + a plain handler that returns a string.
  *
+ * `describe_image_at_ref` is registered only when `image_understanding.enabled`
+ * is set — image understanding is opt-in and off by default, and the tool's OCR
+ * fallback (`recognizeOnce`) would otherwise load the vendored Tesseract runtime
+ * on any PR with a screenshot even for repos that never enabled the feature.
+ *
  * When `deps.worker` is present (worker_delegation flag enabled), an extra
  * `worker_check_usage_claim` tool joins the list. Tool order does not affect
  * Sonnet's choice but does affect the cache_control breakpoint placement —
@@ -524,7 +529,7 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
-    makeDescribeImageAtRefTool(deps),
+    ...(deps.config.image_understanding.enabled ? [makeDescribeImageAtRefTool(deps)] : []),
     ...(deps.worker !== undefined ? [makeWorkerCheckUsageClaimTool(deps)] : []),
   ];
 

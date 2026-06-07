@@ -60657,7 +60657,7 @@ function buildToolDefinitions(deps) {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
-    makeDescribeImageAtRefTool(deps),
+    ...deps.config.image_understanding.enabled ? [makeDescribeImageAtRefTool(deps)] : [],
     ...deps.worker !== void 0 ? [makeWorkerCheckUsageClaimTool(deps)] : []
   ];
   return mcpTools.map((mcp) => {

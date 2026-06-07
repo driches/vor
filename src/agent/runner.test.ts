@@ -231,6 +231,28 @@ describe('runAgent', () => {
     expect(tools.some((t) => t.name === 'post_summary')).toBe(true);
   });
 
+  it('registers describe_image_at_ref only when image_understanding is enabled', async () => {
+    // Default (image_understanding.enabled: false) — the tool, and its vendored
+    // OCR fallback, must not be exposed to the agent.
+    const offProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(offProvider);
+    await runAgent(baseInput());
+    expect(
+      offProvider.completeCalls[0]!.tools.some((t) => t.name === 'describe_image_at_ref'),
+    ).toBe(false);
+
+    // Opt in — the tool is registered.
+    const onProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(onProvider);
+    await runAgent({
+      ...baseInput(),
+      deps: buildFakeDeps({ config: { image_understanding: { enabled: true } } }),
+    });
+    expect(onProvider.completeCalls[0]!.tools.some((t) => t.name === 'describe_image_at_ref')).toBe(
+      true,
+    );
+  });
+
   it('executes a tool_call, pushes a canonical tool message, and continues to the next turn', async () => {
     const input = baseInput();
     const provider = new FakeProvider([
