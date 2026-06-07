@@ -70721,6 +70721,10 @@ var import_node_crypto6 = require("node:crypto");
 var import_node_path18 = __toESM(require("node:path"), 1);
 var SCANNER_ID8 = "image-ocr";
 var IMAGE_EXTENSIONS2 = /\.(png|jpe?g|gif|webp|bmp)$/i;
+var OCR_DASH_CONFUSABLES = /[‐‑‒–—―−]/g;
+function normalizeOcrConfusables(text) {
+  return text.replace(OCR_DASH_CONFUSABLES, "-");
+}
 var OCR_SCANNER_TIMEOUT_MS = 12e4;
 function fingerprintOf6(rule_id, file_path, matchOrdinal) {
   return (0, import_node_crypto6.createHash)("sha1").update(`${rule_id}:${file_path}:${matchOrdinal}`).digest("hex").slice(0, 12);
@@ -70805,7 +70809,8 @@ function createImageOcrScanner(options = {}) {
           if (bytes === null) continue;
           const ocr = await recognizeCancellable(ocrEngine, bytes, deps.signal);
           if (ocr === "aborted") break;
-          const { text, confidence } = ocr;
+          const { confidence } = ocr;
+          const text = normalizeOcrConfusables(ocr.text);
           if (text.trim() === "") continue;
           let matchOrdinal = 0;
           for (const pattern of patterns) {

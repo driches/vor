@@ -217,4 +217,20 @@ describe('createImageOcrScanner scan()', () => {
     expect(engine.recognize).not.toHaveBeenCalled();
     expect(result.findings).toHaveLength(0);
   });
+
+  it("normalizes OCR'd Unicode dash confusables so a PEM header still matches", async () => {
+    // Tesseract renders the PEM `-----` rules as em/en dashes on real
+    // screenshots (observed: `—----BEGIN RSA PRIVATE KEY--—-—`). The PEM
+    // pattern is ASCII-hyphen literal, so a faithful OCR of a real key would
+    // miss purely on glyph substitution unless the scanner normalizes first.
+    const ocrText =
+      '—----BEGIN RSA PRIVATE KEY--—-—\nMIIEowIBAAKCAQEA\n—----END RSA PRIVATE KEY-----\n';
+    const engine = makeEngine({ text: ocrText, confidence: 70 });
+    const scanner = createImageOcrScanner({ engine });
+    const result = await scanner.scan(
+      makeScannerDeps({ changedFiles: [makeChangedFile({ path: 'docs/key.png' })] }),
+    );
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.rule_id).toBe('secret:private-key-pem');
+  });
 });
