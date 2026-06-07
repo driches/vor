@@ -73,6 +73,24 @@ describe('local git helpers', () => {
     expect(fileContentOnDisk(repo, 'nope.ts')).toBeNull();
   });
 
+  it('refuses on-disk reads that escape the workspace', () => {
+    // A model-supplied path must not traverse out of the checkout.
+    const secret = join(repo, '..', 'escape-secret.txt');
+    writeFileSync(secret, 'top secret\n');
+    try {
+      expect(fileContentOnDisk(repo, '../escape-secret.txt')).toBeNull();
+      expect(fileContentOnDisk(repo, '../../etc/hostname')).toBeNull();
+      expect(fileContentOnDisk(repo, '/etc/hostname')).toBeNull();
+      // A normal nested path inside the repo still reads.
+      mkdirSync(join(repo, 'sub'), { recursive: true });
+      writeFileSync(join(repo, 'sub', 'in.ts'), 'inside\n');
+      expect(fileContentOnDisk(repo, 'sub/in.ts')).toBe('inside\n');
+    } finally {
+      rmSync(secret, { force: true });
+      rmSync(join(repo, 'sub'), { recursive: true, force: true });
+    }
+  });
+
   it('detects working-tree changes and diffs HEAD vs disk', () => {
     expect(hasWorkingTreeChanges(repo)).toBe(false);
     writeFileSync(join(repo, 'keep.ts'), 'export const a = 99;\n');

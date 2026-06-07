@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export interface ChangedFile {
   path: string;
@@ -172,8 +172,19 @@ export function fileContentAtRef(workspace: string, ref: string, path: string): 
 
 /** File content from the working tree on disk, or null when it's absent. */
 export function fileContentOnDisk(workspace: string, path: string): string | null {
+  // The real GitHub Contents API can't read outside the repo; this fake one
+  // serves read_file_at_ref for working-tree HEAD, so a model-supplied path
+  // like `../../.ssh/id_rsa` must not escape the checkout. Reject anything that
+  // resolves outside `workspace` (relative() yields a '..' segment or an
+  // absolute path when the target isn't contained).
+  const root = resolve(workspace);
+  const target = resolve(root, path);
+  const rel = relative(root, target);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    return null;
+  }
   try {
-    return readFileSync(join(workspace, path), 'utf-8');
+    return readFileSync(target, 'utf-8');
   } catch {
     return null; // deleted in the working tree, or unreadable
   }
