@@ -59,6 +59,24 @@ describe('AnthropicVisionClient.describe', () => {
     const out = await vision.describe(Buffer.from('x'), 'image/png');
     expect(out.description).toBe('');
   });
+
+  it('propagates a BudgetError (does not swallow it as a vision failure)', async () => {
+    // The API call succeeded, but recording its usage pushes the run over the
+    // input cap — addUsage throws and the error must propagate to halt the run.
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      usage: { input_tokens: 1000, output_tokens: 1 },
+    });
+    const client = { messages: { create } } as unknown as Anthropic;
+    const tightBudget = new Budget({
+      maxTurns: 10,
+      warnFraction: 0.8,
+      maxInputTokens: 50,
+      maxOutputTokens: 1e6,
+    });
+    const vision = new AnthropicVisionClient(client, tightBudget, 'claude-haiku-4-5', makeLogger());
+    await expect(vision.describe(Buffer.from('x'), 'image/png')).rejects.toThrow(/maxInputTokens/);
+  });
 });
 
 describe('mediaTypeForPath', () => {

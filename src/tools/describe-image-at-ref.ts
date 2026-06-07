@@ -24,6 +24,12 @@ import { mediaTypeForPath } from '../vision/describe-image.js';
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
 export function makeDescribeImageAtRefTool(deps: ToolDeps) {
+  // Per-run cap on vision calls. The factory is invoked once per agent run, so
+  // this counter is shared across every invocation of the returned tool and
+  // bounds total image-input token spend to `image_understanding.max_images`.
+  const maxImages = deps.config.image_understanding.max_images;
+  let visionCalls = 0;
+
   return tool(
     'describe_image_at_ref',
     'Reads an image file (PNG/JPG/GIF/WEBP) at HEAD or BASE and returns OCR text ' +
@@ -68,10 +74,14 @@ export function makeDescribeImageAtRefTool(deps: ToolDeps) {
         : await recognizeOnce(bytes);
 
       // Visual understanding is optional (config-gated) and best-effort — a
-      // failure here resolves to an empty description, never an error.
+      // failure here resolves to an empty description, never an error. The
+      // per-run `max_images` cap bounds vision token spend; once hit, the tool
+      // keeps returning OCR text but stops making vision calls.
       let description = '';
       const mediaType = mediaTypeForPath(args.path);
-      if (deps.visionClient && mediaType !== undefined) {
+      const underCap = maxImages === undefined || visionCalls < maxImages;
+      if (deps.visionClient && mediaType !== undefined && underCap) {
+        visionCalls += 1;
         const result = await deps.visionClient.describe(bytes, mediaType);
         description = result.description;
       }

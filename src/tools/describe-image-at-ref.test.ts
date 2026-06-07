@@ -100,6 +100,26 @@ describe('describe_image_at_ref tool', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('enforces image_understanding.max_images across calls', async () => {
+    const vision = fakeVision('a description');
+    const reader: Partial<FileReader> = {
+      readBinary: vi.fn().mockResolvedValue(Buffer.from('PNG')),
+    };
+    const base = buildFakeDeps({
+      fileReader: reader,
+      config: { image_understanding: { enabled: true, max_images: 1 } },
+    });
+    const deps: ToolDeps = { ...base, ocrEngine: fakeOcr('text'), visionClient: vision };
+    const tool = makeDescribeImageAtRefTool(deps);
+
+    const r1 = getResultJson(await callTool(tool, { path: 'a.png' })) as { description: string };
+    const r2 = getResultJson(await callTool(tool, { path: 'b.png' })) as { description: string };
+
+    expect(r1.description).toBe('a description');
+    expect(r2.description).toBe(''); // cap hit — OCR still returned, vision skipped
+    expect(vision.describe).toHaveBeenCalledTimes(1);
+  });
+
   it('skips the vision call for bmp (unsupported media type) but still OCRs', async () => {
     const vision = fakeVision('should not be called');
     const deps = depsWith({ ocrEngine: fakeOcr('bmp text'), visionClient: vision });

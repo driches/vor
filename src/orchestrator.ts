@@ -606,6 +606,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // based on what ACTUALLY survives.
   const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
   let addedScannerComments = 0;
+  // Findings on binary files (e.g. secrets the image-ocr scanner read out of a
+  // committed screenshot) can never be posted as inline comments — GitHub
+  // can't anchor a review comment on a binary blob. Collect them here and
+  // surface them in a dedicated summary section instead of dropping the
+  // security signal at the validator.
+  const binaryFindings: ScanFinding[] = [];
   for (const finding of scanRunResult.findings) {
     // Per-scanner min_severity (separate from the global severity.floor that
     // filterComments applies later). Lets operators tighten a noisy scanner
@@ -618,6 +624,20 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       await logger.debug(
         `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`,
       );
+      continue;
+    }
+    const file = changedFilesMap.get(finding.file_path);
+    if (file?.is_binary) {
+      // The inline path's per-file/global caps don't apply to this channel, but
+      // the global severity floor still should — an operator who raised the
+      // floor doesn't want low-severity noise in the summary either.
+      if (SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[config.severity.floor]) {
+        binaryFindings.push(finding);
+      } else {
+        await logger.debug(
+          `Skipping binary-file finding from ${finding.scanner} (severity=${finding.severity} below severity.floor=${config.severity.floor})`,
+        );
+      }
       continue;
     }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
@@ -634,6 +654,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     await logger.info(
       `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ` +
         `${addedScannerComments} added to review` +
+        (binaryFindings.length > 0
+          ? `, ${binaryFindings.length} binary-file finding(s) in summary`
+          : '') +
         (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : ''),
     );
   }
@@ -683,6 +706,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     modelName: config.model,
     agentEnded: result.ended,
     unreviewedPaths: agentScope.unreviewedPaths,
+    binaryFindings,
   });
 
   // Dry run: log instead of posting

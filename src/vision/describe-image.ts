@@ -60,8 +60,11 @@ export class AnthropicVisionClient implements VisionClient {
   ) {}
 
   async describe(image: Buffer, mediaType: VisionMediaType): Promise<VisionDescription> {
+    let response: Anthropic.Message;
+    // Only the API call is best-effort — a network/API failure degrades to an
+    // empty description so a review never fails on a vision hiccup.
     try {
-      const response = await this.client.messages.create({
+      response = await this.client.messages.create({
         model: this.model,
         max_tokens: MAX_OUTPUT_TOKENS,
         // Determinism over variety — same image should yield the same gist.
@@ -80,19 +83,23 @@ export class AnthropicVisionClient implements VisionClient {
           },
         ],
       });
-
-      this.budget.addUsage(this.model, response.usage);
-
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n')
-        .trim();
-      return { description: text };
     } catch (err) {
       void this.log.warn(`vision: describe failed: ${(err as Error).message}`);
       return { description: '' };
     }
+
+    // Budget accounting is NOT best-effort. Mirror WorkerClient: call addUsage
+    // OUTSIDE the catch so a BudgetError (cap exceeded) propagates and halts the
+    // run instead of being silently swallowed as a vision failure after the
+    // call has already incurred cost.
+    this.budget.addUsage(this.model, response.usage);
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim();
+    return { description: text };
   }
 }
 

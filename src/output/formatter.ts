@@ -5,6 +5,8 @@
 
 import type { RunAgentResult } from '../agent/runner.js';
 import type { PostedComment, ReviewDraft, ReviewEvent, ScannerId, Severity } from '../types.js';
+import { SEVERITY_RANK } from '../types.js';
+import type { ScanFinding } from '../scanners/types.js';
 
 export interface SummaryRenderInput {
   draft: ReviewDraft;
@@ -21,6 +23,14 @@ export interface SummaryRenderInput {
    * with tests; orchestrator always supplies it.
    */
   agentEnded?: RunAgentResult['ended'];
+  /**
+   * Scanner findings on binary files. GitHub can't anchor inline review
+   * comments on a binary blob, so these never make it into `keptComments` —
+   * they're reported in a dedicated summary section instead of being dropped.
+   * The canonical case is the `image-ocr` scanner surfacing a secret it read
+   * out of a committed screenshot.
+   */
+  binaryFindings?: readonly ScanFinding[];
 }
 
 export interface RenderedSummary {
@@ -51,8 +61,14 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
 
   // Headline: severity of the highest-severity finding (or "No findings").
   // Always rendered, even without an agent-supplied summary, so the body has a
-  // real lede instead of an apologetic placeholder.
-  sections.push(`### ${severityHeader(input.keptComments)}`);
+  // real lede instead of an apologetic placeholder. Binary-file findings count
+  // toward the headline too — a secret OCR'd from a screenshot is a finding
+  // even though it can't be posted inline.
+  const headlineSeverities: Severity[] = [
+    ...input.keptComments.map((c) => c.severity),
+    ...(input.binaryFindings ?? []).map((f) => f.severity),
+  ];
+  sections.push(`### ${severityHeader(headlineSeverities)}`);
 
   // When the agent didn't post a summary, surface that prominently — otherwise
   // a truncated run with zero findings looks indistinguishable from a clean
@@ -83,6 +99,18 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     // When summary is missing we already emit the prominent missing-summary
     // warning above; don't pile on with a redundant "no inline comments" note.
     sections.push('_No inline comments were posted._');
+  }
+
+  // Binary-file findings: a non-inline channel for scanner findings GitHub
+  // can't anchor (secrets read out of committed images, etc.). Rendered as its
+  // own section so the security signal survives even though it never becomes a
+  // kept inline comment.
+  if (input.binaryFindings && input.binaryFindings.length > 0) {
+    sections.push('### Security findings in binary files');
+    sections.push(
+      "_GitHub can't anchor inline comments on binary files, so these are reported here._",
+    );
+    sections.push(formatBinaryFindings(input.binaryFindings));
   }
 
   // Coverage notes (only available from the agent's summary)
@@ -185,12 +213,48 @@ function missingSummaryWarning(ended: RunAgentResult['ended'] | undefined): stri
  * by default), so saying "Approve" in the body is misleading. The severity
  * label gives the reader a quick at-a-glance signal of what was found.
  */
-function severityHeader(comments: readonly PostedComment[]): string {
-  if (comments.length === 0) return 'No findings';
-  if (comments.some((c) => c.severity === 'critical')) return 'Critical findings';
-  if (comments.some((c) => c.severity === 'important')) return 'Important findings';
-  if (comments.some((c) => c.severity === 'minor')) return 'Minor findings';
+function severityHeader(severities: readonly Severity[]): string {
+  if (severities.length === 0) return 'No findings';
+  if (severities.includes('critical')) return 'Critical findings';
+  if (severities.includes('important')) return 'Important findings';
+  if (severities.includes('minor')) return 'Minor findings';
   return 'Notes only';
+}
+
+/**
+ * Renders the bullet list for the binary-file findings section. Sorted
+ * highest-severity-first and capped so a pathological image (many detected
+ * secrets) can't flood the summary body. OCR findings get scanner-specific
+ * detail — masked match, pattern id, and the OCR confidence that produced it —
+ * so a reader can triage without opening the image.
+ */
+function formatBinaryFindings(findings: readonly ScanFinding[]): string {
+  const MAX = 20;
+  const sorted = [...findings].sort(
+    (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity],
+  );
+  const lines = sorted.slice(0, MAX).map((f) => `- ${formatBinaryFindingLine(f)}`);
+  if (sorted.length > MAX) {
+    lines.push(`- _+${sorted.length - MAX} more_`);
+  }
+  return lines.join('\n');
+}
+
+function formatBinaryFindingLine(f: ScanFinding): string {
+  const loc = `\`${f.file_path}\``;
+  const sev = `**${capitalizeSeverity(f.severity)}**`;
+  if (f.evidence.kind === 'ocr') {
+    return (
+      `${sev} ${loc} — ${f.title} ` +
+      `(pattern \`${f.evidence.pattern_id}\`, OCR confidence ${Math.round(f.evidence.ocr_confidence)}%) ` +
+      `— masked match \`${f.evidence.masked_match}\``
+    );
+  }
+  return `${sev} ${loc} — ${f.title}`;
+}
+
+function capitalizeSeverity(s: Severity): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /**

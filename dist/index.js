@@ -58592,8 +58592,9 @@ var AnthropicVisionClient = class {
   model;
   log;
   async describe(image, mediaType) {
+    let response;
     try {
-      const response = await this.client.messages.create({
+      response = await this.client.messages.create({
         model: this.model,
         max_tokens: MAX_OUTPUT_TOKENS,
         // Determinism over variety — same image should yield the same gist.
@@ -58612,13 +58613,13 @@ var AnthropicVisionClient = class {
           }
         ]
       });
-      this.budget.addUsage(this.model, response.usage);
-      const text = response.content.filter((b2) => b2.type === "text").map((b2) => b2.text).join("\n").trim();
-      return { description: text };
     } catch (err) {
       void this.log.warn(`vision: describe failed: ${err.message}`);
       return { description: "" };
     }
+    this.budget.addUsage(this.model, response.usage);
+    const text = response.content.filter((b2) => b2.type === "text").map((b2) => b2.text).join("\n").trim();
+    return { description: text };
   }
 };
 function mediaTypeForPath(filePath) {
@@ -58633,6 +58634,8 @@ function mediaTypeForPath(filePath) {
 // src/tools/describe-image-at-ref.ts
 var IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
 function makeDescribeImageAtRefTool(deps) {
+  const maxImages = deps.config.image_understanding.max_images;
+  let visionCalls = 0;
   return tool(
     "describe_image_at_ref",
     "Reads an image file (PNG/JPG/GIF/WEBP) at HEAD or BASE and returns OCR text plus a short description of what the image shows. Use it to inspect screenshots and diagrams that read_file_at_ref cannot (it is text-only). Find image files via list_changed_files (is_binary: true).",
@@ -58665,7 +58668,9 @@ function makeDescribeImageAtRefTool(deps) {
       const ocr = deps.ocrEngine ? await deps.ocrEngine.recognize(bytes) : await recognizeOnce(bytes);
       let description = "";
       const mediaType = mediaTypeForPath(args.path);
-      if (deps.visionClient && mediaType !== void 0) {
+      const underCap = maxImages === void 0 || visionCalls < maxImages;
+      if (deps.visionClient && mediaType !== void 0 && underCap) {
+        visionCalls += 1;
         const result = await deps.visionClient.describe(bytes, mediaType);
         description = result.description;
       }
@@ -64790,7 +64795,11 @@ function renderSummary(input) {
     input.unreviewedPaths ?? []
   );
   const sections = [];
-  sections.push(`### ${severityHeader(input.keptComments)}`);
+  const headlineSeverities = [
+    ...input.keptComments.map((c2) => c2.severity),
+    ...(input.binaryFindings ?? []).map((f2) => f2.severity)
+  ];
+  sections.push(`### ${severityHeader(headlineSeverities)}`);
   if (!summary2) {
     sections.push(missingSummaryWarning(input.agentEnded));
   }
@@ -64809,6 +64818,13 @@ function renderSummary(input) {
     if (scannerLine) sections.push(scannerLine);
   } else if (summary2 && summary2.assessment !== "approve") {
     sections.push("_No inline comments were posted._");
+  }
+  if (input.binaryFindings && input.binaryFindings.length > 0) {
+    sections.push("### Security findings in binary files");
+    sections.push(
+      "_GitHub can't anchor inline comments on binary files, so these are reported here._"
+    );
+    sections.push(formatBinaryFindings(input.binaryFindings));
   }
   if (summary2?.coverage_note) {
     sections.push("### Coverage");
@@ -64865,12 +64881,34 @@ function missingSummaryWarning(ended) {
   const tail = ended && ended !== "summary_posted" ? ` \u2014 ${reasons[ended]} (\`ended: ${ended}\`).` : ".";
   return `> \u26A0\uFE0F The agent did not call \`post_summary\`${tail} The body was synthesized from inline findings and may be incomplete.`;
 }
-function severityHeader(comments) {
-  if (comments.length === 0) return "No findings";
-  if (comments.some((c2) => c2.severity === "critical")) return "Critical findings";
-  if (comments.some((c2) => c2.severity === "important")) return "Important findings";
-  if (comments.some((c2) => c2.severity === "minor")) return "Minor findings";
+function severityHeader(severities) {
+  if (severities.length === 0) return "No findings";
+  if (severities.includes("critical")) return "Critical findings";
+  if (severities.includes("important")) return "Important findings";
+  if (severities.includes("minor")) return "Minor findings";
   return "Notes only";
+}
+function formatBinaryFindings(findings) {
+  const MAX = 20;
+  const sorted = [...findings].sort(
+    (a2, b2) => SEVERITY_RANK[b2.severity] - SEVERITY_RANK[a2.severity]
+  );
+  const lines = sorted.slice(0, MAX).map((f2) => `- ${formatBinaryFindingLine(f2)}`);
+  if (sorted.length > MAX) {
+    lines.push(`- _+${sorted.length - MAX} more_`);
+  }
+  return lines.join("\n");
+}
+function formatBinaryFindingLine(f2) {
+  const loc = `\`${f2.file_path}\``;
+  const sev = `**${capitalizeSeverity(f2.severity)}**`;
+  if (f2.evidence.kind === "ocr") {
+    return `${sev} ${loc} \u2014 ${f2.title} (pattern \`${f2.evidence.pattern_id}\`, OCR confidence ${Math.round(f2.evidence.ocr_confidence)}%) \u2014 masked match \`${f2.evidence.masked_match}\``;
+  }
+  return `${sev} ${loc} \u2014 ${f2.title}`;
+}
+function capitalizeSeverity(s2) {
+  return s2.charAt(0).toUpperCase() + s2.slice(1);
 }
 function formatScannerCountsLine(comments) {
   const byScanner = /* @__PURE__ */ new Map();
@@ -70005,12 +70043,24 @@ ${base}` : base;
   }
   const changedFilesMap = new Map(prContext.files.map((f2) => [f2.path, f2]));
   let addedScannerComments = 0;
+  const binaryFindings = [];
   for (const finding of scanRunResult.findings) {
     const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
     if (scannerFloor !== void 0 && SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]) {
       await logger.debug(
         `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`
       );
+      continue;
+    }
+    const file = changedFilesMap.get(finding.file_path);
+    if (file?.is_binary) {
+      if (SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[config.severity.floor]) {
+        binaryFindings.push(finding);
+      } else {
+        await logger.debug(
+          `Skipping binary-file finding from ${finding.scanner} (severity=${finding.severity} below severity.floor=${config.severity.floor})`
+        );
+      }
       continue;
     }
     const valid = validateScanFinding(finding, { changedFiles: changedFilesMap });
@@ -70024,7 +70074,7 @@ ${base}` : base;
   if (scanners.length > 0) {
     const scannerErrors = scanRunResult.perScanner.flatMap((r2) => r2.errors);
     await logger.info(
-      `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ${addedScannerComments} added to review` + (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : "")
+      `Scanners finished: ${scanners.length} run, ${scanRunResult.findings.length} unique finding(s), ${addedScannerComments} added to review` + (binaryFindings.length > 0 ? `, ${binaryFindings.length} binary-file finding(s) in summary` : "") + (scannerErrors.length > 0 ? `, ${scannerErrors.length} non-fatal error(s)` : "")
     );
   }
   const caps = {
@@ -70051,7 +70101,8 @@ ${base}` : base;
     configEvent: config.review.event,
     modelName: config.model,
     agentEnded: result.ended,
-    unreviewedPaths: agentScope.unreviewedPaths
+    unreviewedPaths: agentScope.unreviewedPaths,
+    binaryFindings
   });
   if (input.dry_run) {
     await logDryRunReview({
