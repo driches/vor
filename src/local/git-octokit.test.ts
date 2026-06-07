@@ -62,4 +62,31 @@ describe('buildLocalOctokit listFiles', () => {
     // Never null — that is the binary signal fetchPRContext keys on.
     for (const patch of Object.values(byName)) expect(patch).not.toBeNull();
   });
+
+  it('paginates listFiles so the fetch loop terminates on large diffs', async () => {
+    const many: ChangedFile[] = Array.from({ length: 150 }, (_, i) => ({
+      path: `f${i}.ts`,
+      status: 'added' as const,
+      additions: 1,
+      deletions: 0,
+    }));
+    const octokit = buildLocalOctokit({
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      files: many,
+      diff: '',
+      prMeta: { title: 't', body: '', author: 'me', additions: 150, deletions: 0 },
+      resolveContent: () => null,
+    });
+    const lf = octokit.rest.pulls.listFiles;
+    const page1 = (await lf({ owner: 'l', repo: 'l', pull_number: 0, per_page: 100, page: 1 }))
+      .data;
+    const page2 = (await lf({ owner: 'l', repo: 'l', pull_number: 0, per_page: 100, page: 2 }))
+      .data;
+    const page3 = (await lf({ owner: 'l', repo: 'l', pull_number: 0, per_page: 100, page: 3 }))
+      .data;
+    expect(page1).toHaveLength(100);
+    expect(page2).toHaveLength(50); // < per_page → fetch loop breaks here
+    expect(page3).toHaveLength(0);
+  });
 });

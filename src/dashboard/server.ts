@@ -20,6 +20,23 @@ export interface DashboardOptions {
 
 const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
+/** Addresses the server may bind to. The Host-header guard is client-controlled
+ *  (a LAN client can spoof `Host: localhost`), so the real protection is binding
+ *  to loopback in the first place. */
+const LOOPBACK_BIND = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/** Refuse to bind anywhere a LAN/WAN peer could reach: the dashboard has no auth
+ *  and POST /api/review triggers a paid LLM call. */
+function assertLoopbackBind(host: string): void {
+  if (!LOOPBACK_BIND.has(host)) {
+    throw new Error(
+      `Refusing to bind the dashboard to non-loopback host "${host}". It has no ` +
+        `auth and POST /api/review triggers a paid LLM call, so it serves ` +
+        `loopback only (127.0.0.1, ::1, localhost).`,
+    );
+  }
+}
+
 /** Reject requests whose Host header isn't loopback (DNS-rebinding guard). */
 function hostAllowed(req: IncomingMessage, port: number): boolean {
   const host = req.headers.host;
@@ -42,6 +59,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 
 export async function startDashboard(opts: DashboardOptions): Promise<void> {
   const host = opts.host ?? '127.0.0.1';
+  assertLoopbackBind(host); // before anything else — never bind externally
   const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
   const assetDir = materializeDashboard(pkg.version);
 

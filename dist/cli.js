@@ -85615,7 +85615,16 @@ function buildLocalOctokit(opts) {
             }
           };
         },
-        listFiles: async () => ({ data: fileApi }),
+        // Honor pagination: fetchPRFiles loops `page` until a response has
+        // fewer than `per_page` items. Returning the full list every call would
+        // never terminate that loop on diffs of >= per_page files, hanging the
+        // review before scanners/agent run.
+        listFiles: async (args) => {
+          const perPage = args?.per_page ?? Math.max(fileApi.length, 1);
+          const page = args?.page ?? 1;
+          const start = (page - 1) * perPage;
+          return { data: fileApi.slice(start, start + perPage) };
+        },
         // Sticky dismissal lookup: no prior reviews to dismiss.
         listReviews: async () => ({ data: [] }),
         // Prior-thread fetch: a local working copy has no prior PR threads.
@@ -85996,6 +86005,14 @@ function serveStatic(res, rootDir, urlPath) {
 
 // src/dashboard/server.ts
 var ALLOWED_HOSTS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+var LOOPBACK_BIND = /* @__PURE__ */ new Set(["127.0.0.1", "::1", "localhost"]);
+function assertLoopbackBind(host) {
+  if (!LOOPBACK_BIND.has(host)) {
+    throw new Error(
+      `Refusing to bind the dashboard to non-loopback host "${host}". It has no auth and POST /api/review triggers a paid LLM call, so it serves loopback only (127.0.0.1, ::1, localhost).`
+    );
+  }
+}
 function hostAllowed(req, port) {
   const host = req.headers.host;
   if (!host) return false;
@@ -86015,6 +86032,7 @@ async function readBody(req) {
 }
 async function startDashboard(opts) {
   const host = opts.host ?? "127.0.0.1";
+  assertLoopbackBind(host);
   const deps = opts.deps ?? defaultDashboardDeps(process.cwd());
   const assetDir = materializeDashboard(package_default.version);
   const server = (0, import_node_http.createServer)((req, res) => {

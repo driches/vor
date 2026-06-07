@@ -90,7 +90,16 @@ export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
             },
           };
         },
-        listFiles: async () => ({ data: fileApi }),
+        // Honor pagination: fetchPRFiles loops `page` until a response has
+        // fewer than `per_page` items. Returning the full list every call would
+        // never terminate that loop on diffs of >= per_page files, hanging the
+        // review before scanners/agent run.
+        listFiles: async (args?: { per_page?: number; page?: number }) => {
+          const perPage = args?.per_page ?? Math.max(fileApi.length, 1);
+          const page = args?.page ?? 1;
+          const start = (page - 1) * perPage;
+          return { data: fileApi.slice(start, start + perPage) };
+        },
         // Sticky dismissal lookup: no prior reviews to dismiss.
         listReviews: async () => ({ data: [] }),
         // Prior-thread fetch: a local working copy has no prior PR threads.
