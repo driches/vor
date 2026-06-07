@@ -58,19 +58,24 @@ export interface TesseractEngineOptions {
 const DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
- * Resolve the default vendored-assets directory. The built bundle lives at
- * `dist/index.js`, so `../assets/ocr` from the bundle dir points at the
- * repo's committed assets. `VOR_OCR_ASSETS_DIR` overrides for non-standard
- * layouts.
+ * Resolve the default vendored-assets directory, which holds `eng.traineddata`,
+ * the WASM cores, and the bundled OCR worker. `VOR_OCR_ASSETS_DIR` overrides.
  */
 function defaultAssetsDir(): string {
   const fromEnv = process.env.VOR_OCR_ASSETS_DIR;
   if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
-  // `import.meta.url` resolves both under tsx (src/ocr/) and the CJS bundle
-  // (dist/), so `../../assets/ocr` from src or `../assets/ocr` from dist both
-  // need normalizing — anchor on the nearest `assets/ocr` by walking up to the
-  // package root is overkill; the bundle ships from dist, so go up one.
   const here = path.dirname(fileURLToPath(import.meta.url));
+  // The committed assets live at `<repo>/assets/ocr`, but `here` differs by
+  // runtime: the bundle runs from `dist/` (root one up), while tsx
+  // (`npm run local-review`) runs from `src/ocr/` (root two up). Probe both
+  // layouts rather than hard-coding one — otherwise tsx resolves to a
+  // nonexistent `src/assets/ocr` and OCR silently degrades to empty text.
+  for (const up of ['..', path.join('..', '..')]) {
+    const candidate = path.resolve(here, up, 'assets', 'ocr');
+    if (existsSync(candidate)) return candidate;
+  }
+  // Neither exists yet (e.g. a pre-build checkout) — fall back to the bundle
+  // layout so the graceful-degrade warning names a sensible directory.
   return path.resolve(here, '..', 'assets', 'ocr');
 }
 

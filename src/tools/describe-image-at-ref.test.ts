@@ -81,6 +81,29 @@ describe('describe_image_at_ref tool', () => {
     expect(r.description).toBe('');
   });
 
+  it('truncates a very long OCR transcript and flags it', async () => {
+    const long = 'a'.repeat(25_000);
+    const deps = depsWith({ ocrEngine: fakeOcr(long) });
+    const tool = makeDescribeImageAtRefTool(deps);
+    const r = getResultJson(await callTool(tool, { path: 'dense.png' })) as {
+      text: string;
+      text_truncated: boolean;
+    };
+    expect(r.text_truncated).toBe(true);
+    expect(r.text.length).toBe(20_000);
+  });
+
+  it('does not flag truncation for short OCR text', async () => {
+    const deps = depsWith({ ocrEngine: fakeOcr('short') });
+    const tool = makeDescribeImageAtRefTool(deps);
+    const r = getResultJson(await callTool(tool, { path: 'x.png' })) as {
+      text: string;
+      text_truncated: boolean;
+    };
+    expect(r.text_truncated).toBe(false);
+    expect(r.text).toBe('short');
+  });
+
   it('rejects non-image paths without reading', async () => {
     const readBinary = vi.fn();
     const deps = depsWith({ reader: { readBinary }, ocrEngine: fakeOcr('') });

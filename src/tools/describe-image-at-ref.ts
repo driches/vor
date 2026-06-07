@@ -23,6 +23,13 @@ import { mediaTypeForPath } from '../vision/describe-image.js';
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
+// Cap the OCR transcript returned to the agent. The image cap is 10 MB, and a
+// dense screenshot can OCR to a lot of text — returned unbounded, it lands in
+// the next API call's input before budget accounting sees the response, risking
+// context blow-out and surprise token spend. Mirrors read_file_at_ref's
+// truncate-and-flag contract (~20k chars ≈ a few thousand tokens).
+const MAX_OCR_TEXT_CHARS = 20_000;
+
 export function makeDescribeImageAtRefTool(deps: ToolDeps) {
   // Per-run cap on vision calls. The factory is invoked once per agent run, so
   // this counter is shared across every invocation of the returned tool and
@@ -86,12 +93,16 @@ export function makeDescribeImageAtRefTool(deps: ToolDeps) {
         description = result.description;
       }
 
+      const textTruncated = ocr.text.length > MAX_OCR_TEXT_CHARS;
+      const text = textTruncated ? ocr.text.slice(0, MAX_OCR_TEXT_CHARS) : ocr.text;
+
       return jsonResult({
         ok: true,
         path: args.path,
         ref: args.ref,
         ref_sha: sha,
-        text: ocr.text,
+        text,
+        text_truncated: textTruncated,
         ocr_confidence: Math.round(ocr.confidence),
         description,
       });

@@ -59708,6 +59708,10 @@ function defaultAssetsDir() {
   const fromEnv = process.env.VOR_OCR_ASSETS_DIR;
   if (fromEnv !== void 0 && fromEnv !== "") return fromEnv;
   const here = import_node_path.default.dirname((0, import_node_url.fileURLToPath)(import_meta_url));
+  for (const up of ["..", import_node_path.default.join("..", "..")]) {
+    const candidate = import_node_path.default.resolve(here, up, "assets", "ocr");
+    if ((0, import_node_fs2.existsSync)(candidate)) return candidate;
+  }
   return import_node_path.default.resolve(here, "..", "assets", "ocr");
 }
 function createTesseractEngine(options = {}) {
@@ -59853,6 +59857,7 @@ function mediaTypeForPath(filePath) {
 
 // src/tools/describe-image-at-ref.ts
 var IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
+var MAX_OCR_TEXT_CHARS = 2e4;
 function makeDescribeImageAtRefTool(deps) {
   const maxImages = deps.config.image_understanding.max_images;
   let visionCalls = 0;
@@ -59894,12 +59899,15 @@ function makeDescribeImageAtRefTool(deps) {
         const result = await deps.visionClient.describe(bytes, mediaType);
         description = result.description;
       }
+      const textTruncated = ocr.text.length > MAX_OCR_TEXT_CHARS;
+      const text = textTruncated ? ocr.text.slice(0, MAX_OCR_TEXT_CHARS) : ocr.text;
       return jsonResult({
         ok: true,
         path: args.path,
         ref: args.ref,
         ref_sha: sha,
-        text: ocr.text,
+        text,
+        text_truncated: textTruncated,
         ocr_confidence: Math.round(ocr.confidence),
         description
       });
