@@ -44,17 +44,42 @@ export interface ScoreInput {
 }
 
 export function scoreRun(input: ScoreInput): ScoreResult {
+  // Collapse scanner fan-out before matching. A deterministic scanner that
+  // emits several rows for one underlying issue at one location (e.g. multiple
+  // OSV CVEs for a single vulnerable dependency, all anchored to the same
+  // lockfile line) should count once, not N times. Keep one representative per
+  // (scanner, file, line); the rest are `duplicates`, excluded from precision.
+  // Agent findings are never collapsed — a co-located LLM comment is a distinct
+  // signal precision must measure, so it falls through to the matcher and counts
+  // as a FP when it doesn't match a truth. Earlier the scorer kept every row and
+  // then treated any unmatched-but-truth-compatible finding as a duplicate,
+  // which silently hid co-located agent noise. Codex P2 3370136471.
+  const findings: PostedComment[] = [];
+  const duplicates: PostedComment[] = [];
+  const seenScannerKeys = new Set<string>();
+  for (const f of input.findings) {
+    if (f.source?.kind === 'scanner') {
+      const key = `${f.source.scanner}|${f.file_path}|${f.start_line ?? f.line}|${f.line}`;
+      if (seenScannerKeys.has(key)) {
+        duplicates.push(f);
+        continue;
+      }
+      seenScannerKeys.add(key);
+    }
+    findings.push(f);
+  }
+
   // Build a compatibility matrix: compat[t][f] === true iff finding f satisfies
   // truth t's file + line-range (with slack) + category constraints.
   const T = input.truths.length;
-  const F = input.findings.length;
+  const F = findings.length;
   const compat: boolean[][] = [];
   for (let t = 0; t < T; t++) {
     const truth = input.truths[t]!;
     const [truthStart, truthEnd] = truth.line_range;
     const row: boolean[] = [];
     for (let i = 0; i < F; i++) {
-      const finding = input.findings[i]!;
+      const finding = findings[i]!;
       // GitHub's PostedComment may carry a multi-line range via `start_line`;
       // a single-line comment has `start_line` absent and `line` carries the
       // single anchor. Treat the finding as [findingStart, findingEnd] and
@@ -102,7 +127,7 @@ export function scoreRun(input: ScoreInput): ScoreResult {
   for (let t = 0; t < T; t++) {
     const f = matchFinding[t]!;
     if (f >= 0) {
-      outcomes.push({ truth: input.truths[t]!, status: 'matched', finding: input.findings[f]! });
+      outcomes.push({ truth: input.truths[t]!, status: 'matched', finding: findings[f]! });
     } else {
       outcomes.push({ truth: input.truths[t]!, status: 'missed' });
     }
@@ -111,22 +136,9 @@ export function scoreRun(input: ScoreInput): ScoreResult {
 
   const tp = outcomes.filter((o) => o.status === 'matched').length;
   const fn = outcomes.length - tp;
-
-  // Split the unmatched findings into genuine false positives vs. duplicates.
-  // In a maximum matching, an unmatched finding that is still compatible with
-  // SOME truth means that truth was paired with a different finding — so this
-  // one is a duplicate report of an already-credited bug (multiple CVEs on one
-  // planted vulnerable dependency, or the agent commenting twice on the same
-  // secret), not spurious noise. Only findings compatible with NO truth are
-  // FPs. Counting duplicates as FPs made precision a function of scanner
-  // fan-out and double-reporting rather than review quality.
-  const unaligned: PostedComment[] = [];
-  const duplicates: PostedComment[] = [];
-  for (let f = 0; f < F; f++) {
-    if (matchedFindings.has(f)) continue;
-    const compatibleWithSomeTruth = compat.some((row) => row[f]);
-    (compatibleWithSomeTruth ? duplicates : unaligned).push(input.findings[f]!);
-  }
+  // Any kept finding (after scanner fan-out was collapsed above) that didn't
+  // match a truth is a false positive — including a co-located agent comment.
+  const unaligned = findings.filter((_f, i) => !matchedFindings.has(i));
   const fp = unaligned.length;
 
   const recall = tp + fn === 0 ? 1 : tp / (tp + fn);

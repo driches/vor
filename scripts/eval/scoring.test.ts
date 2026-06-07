@@ -322,11 +322,42 @@ describe('scoreRun', () => {
     expect(reverse.fp).toBe(0);
   });
 
-  it('counts a duplicate report of a matched truth as a duplicate, not a FP', () => {
-    // The agent comments twice on the same secret: one matches the truth, the
-    // other has nowhere to land. Because it IS compatible with an already-
-    // matched truth, it is a duplicate — not spurious noise — so it must not
-    // depress precision.
+  it('absorbs scanner fan-out (same scanner, same location) as duplicates, not FPs', () => {
+    // One planted vulnerable dependency, but the dependency-cve scanner emits
+    // several CVE rows at the same lockfile line. One matches the truth; the
+    // rest are fan-out of an already-credited finding and must not depress
+    // precision.
+    const depTruth = truth({
+      file: 'package-lock.json',
+      line_range: [11, 11],
+      bug_type: 'vuln-dep:npm',
+      category: ['vulnerability', 'security'],
+    });
+    const cve = (ghsa: string): PostedComment =>
+      finding({
+        file_path: 'package-lock.json',
+        line: 11,
+        category: 'vulnerability',
+        source: { kind: 'scanner', scanner: 'dependency-cve', rule_id: `osv:${ghsa}` },
+      });
+    const result = scoreRun({
+      case_id: 'c',
+      config_name: 'cfg',
+      truths: [depTruth],
+      findings: [cve('a'), cve('b'), cve('c'), cve('d'), cve('e')],
+      cost,
+    });
+    expect(result.tp).toBe(1);
+    expect(result.fp).toBe(0);
+    expect(result.precision).toBe(1);
+    expect(result.duplicates).toHaveLength(4);
+  });
+
+  it('counts a co-located AGENT finding as a FP, not a duplicate (Codex P2 3370136471)', () => {
+    // A noisy agent posts a SECOND, distinct comment on the same file/line/
+    // category as a real finding. It is NOT scanner fan-out (no scanner source),
+    // so it must count against precision — this is exactly the noise the eval
+    // exists to measure, and the coarse "compatible with any truth" rule hid it.
     const result = scoreRun({
       case_id: 'c',
       config_name: 'cfg',
@@ -335,36 +366,41 @@ describe('scoreRun', () => {
       cost,
     });
     expect(result.tp).toBe(1);
-    expect(result.fp).toBe(0);
-    expect(result.precision).toBe(1);
-    expect(result.duplicates).toHaveLength(1);
-    expect(result.unaligned).toHaveLength(0);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
+    expect(result.unaligned).toHaveLength(1);
   });
 
-  it('counts multiple CVEs on one planted dependency as one TP (CVE fan-out)', () => {
-    // OSV reports every known CVE for a vulnerable package; the case plants one
-    // vulnerable dependency. The extra CVE rows land on the same file+line and
-    // are all compatible with the single vuln-dep truth → 1 TP, 0 FP, the rest
-    // duplicates.
-    const depTruth = truth({
+  it('counts an extra finding from a DIFFERENT scanner at the same line as a FP', () => {
+    // Fan-out absorption is per-scanner: a different scanner flagging the same
+    // line is a distinct signal, not a redundant row, so it stays a FP.
+    const t = truth({
       file: 'package-lock.json',
       line_range: [11, 11],
-      bug_type: 'vuln-dep:npm',
-      category: ['vulnerability', 'security'],
+      category: ['vulnerability'],
     });
-    const cve = (): PostedComment =>
-      finding({ file_path: 'package-lock.json', line: 11, category: 'vulnerability' });
+    const credited = finding({
+      file_path: 'package-lock.json',
+      line: 11,
+      category: 'vulnerability',
+      source: { kind: 'scanner', scanner: 'dependency-cve', rule_id: 'osv:a' },
+    });
+    const otherScanner = finding({
+      file_path: 'package-lock.json',
+      line: 11,
+      category: 'vulnerability',
+      source: { kind: 'scanner', scanner: 'secrets', rule_id: 'secret:x' },
+    });
     const result = scoreRun({
       case_id: 'c',
       config_name: 'cfg',
-      truths: [depTruth],
-      findings: [cve(), cve(), cve(), cve(), cve()],
+      truths: [t],
+      findings: [credited, otherScanner],
       cost,
     });
     expect(result.tp).toBe(1);
-    expect(result.fp).toBe(0);
-    expect(result.precision).toBe(1);
-    expect(result.duplicates).toHaveLength(4);
+    expect(result.fp).toBe(1);
+    expect(result.duplicates).toHaveLength(0);
   });
 
   it('still counts a finding compatible with no truth as a FP (duplicate logic does not swallow noise)', () => {
