@@ -44,6 +44,17 @@ export function newRunId(): string {
   return `${ts}-${rand}`;
 }
 
+/**
+ * Run ids are interpolated into a file path, so an id reaching `getRun` from
+ * `vor runs show`, the dashboard, or the MCP `get_run` tool must not contain a
+ * path separator that lets `../` escape the project's run directory. Generated
+ * ids are only `[0-9A-Za-z-]`; allow that charset (plus `.`/`_` for headroom)
+ * and reject everything else.
+ */
+function isValidRunId(id: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(id);
+}
+
 export function saveRun(record: LocalRunRecord): string {
   const dir = runsDir(record.workspace);
   mkdirSync(dir, { recursive: true });
@@ -77,6 +88,7 @@ export function listRuns(workspace: string, opts: { limit?: number } = {}): Loca
 }
 
 export function getRun(workspace: string, id: string): LocalRunRecord | null {
+  if (!isValidRunId(id)) return null;
   const path = join(runsDir(workspace), `${id}.json`);
   if (!existsSync(path)) return null;
   try {

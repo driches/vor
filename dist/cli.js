@@ -85787,6 +85787,9 @@ function newRunId() {
   const rand = (0, import_node_crypto6.createHash)("sha256").update(`${ts}-${Math.random()}`).digest("hex").slice(0, 6);
   return `${ts}-${rand}`;
 }
+function isValidRunId(id) {
+  return /^[A-Za-z0-9._-]+$/.test(id);
+}
 function saveRun(record2) {
   const dir = runsDir(record2.workspace);
   (0, import_node_fs9.mkdirSync)(dir, { recursive: true });
@@ -85809,6 +85812,7 @@ function listRuns(workspace2, opts = {}) {
   return records;
 }
 function getRun(workspace2, id) {
+  if (!isValidRunId(id)) return null;
   const path23 = (0, import_node_path20.join)(runsDir(workspace2), `${id}.json`);
   if (!(0, import_node_fs9.existsSync)(path23)) return null;
   try {

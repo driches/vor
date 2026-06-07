@@ -75,6 +75,16 @@ describe('local run store', () => {
     expect(latestRun('/never/seen')).toBeNull();
   });
 
+  it('rejects run ids that try to traverse out of the project directory', () => {
+    // Plant a record in a sibling project; a traversal id must not reach it.
+    const other = '/some/other/project';
+    const planted = makeRecord(other, newRunId());
+    saveRun(planted);
+    const escape = join('..', projectSlug(other), planted.id);
+    expect(getRun(workspace, escape)).toBeNull();
+    expect(getRun(workspace, '../../etc/passwd')).toBeNull();
+  });
+
   it('keeps different checkouts of the same basename separate', () => {
     expect(projectSlug('/a/vor')).not.toBe(projectSlug('/b/vor'));
     expect(projectSlug('/a/vor')).toMatch(/^vor-[0-9a-f]{8}$/);
