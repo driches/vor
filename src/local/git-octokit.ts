@@ -37,8 +37,13 @@ export interface FakeOctokitOptions {
 
 export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
   // GitHub's listFiles shape has `filename`, `status`, `additions`, `deletions`,
-  // `changes`, `patch`. The orchestrator only needs filename + status +
-  // additions/deletions; per-file patch is read from the unified diff instead.
+  // `changes`, `patch`. `patch` MUST be populated for text files: fetchPRContext
+  // treats `patch == null` as the binary-file signal (`is_binary || patch ==
+  // null`), so omitting it marks every locally changed file binary and gates out
+  // the non-binary scanners (secrets, debris, eslint/tsc/semgrep). We slice the
+  // real per-file hunk out of the unified diff; genuine binaries are still caught
+  // by the diff parser's own `is_binary`, which fetchPRContext ORs in.
+  const patchesByPath = splitPatchesByFile(opts.diff);
   const fileApi = opts.files.map((f) => ({
     filename: f.path,
     status: f.status,
@@ -46,6 +51,9 @@ export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
     deletions: f.deletions,
     changes: f.additions + f.deletions,
     previous_filename: f.previous_path,
+    // Fall back to '' (non-null) when a section can't be matched, so a text file
+    // is never misflagged binary; the diff parser remains the binary authority.
+    patch: patchesByPath.get(f.path) ?? '',
     sha: opts.headSha,
   }));
 
@@ -110,4 +118,47 @@ export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
       },
     },
   } as unknown as Octokit;
+}
+
+/**
+ * Split a unified diff into per-file patches keyed by the file's new path,
+ * mirroring GitHub's per-file `patch` field. Sections start at `diff --git`;
+ * the new path is taken from the `+++ b/<path>` line when present (handles
+ * renames), falling back to the `b/<path>` side of the `diff --git` header.
+ */
+export function splitPatchesByFile(diff: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!diff) return map;
+
+  const sections: string[] = [];
+  let current: string[] = [];
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      if (current.length > 0) sections.push(current.join('\n'));
+      current = [line];
+    } else if (current.length > 0) {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) sections.push(current.join('\n'));
+
+  for (const section of sections) {
+    const path = newPathFromSection(section);
+    if (path) map.set(path, section);
+  }
+  return map;
+}
+
+function newPathFromSection(section: string): string | null {
+  for (const line of section.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      const target = line.slice(4).trim();
+      if (target === '/dev/null') return null; // deletion — no new path
+      return target.startsWith('b/') ? target.slice(2) : target;
+    }
+  }
+  // No `+++` line (e.g. a pure-binary or mode-only change): use the header.
+  const header = section.split('\n', 1)[0] ?? '';
+  const m = header.match(/ b\/(.+)$/);
+  return m ? m[1]! : null;
 }

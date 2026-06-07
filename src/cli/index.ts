@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import { pathToFileURL } from 'node:url';
 import pkg from '../../package.json' with { type: 'json' };
+import { useStderr } from '../util/logger.js';
 import { status } from './output.js';
 import { registerConfig } from './commands/config.js';
 import { registerDashboard } from './commands/dashboard.js';
@@ -31,6 +32,11 @@ export function buildProgram(): Command {
 }
 
 export async function main(): Promise<void> {
+  // The CLI's stdout is its deliverable (review render, `--json`, config YAML),
+  // written via output.ts. The orchestrator logs progress through logger.info,
+  // which otherwise lands on stdout (@actions/core / console.log) and corrupts
+  // `vor review --json | jq`. Pin all logging to stderr for every command.
+  useStderr();
   const program = buildProgram();
   await program.parseAsync(process.argv);
 }
