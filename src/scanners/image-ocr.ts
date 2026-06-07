@@ -82,7 +82,14 @@ function buildDescription(pattern: SecretPattern): string {
 }
 
 function isImageFile(f: ChangedFile): boolean {
-  return f.is_binary && IMAGE_EXTENSIONS.test(f.path) && f.status !== 'removed';
+  // Only images whose content the PR introduces: `added` or `modified`. A pure
+  // `renamed` (GitHub only classifies high-similarity moves as renames, so the
+  // bytes pre-exist under the old name) would otherwise OCR the whole HEAD
+  // image and flag a secret the PR never introduced. `removed` has no HEAD
+  // content to read. Binary additions/deletions are unreliable, so gate on
+  // status, not line counts.
+  const introducesContent = f.status === 'added' || f.status === 'modified';
+  return f.is_binary && IMAGE_EXTENSIONS.test(f.path) && introducesContent;
 }
 
 /**

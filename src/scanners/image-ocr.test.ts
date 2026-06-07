@@ -99,6 +99,14 @@ describe('createImageOcrScanner applies()', () => {
     expect(scanner.applies([makeChangedFile({ path: 'a.ts', is_binary: false })])).toBe(false);
     expect(scanner.applies([makeChangedFile({ path: 'a.png', status: 'removed' })])).toBe(false);
   });
+
+  it('matches modified images but skips pure renames (content not introduced by the PR)', () => {
+    const scanner = createImageOcrScanner({ engine: makeEngine({ text: '', confidence: 0 }) });
+    expect(scanner.applies([makeChangedFile({ path: 'a.png', status: 'modified' })])).toBe(true);
+    // A pure rename's bytes pre-exist under the old name — flagging a secret in
+    // them would blame the PR for content it didn't introduce.
+    expect(scanner.applies([makeChangedFile({ path: 'a.png', status: 'renamed' })])).toBe(false);
+  });
 });
 
 describe('createImageOcrScanner scan()', () => {

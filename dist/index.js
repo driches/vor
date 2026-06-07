@@ -70677,7 +70677,8 @@ function buildDescription3(pattern) {
   return `OCR of this image found a string matching the ${pattern.display_name} format. If this is a real credential it should be revoked immediately and the image removed from version control \u2014 committed images are public history.`;
 }
 function isImageFile(f2) {
-  return f2.is_binary && IMAGE_EXTENSIONS2.test(f2.path) && f2.status !== "removed";
+  const introducesContent = f2.status === "added" || f2.status === "modified";
+  return f2.is_binary && IMAGE_EXTENSIONS2.test(f2.path) && introducesContent;
 }
 function recognizeCancellable(engine, bytes, signal) {
   if (signal.aborted) return Promise.resolve("aborted");
