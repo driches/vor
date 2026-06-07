@@ -179,25 +179,25 @@ export function fileContentOnDisk(workspace: string, path: string): string | nul
   }
 }
 
-export function authorFromHead(workspace: string): string {
+export function authorFromHead(workspace: string, ref = 'HEAD'): string {
   try {
-    return git(['log', '-1', '--format=%aN', 'HEAD'], workspace).trim();
+    return git(['log', '-1', '--format=%aN', ref], workspace).trim();
   } catch {
     return 'local-user';
   }
 }
 
-export function titleFromHead(workspace: string): string {
+export function titleFromHead(workspace: string, ref = 'HEAD'): string {
   try {
-    return git(['log', '-1', '--format=%s', 'HEAD'], workspace).trim();
+    return git(['log', '-1', '--format=%s', ref], workspace).trim();
   } catch {
     return 'Local review';
   }
 }
 
-export function bodyFromHead(workspace: string): string {
+export function bodyFromHead(workspace: string, ref = 'HEAD'): string {
   try {
-    return git(['log', '-1', '--format=%b', 'HEAD'], workspace).trim();
+    return git(['log', '-1', '--format=%b', ref], workspace).trim();
   } catch {
     return '';
   }

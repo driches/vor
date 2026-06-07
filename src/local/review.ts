@@ -138,15 +138,20 @@ export async function runLocalReview(
     return fileContentAtRef(workspace, ref, path);
   };
 
+  // Range reviews describe the requested head, which may not be the checkout;
+  // read the title/body/author from that commit so get_pr_metadata (the agent's
+  // first tool call) forms intent from the branch under review. Working-tree
+  // mode reviews HEAD itself, so the default ref is correct there.
+  const metaRef = resolved === 'range' ? headSha : 'HEAD';
   const octokit = buildLocalOctokit({
     baseSha,
     headSha,
     files,
     diff,
     prMeta: {
-      title: titleFromHead(workspace),
-      body: bodyFromHead(workspace),
-      author: authorFromHead(workspace),
+      title: titleFromHead(workspace, metaRef),
+      body: bodyFromHead(workspace, metaRef),
+      author: authorFromHead(workspace, metaRef),
       additions,
       deletions,
     },

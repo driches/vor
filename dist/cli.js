@@ -58629,23 +58629,23 @@ function fileContentOnDisk(workspace2, path23) {
     return null;
   }
 }
-function authorFromHead(workspace2) {
+function authorFromHead(workspace2, ref = "HEAD") {
   try {
-    return git(["log", "-1", "--format=%aN", "HEAD"], workspace2).trim();
+    return git(["log", "-1", "--format=%aN", ref], workspace2).trim();
   } catch {
     return "local-user";
   }
 }
-function titleFromHead(workspace2) {
+function titleFromHead(workspace2, ref = "HEAD") {
   try {
-    return git(["log", "-1", "--format=%s", "HEAD"], workspace2).trim();
+    return git(["log", "-1", "--format=%s", ref], workspace2).trim();
   } catch {
     return "Local review";
   }
 }
-function bodyFromHead(workspace2) {
+function bodyFromHead(workspace2, ref = "HEAD") {
   try {
-    return git(["log", "-1", "--format=%b", "HEAD"], workspace2).trim();
+    return git(["log", "-1", "--format=%b", ref], workspace2).trim();
   } catch {
     return "";
   }
@@ -85857,15 +85857,16 @@ async function runLocalReview(opts = {}, deps = {}) {
     if (ref === WORKTREE) return fileContentOnDisk(workspace2, path23);
     return fileContentAtRef(workspace2, ref, path23);
   };
+  const metaRef = resolved === "range" ? headSha : "HEAD";
   const octokit = buildLocalOctokit({
     baseSha,
     headSha,
     files,
     diff,
     prMeta: {
-      title: titleFromHead(workspace2),
-      body: bodyFromHead(workspace2),
-      author: authorFromHead(workspace2),
+      title: titleFromHead(workspace2, metaRef),
+      body: bodyFromHead(workspace2, metaRef),
+      author: authorFromHead(workspace2, metaRef),
       additions,
       deletions
     },

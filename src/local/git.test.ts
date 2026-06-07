@@ -4,12 +4,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  authorFromHead,
+  bodyFromHead,
   changedFiles,
   fileContentAtRef,
   fileContentOnDisk,
   hasWorkingTreeChanges,
   repoRoot,
   resolveRef,
+  titleFromHead,
   unifiedDiff,
   untrackedFiles,
   workingTreeChanges,
@@ -112,5 +115,15 @@ describe('local git helpers', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('reads PR metadata from an explicit ref, not just the checkout', () => {
+    // Default reads HEAD (the second commit); an explicit base ref reads the
+    // first. Range reviews rely on this to describe the requested head when a
+    // different commit is checked out.
+    expect(titleFromHead(repo)).toBe('second commit');
+    expect(titleFromHead(repo, baseSha)).toBe('first commit');
+    expect(authorFromHead(repo, baseSha)).toBe('Test');
+    expect(bodyFromHead(repo, baseSha)).toBe('');
   });
 });
