@@ -5,8 +5,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import pkg from '../../package.json' with { type: 'json' };
 import { repoRoot } from '../local/git.js';
+import { packageVersion } from '../util/package-version.js';
 import { logger } from '../util/logger.js';
 import { defaultDashboardDeps, handleApi, type DashboardDeps } from './api.js';
 import { materializeDashboard, serveStatic } from './static.js';
@@ -122,7 +122,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
   // to (it normalizes to the root); otherwise a review started from a nested dir
   // would never appear in /api/runs.
   const deps = opts.deps ?? defaultDashboardDeps(repoRoot(process.cwd()));
-  const assetDir = materializeDashboard(pkg.version);
+  const assetDir = materializeDashboard(packageVersion());
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
