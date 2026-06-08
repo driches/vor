@@ -6,8 +6,8 @@
 
 import { Command } from 'commander';
 import { pathToFileURL } from 'node:url';
-import pkg from '../../package.json' with { type: 'json' };
 import { useStderr } from '../util/logger.js';
+import { packageVersion } from '../util/package-version.js';
 import { status } from './output.js';
 import { registerConfig } from './commands/config.js';
 import { registerDashboard } from './commands/dashboard.js';
@@ -20,7 +20,7 @@ export function buildProgram(): Command {
   program
     .name('vor')
     .description('VOR — local AI code review: review, dashboard, and MCP for your working tree')
-    .version(pkg.version, '-v, --version');
+    .version(packageVersion(), '-v, --version');
 
   registerReview(program);
   registerRuns(program);

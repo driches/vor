@@ -55176,93 +55176,6 @@ var {
 // src/cli/index.ts
 var import_node_url3 = require("node:url");
 
-// package.json
-var package_default = {
-  name: "@driches/vor",
-  version: "0.6.0",
-  description: "Vor \u2014 AI code review GitHub Action with inline comments and parallel vulnerability scanning, via Claude or OpenAI",
-  license: "MIT",
-  author: "Doug Riches",
-  homepage: "https://github.com/driches/vor",
-  repository: {
-    type: "git",
-    url: "https://github.com/driches/vor.git"
-  },
-  type: "module",
-  bin: {
-    vor: "dist/cli.js"
-  },
-  files: [
-    "dist/",
-    "assets/ocr/",
-    "action.yml",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE"
-  ],
-  publishConfig: {
-    access: "public"
-  },
-  engines: {
-    node: ">=20"
-  },
-  scripts: {
-    build: "tsx scripts/build.ts",
-    "build:dashboard": "vite build dashboard",
-    prepublishOnly: "npm run build && npm run build:dashboard",
-    "verify-dist": "tsx scripts/verify-dist.ts",
-    typecheck: "tsc --noEmit",
-    lint: "eslint .",
-    format: "prettier --write .",
-    "format:check": "prettier --check .",
-    test: "vitest run",
-    "test:watch": "vitest",
-    "record-fixture": "tsx scripts/record-fixture.ts",
-    "golden:capture": "tsx scripts/golden/capture.ts",
-    "golden:capture-batch": "tsx scripts/golden/capture-batch.ts",
-    "golden:discover": "tsx scripts/golden/discover.ts",
-    "golden:eval": "tsx scripts/golden/eval.ts",
-    "golden:plant": "tsx scripts/plant.ts",
-    "local-review": "tsx scripts/local-review.ts"
-  },
-  dependencies: {
-    "@actions/core": "3.0.1",
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@octokit/plugin-retry": "^7.1.4",
-    "@octokit/plugin-throttling": "^9.4.0",
-    "@octokit/rest": "^21.1.1",
-    commander: "^12.1.0",
-    openai: "^6.39.0",
-    "parse-diff": "^0.11.1",
-    semver: "^7.8.0",
-    yaml: "^2.7.0",
-    zod: "^3.24.1",
-    "zod-to-json-schema": "^3.25.2"
-  },
-  optionalDependencies: {
-    "tesseract.js": "^7.0.0",
-    "tesseract.js-core": "^7.0.0"
-  },
-  devDependencies: {
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "@types/diff": "^7.0.2",
-    "@types/node": "^20.17.10",
-    "@types/semver": "^7.7.1",
-    "@typescript-eslint/eslint-plugin": "^8.18.0",
-    "@typescript-eslint/parser": "^8.18.0",
-    diff: "^9.0.0",
-    esbuild: "0.28.0",
-    eslint: "^9.17.0",
-    prettier: "^3.4.2",
-    svelte: "^5.56.2",
-    tsx: "^4.19.2",
-    typescript: "^5.7.2",
-    vite: "^8.0.16",
-    vitest: "4.1.6"
-  }
-};
-
 // src/util/secrets.ts
 var registered = /* @__PURE__ */ new Set();
 function registerSecret(value) {
@@ -55355,6 +55268,16 @@ var logger = {
     core.setFailed(redact(m2));
   }
 };
+
+// src/util/package-version.ts
+var import_node_module = require("node:module");
+function packageVersion() {
+  try {
+    return (0, import_node_module.createRequire)(import_meta_url)("../package.json").version;
+  } catch {
+    return "0.0.0";
+  }
+}
 
 // src/cli/output.ts
 var useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -75945,9 +75868,9 @@ function makeReadRepoContextFileTool(deps) {
 // src/ocr/recognize.ts
 var import_node_path3 = __toESM(require("node:path"), 1);
 var import_node_fs4 = require("node:fs");
-var import_node_module = require("node:module");
+var import_node_module2 = require("node:module");
 var import_node_url = require("node:url");
-var localRequire = (0, import_node_module.createRequire)(import_meta_url);
+var localRequire = (0, import_node_module2.createRequire)(import_meta_url);
 var DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 function defaultAssetsDir() {
   const fromEnv = process.env.VOR_OCR_ASSETS_DIR;
@@ -87979,7 +87902,7 @@ async function startDashboard(opts) {
   assertLoopbackBind(host);
   const authority = `${hostForUrl(host)}:${opts.port}`;
   const deps = opts.deps ?? defaultDashboardDeps(repoRoot(process.cwd()));
-  const assetDir = materializeDashboard(package_default.version);
+  const assetDir = materializeDashboard(packageVersion());
   const server = (0, import_node_http.createServer)((req, res) => {
     void (async () => {
       if (!hostAllowed(req, opts.port)) {
@@ -97196,7 +97119,7 @@ function registerRuns(program2) {
 // src/cli/index.ts
 function buildProgram() {
   const program2 = new Command();
-  program2.name("vor").description("VOR \u2014 local AI code review: review, dashboard, and MCP for your working tree").version(package_default.version, "-v, --version");
+  program2.name("vor").description("VOR \u2014 local AI code review: review, dashboard, and MCP for your working tree").version(packageVersion(), "-v, --version");
   registerReview(program2);
   registerRuns(program2);
   registerConfig(program2);
