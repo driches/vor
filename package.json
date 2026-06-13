@@ -73,7 +73,7 @@
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "diff": "^9.0.0",
-    "esbuild": "0.28.0",
+    "esbuild": "0.28.1",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "svelte": "^5.56.2",
