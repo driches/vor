@@ -96,8 +96,8 @@ security:
     secrets:
       enabled: true
       include_generic_entropy: false                  # opt-in; high false-positive rate
-    sast:           { enabled: false }                # v2 — stub in v1
-    container_cve:  { enabled: false }                # v2 — stub in v1
+    sast:           { enabled: true }                 # on by default since v0.4.0; set false to disable
+    container_cve:  { enabled: false }                # v2 — not yet active
     image_ocr:                                        # off by default
       enabled: false                                  # OCR committed images, scan extracted text for secrets
       # max_image_bytes: 10485760                     # skip images larger than this
