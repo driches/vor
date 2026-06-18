@@ -23,7 +23,7 @@
 
 ## Why Vor
 
-**Your code never leaves your runner.** Bring your own Anthropic or OpenAI key. No vendor data egress, no per-seat subscription. Cost is metered per run via the `cost_usd` output.
+**No third-party code-review vendor sees your code.** The diff and any context the agent reads go directly to the LLM provider you configure — the same Anthropic or OpenAI account you already pay for. No separate SaaS, no per-seat subscription. Cost is metered per run via the `cost_usd` output.
 
 **Comments can't land on lines that don't exist.** Every inline comment is validated against the actual diff before posting. The agent gets a structured hint and self-corrects — hallucinated line numbers are structurally impossible.
 
@@ -46,6 +46,11 @@ name: Vor
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
 
 permissions:
   contents: read
@@ -60,6 +65,7 @@ jobs:
       - uses: driches/vor@v0
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pr_number: ${{ inputs.pr_number }}
 ```
 
 Prefer OpenAI? Replace `anthropic_api_key` with `openai_api_key` and add `model: gpt-4.1`. The provider is inferred from the model name.
