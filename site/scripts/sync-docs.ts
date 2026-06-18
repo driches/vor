@@ -57,8 +57,7 @@ const PAGES: Page[] = [
     src: 'docs/triggers.md',
     out: 'triggers.md',
     title: 'Trigger options',
-    description:
-      'Auto-trigger, manual-only, comment-triggered (/review), and fork PR handling.',
+    description: 'Auto-trigger, manual-only, comment-triggered (/review), and fork PR handling.',
   },
   {
     src: 'docs/local.md',
