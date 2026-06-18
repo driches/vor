@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **README restructured as a sales pitch and getting started guide.** The configuration reference, security scanning docs, trigger options, local CLI reference, and architecture internals have moved to dedicated pages on the docs site. The README now covers: what Vor is, why to use it, getting started in three steps, what a review looks like, local usage, and links to the new reference pages.
+
+### Added
+- **New docs pages on driches.github.io/vor**: Configuration, Security scanning, Trigger options, Local usage, and How it works — synced from new source files under `docs/`.
+
 ## [0.6.0] - 2026-06-07
 
 ### Added

@@ -32,9 +32,24 @@ export default defineConfig({
       },
       sidebar: [
         {
-          label: 'Documentation',
+          label: 'Getting started',
           items: [
             { label: 'Overview', link: '/overview/' },
+            { label: 'Trigger options', link: '/triggers/' },
+            { label: 'Local usage', link: '/local/' },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { label: 'Configuration', link: '/configuration/' },
+            { label: 'Security scanning', link: '/security-scanning/' },
+            { label: 'How it works', link: '/how-it-works/' },
+          ],
+        },
+        {
+          label: 'Project',
+          items: [
             { label: 'Changelog', link: '/changelog/' },
             { label: 'Security policy', link: '/security/' },
             { label: 'Support', link: '/support/' },

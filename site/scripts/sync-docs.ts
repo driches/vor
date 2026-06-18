@@ -40,6 +40,39 @@ const PAGES: Page[] = [
       'AI-powered PR code review with parallel vulnerability scanning — inline comments anchored to real diff lines.',
   },
   {
+    src: 'docs/configuration.md',
+    out: 'configuration.md',
+    title: 'Configuration',
+    description:
+      'Full .vor.yml reference, action inputs and outputs, model options, and per-repo config.',
+  },
+  {
+    src: 'docs/security-scanning.md',
+    out: 'security-scanning.md',
+    title: 'Security scanning',
+    description:
+      'CVE scanning, secrets detection, SAST, image OCR, and the security-ignore file format.',
+  },
+  {
+    src: 'docs/triggers.md',
+    out: 'triggers.md',
+    title: 'Trigger options',
+    description: 'Auto-trigger, manual-only, comment-triggered (/review), and fork PR handling.',
+  },
+  {
+    src: 'docs/local.md',
+    out: 'local.md',
+    title: 'Local usage',
+    description: 'CLI commands, dashboard, and MCP server for reviewing changes before you push.',
+  },
+  {
+    src: 'docs/how-it-works.md',
+    out: 'how-it-works.md',
+    title: 'How it works',
+    description:
+      'The review pipeline, why hallucinated line numbers are impossible, and cross-file impact analysis.',
+  },
+  {
     src: 'CHANGELOG.md',
     out: 'changelog.md',
     title: 'Changelog',
