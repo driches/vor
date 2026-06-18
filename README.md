@@ -94,9 +94,10 @@ By default, all reviews are posted as `COMMENT` — Vor never auto-blocks. To op
 The same orchestrator runs against your local git — review changes before you push. Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` first.
 
 ```sh
-npx @driches/vor review                         # review uncommitted changes
-npx @driches/vor review --range \               # review a branch against main
-  --base origin/main --head HEAD
+npx @driches/vor review                              # review uncommitted changes
+
+# review a branch against main
+npx @driches/vor review --range --base origin/main --head HEAD
 
 vor dashboard                                   # run history at http://127.0.0.1:4310
 claude mcp add vor -- npx -y @driches/vor mcp  # expose to Claude Code as MCP
