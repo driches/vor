@@ -13,8 +13,8 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.34.0",
-    "astro": "^5.7.0"
+    "@astrojs/starlight": "^0.40.0",
+    "astro": "^6.4.8"
   },
   "devDependencies": {
     "tsx": "^4.19.2"
