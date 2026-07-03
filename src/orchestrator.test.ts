@@ -589,6 +589,64 @@ describe('runOrchestrator — Scenario 1: happy path with AI + scanner findings'
 });
 
 // -----------------------------------------------------------------
+// Scenario 1b: `review.post_summary: false` suppresses the summary body.
+//
+// The review must still post (inline comments are the deliverable) and the
+// body must still carry the AGENT_REVIEW_MARKER (prepended in postReview) so
+// sticky dismissal keeps recognizing our reviews — only the rendered summary
+// markdown is dropped.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — review.post_summary: false', () => {
+  it('posts the review with an empty body but keeps inline comments', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'review:',
+        '  post_summary: false',
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+      ].join('\n'),
+    );
+
+    scriptOneCommentAndSummary({
+      severity: 'minor',
+      file_path: 'src/app.ts',
+      line: 5,
+      side: 'RIGHT',
+      category: 'readability',
+      title: 'Function lacks return type annotation',
+      why_it_matters: 'Explicit return types help future readers and TypeScript inference.',
+      confidence: 'medium',
+    });
+
+    const result = await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string; body: string }>;
+      body: string;
+    };
+
+    // Inline comments survive; only the summary body is suppressed. The
+    // marker (prepended by postReview) must remain so sticky dismissal and
+    // prior-thread awareness still identify this as an agent review.
+    expect(call.comments.length).toBeGreaterThan(0);
+    expect(call.body).toContain('driches/vor: agent-review');
+    expect(call.body).not.toContain('Reviewed by');
+    expect(call.body).not.toContain('###');
+
+    expect(result.comment_count).toBeGreaterThan(0);
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 2: Cross-AI dedup suppresses an overlapping scanner finding.
 //
 // The agent posts a 'security' comment on src/auth.ts:10 (within 3 lines of

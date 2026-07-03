@@ -14,8 +14,9 @@
 import type { ChangedFile } from '../../types.js';
 
 export interface ParsedDependency {
-  /** v1 ecosystems supported by the dependency-cve scanner. */
-  ecosystem: 'npm' | 'PyPI';
+  /** Ecosystems supported by the dependency-cve scanner. Values are OSV's
+   *  case-sensitive ecosystem strings. */
+  ecosystem: 'npm' | 'PyPI' | 'Go';
   name: string;
   version: string;
   /** 1-indexed line in the lockfile where this version is declared.

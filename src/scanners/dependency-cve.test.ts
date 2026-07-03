@@ -154,6 +154,11 @@ describe('createDependencyCveScanner — applies()', () => {
     expect(scanner.applies([makeChangedFile({ path: 'package-lock.json' })])).toBe(true);
   });
 
+  it('returns true for a changed go.sum', () => {
+    const scanner = createDependencyCveScanner();
+    expect(scanner.applies([makeChangedFile({ path: 'go.sum' })])).toBe(true);
+  });
+
   it('returns false when no changed file matches any parser', () => {
     const scanner = createDependencyCveScanner();
     expect(
@@ -161,6 +166,74 @@ describe('createDependencyCveScanner — applies()', () => {
         makeChangedFile({ path: 'src/foo.ts', is_generated: false, language: 'ts' }),
       ]),
     ).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------
+// scan() — Go ecosystem end-to-end
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — go.sum ecosystem routing', () => {
+  it('queries OSV with ecosystem Go and the v-stripped version', async () => {
+    const GIN_GO_SUM = [
+      'github.com/gin-gonic/gin v1.6.3 h1:ahKqKTFpO5KTPHxWZjEdPScmYaGtLo8Y4DMHoEsnp14=',
+      'github.com/gin-gonic/gin v1.6.3/go.mod h1:75u5sXoLsGZoRN5Sgbi1eraJ4GU3++wFwWzhwvtwp4M=',
+    ].join('\n');
+    const GIN_VULN: OsvVuln = {
+      id: 'GHSA-h395-qcrw-5vmq',
+      aliases: ['CVE-2020-28483'],
+      summary: 'Improper input validation in github.com/gin-gonic/gin',
+      severity: [{ type: 'CVSS_V3', score: '7.1' }],
+      affected: [
+        {
+          package: { name: 'github.com/gin-gonic/gin', ecosystem: 'Go' },
+          ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '1.7.7' }] }],
+        },
+      ],
+    };
+    const osvClient = makeOsvClient({
+      queryBatch: vi.fn().mockResolvedValue({
+        results: [{ vulns: [{ id: 'GHSA-h395-qcrw-5vmq', modified: '2024-01-01T00:00:00Z' }] }],
+      }),
+      getVuln: vi.fn().mockResolvedValue(GIN_VULN),
+    });
+    const scanner = createDependencyCveScanner({ osvClient });
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(GIN_GO_SUM),
+    } as unknown as FileReader;
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'go.sum', language: 'plaintext' })],
+        fileReader: reader,
+      }),
+    );
+
+    // One query for the code line only — the /go.mod duplicate is skipped —
+    // with OSV's Go ecosystem string and the `v` prefix stripped so range
+    // matching against the advisory's SEMVER events works.
+    expect(osvClient.queryBatch).toHaveBeenCalledOnce();
+    const queries = (osvClient.queryBatch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Array<{
+      package: { name: string; ecosystem: string };
+      version: string;
+    }>;
+    expect(queries).toEqual([
+      {
+        package: { name: 'github.com/gin-gonic/gin', ecosystem: 'Go' },
+        version: '1.6.3',
+      },
+    ]);
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    expect(finding.file_path).toBe('go.sum');
+    expect(finding.line).toBe(1);
+    expect(finding.severity).toBe('important');
+    expect(finding.evidence.kind).toBe('cve');
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    expect(finding.evidence.ecosystem).toBe('Go');
+    expect(finding.evidence.fixed_version).toBe('1.7.7');
+    expect(finding.description).toContain('Upgrade github.com/gin-gonic/gin to >=1.7.7');
   });
 });
 

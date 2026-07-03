@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG: ReviewConfig = {
       '**/package-lock.json',
       '**/yarn.lock',
       '**/pnpm-lock.yaml',
+      '**/go.sum',
       '**/poetry.lock',
       '**/Cargo.lock',
       '**/Gemfile.lock',

@@ -113,10 +113,10 @@ Drop a `.vor.yml` in your repo root to control the model, focus areas, severity 
 
 ## Security scanning
 
-Three scanners run in parallel with the AI review:
+Security scanners run in parallel with the AI review:
 
-- **Dependency CVEs** — queries [OSV.dev](https://osv.dev) for known vulnerabilities in changed lockfiles (npm, PyPI)
-- **Secrets** — scans added lines for hardcoded credentials: AWS keys, GitHub PATs, Stripe keys, and more
+- **Dependency CVEs** — queries [OSV.dev](https://osv.dev) for known vulnerabilities in changed lockfiles (npm, PyPI, Go)
+- **Secrets** — scans added lines for hardcoded credentials: AWS keys, GitHub PATs, Anthropic/OpenAI API keys, Stripe keys, and more
 - **SAST** — runs your repo's own linters (ESLint, Ruff, golangci-lint, Semgrep, and others) at zero token cost
 
 → [Security scanning docs](https://driches.github.io/vor/security-scanning/)

@@ -140,6 +140,45 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
       negative: 'npm_short',
     },
     {
+      id: 'anthropic-api-key',
+      positive: 'sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      negative: 'sk-ant-short',
+    },
+    {
+      // The `T3BlbkFJ` marker (base64 "OpenAI") is embedded in every real
+      // key format; a long `sk-` blob WITHOUT it must not match. The
+      // positive is assembled at runtime — GitHub's push protection keys on
+      // the same marker and blocks the contiguous literal even with `x`
+      // filler.
+      id: 'openai-api-key',
+      positive: ['sk-proj-', 'x'.repeat(20), 'T3Blbk', 'FJ', 'x'.repeat(20)].join(''),
+      negative: 'sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    },
+    {
+      id: 'gitlab-pat',
+      positive: 'glpat-xxxxxxxxxxxxxxxxxxxx',
+      negative: 'glpat-short',
+    },
+    {
+      id: 'huggingface-token',
+      positive: 'hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      negative: 'hf_short',
+    },
+    {
+      // Exactly SG. + 22 chars + . + 43 chars. Negative drops one char from
+      // the middle segment so the fixed-length shape rejects it.
+      id: 'sendgrid-api-key',
+      positive: 'SG.xxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      negative: 'SG.xxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    },
+    {
+      // Assembled at runtime for the same push-protection reason: a
+      // contiguous `dop_v1_` + 64-hex literal is blocked as a live token.
+      id: 'digitalocean-token',
+      positive: 'dop_v1_' + '0123456789abcdef'.repeat(4),
+      negative: 'dop_v1_0123456789ABCDEF',
+    },
+    {
       id: 'private-key-pem',
       positive: '-----BEGIN RSA PRIVATE KEY-----',
       negative: '-----BEGIN PUBLIC KEY-----',
@@ -248,6 +287,20 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
     });
   });
 
+  describe('anthropic-api-key — boundary edge cases', () => {
+    it('matches a key ending in `-` (the reason for lookarounds over \\b)', () => {
+      const key = 'sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-';
+      const hits = matches(findPattern('anthropic-api-key'), `key = "${key}";`);
+      expect(hits).toHaveLength(1);
+      expect(hits[0]![1]).toBe(key);
+    });
+
+    it('does NOT match inside a longer run of key-class characters', () => {
+      const text = 'prefix_sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+      expect(matches(findPattern('anthropic-api-key'), text)).toEqual([]);
+    });
+  });
+
   it('private-key-pem exposes the header text via capture group (m[1])', () => {
     // Regression: previously the pattern had no capture group, so
     // `m[1] ?? m[0]` returned `m[0]` (still the header text by accident,
@@ -279,6 +332,12 @@ describe('DEFAULT_SECRET_PATTERNS', () => {
       'stripe-restricted-key',
       'google-api-key',
       'npm-access-token',
+      'anthropic-api-key',
+      'openai-api-key',
+      'gitlab-pat',
+      'huggingface-token',
+      'sendgrid-api-key',
+      'digitalocean-token',
       'private-key-pem',
       'jwt',
     ]);
