@@ -3,8 +3,8 @@
  *
  * Pipeline per PR:
  *
- *   1. Filter the changed-file set through the 4 lockfile parsers (npm
- *      package-lock, yarn classic, pnpm, python requirements).
+ *   1. Filter the changed-file set through the lockfile parsers (npm
+ *      package-lock, yarn classic, pnpm, python requirements, go.sum).
  *   2. Fetch each matching lockfile at HEAD via {@link FileReader} and parse
  *      it into a list of (ecosystem, name, version, line) tuples.
  *   3. Batch the (ecosystem, name, version) tuples through OSV's
@@ -27,6 +27,7 @@ import { npmPackageLockParser } from './parsers/npm-package-lock.js';
 import { yarnLockParser } from './parsers/yarn-lock.js';
 import { pnpmLockParser } from './parsers/pnpm-lock.js';
 import { pythonRequirementsParser } from './parsers/python-requirements.js';
+import { goSumParser } from './parsers/go-sum.js';
 import type { LockfileParser, ParsedDependency } from './parsers/types.js';
 import {
   createOsvClient,
@@ -72,6 +73,7 @@ const DEFAULT_PARSERS: readonly LockfileParser[] = [
   yarnLockParser,
   pnpmLockParser,
   pythonRequirementsParser,
+  goSumParser,
 ];
 
 export interface DependencyCveScannerOptions {

@@ -176,6 +176,70 @@ export const DEFAULT_SECRET_PATTERNS: readonly SecretPattern[] = [
     confidence: 'high',
   },
   {
+    // Anthropic API keys (`sk-ant-api03-…`) and admin keys (`sk-ant-admin01-…`).
+    // The key alphabet includes `-` and `_`; `-` is a non-word character, so a
+    // trailing `\b` would miss keys ending in `-` (same failure mode as the
+    // JWT pattern above). Lookarounds against the key alphabet instead.
+    // Vor itself is configured with one of these — a consumer committing the
+    // key that powers their review bot is exactly the leak this catches.
+    id: 'anthropic-api-key',
+    display_name: 'Anthropic API key',
+    pattern: /(?<![A-Za-z0-9_-])(sk-ant-[A-Za-z0-9_-]{24,})(?![A-Za-z0-9_-])/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
+    // OpenAI API keys — legacy (`sk-{20}T3BlbkFJ{20}`), project
+    // (`sk-proj-…`), service-account (`sk-svcacct-…`), and admin
+    // (`sk-admin-…`) formats all embed the literal marker `T3BlbkFJ`
+    // (base64 for "OpenAI"), which is what makes this zero-false-positive
+    // without pinning the surrounding segment lengths OpenAI has already
+    // changed once. A bare `sk-[A-Za-z0-9]{48}` alternative would collide
+    // with Anthropic's `sk-ant-` prefix and random base64; the marker
+    // doesn't. Lookarounds for the same trailing `-`/`_` reason as above.
+    id: 'openai-api-key',
+    display_name: 'OpenAI API key',
+    pattern: /(?<![A-Za-z0-9_-])(sk-[A-Za-z0-9_-]{10,}T3BlbkFJ[A-Za-z0-9_-]{10,})(?![A-Za-z0-9_-])/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
+    // GitLab personal access tokens. Newer tokens append a CRC suffix so the
+    // tail can exceed the classic 20 chars — hence `{20,}` not `{20}`.
+    id: 'gitlab-pat',
+    display_name: 'GitLab personal access token',
+    pattern: /(?<![A-Za-z0-9_-])(glpat-[A-Za-z0-9_-]{20,})(?![A-Za-z0-9_-])/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
+    id: 'huggingface-token',
+    display_name: 'Hugging Face access token',
+    pattern: /\b(hf_[A-Za-z0-9]{30,})\b/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
+    // SendGrid API keys are exactly `SG.` + 22 chars + `.` + 43 chars of the
+    // base64url alphabet. The fixed segment lengths are load-bearing: `SG.`
+    // alone is a plausible prose/code prefix, so keeping the exact shape is
+    // what makes this high-confidence.
+    id: 'sendgrid-api-key',
+    display_name: 'SendGrid API key',
+    pattern: /(?<![A-Za-z0-9_-])(SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
+    // DigitalOcean tokens: `dop_v1_` (personal), `doo_v1_` (OAuth), `dor_v1_`
+    // (refresh), each followed by exactly 64 hex chars.
+    id: 'digitalocean-token',
+    display_name: 'DigitalOcean token',
+    pattern: /\b(do[opr]_v1_[a-f0-9]{64})\b/g,
+    severity: 'critical',
+    confidence: 'high',
+  },
+  {
     // Unbracketed character class — PEM headers cover RSA, OpenSSH, EC, DSA,
     // and PGP private keys. The `\b` boundary is omitted because `-` is a
     // non-word character; the dashes act as their own boundaries. The whole

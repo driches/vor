@@ -1,6 +1,6 @@
 # Security scanning
 
-Three scanners run in parallel with the AI review and post their findings in the same single PR review, tagged with provenance so you can tell at a glance which tool surfaced each finding.
+The security scanners run in parallel with the AI review and post their findings in the same single PR review, tagged with provenance so you can tell at a glance which tool surfaced each finding.
 
 ## Scope (v1)
 
@@ -10,6 +10,7 @@ Parses changed lockfiles and queries [OSV.dev](https://osv.dev) for known vulner
 
 - **npm**: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
 - **PyPI**: `requirements.txt` — `==`-pinned lines only
+- **Go**: `go.sum` — module code lines only (`/go.mod`-only entries are pruned indirect deps whose code never ships, so they're skipped)
 
 Uses the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost. Findings appear inline on the lockfile line with the version pin, tagged `_via OSV · GHSA-…_`.
 
@@ -28,6 +29,12 @@ Detected patterns:
 - Stripe live/restricted keys (`sk_live_`, `rk_live_`)
 - Google API keys (`AIza…`)
 - npm tokens (`npm_…`)
+- Anthropic API keys (`sk-ant-…`)
+- OpenAI API keys (`sk-…T3BlbkFJ…` — covers legacy, project, service-account, and admin formats)
+- GitLab PATs (`glpat-…`)
+- Hugging Face tokens (`hf_…`)
+- SendGrid API keys (`SG.….…`)
+- DigitalOcean tokens (`dop_v1_…`, `doo_v1_…`, `dor_v1_…`)
 - PEM private key headers
 - JSON Web Tokens (`eyJ…`-prefixed 3-segment shape)
 
@@ -77,10 +84,10 @@ entries:
   - cve_id: CVE-2025-12345
     reason: "Patch shipped in v2.1.0"
 
-  # Suppress by package + semver range (npm or PyPI)
+  # Suppress by package + semver range
   - package:
       name: lodash
-      ecosystem: npm           # npm | PyPI
+      ecosystem: npm           # npm | PyPI | Go
       version: ">=4.17.20 <4.18.0"
     reason: "Vendor pin until next major"
 
@@ -90,8 +97,13 @@ entries:
     reason: "Synthetic test fixture, never deployed"
 ```
 
-Supported `rule` values for `file` entries:
-- Secrets: `secret:aws-access-key-id`, `secret:aws-secret-access-key`, `secret:github-pat-classic`, `secret:github-pat-fine-grained`, `secret:slack-token`, `secret:stripe-live-key`, `secret:google-api-key`, `secret:npm-token`, `secret:private-key-pem`
-- Dependency CVEs: `osv:<id>` (e.g. `osv:GHSA-jf85-cpcp-j695`)
+Supported `rule` values for `file` entries are `secret:<pattern-id>` for any pattern id in [`src/scanners/secrets-patterns.ts`](src/scanners/secrets-patterns.ts):
+- `secret:aws-access-key-id`, `secret:aws-secret-access-key`
+- `secret:github-pat-classic`, `secret:github-pat-oauth`, `secret:github-pat-user-server`, `secret:github-pat-server-server`, `secret:github-pat-refresh`, `secret:github-pat-fine-grained`
+- `secret:slack-token`, `secret:stripe-live-key`, `secret:stripe-restricted-key`, `secret:google-api-key`, `secret:npm-access-token`
+- `secret:anthropic-api-key`, `secret:openai-api-key`, `secret:gitlab-pat`, `secret:huggingface-token`, `secret:sendgrid-api-key`, `secret:digitalocean-token`
+- `secret:private-key-pem`, `secret:jwt`, `secret:generic-high-entropy`
+
+And for dependency CVEs: `osv:<id>` (e.g. `osv:GHSA-jf85-cpcp-j695`)
 
 If the ignore file is missing, malformed, or fails schema validation, Vor degrades to "no suppressions" and logs a warning — a typo in the ignore file will never block your code review.
