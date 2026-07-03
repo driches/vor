@@ -199,7 +199,8 @@ export const DEFAULT_SECRET_PATTERNS: readonly SecretPattern[] = [
     // doesn't. Lookarounds for the same trailing `-`/`_` reason as above.
     id: 'openai-api-key',
     display_name: 'OpenAI API key',
-    pattern: /(?<![A-Za-z0-9_-])(sk-[A-Za-z0-9_-]{10,}T3BlbkFJ[A-Za-z0-9_-]{10,})(?![A-Za-z0-9_-])/g,
+    pattern:
+      /(?<![A-Za-z0-9_-])(sk-[A-Za-z0-9_-]{10,}T3BlbkFJ[A-Za-z0-9_-]{10,})(?![A-Za-z0-9_-])/g,
     severity: 'critical',
     confidence: 'high',
   },
