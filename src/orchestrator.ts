@@ -709,11 +709,26 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     binaryFindings,
   });
 
+  // `review.post_summary: false` suppresses the human-facing summary body,
+  // NOT the review itself — inline comments still post, and the review body
+  // keeps the AGENT_REVIEW_MARKER (prepended in postReview) so sticky
+  // dismissal and prior-thread awareness keep recognizing our reviews.
+  // renderSummary still runs because it also decides the review event.
+  // Trade-off the operator opts into: binary-file findings (e.g. image-OCR
+  // secrets) only surface in the summary body, so they are dropped too.
+  const summaryBody = config.review.post_summary ? rendered.body : '';
+  if (!config.review.post_summary && binaryFindings.length > 0) {
+    await logger.warn(
+      `review.post_summary is false — ${binaryFindings.length} binary-file finding(s) have no ` +
+        `inline anchor and will not be reported.`,
+    );
+  }
+
   // Dry run: log instead of posting
   if (input.dry_run) {
     await logDryRunReview({
       event: rendered.event,
-      body: rendered.body,
+      body: summaryBody,
       comments: filtered.kept,
       draft: aggregator.snapshot(),
     });
@@ -750,7 +765,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     pull_number: input.pull_number,
     commit_id: prContext.metadata.head_sha,
     event: rendered.event,
-    body: rendered.body,
+    body: summaryBody,
     comments: filtered.kept,
   });
 

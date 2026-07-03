@@ -71,7 +71,7 @@ prompt:
 review:
   event: COMMENT                   # COMMENT | REQUEST_CHANGES | APPROVE
   sticky: true                     # dismiss prior agent reviews on each push
-  post_summary: true
+  post_summary: true               # false = inline comments only, no summary body
 
 budget:
   max_input_tokens: 500000
