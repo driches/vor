@@ -238,6 +238,71 @@ describe('createDependencyCveScanner — go.sum ecosystem routing', () => {
 });
 
 // -----------------------------------------------------------------
+// scan() — crates.io ecosystem end-to-end
+// -----------------------------------------------------------------
+
+describe('createDependencyCveScanner — Cargo.lock ecosystem routing', () => {
+  it('queries OSV with ecosystem crates.io and anchors on the version line', async () => {
+    const CARGO_LOCK = [
+      'version = 3',
+      '',
+      '[[package]]',
+      'name = "time"',
+      'version = "0.1.44"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+      'checksum = "6db9e6914ab8b1ae1c260a4ae7a49b6c5611b40328a735b21862567685e73255"',
+    ].join('\n');
+    const TIME_VULN: OsvVuln = {
+      id: 'RUSTSEC-2020-0071',
+      aliases: ['CVE-2020-26235', 'GHSA-wcg3-cvx6-7396'],
+      summary: 'Potential segfault in the time crate',
+      severity: [{ type: 'CVSS_V3', score: '6.2' }],
+      affected: [
+        {
+          package: { name: 'time', ecosystem: 'crates.io' },
+          ranges: [{ type: 'SEMVER', events: [{ introduced: '0.1.0' }, { fixed: '0.2.23' }] }],
+        },
+      ],
+    };
+    const osvClient = makeOsvClient({
+      queryBatch: vi.fn().mockResolvedValue({
+        results: [{ vulns: [{ id: 'RUSTSEC-2020-0071', modified: '2024-01-01T00:00:00Z' }] }],
+      }),
+      getVuln: vi.fn().mockResolvedValue(TIME_VULN),
+    });
+    const scanner = createDependencyCveScanner({ osvClient });
+    const reader: FileReader = {
+      read: vi.fn().mockResolvedValue(CARGO_LOCK),
+    } as unknown as FileReader;
+
+    const result = await scanner.scan(
+      makeScannerDeps({
+        changedFiles: [makeChangedFile({ path: 'Cargo.lock', language: 'plaintext' })],
+        fileReader: reader,
+      }),
+    );
+
+    expect(osvClient.queryBatch).toHaveBeenCalledOnce();
+    const queries = (osvClient.queryBatch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Array<{
+      package: { name: string; ecosystem: string };
+      version: string;
+    }>;
+    expect(queries).toEqual([
+      { package: { name: 'time', ecosystem: 'crates.io' }, version: '0.1.44' },
+    ]);
+
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    expect(finding.file_path).toBe('Cargo.lock');
+    expect(finding.line).toBe(5);
+    expect(finding.evidence.kind).toBe('cve');
+    if (finding.evidence.kind !== 'cve') throw new Error('expected cve evidence');
+    expect(finding.evidence.ecosystem).toBe('crates.io');
+    expect(finding.evidence.fixed_version).toBe('0.2.23');
+  });
+});
+
+// -----------------------------------------------------------------
 // scan() — happy path
 // -----------------------------------------------------------------
 

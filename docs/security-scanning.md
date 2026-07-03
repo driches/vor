@@ -9,8 +9,9 @@ The security scanners run in parallel with the AI review and post their findings
 Parses changed lockfiles and queries [OSV.dev](https://osv.dev) for known vulnerabilities. Supported ecosystems:
 
 - **npm**: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
-- **PyPI**: `requirements.txt` — `==`-pinned lines only
+- **PyPI**: `requirements.txt` (`==`-pinned lines only) and `poetry.lock` (packages resolved from PyPI; git/path/custom-index deps are skipped)
 - **Go**: `go.sum` — module code lines only (`/go.mod`-only entries are pruned indirect deps whose code never ships, so they're skipped)
+- **crates.io**: `Cargo.lock` — packages resolved from crates.io (local path/workspace members and git deps are skipped)
 
 Uses the OSV.dev `/v1/querybatch` and `/v1/vulns/{id}` endpoints. No auth, no account, no per-call cost. Findings appear inline on the lockfile line with the version pin, tagged `_via OSV · GHSA-…_`.
 
@@ -87,7 +88,7 @@ entries:
   # Suppress by package + semver range
   - package:
       name: lodash
-      ecosystem: npm           # npm | PyPI | Go
+      ecosystem: npm           # npm | PyPI | Go | crates.io
       version: ">=4.17.20 <4.18.0"
     reason: "Vendor pin until next major"
 
