@@ -115,7 +115,7 @@ Drop a `.vor.yml` in your repo root to control the model, focus areas, severity 
 
 Security scanners run in parallel with the AI review:
 
-- **Dependency CVEs** — queries [OSV.dev](https://osv.dev) for known vulnerabilities in changed lockfiles (npm, PyPI, Go)
+- **Dependency CVEs** — queries [OSV.dev](https://osv.dev) for known vulnerabilities in changed lockfiles (npm, PyPI, Go, crates.io)
 - **Secrets** — scans added lines for hardcoded credentials: AWS keys, GitHub PATs, Anthropic/OpenAI API keys, Stripe keys, and more
 - **SAST** — runs your repo's own linters (ESLint, Ruff, golangci-lint, Semgrep, and others) at zero token cost
 
