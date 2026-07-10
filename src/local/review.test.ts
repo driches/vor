@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorInput, OrchestratorOutput } from '../orchestrator.js';
@@ -53,7 +60,7 @@ describe('runLocalReview', () => {
     expect(spy).toHaveBeenCalledOnce();
     const passed = spy.mock.calls[0]![0];
     expect(passed.dry_run).toBe(true);
-    expect(passed.workspace_dir).toBe(repo);
+    expect(realpathSync(passed.workspace_dir)).toBe(realpathSync(repo));
     expect(rec.target).toBe('range');
     expect(rec.files).toBe(1);
     expect(rec.head.ref).toBe('HEAD');

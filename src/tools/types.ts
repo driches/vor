@@ -1,9 +1,7 @@
 /**
  * Shared types for tool handlers.
  */
-import type { Octokit } from '@octokit/rest';
-import type { FileReader } from '../github/file-reader.js';
-import type { PRContext } from '../github/pr-context.js';
+import type { PRContext, RepoFileReader } from '../platform/types.js';
 import type { RunContext } from '../agent/run-context.js';
 import type { WorkerClient } from '../agent/worker.js';
 import type { ReviewAggregator } from '../output/aggregator.js';
@@ -12,12 +10,11 @@ import type { OcrEngine } from '../ocr/recognize.js';
 import type { VisionClient } from '../vision/describe-image.js';
 
 export interface ToolDeps {
-  octokit: Octokit;
   owner: string;
   repo: string;
   pull_number: number;
   prContext: PRContext;
-  fileReader: FileReader;
+  fileReader: RepoFileReader;
   aggregator: ReviewAggregator;
   config: ReviewConfig;
   /** Local checkout root (GITHUB_WORKSPACE in CI). Used for grep_repo_at_ref. */

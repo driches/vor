@@ -87,8 +87,9 @@ export interface CanonicalUsage {
    */
   cache_read_tokens?: number;
   /**
-   * Tokens written into the prompt cache. Anthropic-only — OpenAI's cache
-   * writes are free and not separately surfaced.
+   * Tokens written into the prompt cache. Anthropic reports these today;
+   * OpenAI GPT-5.6 bills writes but the current Responses usage object does
+   * not expose a separate count.
    */
   cache_creation_tokens?: number;
   /**

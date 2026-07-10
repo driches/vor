@@ -10,7 +10,6 @@
  * up real OSV/secrets scanners.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { Octokit } from '@octokit/rest';
 import type { FileReader } from '../github/file-reader.js';
 import type { SecurityConfig } from '../config/types.js';
 import { InMemoryScanCache } from './cache.js';
@@ -29,7 +28,6 @@ function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
   } as unknown as FileReader;
   const ignoreList: IgnoreList = { matches: vi.fn().mockReturnValue({ ignored: false }) };
   return {
-    octokit: {} as Octokit,
     owner: 'test-owner',
     repo: 'test-repo',
     pull_number: 1,

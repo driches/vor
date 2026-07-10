@@ -18,7 +18,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { Octokit } from '@octokit/rest';
 import type { ChangedFile } from '../types.js';
 import type { FileReader } from '../github/file-reader.js';
 import { InMemoryScanCache } from './cache.js';
@@ -76,7 +75,6 @@ function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
     read: vi.fn().mockResolvedValue(null),
   } as unknown as FileReader;
   return {
-    octokit: {} as Octokit,
     owner: 'test-owner',
     repo: 'test-repo',
     pull_number: 1,

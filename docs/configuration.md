@@ -5,10 +5,10 @@
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required when using a Claude model (the default). |
-| `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI model (`gpt-*`, `o<digit>*`, `chatgpt-*`). |
+| `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI model (`gpt-*`, `o<digit>*`, `chatgpt-*`). OpenAI-only setups default to `gpt-5.6-sol`. |
 | `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted. |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI: `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
+| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (overall default), `claude-haiku-4-5`, `claude-opus-4-7`. OpenAI: `gpt-5.6-sol` (provider default), `gpt-5.6-terra`, `gpt-5.6-luna`. GPT-5.6 requires account access while it remains in limited preview. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config file. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
@@ -32,7 +32,7 @@ Drop this file at the root of any repo Vor reviews to control its behavior. All 
 
 ```yaml
 model: claude-sonnet-4-6  # Claude: claude-sonnet-4-6 | claude-haiku-4-5 | claude-opus-4-7
-                          # OpenAI: gpt-4.1 | gpt-4o-mini | o4-mini | …
+                          # OpenAI: gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna
 # provider: openai        # optional — only needed when `model` doesn't match a known prefix
 max_turns: 40
 

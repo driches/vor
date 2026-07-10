@@ -9,8 +9,9 @@
 
 import type { Octokit } from '@octokit/rest';
 import { logger } from '../util/logger.js';
+import { AGENT_REVIEW_MARKER } from '../platform/review-marker.js';
 
-export const AGENT_REVIEW_MARKER = '<!-- driches/vor: agent-review v1 -->';
+export { AGENT_REVIEW_MARKER } from '../platform/review-marker.js';
 
 export interface PriorReviewsRef {
   owner: string;

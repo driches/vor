@@ -1,6 +1,6 @@
 /**
  * Per-million-token pricing for Claude and OpenAI models. Source: vendor
- * pricing pages (rates as of 2026-05).
+ * pricing pages (rates as of 2026-07).
  *
  * Owned here (not in scripts/eval/) so the production agent runner and the
  * test-only eval harness both consume the same table. Out-of-date entries
@@ -13,9 +13,8 @@ export interface ModelPricing {
   /** $ per million output tokens. */
   output: number;
   /**
-   * $ per million input tokens written to the prompt cache. Anthropic-only —
-   * OpenAI's cached prompts are written for free, so this is `undefined` on
-   * OpenAI rows.
+   * $ per million input tokens written to the prompt cache. Undefined for
+   * models whose provider does not bill cache writes separately.
    */
   cache_creation?: number;
   /** $ per million input tokens read from the prompt cache. */
@@ -33,14 +32,21 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-opus-4-5': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
   'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
   'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
-  // OpenAI rates from the published price list as of 2026-05. Verify before
+  // OpenAI rates from the published price list as of 2026-07. Verify before
   // each release; published rates shift.
   'gpt-4.1': { input: 2, output: 8, cache_read: 0.5 },
   'gpt-4.1-mini': { input: 0.4, output: 1.6, cache_read: 0.1 },
   'gpt-4.1-nano': { input: 0.1, output: 0.4, cache_read: 0.025 },
   'gpt-4o': { input: 2.5, output: 10, cache_read: 1.25 },
   'gpt-4o-mini': { input: 0.15, output: 0.6, cache_read: 0.075 },
-  // GPT-5.x / Codex API pricing from OpenAI pricing page as of 2026-05.
+  // GPT-5.6 preview pricing. Cache writes are billed at 1.25x input and cache
+  // reads at 10% of input. The current Responses usage shape does not expose
+  // cache-write tokens separately, so the rate is ready for that telemetry but
+  // only contributes when the provider reports cache_creation_tokens.
+  'gpt-5.6-sol': { input: 5, output: 30, cache_creation: 6.25, cache_read: 0.5 },
+  'gpt-5.6-terra': { input: 2.5, output: 15, cache_creation: 3.125, cache_read: 0.25 },
+  'gpt-5.6-luna': { input: 1, output: 6, cache_creation: 1.25, cache_read: 0.1 },
+  // GPT-5.x / Codex API pricing from OpenAI pricing page as of 2026-07.
   'gpt-5.5': { input: 5, output: 30, cache_read: 0.5 },
   'gpt-5.4': { input: 2.5, output: 15, cache_read: 0.25 },
   'gpt-5.4-mini': { input: 0.75, output: 4.5, cache_read: 0.075 },
@@ -105,11 +111,9 @@ export function costFromUsage(
 ): number {
   const pricing =
     pricingForModel(model) ?? pricingForModel('claude-sonnet-4-6') ?? SONNET_FALLBACK_PRICING;
-  // `cache_creation` / `cache_read` are optional on `ModelPricing` because
-  // OpenAI rows have no cache_creation cost (cached writes are free, only
-  // reads are billed at a discounted rate). Guard each with `?? 0` so an
-  // OpenAI model that emits zero cache_creation_tokens against an
-  // undefined `pricing.cache_creation` contributes $0 instead of `NaN`.
+  // Cache rates are optional because most OpenAI models do not bill cache
+  // writes separately. Guard each with `?? 0` so usage from those models does
+  // not produce `NaN`.
   return (
     ((usage.inputTokens ?? 0) * pricing.input) / 1_000_000 +
     ((usage.outputTokens ?? 0) * pricing.output) / 1_000_000 +

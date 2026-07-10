@@ -64,6 +64,9 @@ describe('pricingForModel', () => {
       'gpt-5.4-mini',
       'gpt-5.4-nano',
       'gpt-5.5',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
       'o1',
       'o1-mini',
       'o1-preview',
@@ -138,6 +141,27 @@ describe('pricingForModel', () => {
       input: 1.75,
       output: 14,
       cache_read: 0.175,
+    });
+  });
+
+  it('prices all GPT-5.6 tiers including billed cache writes', () => {
+    expect(pricingForModel('gpt-5.6-sol')).toEqual({
+      input: 5,
+      output: 30,
+      cache_creation: 6.25,
+      cache_read: 0.5,
+    });
+    expect(pricingForModel('gpt-5.6-terra')).toEqual({
+      input: 2.5,
+      output: 15,
+      cache_creation: 3.125,
+      cache_read: 0.25,
+    });
+    expect(pricingForModel('gpt-5.6-luna')).toEqual({
+      input: 1,
+      output: 6,
+      cache_creation: 1.25,
+      cache_read: 0.1,
     });
   });
 

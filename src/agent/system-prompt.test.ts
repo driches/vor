@@ -15,6 +15,22 @@ describe('buildSystemPrompt', () => {
     expect(p).toContain('Severity calibration');
   });
 
+  it('names the active review platform without changing the GitHub default', () => {
+    const bitbucket = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'workspace/repo',
+      platformName: 'Bitbucket',
+      contextFiles: [],
+    });
+    const github = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'owner/repo',
+      contextFiles: [],
+    });
+    expect(bitbucket).toContain('Bitbucket pull request');
+    expect(github).toContain('GitHub pull request');
+  });
+
   it('includes focus areas based on config', () => {
     const p = buildSystemPrompt({
       config: DEFAULT_CONFIG,

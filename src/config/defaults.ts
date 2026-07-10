@@ -1,5 +1,8 @@
 import type { ReviewConfig } from './types.js';
 
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
+
 /**
  * Defaults applied when no .vor.yml is present.
  * Sonnet 4.6 is the recall-default; consumers wanting cheaper review (with
@@ -7,7 +10,7 @@ import type { ReviewConfig } from './types.js';
  * `model:` in their `.vor.yml`. COMMENT-only (no auto-block), sticky reviews.
  */
 export const DEFAULT_CONFIG: ReviewConfig = {
-  model: 'claude-sonnet-4-6',
+  model: DEFAULT_ANTHROPIC_MODEL,
   max_turns: 40,
 
   exclude: {

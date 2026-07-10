@@ -1,6 +1,6 @@
 ---
-title: AI code review for GitHub PRs
-description: AI-powered PR code review with parallel vulnerability scanning. Inline comments anchored to real diff lines — Claude or OpenAI.
+title: AI code review for PRs
+description: AI-powered PR code review for GitHub Actions and Bitbucket Pipelines with parallel vulnerability scanning. Inline comments anchored to real diff lines — Claude or OpenAI.
 template: splash
 tableOfContents: false
 editUrl: false
@@ -28,15 +28,16 @@ export const base = import.meta.env.BASE_URL;
     AI code review, <span class="ccr-grad">anchored to real lines</span>
   </h1>
   <p class="ccr-tagline">
-    A provider-agnostic GitHub Action — Claude or OpenAI — that posts inline review comments with
-    one-click suggestions, and runs CVE and secret scanning in parallel, all in a single PR review.
+    A provider-agnostic reviewer for GitHub Actions and Bitbucket Pipelines — Claude or OpenAI —
+    that posts inline review comments with concrete suggestions, and runs CVE and secret scanning in
+    parallel.
   </p>
   <div class="ccr-actions">
-    <a class="ccr-btn ccr-btn--primary" href={`${base}overview/#quick-start`}>
-      Get started →
+    <a class="ccr-btn ccr-btn--primary" href={`${base}github-actions/`}>
+      GitHub setup →
     </a>
-    <a class="ccr-btn ccr-btn--ghost" href="https://github.com/driches/vor">
-      View on GitHub
+    <a class="ccr-btn ccr-btn--ghost" href={`${base}bitbucket-pipelines/`}>
+      Bitbucket setup
     </a>
   </div>
   <div class="ccr-trust">
@@ -167,7 +168,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - uses: driches/vor@v0
         with:
@@ -177,7 +178,42 @@ jobs:
           dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
-  <p class="ccr-step">Prefer OpenAI? Swap in <code>openai_api_key</code> and set <code>model: gpt-4.1</code> — the provider is inferred from the model id. You can also re-run or review any PR on demand via <strong>Actions → Vor → Run workflow</strong>.</p>
+<p class="ccr-step">
+  Prefer OpenAI? Swap in <code>openai_api_key</code>; Vor selects <code>gpt-5.6-sol</code> when
+  OpenAI is the only configured provider, or you can set a GPT-5.6 tier explicitly. GPT-5.6
+  currently requires preview access. You can also re-run or review any PR on demand via{' '}
+  <strong>Actions → Vor → Run workflow</strong>.
+</p>
+
+<p class="ccr-step">
+  <a href={`${base}github-actions/`}>Read the complete GitHub Actions setup guide</a> for secret
+  creation, permissions, verification, dry runs, fork behavior, and troubleshooting.
+</p>
+
+```yaml title="bitbucket-pipelines.yml"
+image: node:20
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: Vor review
+          clone:
+            depth: full
+          script:
+            - git checkout "$BITBUCKET_COMMIT"
+            - npx -y @driches/vor@latest bitbucket review
+```
+
+<p class="ccr-step">
+  For Bitbucket Cloud, add secure variables for <code>BITBUCKET_API_EMAIL</code>,{' '}
+  <code>BITBUCKET_API_TOKEN</code>, and your LLM API key. The explicit source-commit checkout keeps
+  disk-backed scanners aligned with the PR diff after Bitbucket prepares its destination-merge
+  checkout. Bitbucket does not trigger pull-request Pipelines for fork PRs; Data Center/Server is
+  not supported in v1.
+</p>
+
+  <p class="ccr-step"><a href={`${base}bitbucket-pipelines/`}>Read the complete Bitbucket Pipelines setup guide</a> for token scopes, secured variables, verification, sticky reruns, dry runs, and troubleshooting.</p>
 </section>
 
 <section class="ccr-section">
@@ -201,8 +237,8 @@ jobs:
     <div class="ccr-why__card">
       <h3>Comments land inline</h3>
       <p>
-        Reviews post via <code>pulls.createReview</code> with a structured <code>comments[]</code>{' '}
-        array — path, line, side, and suggestion blocks.
+        GitHub posts a structured review; Bitbucket Cloud posts anchored PR comments. Both paths use
+        the same validated file, line, and side data.
       </p>
     </div>
     <div class="ccr-why__card">

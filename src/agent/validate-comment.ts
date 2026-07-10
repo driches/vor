@@ -6,7 +6,7 @@
  * can self-correct rather than silently fail.
  */
 
-import { formatRanges, isLineReviewable } from '../github/reviewable-lines.js';
+import { formatRanges, isLineReviewable } from '../platform/reviewable-lines.js';
 import type { Category, ChangedFile, Confidence, PostedComment, Severity, Side } from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
 import { hasReadRange, type RunContext } from './run-context.js';

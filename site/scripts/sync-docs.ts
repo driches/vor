@@ -40,6 +40,20 @@ const PAGES: Page[] = [
       'AI-powered PR code review with parallel vulnerability scanning — inline comments anchored to real diff lines.',
   },
   {
+    src: 'docs/setup-github.md',
+    out: 'github-actions.md',
+    title: 'GitHub Actions setup',
+    description:
+      'Install Vor on GitHub Actions, configure credentials and permissions, and verify pull request reviews.',
+  },
+  {
+    src: 'docs/setup-bitbucket.md',
+    out: 'bitbucket-pipelines.md',
+    title: 'Bitbucket Pipelines setup',
+    description:
+      'Install Vor on Bitbucket Cloud, configure API token scopes and secured variables, and verify pull request reviews.',
+  },
+  {
     src: 'docs/configuration.md',
     out: 'configuration.md',
     title: 'Configuration',
@@ -139,7 +153,7 @@ function rewriteLinks(md: string): string {
   // 1. Cross-doc markdown links → on-site routes, preserving any #anchor.
   for (const [src, route] of ROUTE_BY_SRC) {
     const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\]\\((?:\\./)?${escaped}(#[^)\\s]*)?\\)`, 'g');
+    const re = new RegExp(`\\]\\((?:\\.\\.?/)?${escaped}(#[^)\\s]*)?\\)`, 'g');
     out = out.replace(re, (_m, anchor) => `](${route}${anchor ?? ''})`);
   }
 

@@ -43,6 +43,9 @@ describe('isReasoningModel', () => {
   });
 
   it('returns true for GPT-5.x and Codex reasoning models', () => {
+    expect(isReasoningModel('gpt-5.6-sol')).toBe(true);
+    expect(isReasoningModel('gpt-5.6-terra')).toBe(true);
+    expect(isReasoningModel('gpt-5.6-luna')).toBe(true);
     expect(isReasoningModel('gpt-5.5')).toBe(true);
     expect(isReasoningModel('gpt-5.4-mini')).toBe(true);
     expect(isReasoningModel('gpt-5.3-codex')).toBe(true);
@@ -65,6 +68,7 @@ describe('supportsTemperature', () => {
     expect(supportsTemperature('gpt-4o')).toBe(true);
     expect(supportsTemperature('chatgpt-4o-latest')).toBe(true);
     expect(supportsTemperature('gpt-5.5')).toBe(false);
+    expect(supportsTemperature('gpt-5.6-sol')).toBe(false);
   });
 });
 
@@ -791,8 +795,7 @@ describe('responsesResponseToCanonical', () => {
       } as unknown as Partial<OpenAI.Responses.Response>),
     );
     expect(result.usage.reasoning_tokens).toBe(150);
-    // cache_creation_tokens is intentionally never set for OpenAI (no
-    // creation cost surfaced by the API).
+    // The current Responses usage shape does not surface cache writes.
     expect(result.usage.cache_creation_tokens).toBeUndefined();
   });
 

@@ -461,8 +461,9 @@ export function responsesResponseToCanonical(
   if (cacheRead > 0) usage.cache_read_tokens = cacheRead;
   const reasoning = response.usage?.output_tokens_details?.reasoning_tokens ?? 0;
   if (reasoning > 0) usage.reasoning_tokens = reasoning;
-  // cache_creation_tokens is intentionally left unset — OpenAI doesn't bill
-  // for cache writes and the canonical type allows undefined.
+  // cache_creation_tokens stays unset because the current Responses usage
+  // object does not expose cache writes separately. GPT-5.6 bills them, so
+  // populate the canonical field when the SDK/API adds that telemetry.
 
   return {
     text,

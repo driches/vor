@@ -18,11 +18,14 @@ export interface RepoContextEntry {
 export interface BuildSystemPromptInput {
   config: ReviewConfig;
   repoName: string;
+  platformName?: string;
   contextFiles: RepoContextEntry[];
 }
 
 export function buildSystemPrompt(input: BuildSystemPromptInput): string {
-  const sections: string[] = [BASE_PROMPT];
+  const sections: string[] = [
+    BASE_PROMPT.replace('{review_platform}', input.platformName ?? 'GitHub'),
+  ];
 
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
@@ -88,7 +91,7 @@ Investigate freely, including in areas the static tools cover. If you spot an ob
 
 **Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
 
-const BASE_PROMPT = `You are a senior staff engineer performing a code review on a GitHub pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
+const BASE_PROMPT = `You are a senior staff engineer performing a code review on a {review_platform} pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal
 
