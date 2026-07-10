@@ -16,6 +16,35 @@ describe('post_summary tool', () => {
     expect(deps.aggregator.hasSummary()).toBe(true);
   });
 
+  it('accepts a coverage note limited to review scope', async () => {
+    const deps = buildFakeDeps();
+    const tool = makePostSummaryTool(deps);
+    const result = await callTool(tool, {
+      strengths: ['Tests cover the new edge case clearly.'],
+      assessment: 'comment',
+      assessment_reasoning: 'A small observation but nothing blocking the merge.',
+      coverage_note: 'Reviewed the changed source files; skipped generated snapshots.',
+    });
+    const json = getResultJson(result) as { accepted: boolean };
+    expect(json.accepted).toBe(true);
+  });
+
+  it('rejects scanner cleanliness claims in coverage notes', async () => {
+    const deps = buildFakeDeps();
+    const tool = makePostSummaryTool(deps);
+
+    await expect(
+      callTool(tool, {
+        strengths: ['Tests cover the new edge case clearly.'],
+        assessment: 'comment',
+        assessment_reasoning: 'A small observation but nothing blocking the merge.',
+        coverage_note:
+          'requirements.txt was reviewed; pyyaml and requests appear clean at those versions.',
+      }),
+    ).rejects.toThrow('Coverage notes may only describe reviewed or skipped scope');
+    expect(deps.aggregator.hasSummary()).toBe(false);
+  });
+
   it('rejects second call', async () => {
     const deps = buildFakeDeps();
     const tool = makePostSummaryTool(deps);

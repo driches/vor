@@ -75864,6 +75864,8 @@ function normalizeSuggestion(raw) {
 }
 
 // src/tools/post-summary.ts
+var UNSUPPORTED_COVERAGE_CLAIM = /\bclean\b|\b(?:no|without)\s+(?:known\s+)?(?:issues?|findings?|vulnerabilit(?:y|ies)|cves?|secrets?)\b|\b(?:issue|vulnerability|cve|secret)-free\b/i;
+var COVERAGE_SCOPE_MESSAGE = "Coverage notes may only describe reviewed or skipped scope; do not claim files or dependencies are clean or free of scanner findings.";
 function makePostSummaryTool(deps) {
   return tool(
     "post_summary",
@@ -75872,7 +75874,11 @@ function makePostSummaryTool(deps) {
       strengths: external_exports.array(external_exports.string().min(10).max(280)).min(1).max(5).describe('1-5 specific strengths. "Nice PR" is not specific. Cite what.'),
       assessment: external_exports.enum(["approve", "request_changes", "comment"]),
       assessment_reasoning: external_exports.string().min(30).max(800).describe("Why this assessment, in 1-3 sentences. Be concrete."),
-      coverage_note: external_exports.string().max(400).optional().describe('Optional note about coverage gaps, e.g., "Skipped generated proto files."'),
+      coverage_note: external_exports.string().max(400).refine((value) => !UNSUPPORTED_COVERAGE_CLAIM.test(value), {
+        message: COVERAGE_SCOPE_MESSAGE
+      }).optional().describe(
+        'Optional factual note about reviewed or skipped scope, e.g., "Skipped generated proto files." Never claim files or dependencies are clean; scanners run independently.'
+      ),
       unreviewed_paths: external_exports.array(external_exports.string()).optional().describe("Paths intentionally not reviewed (e.g., out of token budget).")
     },
     async (args) => {
@@ -77289,7 +77295,8 @@ function extractGoSymbols(line) {
 // src/agent/system-prompt.ts
 function buildSystemPrompt(input) {
   const sections = [
-    BASE_PROMPT.replace("{review_platform}", input.platformName ?? "GitHub")
+    BASE_PROMPT.replace("{review_platform}", input.platformName ?? "GitHub"),
+    SCANNER_RESULT_BOUNDARY_SECTION
   ];
   const focus = buildFocusBlock(input.config);
   if (focus) sections.push(focus);
@@ -77325,6 +77332,13 @@ This repo runs language-appropriate static tools alongside your review (you don'
 Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) \u2014 flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
 
 **Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
+var SCANNER_RESULT_BOUNDARY_SECTION = `# Scanner result boundary
+
+Deterministic scanners may run independently of your review. Unless findings are explicitly included in the user prompt, you cannot see their results. Even when findings are included, absence from that bounded list is not proof that a scanner completed successfully or found nothing.
+
+- Do not declare a dependency, package, lockfile, source file, or the PR itself clean, safe, vulnerability-free, CVE-free, secret-free, or free of scanner findings.
+- In \`post_summary\`, use \`coverage_note\` only for factual review scope: what you inspected, what you skipped, and why. Do not use it to make health or cleanliness claims.
+- You may summarize scanner findings explicitly supplied in the user prompt, but never infer a clean result from their absence.`;
 var BASE_PROMPT = `You are a senior staff engineer performing a code review on a {review_platform} pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 
 # Goal

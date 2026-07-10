@@ -25,6 +25,7 @@ export interface BuildSystemPromptInput {
 export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   const sections: string[] = [
     BASE_PROMPT.replace('{review_platform}', input.platformName ?? 'GitHub'),
+    SCANNER_RESULT_BOUNDARY_SECTION,
   ];
 
   const focus = buildFocusBlock(input.config);
@@ -90,6 +91,14 @@ This repo runs language-appropriate static tools alongside your review (you don'
 Investigate freely, including in areas the static tools cover. If you spot an obvious lint-style issue (a clearly unused export, a hardcoded API key, a shell-injection vector) — flag it as a safety net, because the relevant linter may not be installed in this workspace. Static tools complement your review, they don't replace your judgment.
 
 **Verification discipline is unchanged.** Before posting any critical or important finding, you still read the bytes via \`read_file_at_ref\` to verify. Static analysis doesn't bypass that.`;
+
+const SCANNER_RESULT_BOUNDARY_SECTION = `# Scanner result boundary
+
+Deterministic scanners may run independently of your review. Unless findings are explicitly included in the user prompt, you cannot see their results. Even when findings are included, absence from that bounded list is not proof that a scanner completed successfully or found nothing.
+
+- Do not declare a dependency, package, lockfile, source file, or the PR itself clean, safe, vulnerability-free, CVE-free, secret-free, or free of scanner findings.
+- In \`post_summary\`, use \`coverage_note\` only for factual review scope: what you inspected, what you skipped, and why. Do not use it to make health or cleanliness claims.
+- You may summarize scanner findings explicitly supplied in the user prompt, but never infer a clean result from their absence.`;
 
 const BASE_PROMPT = `You are a senior staff engineer performing a code review on a {review_platform} pull request. You will be evaluated SOLELY by the inline comments and the summary you post via tools. Prose you write to stdout is logged for debugging only and is invisible to the PR author. There is no way to "say" anything to the author except through \`post_inline_comment\` and \`post_summary\`.
 

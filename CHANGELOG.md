@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New docs pages on driches.github.io/vor**: Configuration, Security scanning, Trigger options, Local usage, and How it works — synced from new source files under `docs/`.
 
 ### Fixed
+- **Agent summaries no longer declare scanner-covered files or dependencies clean without scanner evidence.** Deterministic scanners can finish after the agent because both tracks run in parallel. The shared prompt now makes that result boundary explicit, and `post_summary.coverage_note` rejects cleanliness, CVE-free, vulnerability-free, and similar health claims so the model retries with factual reviewed/skipped scope instead of contradicting final scanner comments.
 - **`review.post_summary: false` is now honored.** The option existed in the schema, defaults, and docs but was read nowhere — the summary body always posted. When set to `false`, the review still posts (inline comments are the deliverable, and the hidden agent-review marker is kept so sticky dismissal and prior-thread awareness keep working) but the rendered summary markdown is suppressed. Trade-off the setting opts into: binary-file findings (e.g. image-OCR secrets) only surface in the summary body, so a warning is logged when any would be dropped.
 
 ### Docs
