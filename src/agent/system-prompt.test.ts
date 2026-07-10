@@ -13,6 +13,9 @@ describe('buildSystemPrompt', () => {
     expect(p).toContain('post_inline_comment');
     expect(p).toContain('post_summary');
     expect(p).toContain('Severity calibration');
+    expect(p).toContain('Scanner result boundary');
+    expect(p).toContain('Do not declare a dependency');
+    expect(p).toContain('coverage_note');
   });
 
   it('names the active review platform without changing the GitHub default', () => {
