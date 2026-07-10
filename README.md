@@ -19,7 +19,7 @@
   <strong><a href="https://driches.github.io/vor/">Documentation &amp; site →</a></strong>
 </p>
 
-> AI code review that posts inline comments anchored to real diff lines — with one-click suggestions, CVE scanning, and secrets detection — running entirely inside your CI on the LLM you already pay for.
+> AI code review for GitHub Actions and Bitbucket Pipelines that posts inline comments anchored to real diff lines — with CVE scanning and secrets detection — running entirely inside your CI on the LLM you already pay for.
 
 ## Why Vor
 
@@ -27,11 +27,22 @@
 
 **Comments can't land on lines that don't exist.** Every inline comment is validated against the actual diff before posting. The agent gets a structured hint and self-corrects — hallucinated line numbers are structurally impossible.
 
-**Security is first-class, not a bolt-on.** CVE scanning via OSV, 14+ hardcoded-credential patterns, and multi-language SAST run in parallel with the AI review and post in the same single PR review.
+**Security is first-class, not a bolt-on.** CVE scanning via OSV, 14+ hardcoded-credential patterns, and multi-language SAST run in parallel with the AI review and flow through the same filtering and deduplication pipeline.
 
 **Works with Claude or GPT.** Switch by changing one line — the provider is inferred from the model ID.
 
-## Getting started
+## Setup
+
+Choose the guide for your pull request host. Both cover credentials, permissions, CI configuration, dry runs, verification, and troubleshooting.
+
+| Environment | Setup guide |
+|---|---|
+| GitHub Actions | [Set up Vor on GitHub Actions](docs/setup-github.md) |
+| Bitbucket Cloud | [Set up Vor on Bitbucket Pipelines](docs/setup-bitbucket.md) |
+
+GitHub Actions keeps the existing action interface and review behavior. Bitbucket Cloud uses the `vor bitbucket review` CLI inside Pipelines. Bitbucket Data Center and Server are not supported in v1.
+
+## GitHub Actions quick start
 
 ### 1. Add your API key as a repo secret
 
@@ -68,13 +79,34 @@ jobs:
           pr_number: ${{ inputs.pr_number }}
 ```
 
-Prefer OpenAI? Replace `anthropic_api_key` with `openai_api_key` and add `model: gpt-4.1`. The provider is inferred from the model name.
+Prefer OpenAI? Replace `anthropic_api_key` with `openai_api_key` and add `model: gpt-5.6-sol`. The provider is inferred from the model name, and OpenAI-only setups use `gpt-5.6-sol` when no model is specified.
 
 ### 3. Open a PR
 
 Vor reviews it automatically. To re-run on any existing PR, go to **Actions → Vor → Run workflow** and enter the PR number.
 
 > Want to trigger from a PR comment, or limit to manual runs only? See [Trigger options →](https://driches.github.io/vor/triggers/).
+
+## Bitbucket Pipelines quick start
+
+Add secured repository variables for `BITBUCKET_API_EMAIL`, `BITBUCKET_API_TOKEN`, and one LLM key, then add `bitbucket-pipelines.yml`:
+
+```yaml
+image: node:20
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: Vor review
+          clone:
+            depth: full
+          script:
+            - git checkout "$BITBUCKET_COMMIT"
+            - npx -y @driches/vor@latest bitbucket review
+```
+
+The Bitbucket token needs repository read and pull request read/write scopes. Follow the [Bitbucket Pipelines setup guide](docs/setup-bitbucket.md) for the exact token permissions, secured variables, and live verification checklist.
 
 ## What a review looks like
 

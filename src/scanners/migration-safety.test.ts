@@ -3,7 +3,6 @@
  * without default) on PR-added lines of migration files.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { Octokit } from '@octokit/rest';
 import type { ChangedFile, LineRange } from '../types.js';
 import type { FileReader } from '../github/file-reader.js';
 import { InMemoryScanCache } from './cache.js';
@@ -55,7 +54,6 @@ function makeIgnoreList(result: IgnoreMatchResult = { ignored: false }): IgnoreL
 
 function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
   return {
-    octokit: {} as Octokit,
     owner: 'o',
     repo: 'r',
     pull_number: 1,

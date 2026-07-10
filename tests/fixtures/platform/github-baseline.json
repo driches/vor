@@ -1,0 +1,82 @@
+{
+  "baseline_sha": "3ba439d5ec6593955699f2f1f63c7d92796d82ec",
+  "post": {
+    "event": "COMMENT",
+    "body_contains": [
+      "### Minor findings",
+      "Small observations; nothing blocking the merge here.",
+      "### Strengths",
+      "Reviewed by [driches/vor](https://github.com/driches/vor) using `claude-sonnet-4-6`."
+    ],
+    "prompt_contains": [
+      "Your prior review threads on this PR",
+      "Existing finding",
+      "This is by design; won't fix."
+    ],
+    "comments": [
+      {
+        "file_path": "src/app.ts",
+        "line": 5,
+        "severity": "minor",
+        "category": "readability",
+        "title": "Function lacks return type annotation",
+        "confidence": "medium"
+      },
+      {
+        "file_path": "src/app.ts",
+        "line": 6,
+        "severity": "minor",
+        "category": "bug",
+        "title": "Leftover `debugger` statement in app.ts",
+        "confidence": "high"
+      }
+    ]
+  },
+  "result": {
+    "comment_count": 2,
+    "ended": "summary_posted",
+    "dry_run": false
+  },
+  "github_adapter": {
+    "prior_threads": [
+      {
+        "file_path": "src/app.ts",
+        "line": 5,
+        "outdated": false,
+        "finding_excerpt": "[IMPORTANT · bug] Existing finding",
+        "from_dismissable_review": true,
+        "already_dismissed": false,
+        "has_pushback": true,
+        "replies": [
+          {
+            "author": "author",
+            "excerpt": "This is by design; won't fix."
+          }
+        ]
+      }
+    ],
+    "dismiss_review": {
+      "owner": "driches",
+      "repo": "test",
+      "pull_number": 1,
+      "review_id": 41,
+      "message": "Superseded by review on commit head111."
+    },
+    "create_review": {
+      "owner": "driches",
+      "repo": "test",
+      "pull_number": 1,
+      "commit_id": "head111",
+      "event": "COMMENT",
+      "body": "<!-- driches/vor: agent-review v1 -->\n\nBaseline summary",
+      "comments": [
+        {
+          "path": "src/app.ts",
+          "line": 5,
+          "side": "RIGHT",
+          "body": "**[IMPORTANT · bug]** Guard missing null profile\n\nThe code can throw when the profile is absent.\n\n```suggestion\nif (!profile) return null;\n```"
+        }
+      ]
+    }
+  }
+}

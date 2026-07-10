@@ -23,7 +23,7 @@
  * dedup all live in the runner (Task 7) — not here. A `false` result returns
  * a `reason` string suitable for surfacing in the run log.
  */
-import { isLineReviewable } from '../github/reviewable-lines.js';
+import { isLineReviewable } from '../platform/reviewable-lines.js';
 import type { ChangedFile } from '../types.js';
 import type { ScanFinding } from './types.js';
 

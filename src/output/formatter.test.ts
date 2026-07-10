@@ -405,6 +405,20 @@ describe('renderSummary — binary-file findings (non-inline channel)', () => {
     expect(r.body).toContain('masked match `AKIA…WXYZ`');
   });
 
+  it('uses the active platform name in the binary-anchor explanation', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      platformName: 'Bitbucket',
+      binaryFindings: [ocrFinding()],
+    });
+    expect(r.body).toContain("Bitbucket can't anchor inline comments on binary files");
+    expect(r.body).not.toContain("GitHub can't anchor inline comments on binary files");
+  });
+
   it('counts a binary finding toward the severity headline even with no inline comments', () => {
     const r = renderSummary({
       draft: baseDraft({ summary: undefined }),

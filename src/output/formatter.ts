@@ -31,6 +31,8 @@ export interface SummaryRenderInput {
    * out of a committed screenshot.
    */
   binaryFindings?: readonly ScanFinding[];
+  /** Human-readable review platform name. Defaults to GitHub for compatibility. */
+  platformName?: string;
 }
 
 export interface RenderedSummary {
@@ -52,6 +54,7 @@ export interface RenderedSummary {
  * is the ceiling and the agent cannot escalate above it.
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
+  const platformName = input.platformName ?? 'GitHub';
   const summary = input.draft.summary;
   const unreviewedPaths = mergeUniquePaths(
     summary?.unreviewed_paths ?? [],
@@ -108,7 +111,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   if (input.binaryFindings && input.binaryFindings.length > 0) {
     sections.push('### Security findings in binary files');
     sections.push(
-      "_GitHub can't anchor inline comments on binary files, so these are reported here._",
+      `_${platformName} can't anchor inline comments on binary files, so these are reported here._`,
     );
     sections.push(formatBinaryFindings(input.binaryFindings));
   }
