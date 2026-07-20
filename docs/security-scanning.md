@@ -1,6 +1,8 @@
 # Security scanning
 
-The security scanners run in parallel with the AI review and post their findings in the same single PR review, tagged with provenance so you can tell at a glance which tool surfaced each finding.
+The security scanners run in parallel with the AI review and post through the same review run, tagged with provenance so you can tell at a glance which tool surfaced each finding.
+
+Scanner results that pass the configured severity floor are authoritative when they conflict with agent output. If both tracks report the same eligible issue, Vor keeps the validated scanner finding. An eligible critical or important scanner finding also prevents an agent approval; repositories configured for `REQUEST_CHANGES` receive that state, while other event configurations post a non-approving `COMMENT`.
 
 ## Scope (v1)
 

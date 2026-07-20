@@ -45,6 +45,21 @@ describe('post_summary tool', () => {
     expect(deps.aggregator.hasSummary()).toBe(false);
   });
 
+  it('rejects scanner cleanliness claims elsewhere in the summary', async () => {
+    const deps = buildFakeDeps();
+    const tool = makePostSummaryTool(deps);
+
+    await expect(
+      callTool(tool, {
+        strengths: ['The dependency updates are clean and safe to ship.'],
+        assessment: 'approve',
+        assessment_reasoning:
+          'The implementation follows existing patterns and has no known vulnerabilities.',
+      }),
+    ).rejects.toThrow('deterministic scanner results are reconciled after the agent finishes');
+    expect(deps.aggregator.hasSummary()).toBe(false);
+  });
+
   it('rejects second call', async () => {
     const deps = buildFakeDeps();
     const tool = makePostSummaryTool(deps);

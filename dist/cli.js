@@ -75865,15 +75865,23 @@ function normalizeSuggestion(raw) {
 
 // src/tools/post-summary.ts
 var UNSUPPORTED_COVERAGE_CLAIM = /\bclean\b|\b(?:no|without)\s+(?:known\s+)?(?:issues?|findings?|vulnerabilit(?:y|ies)|cves?|secrets?)\b|\b(?:issue|vulnerability|cve|secret)-free\b/i;
+var UNSUPPORTED_SCANNER_STATUS_CLAIM = /\b(?:dependencies?|packages?|lockfiles?|requirements(?:\.txt)?|scanners?|security checks?)\b[^.!?\n]{0,100}\b(?:clean|safe|secure|(?:issue|vulnerability|cve|secret)-free|free of (?:issues?|findings?|vulnerabilities|cves?|secrets?))\b|\b(?:clean|safe|secure|(?:issue|vulnerability|cve|secret)-free)\b[^.!?\n]{0,100}\b(?:dependencies?|packages?|lockfiles?|requirements(?:\.txt)?|scanners?|security checks?)\b|\b(?:no|without)\s+(?:known\s+)?(?:cves?|vulnerabilit(?:y|ies)|scanner findings?|secrets?)\b/i;
 var COVERAGE_SCOPE_MESSAGE = "Coverage notes may only describe reviewed or skipped scope; do not claim files or dependencies are clean or free of scanner findings.";
+var SCANNER_STATUS_MESSAGE = "Summary text must not claim dependencies or scanner-covered areas are clean; deterministic scanner results are reconciled after the agent finishes.";
 function makePostSummaryTool(deps) {
   return tool(
     "post_summary",
     "Posts the PR-level summary and ENDS the review. Call this exactly once, last. Requires 1-5 specific strengths (something the author did well) and an assessment with reasoning.\n\nassessment values:\n- approve: no significant issues; ready to merge\n- comment: observations only; not blocking\n- request_changes: at least one critical or important finding (validated)",
     {
-      strengths: external_exports.array(external_exports.string().min(10).max(280)).min(1).max(5).describe('1-5 specific strengths. "Nice PR" is not specific. Cite what.'),
+      strengths: external_exports.array(
+        external_exports.string().min(10).max(280).refine((value) => !UNSUPPORTED_SCANNER_STATUS_CLAIM.test(value), {
+          message: SCANNER_STATUS_MESSAGE
+        })
+      ).min(1).max(5).describe('1-5 specific strengths. "Nice PR" is not specific. Cite what.'),
       assessment: external_exports.enum(["approve", "request_changes", "comment"]),
-      assessment_reasoning: external_exports.string().min(30).max(800).describe("Why this assessment, in 1-3 sentences. Be concrete."),
+      assessment_reasoning: external_exports.string().min(30).max(800).refine((value) => !UNSUPPORTED_SCANNER_STATUS_CLAIM.test(value), {
+        message: SCANNER_STATUS_MESSAGE
+      }).describe("Why this assessment, in 1-3 sentences. Be concrete."),
       coverage_note: external_exports.string().max(400).refine((value) => !UNSUPPORTED_COVERAGE_CLAIM.test(value), {
         message: COVERAGE_SCOPE_MESSAGE
       }).optional().describe(
@@ -78019,15 +78027,28 @@ function renderSummary(input) {
     input.unreviewedPaths ?? []
   );
   const sections = [];
+  const scannerCommentsForAssessment = input.scannerCommentsForAssessment ?? input.keptComments.filter((comment) => comment.source?.kind === "scanner");
+  const blockingScannerFindings = [
+    ...scannerCommentsForAssessment.filter(
+      (comment) => comment.severity === "critical" || comment.severity === "important"
+    ),
+    ...(input.binaryFindings ?? []).filter(
+      (finding) => finding.severity === "critical" || finding.severity === "important"
+    )
+  ];
+  const scannerOverridesAssessment = blockingScannerFindings.length > 0 && summary2?.assessment !== "request_changes";
   const headlineSeverities = [
     ...input.keptComments.map((c2) => c2.severity),
+    ...scannerCommentsForAssessment.map((c2) => c2.severity),
     ...(input.binaryFindings ?? []).map((f2) => f2.severity)
   ];
   sections.push(`### ${severityHeader(headlineSeverities)}`);
   if (!summary2) {
     sections.push(missingSummaryWarning(input.agentEnded));
   }
-  if (summary2) {
+  if (scannerOverridesAssessment) {
+    sections.push(scannerAssessmentOverride(blockingScannerFindings.length, summary2?.assessment));
+  } else if (summary2) {
     sections.push(summary2.assessment_reasoning);
   }
   if (summary2 && summary2.strengths.length > 0) {
@@ -78061,7 +78082,7 @@ function renderSummary(input) {
   }
   if (input.truncatedCount > 0) {
     sections.push(
-      `_${input.truncatedCount} additional comment(s) were dropped due to per-file or global caps._`
+      `_${input.truncatedCount} additional comment(s) were removed by severity filtering, overlap reconciliation, or comment caps._`
     );
   }
   sections.push("---");
@@ -78069,8 +78090,13 @@ function renderSummary(input) {
     `_Reviewed by [driches/vor](https://github.com/driches/vor) using \`${input.modelName}\`._`
   );
   const agentEvent = !summary2 ? "COMMENT" : summary2.assessment === "approve" ? "APPROVE" : summary2.assessment === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
-  const event = chooseEvent(input.configEvent, agentEvent);
+  const event = blockingScannerFindings.length > 0 ? input.configEvent === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "COMMENT" : chooseEvent(input.configEvent, agentEvent);
   return { body: sections.join("\n\n"), event };
+}
+function scannerAssessmentOverride(count, assessment) {
+  const noun = count === 1 ? "finding" : "findings";
+  const prior = assessment ? `the agent's ${assessment} assessment` : "the missing agent assessment";
+  return `> **Deterministic scanner result:** ${count} critical or important ${noun} take precedence over ${prior}. Treat the scanner-backed findings as authoritative.`;
 }
 function mergeUniquePaths(a2, b2) {
   return [.../* @__PURE__ */ new Set([...a2, ...b2])];
@@ -78249,7 +78275,7 @@ var CONFIDENCE_RANK = {
   medium: 2,
   low: 1
 };
-var AI_SECURITY_ADJACENT_CATEGORIES = /* @__PURE__ */ new Set([
+var SECURITY_ADJACENT_CATEGORIES = /* @__PURE__ */ new Set([
   "security",
   "vulnerability",
   "data-loss"
@@ -78298,15 +78324,19 @@ function dedupAcrossScanners(findings) {
   }
   return out2.filter((_f, i2) => !droppedSlots.has(i2));
 }
-function dedupKeptScannerComments(kept) {
-  const survivingAi = kept.filter((c2) => c2.source?.kind !== "scanner");
-  return kept.filter((c2) => {
-    if (c2.source?.kind !== "scanner") return true;
-    if (c2.source.scanner === "dependency-cve") return true;
-    return !survivingAi.some(
-      (ai) => ai.file_path === c2.file_path && ai.side === c2.side && Math.abs(ai.line - c2.line) <= AI_OVERLAP_LINE_WINDOW && AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category)
-    );
+function dedupCommentsWithScannerPrecedence(comments) {
+  const scannerComments = comments.filter((comment) => comment.source?.kind === "scanner");
+  return comments.filter((comment) => {
+    if (comment.source?.kind === "scanner") return true;
+    return !scannerComments.some((scanner) => commentsOverlap(scanner, comment));
   });
+}
+function commentsOverlap(scanner, agent) {
+  if (scanner.file_path !== agent.file_path || scanner.side !== agent.side) return false;
+  const distance = Math.abs(scanner.line - agent.line);
+  const securityOverlap = SECURITY_ADJACENT_CATEGORIES.has(scanner.category) && SECURITY_ADJACENT_CATEGORIES.has(agent.category) && distance <= AI_OVERLAP_LINE_WINDOW;
+  const exactCategoryOverlap = scanner.category === agent.category && distance === 0;
+  return securityOverlap || exactCategoryOverlap;
 }
 
 // src/scanners/ignore-list.ts
@@ -83558,17 +83588,11 @@ ${base}` : base;
     maxCommentsPerFile: config2.severity.max_comments_per_file,
     maxCommentsTotal: config2.severity.max_comments_total
   };
-  let filtered = filterComments(aggregator.acceptedComments, caps);
-  const dedupedKept = dedupKeptScannerComments(filtered.kept);
-  if (dedupedKept.length < filtered.kept.length) {
-    const dedupKeptSet = new Set(dedupedKept);
-    const dedupExcluded = new Set(filtered.kept.filter((c2) => !dedupKeptSet.has(c2)));
-    const eligible = aggregator.acceptedComments.filter((c2) => !dedupExcluded.has(c2));
-    filtered = filterComments(eligible, caps);
-    filtered.kept = dedupKeptScannerComments(filtered.kept);
-  } else {
-    filtered.kept = dedupedKept;
-  }
+  const aboveFloor = aggregator.acceptedComments.filter(
+    (comment) => SEVERITY_RANK[comment.severity] >= SEVERITY_RANK[config2.severity.floor]
+  );
+  const reconciled = dedupCommentsWithScannerPrecedence(aboveFloor);
+  const filtered = filterComments(reconciled, caps);
   filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
   const rendered = renderSummary({
     draft: aggregator.snapshot(),
@@ -83579,6 +83603,9 @@ ${base}` : base;
     agentEnded: result.ended,
     unreviewedPaths: agentScope.unreviewedPaths,
     binaryFindings,
+    scannerCommentsForAssessment: reconciled.filter(
+      (comment) => comment.source?.kind === "scanner"
+    ),
     platformName: platform2.displayName
   });
   const summaryBody = config2.review.post_summary ? rendered.body : "";

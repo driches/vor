@@ -20,7 +20,7 @@ import { filterComments } from '../output/filter.js';
 import { renderSummary } from '../output/formatter.js';
 import { scanFindingToPostedComment } from '../scanners/adapter.js';
 import { InMemoryScanCache, NoopScanCache } from '../scanners/cache.js';
-import { dedupKeptScannerComments } from '../scanners/dedup.js';
+import { dedupCommentsWithScannerPrecedence } from '../scanners/dedup.js';
 import { IgnoreList } from '../scanners/ignore-list.js';
 import { buildEnabledScanners } from '../scanners/registry.js';
 import { runScanners } from '../scanners/runner.js';
@@ -558,19 +558,10 @@ export async function runReviewWithPlatform(input: ReviewRunInput): Promise<Orch
     );
   }
 
-  // Validate + adapt ALL scanner findings, then push into the same aggregator
-  // so the filter pipeline (severity floor + caps) applies uniformly to both
-  // AI and scanner comments. Dedup between scanner and AI runs AFTER the
-  // filter — see Codex P1 on PR #8.
-  //
-  // Why no early dedup here: an earlier predict-then-dedup approach ran the
-  // filter over AI-only comments to compute "predicted survivors" and deduped
-  // scanner findings against them. That was still wrong: a scanner finding
-  // could be deduped against an AI comment that ended up dropped by the
-  // combined cap (e.g. when other scanner findings outranked it), silently
-  // losing the security signal in the line area. The simpler correct flow is
-  // to add everything to the aggregator and let post-filter dedup decide
-  // based on what ACTUALLY survives.
+  // Validate + adapt all scanner findings, then push them into the same
+  // aggregator as agent comments. The shared reconciliation below applies
+  // the configured severity floor first, gives eligible scanner findings
+  // precedence over overlapping agent findings, and finally applies caps.
   const changedFilesMap = new Map(prContext.files.map((f) => [f.path, f]));
   let addedScannerComments = 0;
   // Findings on binary files (e.g. secrets the image-ocr scanner read out of a
@@ -628,41 +619,23 @@ export async function runReviewWithPlatform(input: ReviewRunInput): Promise<Orch
     );
   }
 
-  // Apply final filters (severity floor, per-file cap, global cap) over the
-  // combined AI + scanner list, then run the post-filter scanner-vs-AI dedup
-  // so scanner findings only lose to AI comments that actually survive caps.
-  //
-  // If dedup removes any kept comments, rerun filterComments over the
-  // combined list minus the dedup-suppressed comments. This refills freed
-  // cap slots so we don't silently under-report when overlap + cap pressure
-  // collide. See Codex P2 on PR #8.
+  // Apply the severity floor before overlap reconciliation so a scanner
+  // finding the operator explicitly filtered out cannot suppress an eligible
+  // AI comment. For eligible overlaps, deterministic scanner findings are
+  // canonical. Reconcile before caps so the scanner result cannot lose its
+  // slot to the AI version of the same issue and then disappear during dedup.
   const caps = {
     severityFloor: config.severity.floor,
     maxCommentsPerFile: config.severity.max_comments_per_file,
     maxCommentsTotal: config.severity.max_comments_total,
   };
-  let filtered = filterComments(aggregator.acceptedComments, caps);
-  const dedupedKept = dedupKeptScannerComments(filtered.kept);
-
-  if (dedupedKept.length < filtered.kept.length) {
-    // Build a Set first so the membership check is O(1) per comment. The
-    // previous Array.includes()-based filter was O(n²) on the kept list —
-    // negligible at the default cap (30) but bad shape for any future
-    // bump.
-    const dedupKeptSet = new Set(dedupedKept);
-    const dedupExcluded = new Set(filtered.kept.filter((c) => !dedupKeptSet.has(c)));
-    const eligible = aggregator.acceptedComments.filter((c) => !dedupExcluded.has(c));
-    filtered = filterComments(eligible, caps);
-    // One more dedup pass: the refill may have admitted AI comments that
-    // overlap a kept scanner finding. Single iteration is enough in
-    // practice — worst case we ship below cap but lose no security signal.
-    filtered.kept = dedupKeptScannerComments(filtered.kept);
-  } else {
-    filtered.kept = dedupedKept;
-  }
+  const aboveFloor = aggregator.acceptedComments.filter(
+    (comment) => SEVERITY_RANK[comment.severity] >= SEVERITY_RANK[config.severity.floor],
+  );
+  const reconciled = dedupCommentsWithScannerPrecedence(aboveFloor);
+  const filtered = filterComments(reconciled, caps);
   // `dropped` is reported relative to the full pre-filter list so the summary
-  // line ("N additional comment(s) were dropped due to per-file/global caps")
-  // counts dedup-suppressed comments too.
+  // accounts for severity filtering, overlap reconciliation, and caps.
   filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
 
   const rendered = renderSummary({
@@ -674,6 +647,9 @@ export async function runReviewWithPlatform(input: ReviewRunInput): Promise<Orch
     agentEnded: result.ended,
     unreviewedPaths: agentScope.unreviewedPaths,
     binaryFindings,
+    scannerCommentsForAssessment: reconciled.filter(
+      (comment) => comment.source?.kind === 'scanner',
+    ),
     platformName: platform.displayName,
   });
 
