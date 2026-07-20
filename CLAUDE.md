@@ -41,3 +41,7 @@ The short list above won't catch most of the ways a contribution can be off-patt
 - The full list of patterns that auto-reject
 
 If you're about to write a comment that says *what* the code does instead of *why*, stop and read AGENTS.md §1 first.
+
+## Knowledge
+
+This repo uses an agent-maintained OKF knowledge bundle at `knowledge/` instead of RAG. Answer questions from `knowledge/index.md` first; ingest new sources by synthesizing into concept pages (update index.md, append to log.md; raw sources are immutable); lint for contradictions, orphans, and broken links during substantial knowledge work. Do not introduce vector stores/embeddings without proposing why the bundle is insufficient. Full conventions: the `knowledge-bundle` skill / ~/Developer/CLAUDE.md.
