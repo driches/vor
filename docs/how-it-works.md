@@ -2,9 +2,9 @@
 
 ## The review pipeline
 
-1. The action fetches PR metadata, the file list, and the full unified diff via the GitHub API.
+1. The active platform adapter fetches PR metadata, the file list, and the full unified diff from GitHub or Bitbucket Cloud.
 2. It computes **reviewable line ranges** for each file — the added lines plus context lines inside diff hunks.
-3. It loads `.vor.yml` and any convention files listed in `context.include` (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD.
+3. It loads `.vor.yml` and any convention files listed in `context.include` (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD through the same adapter.
 4. It builds a system prompt that includes the repo's conventions, severity calibration, and any `prompt.additions`.
 5. It runs a **cross-file impact pre-pass** (blast radius): for each public symbol the PR adds or modifies, grep the checkout for references elsewhere in the codebase. The result is folded into the agent's prompt so it can check call-site compatibility before posting a breaking-change finding.
 6. The **agent loop** runs with 9 custom tools and no built-in filesystem or shell access:
@@ -12,7 +12,8 @@
    - Write: `post_inline_comment` (validated), `post_summary` (terminates the loop), `skip_file`
 7. In parallel, the security scanners run: `dependency-cve` queries OSV.dev for vulnerabilities in changed lockfiles; `secrets` scans added diff lines for credential patterns; `sast` runs the repo's own linters against changed files.
 8. Every `post_inline_comment` call is validated against the reviewable line ranges. On rejection, the agent gets a structured `{ reason, hint }` listing the actual valid ranges so it can self-correct and retry.
-9. After `post_summary`, findings from the agent and all scanners are filtered by severity floor, per-file cap, and global cap. If `review.sticky` is on, prior reviews from this agent on the PR are dismissed. A single review is posted via `octokit.pulls.createReview`.
+9. After `post_summary`, the configured severity floor is applied to findings from the agent and all scanners. When both tracks report the same eligible issue, the deterministic scanner finding takes precedence. Eligible critical or important scanner findings also override a conflicting agent assessment. The per-file and global comment caps then apply to the reconciled result.
+10. If `review.sticky` is on, prior Vor review artifacts are superseded. The active platform adapter posts the final GitHub review or Bitbucket comments and pull-request state.
 
 ## Why hallucinated line numbers are impossible
 
@@ -20,7 +21,7 @@ The three failure modes that plague naive "ask the AI to review the PR" approach
 
 1. **Output is prose, not actionable.** The agent has no free text output channel. Findings can only reach the PR via `post_inline_comment` or `post_summary`. Anything written to stdout is logged for debugging but invisible to the PR.
 
-2. **Comments don't land inline.** The action uses `pulls.createReview` with a `comments[]` array that carries `path`, `line`, `side`, and ` ```suggestion ``` ` blocks. GitHub anchors each one to the exact diff line.
+2. **Comments don't land inline.** GitHub uses `pulls.createReview` with validated `path`, `line`, and `side` values; Bitbucket posts validated inline PR comments with `inline.path` and the appropriate source or destination line. Both adapters anchor findings to the platform's actual diff.
 
 3. **Hallucinated lines.** The `post_inline_comment` validator rejects any `(path, line)` pair outside `reviewable_lines` and returns the valid ranges as a structured hint so the agent retries with a real line. The agent cannot post on a line that doesn't exist in the diff.
 
