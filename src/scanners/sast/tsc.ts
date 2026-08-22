@@ -62,6 +62,7 @@ import {
   type ResolvedBinary,
 } from './linter.js';
 import { logger } from '../../util/logger.js';
+import { killChild } from '../../util/child-process.js';
 
 const ID = 'tsc';
 const TIMEOUT_MS = 120_000;
@@ -289,7 +290,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`tsc timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
@@ -305,7 +306,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         reject(new Error('tsc aborted'));
       },
       { once: true },

@@ -35,6 +35,7 @@ import {
   type LinterRun,
 } from './linter.js';
 import { logger } from '../../util/logger.js';
+import { killChild } from '../../util/child-process.js';
 
 const ID = 'semgrep';
 const TIMEOUT_MS = 180_000;
@@ -319,7 +320,7 @@ function runCli(
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
@@ -335,7 +336,7 @@ function runCli(
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         reject(new Error('semgrep aborted'));
       },
       { once: true },

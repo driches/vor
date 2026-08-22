@@ -56,6 +56,7 @@ import {
   type ResolvedBinary,
 } from './linter.js';
 import { logger } from '../../util/logger.js';
+import { killChild } from '../../util/child-process.js';
 
 const ID = 'golangci-lint';
 const TIMEOUT_MS = 120_000;
@@ -445,7 +446,7 @@ function runCli(
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`golangci-lint timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
@@ -461,7 +462,7 @@ function runCli(
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         reject(new Error('golangci-lint aborted'));
       },
       { once: true },

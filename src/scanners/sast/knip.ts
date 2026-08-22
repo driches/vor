@@ -35,6 +35,7 @@ import {
   type LinterRun,
   type ResolvedBinary,
 } from './linter.js';
+import { killChild } from '../../util/child-process.js';
 
 const ID = 'knip';
 const TIMEOUT_MS = 120_000;
@@ -314,7 +315,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`knip timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
@@ -330,7 +331,7 @@ function runCli(bin: ResolvedBinary, deps: ScannerDeps): Promise<string> {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         reject(new Error('knip aborted'));
       },
       { once: true },

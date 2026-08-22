@@ -1702,6 +1702,62 @@ describe('runOrchestrator — Scenario 4b: agent rejection aborts the scanner si
 });
 
 // -----------------------------------------------------------------
+// Scenario 4c: an agent that throws BEFORE its first await still surfaces
+// as an error instead of taking the process down.
+//
+// Bug: `createProvider` throwing at the top of runAgent rejected the agent
+// promise in the same microtask the scanners started in, so
+// `orchestratorAbort.abort()` fired while the sast linters were still
+// between `spawn()` and their deferred `'error'` event. In that window
+// `child.pid` is undefined but the libuv handle is live, so the abort
+// listeners' `child.kill('SIGKILL')` signalled the RUNNER's own process
+// group. The test process died mid-event-loop — no rejection, no stack, and
+// `--testTimeout` never got a chance to fire. It presented as a hang.
+//
+// Scenario 4b covers the late-rejection case, but its config runs only
+// dependency-cve, so it never spawns a linter and never hit this. Here sast
+// is on and `workspace_dir` doesn't exist, which is exactly the failed-spawn
+// state — the same shape as a CI runner without knip/eslint installed.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 4c: agent throws before its first await', () => {
+  it('rejects promptly instead of killing the runner when a linter spawn is in flight', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    // sast on (default) so the linters spawn against the nonexistent
+    // workspace_dir; dependency-cve off so OSV isn't probed.
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    sast:',
+        '      enabled: true',
+      ].join('\n'),
+    );
+
+    // Reproduces the original trigger: provider construction throws
+    // synchronously at the top of runAgent, before any await.
+    const providerFactory = (): never => {
+      throw new TypeError('provider construction failed');
+    };
+
+    const started = Date.now();
+    await expect(runOrchestrator(baseInput({ providerFactory }))).rejects.toThrow(
+      /provider construction failed/,
+    );
+    // The unfixed path never reached this line at all. The bound guards the
+    // other failure mode the fix protects against: waiting out a scanner
+    // timeout (60s default, longer for sast) before reporting.
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+});
+
+// -----------------------------------------------------------------
 // Scenario 5: `security.enabled: false` short-circuits the scanner pipeline.
 // -----------------------------------------------------------------
 

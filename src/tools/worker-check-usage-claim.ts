@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { tool } from './tool-helper.js';
 import { BudgetError } from '../util/errors.js';
 import { jsonResult, type ToolDeps } from './types.js';
+import { killChild } from '../util/child-process.js';
 
 const GREP_RESULT_CAP = 30;
 const GREP_TIMEOUT_MS = 10_000;
@@ -257,7 +258,7 @@ async function runGitGrep(pattern: string, cwd: string, pathGlob?: string): Prom
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       // Reject on timeout instead of returning []. An empty match set
       // would be indistinguishable from a real "no callers found" result,
       // which the worker could convert into a confident-wrong 'confirmed'

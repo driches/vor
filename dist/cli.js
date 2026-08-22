@@ -75234,6 +75234,14 @@ function makeGetPrMetadataTool(deps) {
 
 // src/util/git-grep.ts
 var import_node_child_process2 = require("node:child_process");
+
+// src/util/child-process.ts
+function killChild(child2) {
+  if (child2.pid === void 0) return false;
+  return child2.kill("SIGKILL");
+}
+
+// src/util/git-grep.ts
 var DEFAULT_TIMEOUT_MS = 1e4;
 async function runGitGrep(opts) {
   const args = ["grep", "-n", opts.fixedString ? "-F" : "-E"];
@@ -75253,7 +75261,7 @@ async function runGitGrep(opts) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`git grep timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child2.stdout.on("data", (b2) => {
@@ -75266,7 +75274,7 @@ async function runGitGrep(opts) {
       if (lineCount > opts.maxResults) {
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         resolve7(parseGrepOutput(stdout, opts.maxResults));
       }
     });
@@ -76323,7 +76331,7 @@ async function runGitGrep2(pattern, cwd, pathGlob) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(
         new Error(
           `git grep timed out after ${GREP_TIMEOUT_MS}ms \u2014 verdict would be inconclusive, falling back`
@@ -84175,7 +84183,7 @@ function runCli(bin, files, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`eslint timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
     child2.stdout.on("data", (b2) => {
@@ -84190,7 +84198,7 @@ function runCli(bin, files, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("eslint aborted"));
       },
       // { once: true } so the listener is dropped on every normal
@@ -84361,7 +84369,7 @@ function runCli2(bin, files, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`ruff timed out after ${TIMEOUT_MS2}ms`));
     }, TIMEOUT_MS2);
     child2.stdout.on("data", (b2) => {
@@ -84376,7 +84384,7 @@ function runCli2(bin, files, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("ruff aborted"));
       },
       { once: true }
@@ -84539,7 +84547,7 @@ function runCli3(files, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`dart analyze timed out after ${TIMEOUT_MS3}ms`));
     }, TIMEOUT_MS3);
     child2.stdout.on("data", (b2) => {
@@ -84554,7 +84562,7 @@ function runCli3(files, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("dart analyze aborted"));
       },
       { once: true }
@@ -84696,7 +84704,7 @@ function runCli4(files, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`actionlint timed out after ${TIMEOUT_MS4}ms`));
     }, TIMEOUT_MS4);
     child2.stdout.on("data", (b2) => {
@@ -84711,7 +84719,7 @@ function runCli4(files, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("actionlint aborted"));
       },
       { once: true }
@@ -84906,7 +84914,7 @@ function runCli5(bin, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`knip timed out after ${TIMEOUT_MS5}ms`));
     }, TIMEOUT_MS5);
     child2.stdout.on("data", (b2) => {
@@ -84921,7 +84929,7 @@ function runCli5(bin, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("knip aborted"));
       },
       { once: true }
@@ -85145,7 +85153,7 @@ function runCli6(files, deps, customRulesPath) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`semgrep timed out after ${TIMEOUT_MS6}ms`));
     }, TIMEOUT_MS6);
     child2.stdout.on("data", (b2) => {
@@ -85160,7 +85168,7 @@ function runCli6(files, deps, customRulesPath) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("semgrep aborted"));
       },
       { once: true }
@@ -85367,7 +85375,7 @@ function runCli7(bin, deps) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`tsc timed out after ${TIMEOUT_MS7}ms`));
     }, TIMEOUT_MS7);
     child2.stdout.on("data", (b2) => {
@@ -85382,7 +85390,7 @@ function runCli7(bin, deps) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("tsc aborted"));
       },
       { once: true }
@@ -85619,7 +85627,7 @@ function runCli8(bin, args, deps, cwd) {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child2.kill("SIGKILL");
+      killChild(child2);
       reject(new Error(`golangci-lint timed out after ${TIMEOUT_MS8}ms`));
     }, TIMEOUT_MS8);
     child2.stdout.on("data", (b2) => {
@@ -85634,7 +85642,7 @@ function runCli8(bin, args, deps, cwd) {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child2.kill("SIGKILL");
+        killChild(child2);
         reject(new Error("golangci-lint aborted"));
       },
       { once: true }
@@ -86076,7 +86084,7 @@ async function runCoverageCli(tool2, deps) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child2.kill("SIGKILL");
+      killChild(child2);
       resolve7({ ok: false, reason });
     };
     const timer = setTimeout(() => {
