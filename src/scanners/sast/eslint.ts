@@ -28,6 +28,7 @@ import {
   type ResolvedBinary,
 } from './linter.js';
 import { logger } from '../../util/logger.js';
+import { killChild } from '../../util/child-process.js';
 
 const ID = 'eslint';
 const TIMEOUT_MS = 60_000;
@@ -171,7 +172,7 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`eslint timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
 
@@ -187,7 +188,7 @@ function runCli(bin: ResolvedBinary, files: string[], deps: ScannerDeps): Promis
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         reject(new Error('eslint aborted'));
       },
       // { once: true } so the listener is dropped on every normal

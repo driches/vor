@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { killChild } from './child-process.js';
 
 export interface GrepMatch {
   path: string;
@@ -82,7 +83,7 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
     const timer = setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      child.kill('SIGKILL');
+      killChild(child);
       reject(new Error(`git grep timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -103,7 +104,7 @@ export async function runGitGrep(opts: GitGrepOptions): Promise<GrepResult> {
       if (lineCount > opts.maxResults) {
         resolved = true;
         clearTimeout(timer);
-        child.kill('SIGKILL');
+        killChild(child);
         resolve(parseGrepOutput(stdout, opts.maxResults));
       }
     });

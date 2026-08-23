@@ -50,6 +50,7 @@ import type {
 } from './types.js';
 import { expiredIgnoreNotice } from './ignore-list.js';
 import type { ChangedFile, ScannerId } from '../types.js';
+import { killChild } from '../util/child-process.js';
 
 const SCANNER_ID: ScannerId = 'coverage-delta';
 
@@ -578,7 +579,7 @@ export async function runCoverageCli(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill('SIGKILL');
+      killChild(child);
       resolve({ ok: false, reason });
     };
     const timer = setTimeout(() => {

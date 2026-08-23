@@ -148,6 +148,12 @@ async function main(): Promise<void> {
     await logger.setOutput('ended', result.ended);
     await logger.setOutput('cost_usd', result.cost_usd.toFixed(4));
   } catch (err) {
+    // `error` is a documented value of the `ended` output (docs/configuration.md),
+    // and this is the case it documents: the orchestrator re-threw rather than
+    // returning a result. Without setting it here the output stays empty, so a
+    // consuming workflow stepping on `steps.vor.outputs.ended` can't tell an
+    // agent-path failure apart from a step that never ran.
+    await logger.setOutput('ended', 'error');
     await logger.setFailed((err as Error).message);
     if (err instanceof Error && err.stack) {
       await logger.error(err.stack);
