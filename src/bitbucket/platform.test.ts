@@ -15,7 +15,7 @@ function textResponse(value: string, status = 200): Response {
   return new Response(value, { status });
 }
 
-function emptyContext(): PRContext {
+function emptyContext(headSha = 'head111'): PRContext {
   return {
     metadata: {
       number: 3,
@@ -23,7 +23,7 @@ function emptyContext(): PRContext {
       body: '',
       author: '',
       base_sha: '',
-      head_sha: '',
+      head_sha: headSha,
       base_ref: '',
       head_ref: '',
       labels: [],
@@ -118,6 +118,9 @@ describe('createBitbucketPlatform', () => {
           ],
         });
       }
+      if (href.endsWith('/pullrequests/3')) {
+        return jsonResponse({ source: { commit: { hash: 'head111' } } });
+      }
       if (href.endsWith('/comments/10/resolve')) return jsonResponse({});
       if (href.endsWith('/approve') && init?.method === 'DELETE') {
         return new Response(null, { status: 204 });
@@ -151,7 +154,7 @@ describe('createBitbucketPlatform', () => {
       confidence: 'high',
     };
 
-    await expect(platform.supersedePriorReviews(emptyContext())).resolves.toBe(1);
+    await expect(platform.supersedePriorReviews(emptyContext())).resolves.toBe(0);
     await platform.postReview({
       commit_id: 'head111',
       event: 'REQUEST_CHANGES',
@@ -174,7 +177,143 @@ describe('createBitbucketPlatform', () => {
       calls.some((call) => call.url.endsWith('/approve') && call.init?.method === 'DELETE'),
     ).toBe(true);
     expect(calls.some((call) => call.url.endsWith('/request-changes'))).toBe(true);
+    expect(calls.filter((call) => call.url.endsWith('/pullrequests/3'))).toHaveLength(3);
   });
+
+  it('keeps prior sticky artifacts when replacement comment posting fails', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    let commentPosts = 0;
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      const method = init?.method ?? 'GET';
+      calls.push({ url: href, method });
+      if (href.includes('/comments?')) {
+        return jsonResponse({
+          values: [
+            {
+              id: 10,
+              content: { raw: `${AGENT_REVIEW_MARKER}\n\nold finding` },
+              inline: { path: 'src/app.ts', to: 5 },
+            },
+            { id: 11, content: { raw: `${AGENT_REVIEW_MARKER}\n\nold summary` } },
+          ],
+        });
+      }
+      if (href.endsWith('/pullrequests/3')) {
+        return jsonResponse({ source: { commit: { hash: 'head111' } } });
+      }
+      if (href.endsWith('/comments') && method === 'POST') {
+        commentPosts += 1;
+        return commentPosts === 1
+          ? jsonResponse({ id: 20 })
+          : jsonResponse({ error: 'invalid inline anchor' }, 400);
+      }
+      throw new Error(`unexpected URL ${href}`);
+    });
+    const platform = createBitbucketPlatform({
+      workspace: 'ws',
+      repoSlug: 'repo',
+      pullRequestId: 3,
+      email: 'bot@example.com',
+      apiToken: 'token123',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const comment: PostedComment = {
+      severity: 'minor',
+      file_path: 'src/app.ts',
+      line: 5,
+      side: 'RIGHT',
+      category: 'bug',
+      title: 'Replacement finding cannot be anchored',
+      why_it_matters: 'The simulated Bitbucket API rejects this inline anchor.',
+      confidence: 'high',
+    };
+
+    await expect(platform.supersedePriorReviews(emptyContext())).resolves.toBe(0);
+    await expect(
+      platform.postReview({
+        commit_id: 'head111',
+        event: 'COMMENT',
+        body: 'replacement summary',
+        comments: [comment],
+      }),
+    ).rejects.toThrow(/invalid inline anchor/);
+
+    expect(calls.some((call) => call.url.endsWith('/comments/10/resolve'))).toBe(false);
+    expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
+  });
+
+  it('does not mutate sticky review state when the pull request head is stale', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      const method = init?.method ?? 'GET';
+      calls.push({ url: href, method });
+      if (href.includes('/comments?')) {
+        return jsonResponse({
+          values: [
+            {
+              id: 10,
+              content: { raw: `${AGENT_REVIEW_MARKER}\n\nold finding` },
+              inline: { path: 'src/app.ts', to: 5 },
+            },
+            { id: 11, content: { raw: `${AGENT_REVIEW_MARKER}\n\nold summary` } },
+          ],
+        });
+      }
+      if (href.endsWith('/pullrequests/3')) {
+        return jsonResponse({ source: { commit: { hash: 'head222' } } });
+      }
+      throw new Error(`unexpected URL ${href}`);
+    });
+    const platform = createBitbucketPlatform({
+      workspace: 'ws',
+      repoSlug: 'repo',
+      pullRequestId: 3,
+      email: 'bot@example.com',
+      apiToken: 'token123',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await expect(platform.supersedePriorReviews(emptyContext())).rejects.toThrow(
+      'head changed during review',
+    );
+    expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+  });
+
+  it.each(['APPROVE', 'REQUEST_CHANGES'] as const)(
+    'does not post comments or %s review state when the pull request head is stale',
+    async (event) => {
+      const calls: Array<{ url: string; method: string }> = [];
+      const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        const method = init?.method ?? 'GET';
+        calls.push({ url: href, method });
+        if (href.endsWith('/pullrequests/3')) {
+          return jsonResponse({ source: { commit: { hash: 'head222' } } });
+        }
+        throw new Error(`unexpected URL ${href}`);
+      });
+      const platform = createBitbucketPlatform({
+        workspace: 'ws',
+        repoSlug: 'repo',
+        pullRequestId: 3,
+        email: 'bot@example.com',
+        apiToken: 'token123',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+
+      await expect(
+        platform.postReview({
+          commit_id: 'head111',
+          event,
+          body: 'summary',
+          comments: [],
+        }),
+      ).rejects.toThrow('head changed during review');
+      expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+    },
+  );
 
   it('maps only inline Vor comments to prior threads and preserves pushback', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
@@ -246,6 +385,10 @@ describe('createBitbucketPlatform', () => {
           })),
         });
       }
+      if (href.endsWith('/pullrequests/3')) {
+        return jsonResponse({ source: { commit: { hash: 'head111' } } });
+      }
+      if (href.endsWith('/comments') && init?.method === 'POST') return jsonResponse({ id: 20 });
       if (href.endsWith('/comments/10/resolve')) return jsonResponse({ error: 'failed' }, 500);
       if (href.endsWith('/comments/11/resolve')) return new Response(null, { status: 204 });
       if (init?.method === 'DELETE') return new Response(null, { status: 204 });
@@ -260,7 +403,15 @@ describe('createBitbucketPlatform', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    await expect(platform.supersedePriorReviews(emptyContext())).resolves.toBe(1);
+    await expect(platform.supersedePriorReviews(emptyContext())).resolves.toBe(0);
+    await expect(
+      platform.postReview({
+        commit_id: 'head111',
+        event: 'COMMENT',
+        body: 'summary',
+        comments: [],
+      }),
+    ).resolves.toMatchObject({ comment_count: 0 });
     expect(calls.some((call) => call.endsWith('/comments/11/resolve'))).toBe(true);
   });
 });

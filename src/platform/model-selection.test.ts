@@ -36,11 +36,11 @@ describe('resolveModelSelection', () => {
   it('preserves an explicitly selected OpenAI model', () => {
     expect(
       resolveModelSelection({
-        model: 'gpt-5.6-terra',
+        model: 'gpt-4.1',
         hasAnthropicKey: false,
         hasOpenAIKey: true,
       }),
-    ).toEqual({ model: 'gpt-5.6-terra', provider: 'openai' });
+    ).toEqual({ model: 'gpt-4.1', provider: 'openai' });
   });
 });
 

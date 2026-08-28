@@ -79,7 +79,18 @@ export function validateInlineComment(
     };
   }
 
-  // 3. Line must be in reviewable ranges
+  // 3. Reviewable ranges and line text are computed from the HEAD side only.
+  // Accepting LEFT here would validate a base-side anchor against unrelated
+  // HEAD line numbers and can make either platform reject or misplace it.
+  if (input.side !== 'RIGHT') {
+    return {
+      ok: false,
+      reason: 'LEFT-side comments are not supported',
+      hint: 'Anchor the finding on a reviewable RIGHT-side line in the HEAD file.',
+    };
+  }
+
+  // 4. Line must be in reviewable ranges
   if (!isLineReviewable(input.line, file.reviewable_lines)) {
     const ranges = formatRanges(file.reviewable_lines);
     return {
@@ -91,7 +102,7 @@ export function validateInlineComment(
     };
   }
 
-  // 4. start_line must be < line
+  // 5. start_line must be < line
   if (input.start_line !== undefined && input.start_line >= input.line) {
     return {
       ok: false,
@@ -100,7 +111,7 @@ export function validateInlineComment(
     };
   }
 
-  // 5. start_line must also be in reviewable range
+  // 6. start_line must also be in reviewable range
   if (
     input.start_line !== undefined &&
     !isLineReviewable(input.start_line, file.reviewable_lines)
@@ -112,7 +123,7 @@ export function validateInlineComment(
     };
   }
 
-  // 6. Suggestion must differ from existing line text
+  // 7. Suggestion must differ from existing line text
   if (input.suggestion !== undefined) {
     const existing = file.head_line_text.get(input.line) ?? '';
     if (normalizeForCompare(input.suggestion) === normalizeForCompare(existing)) {
@@ -124,7 +135,7 @@ export function validateInlineComment(
     }
   }
 
-  // 7. Severity floor
+  // 8. Severity floor
   if (SEVERITY_RANK[input.severity] < SEVERITY_RANK[ctx.severityFloor]) {
     return {
       ok: false,
@@ -133,7 +144,7 @@ export function validateInlineComment(
     };
   }
 
-  // 8. Body length cap
+  // 9. Body length cap
   const bodyLen = input.title.length + input.why_it_matters.length;
   if (bodyLen > ctx.maxBodyChars) {
     return {
@@ -143,7 +154,7 @@ export function validateInlineComment(
     };
   }
 
-  // 9. Dedup — same (file, line, normalized title) already posted
+  // 10. Dedup — same (file, line, normalized title) already posted
   const dup = ctx.postedComments.find(
     (c) =>
       c.file_path === input.file_path &&
@@ -158,7 +169,7 @@ export function validateInlineComment(
     };
   }
 
-  // 10. Read-before-post: for severity ≥ Important, the agent must have
+  // 11. Read-before-post: for severity ≥ Important, the agent must have
   //     called read_file_at_ref on the target line at HEAD this run. Worker
   //     output does NOT count — the model posting the finding must look at
   //     the bytes itself. Only enforced when a runContext is supplied;

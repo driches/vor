@@ -137,7 +137,7 @@ The normal PR Pipeline needs no flags because Bitbucket supplies the PR context.
 | `--model` | `.vor.yml` or provider default | Model override for this run. |
 | `--provider` | inferred | `anthropic` or `openai`. |
 | `--dry-run` | off | Run without resolving or posting comments. |
-| `--api-base-url` | `https://api.bitbucket.org/2.0` | Alternate API endpoint for controlled testing. |
+| `--api-base-url` | `https://api.bitbucket.org/2.0` | Alternate HTTPS endpoint for controlled testing. Plain HTTP is accepted only for loopback hosts. |
 
 Authentication always comes from `BITBUCKET_API_EMAIL` and `BITBUCKET_API_TOKEN`. LLM authentication comes from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
@@ -145,7 +145,8 @@ Authentication always comes from `BITBUCKET_API_EMAIL` and `BITBUCKET_API_TOKEN`
 
 - Vor posts one global summary comment and one inline Bitbucket comment per kept finding.
 - GitHub-style suggestion blocks are rendered as Markdown; Bitbucket does not provide the same one-click suggestion behavior.
-- Sticky mode resolves prior unresolved Vor inline threads. Historical summary comments remain as the run record.
+- Sticky mode posts the complete replacement before resolving prior unresolved Vor inline threads. Historical summary comments remain as the run record; if replacement posting fails partway through, the prior threads remain active.
+- Vor rechecks the PR source commit immediately before Bitbucket writes. If the source branch changes during review, the run refuses stale cleanup/comments and should be rerun on the new head.
 - Pull-request Pipelines run when a same-repository PR is created or its source branch is updated.
 - Fork PRs do not trigger Bitbucket pull-request Pipelines.
 
@@ -165,7 +166,8 @@ Authentication always comes from `BITBUCKET_API_EMAIL` and `BITBUCKET_API_TOKEN`
 | Bitbucket API returns `401` | Use the Atlassian account email associated with the token, confirm the token value, and check that it has not expired. |
 | Bitbucket API returns `403` | Confirm all three token scopes and verify the token owner can access and comment on the repository's PRs. |
 | Pipeline does not start for a PR | Confirm Pipelines are enabled, the YAML has the `pull-requests` selector, and the PR is not from a fork. |
-| Model-not-found or access error | Select a model enabled for the provider account. GPT-5.6 requires preview access while it remains limited. |
+| Model-not-found or access error | Select a model enabled for the provider account and project. |
 | Summary posts but approval/change request does not | Confirm the token owner may perform that action and is not trying to approve its own PR. The state update is best effort. |
+| `head changed during review` | The PR source branch moved after analysis began. Rerun the Pipeline against the new head. |
 | Review has no inline comments | The run succeeded but no finding survived line validation, severity filtering, deduplication, and comment caps. |
 | `vor` cannot start | Confirm the Pipeline image provides Node.js 20 or newer and that npm registry access is allowed. |

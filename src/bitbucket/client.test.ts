@@ -26,6 +26,12 @@ describe('BitbucketClient', () => {
     expect(() => new BitbucketClient({ ...base, apiBaseUrl: 'file:///tmp/api' })).toThrow(
       'Invalid Bitbucket API base URL',
     );
+    expect(() => new BitbucketClient({ ...base, apiBaseUrl: 'http://example.com/2.0' })).toThrow(
+      'Invalid Bitbucket API base URL',
+    );
+    expect(
+      () => new BitbucketClient({ ...base, apiBaseUrl: 'http://127.0.0.1:8080/2.0' }),
+    ).not.toThrow();
     expect(
       () => new BitbucketClient({ ...base, apiBaseUrl: 'https://example.com/?page=1' }),
     ).toThrow('Invalid Bitbucket API base URL');
@@ -179,6 +185,22 @@ describe('BitbucketClient', () => {
     await expect(client.listComments(7)).rejects.toThrow(
       /Refusing to send Bitbucket credentials to pagination origin/,
     );
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('rejects repeated pagination URLs instead of looping', async () => {
+    const next =
+      'https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/7/comments?pagelen=100';
+    const fetchImpl = vi.fn(async () => jsonResponse({ values: [], next }));
+    const client = new BitbucketClient({
+      workspace: 'ws',
+      repoSlug: 'repo',
+      email: 'bot@example.com',
+      apiToken: 'token123',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await expect(client.listComments(7)).rejects.toThrow(/pagination repeated URL/);
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 

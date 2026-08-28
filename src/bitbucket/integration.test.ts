@@ -5,6 +5,7 @@ import type {
   CanonicalUsage,
   CompleteOptions,
   LLMProvider,
+  ProviderId,
 } from '../llm/types.js';
 import { runReviewWithPlatform } from '../platform/runner.js';
 import { AGENT_REVIEW_MARKER } from '../platform/review-marker.js';
@@ -33,6 +34,15 @@ const CONFIG = [
   '  sticky: true',
 ].join('\n');
 
+const OPENAI_MAX_CONFIG = [
+  CONFIG,
+  'model: gpt-5.6-sol',
+  'provider: openai',
+  'providers:',
+  '  openai:',
+  '    reasoning_effort: max',
+].join('\n');
+
 const DIFF = [
   'diff --git a/src/app.ts b/src/app.ts',
   'index 3333333..4444444 100644',
@@ -57,6 +67,8 @@ class FakeBitbucketService {
   readonly comments: StoredComment[] = [];
   readonly requests: Array<{ method: string; path: string }> = [];
   private nextCommentId = 1;
+
+  constructor(private readonly config = CONFIG) {}
 
   readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
@@ -91,7 +103,7 @@ class FakeBitbucketService {
     }
     if (method === 'GET' && path.includes('/src/head111/')) {
       return path.endsWith('/.vor.yml')
-        ? new Response(CONFIG)
+        ? new Response(this.config)
         : jsonResponse({ error: 'missing' }, 404);
     }
     if (method === 'GET' && path.endsWith('/pullrequests/3/comments')) {
@@ -132,11 +144,11 @@ class FakeBitbucketService {
 }
 
 class IntegrationProvider implements LLMProvider {
-  readonly id = 'anthropic' as const;
   private used = false;
 
   constructor(
     private readonly inspect?: (messages: CanonicalMessage[], opts: CompleteOptions) => void,
+    readonly id: ProviderId = 'anthropic',
   ) {}
 
   async complete(messages: CanonicalMessage[], _tools: CanonicalTool[], opts: CompleteOptions) {
@@ -238,5 +250,39 @@ describe('Bitbucket platform integration', () => {
     expect(dryRun).toMatchObject({ comment_count: 2, dry_run: true });
     expect(service.mutatingRequestCount()).toBe(writesBeforeDryRun);
     expect(service.comments).toHaveLength(6);
+  });
+
+  it('forwards max OpenAI reasoning effort through the shared Bitbucket runner', async () => {
+    const service = new FakeBitbucketService(OPENAI_MAX_CONFIG);
+    const platform = createBitbucketPlatform({
+      workspace: 'ws',
+      repoSlug: 'repo',
+      pullRequestId: 3,
+      email: 'bot@example.com',
+      apiToken: 'token123',
+      apiBaseUrl: 'https://bitbucket.example/2.0',
+      fetchImpl: service.fetch as typeof fetch,
+    });
+    let seenOpenAIOptions: CompleteOptions['openai'];
+
+    const result = await runReviewWithPlatform({
+      platform,
+      anthropic_api_key: '',
+      openai_api_key: 'sk-openai-test',
+      config_path: '.vor.yml',
+      dry_run: true,
+      workspace_dir: '/tmp/bitbucket-integration-workspace',
+      providerFactory: ({ modelId, providerHint }) => {
+        expect(modelId).toBe('gpt-5.6-sol');
+        expect(providerHint).toBe('openai');
+        return new IntegrationProvider((_messages, opts) => {
+          seenOpenAIOptions = opts.openai;
+        }, 'openai');
+      },
+    });
+
+    expect(result).toMatchObject({ comment_count: 2, dry_run: true });
+    expect(seenOpenAIOptions).toEqual({ reasoning_effort: 'max' });
+    expect(service.mutatingRequestCount()).toBe(0);
   });
 });

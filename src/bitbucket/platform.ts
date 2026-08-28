@@ -39,6 +39,9 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
     ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
   });
   const fileReader = new BitbucketFileReader(client);
+  let pendingStickyCleanup:
+    | { expectedHeadSha: string; comments: readonly BitbucketComment[] }
+    | undefined;
 
   return {
     id: 'bitbucket',
@@ -61,28 +64,20 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
       const comments = await client.listComments(input.pullRequestId);
       return commentsToPriorThreads(comments);
     },
-    supersedePriorReviews: async () => {
+    supersedePriorReviews: async (context) => {
       const comments = await client.listComments(input.pullRequestId);
-      let resolved = 0;
-      for (const comment of comments) {
-        if (!isVorInlineRoot(comment)) continue;
-        if (comment.deleted || comment.pending || comment.resolution != null) continue;
-        try {
-          await client.resolveComment(input.pullRequestId, comment.id);
-          resolved += 1;
-        } catch (err) {
-          if (err instanceof BitbucketApiError && err.status === 409) continue;
-          await logger.warn(
-            `Failed to resolve prior Bitbucket comment ${comment.id}: ${(err as Error).message}`,
-          );
-        }
-      }
-      if (comments.some((comment) => isVorComment(comment) && comment.parent?.id === undefined)) {
-        await clearPriorReviewState(client, input.pullRequestId);
-      }
-      return resolved;
+      await assertCurrentHead(client, input.pullRequestId, context.metadata.head_sha);
+      // Bitbucket creates a review as multiple comment requests. Stage cleanup
+      // until every replacement comment exists so a partial post cannot erase
+      // the only complete prior review.
+      pendingStickyCleanup = {
+        expectedHeadSha: context.metadata.head_sha,
+        comments,
+      };
+      return 0;
     },
     postReview: async (review) => {
+      await assertCurrentHead(client, input.pullRequestId, review.commit_id);
       const summary = await client.createComment(input.pullRequestId, {
         body: `${AGENT_REVIEW_MARKER}\n\n${review.body}`,
       });
@@ -97,6 +92,27 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
             ...(comment.start_line !== undefined ? { startLine: comment.start_line } : {}),
           },
         });
+      }
+
+      // A source push during the sequential comment requests leaves the new
+      // partial artifacts visible, but must not also destroy the prior review.
+      await assertCurrentHead(client, input.pullRequestId, review.commit_id);
+      if (pendingStickyCleanup !== undefined) {
+        if (pendingStickyCleanup.expectedHeadSha !== review.commit_id) {
+          throw new BitbucketApiError(
+            `Bitbucket sticky cleanup was prepared for ${pendingStickyCleanup.expectedHeadSha}, ` +
+              `not ${review.commit_id}`,
+          );
+        }
+        const superseded = await applyStickyCleanup(
+          client,
+          input.pullRequestId,
+          pendingStickyCleanup.comments,
+        );
+        pendingStickyCleanup = undefined;
+        if (superseded > 0) {
+          await logger.info(`Superseded ${superseded} prior agent review artifact(s).`);
+        }
       }
 
       try {
@@ -117,6 +133,46 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
       };
     },
   };
+}
+
+async function applyStickyCleanup(
+  client: BitbucketClient,
+  prId: number,
+  comments: readonly BitbucketComment[],
+): Promise<number> {
+  let resolved = 0;
+  for (const comment of comments) {
+    if (!isVorInlineRoot(comment)) continue;
+    if (comment.deleted || comment.pending || comment.resolution != null) continue;
+    try {
+      await client.resolveComment(prId, comment.id);
+      resolved += 1;
+    } catch (err) {
+      if (err instanceof BitbucketApiError && err.status === 409) continue;
+      await logger.warn(
+        `Failed to resolve prior Bitbucket comment ${comment.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+  if (comments.some((comment) => isVorComment(comment) && comment.parent?.id === undefined)) {
+    await clearPriorReviewState(client, prId);
+  }
+  return resolved;
+}
+
+async function assertCurrentHead(
+  client: BitbucketClient,
+  prId: number,
+  expectedCommitId: string,
+): Promise<void> {
+  const pr = await client.getPullRequest(prId);
+  const actualCommitId = pr.source?.commit?.hash;
+  if (actualCommitId === expectedCommitId) return;
+
+  throw new BitbucketApiError(
+    `Bitbucket PR ${prId} head changed during review (expected ${expectedCommitId}, ` +
+      `found ${actualCommitId ?? 'missing'}); refusing to write stale review results`,
+  );
 }
 
 class BitbucketFileReader implements RepoFileReader {

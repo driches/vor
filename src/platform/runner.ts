@@ -217,8 +217,8 @@ export async function runReviewWithPlatform(input: ReviewRunInput): Promise<Orch
   if (!apiKey) {
     await logger.notice(
       `No API key set for provider ${resolvedProvider} (model ${config.model}). ` +
-        `Skipping review (this is expected on PRs from forks unless you have ` +
-        `configured pull_request_target with explicit security review).`,
+        `Skipping review. This is expected when CI policy withholds secrets, such as on ` +
+        `untrusted fork pull requests.`,
     );
     return {
       comment_count: 0,

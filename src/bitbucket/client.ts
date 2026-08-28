@@ -78,6 +78,8 @@ interface Paginated<T> {
   next?: string;
 }
 
+const MAX_PAGINATION_PAGES = 1_000;
+
 export class BitbucketClient {
   private readonly baseUrl: string;
   private readonly baseOrigin: string;
@@ -190,8 +192,19 @@ export class BitbucketClient {
   private async paginate<T>(path: string): Promise<T[]> {
     const values: T[] = [];
     let next: string | undefined = `${path}${path.includes('?') ? '&' : '?'}pagelen=100`;
+    const seen = new Set<string>();
+    let pages = 0;
     while (next !== undefined) {
-      const page: Paginated<T> = await this.requestJson<Paginated<T>>(next);
+      const url = this.resolveUrl(next);
+      if (seen.has(url)) {
+        throw new BitbucketApiError(`Bitbucket pagination repeated URL ${url}`);
+      }
+      seen.add(url);
+      pages += 1;
+      if (pages > MAX_PAGINATION_PAGES) {
+        throw new BitbucketApiError(`Bitbucket pagination exceeded ${MAX_PAGINATION_PAGES} pages`);
+      }
+      const page: Paginated<T> = await this.requestJson<Paginated<T>>(url);
       values.push(...(page.values ?? []));
       next = page.next;
     }
@@ -285,13 +298,13 @@ function parseBaseUrl(value: string): URL {
       cause: err,
     });
   }
-  if (
-    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
+  const loopbackHost =
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '[::1]' ||
+    url.hostname === '::1';
+  const safeProtocol = url.protocol === 'https:' || (url.protocol === 'http:' && loopbackHost);
+  if (!safeProtocol || url.username || url.password || url.search || url.hash) {
     throw new BitbucketApiError(`Invalid Bitbucket API base URL: ${value}`);
   }
   return url;

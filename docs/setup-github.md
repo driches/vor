@@ -9,7 +9,7 @@ You need:
 - Admin access to the repository, or permission to manage Actions secrets and workflows.
 - GitHub Actions enabled for the repository.
 - An Anthropic API key or an OpenAI API key.
-- A model that the selected provider has enabled for your account. GPT-5.6 is currently limited preview.
+- A model that the selected provider has enabled for your account.
 
 Do not create a GitHub personal access token for Vor. GitHub supplies a short-lived `GITHUB_TOKEN` to each workflow run, and the workflow below grants it only the permissions Vor needs.
 
@@ -91,7 +91,7 @@ Change the workflow dispatch default and the action step:
           dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
-The `provider` input is optional when the model starts with `gpt-`, but setting it explicitly makes the workflow's intent clear. If your account does not have GPT-5.6 preview access, set `model` to another OpenAI model your account supports.
+The `provider` input is optional when the model starts with `gpt-`, but setting it explicitly makes the workflow's intent clear. If the provider rejects the selected model, set `model` to another OpenAI model your account supports.
 
 ## 3. Optionally add `.vor.yml`
 
@@ -148,7 +148,7 @@ For manual-only operation or a guarded `/review` PR comment workflow, see the [t
 |---|---|
 | `skipped_no_key_anthropic` or `skipped_no_key_openai` | Confirm the secret name, selected provider, model, and repository access policy for the secret. |
 | `Resource not accessible by integration` | Confirm the workflow has `pull-requests: write` and repository or organization policy allows that permission. |
-| Model-not-found or access error | Select a model enabled for the provider account. GPT-5.6 requires preview access while it remains limited. |
+| Model-not-found or access error | Select a model enabled for the provider account and project. |
 | Workflow does not start | Confirm Actions are enabled and the workflow contains the relevant `pull_request` activity type. Fork workflows may require maintainer approval. |
 | Review has a summary but no inline comments | The run succeeded but no finding survived line validation, severity filtering, deduplication, and comment caps. |
 | Manual run cannot find a PR | Enter the numeric PR number and run the workflow in the repository that owns the PR. |
