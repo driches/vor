@@ -204,9 +204,9 @@ describe('createBitbucketPlatform', () => {
       }
       if (href.endsWith('/comments') && method === 'POST') {
         commentPosts += 1;
-        return commentPosts === 1
-          ? jsonResponse({ id: 20 })
-          : jsonResponse({ error: 'invalid inline anchor' }, 400);
+        return commentPosts === 2
+          ? jsonResponse({ error: 'invalid inline anchor' }, 400)
+          : jsonResponse({ id: 20 + commentPosts });
       }
       throw new Error(`unexpected URL ${href}`);
     });
@@ -239,6 +239,17 @@ describe('createBitbucketPlatform', () => {
       }),
     ).rejects.toThrow(/invalid inline anchor/);
 
+    expect(calls.some((call) => call.url.endsWith('/comments/10/resolve'))).toBe(false);
+    expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
+
+    await expect(
+      platform.postReview({
+        commit_id: 'head111',
+        event: 'COMMENT',
+        body: 'non-sticky retry',
+        comments: [],
+      }),
+    ).resolves.toMatchObject({ comment_count: 0 });
     expect(calls.some((call) => call.url.endsWith('/comments/10/resolve'))).toBe(false);
     expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
   });

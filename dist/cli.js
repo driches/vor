@@ -56346,6 +56346,8 @@ function createBitbucketPlatform(input) {
       return 0;
     },
     postReview: async (review) => {
+      const stickyCleanup = pendingStickyCleanup;
+      pendingStickyCleanup = void 0;
       await assertCurrentHead(client, input.pullRequestId, review.commit_id);
       const summary2 = await client.createComment(input.pullRequestId, {
         body: `${AGENT_REVIEW_MARKER}
@@ -56366,18 +56368,17 @@ ${renderCommentBody(comment)}`,
         });
       }
       await assertCurrentHead(client, input.pullRequestId, review.commit_id);
-      if (pendingStickyCleanup !== void 0) {
-        if (pendingStickyCleanup.expectedHeadSha !== review.commit_id) {
+      if (stickyCleanup !== void 0) {
+        if (stickyCleanup.expectedHeadSha !== review.commit_id) {
           throw new BitbucketApiError(
-            `Bitbucket sticky cleanup was prepared for ${pendingStickyCleanup.expectedHeadSha}, not ${review.commit_id}`
+            `Bitbucket sticky cleanup was prepared for ${stickyCleanup.expectedHeadSha}, not ${review.commit_id}`
           );
         }
         const superseded = await applyStickyCleanup(
           client,
           input.pullRequestId,
-          pendingStickyCleanup.comments
+          stickyCleanup.comments
         );
-        pendingStickyCleanup = void 0;
         if (superseded > 0) {
           await logger.info(`Superseded ${superseded} prior agent review artifact(s).`);
         }

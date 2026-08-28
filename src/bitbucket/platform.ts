@@ -77,6 +77,11 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
       return 0;
     },
     postReview: async (review) => {
+      // Platform instances are exported and can be reused after a failed run.
+      // Consume the staged transaction up front so a later non-sticky post
+      // cannot inherit cleanup that belonged to this attempt.
+      const stickyCleanup = pendingStickyCleanup;
+      pendingStickyCleanup = undefined;
       await assertCurrentHead(client, input.pullRequestId, review.commit_id);
       const summary = await client.createComment(input.pullRequestId, {
         body: `${AGENT_REVIEW_MARKER}\n\n${review.body}`,
@@ -97,19 +102,18 @@ export function createBitbucketPlatform(input: BitbucketPlatformInput): ReviewPl
       // A source push during the sequential comment requests leaves the new
       // partial artifacts visible, but must not also destroy the prior review.
       await assertCurrentHead(client, input.pullRequestId, review.commit_id);
-      if (pendingStickyCleanup !== undefined) {
-        if (pendingStickyCleanup.expectedHeadSha !== review.commit_id) {
+      if (stickyCleanup !== undefined) {
+        if (stickyCleanup.expectedHeadSha !== review.commit_id) {
           throw new BitbucketApiError(
-            `Bitbucket sticky cleanup was prepared for ${pendingStickyCleanup.expectedHeadSha}, ` +
+            `Bitbucket sticky cleanup was prepared for ${stickyCleanup.expectedHeadSha}, ` +
               `not ${review.commit_id}`,
           );
         }
         const superseded = await applyStickyCleanup(
           client,
           input.pullRequestId,
-          pendingStickyCleanup.comments,
+          stickyCleanup.comments,
         );
-        pendingStickyCleanup = undefined;
         if (superseded > 0) {
           await logger.info(`Superseded ${superseded} prior agent review artifact(s).`);
         }
