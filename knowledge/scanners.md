@@ -15,7 +15,7 @@ Two deterministic scanners run in parallel with the AI review (code in `src/scan
 
 ## Shared pipeline
 
-Scanner findings flow through the same **severity floor / per-file cap / global cap** pipeline as AI comments, and everything posts in one single PR review. An [architecture](/architecture.md) invariant: scanners are deterministic, in contrast to the LLM review.
+Scanner findings flow through the same **severity floor / per-file cap / global cap** pipeline as AI comments, and everything posts in one single PR review. An [architecture](architecture.md) invariant: scanners are deterministic, in contrast to the LLM review.
 
 Suppression appears to be configurable via `.vor/security-ignore.yml`, and `.vor/semgrep-rules` exists in the repo.
 

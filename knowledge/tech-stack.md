@@ -12,7 +12,7 @@ TypeScript, ESM (`"type": "module"`), Node `>=20` (`.nvmrc` present). Built with
 
 ## Runtime dependencies
 
-- **LLM providers**: `@anthropic-ai/sdk` (^0.39.0), `openai` (^6.39.0) — the dual-provider core of [the review loop](/architecture.md).
+- **LLM providers**: `@anthropic-ai/sdk` (^0.39.0), `openai` (^6.39.0) — the dual-provider core of [the review loop](architecture.md).
 - **GitHub**: `@actions/core`, `@octokit/rest` with `@octokit/plugin-retry` and `@octokit/plugin-throttling`.
 - **MCP**: `@modelcontextprotocol/sdk` (^1.29.0) — there is a `src/mcp` module.
 - **Diff/parsing**: `parse-diff`, `semver`, `yaml`.

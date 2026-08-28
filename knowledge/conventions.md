@@ -10,7 +10,7 @@ timestamp: 2026-07-20T00:00:00Z
 
 ## Single source of truth
 
-Contribution guidelines for AI agents live in **AGENTS.md**. Tool-specific files (`CLAUDE.md`, `.cursorrules`, etc.) all defer to it; on conflict, AGENTS.md wins. AGENTS.md also covers code style, [architecture invariants](/architecture.md), eval usage, PR/commit/dogfooding conventions, and auto-reject patterns.
+Contribution guidelines for AI agents live in **AGENTS.md**. Tool-specific files (`CLAUDE.md`, `.cursorrules`, etc.) all defer to it; on conflict, AGENTS.md wins. AGENTS.md also covers code style, [architecture invariants](architecture.md), eval usage, PR/commit/dogfooding conventions, and auto-reject patterns.
 
 ## Non-negotiables (CLAUDE.md summary)
 

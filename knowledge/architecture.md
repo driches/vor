@@ -15,7 +15,7 @@ A custom tool-use loop drives the model over a constrained set of 9 custom tools
 ## Architecture invariants (from AGENTS.md, via CLAUDE.md)
 
 - The **orchestrator owns the flow** (`src/orchestrator.ts`).
-- **Scanners are deterministic** — see [scanners](/scanners.md).
+- **Scanners are deterministic** — see [scanners](scanners.md).
 - **Tools validate before they take effect.**
 
 ## Source layout
@@ -26,7 +26,7 @@ A custom tool-use loop drives the model over a constrained set of 9 custom tools
 
 - `dashboard/` — a Svelte + Vite app (`svelte.config.js`, `vite.config.ts`), built via `npm run build:dashboard`.
 - `site/` — an Astro-based documentation site (`astro.config.mjs`) with its own package.json.
-- `scripts/` — build (`build.ts`), `verify-dist.ts`, `local-review.ts`, `smoke-openai.ts`, `test-blast-radius.ts`, `plant.ts`, and the `golden/` eval harness (see [conventions](/conventions.md)).
+- `scripts/` — build (`build.ts`), `verify-dist.ts`, `local-review.ts`, `smoke-openai.ts`, `test-blast-radius.ts`, `plant.ts`, and the `golden/` eval harness (see [conventions](conventions.md)).
 - `.vor/` — the repo dogfoods itself: `security-ignore.yml` and `semgrep-rules` live here.
 - `dist/` is a committed build artifact; `verify-dist` checks it stays in sync with `src/`.
 

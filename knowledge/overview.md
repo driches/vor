@@ -8,7 +8,7 @@ timestamp: 2026-07-20T00:00:00Z
 
 # Vor — AI PR Review GitHub Action
 
-Vor (`@driches/vor`, v0.6.0, MIT, author Doug Riches) is a GitHub Action that reviews pull requests with an LLM and posts inline review comments with concrete code suggestions, anchored to real lines in the diff. In parallel it runs deterministic [scanners](/scanners.md) that flag known CVEs in changed lockfiles and hardcoded secrets in the diff — all findings post in the same single PR review.
+Vor (`@driches/vor`, v0.6.0, MIT, author Doug Riches) is a GitHub Action that reviews pull requests with an LLM and posts inline review comments with concrete code suggestions, anchored to real lines in the diff. In parallel it runs deterministic [scanners](scanners.md) that flag known CVEs in changed lockfiles and hardcoded secrets in the diff — all findings post in the same single PR review.
 
 It is provider-agnostic: the same custom tool-use loop talks to Anthropic via `@anthropic-ai/sdk` and to OpenAI via the Responses API. The provider is inferred from the model id (`claude-*` → Anthropic; `gpt-*` / `o<digit>*` / `chatgpt-*` → OpenAI), so users supply only the API key for the provider they use.
 
@@ -20,4 +20,4 @@ It is provider-agnostic: the same custom tool-use loop talks to Anthropic via `@
 - Also ships a CLI: `bin.vor` → `dist/cli.js`; there is a `local-review` script for running reviews locally.
 - Requires Node >= 20. Docs site: https://driches.github.io/vor/
 
-See [architecture](/architecture.md) for how the review loop is structured and [tech-stack](/tech-stack.md) for dependencies.
+See [architecture](architecture.md) for how the review loop is structured and [tech-stack](tech-stack.md) for dependencies.
