@@ -1,0 +1,8 @@
+security:
+  scanners:
+    image_ocr:
+      enabled: true
+image_understanding:
+  enabled: true
+  # model: claude-haiku-4-5         # default; cost-effective vision
+  # max_images: 10
