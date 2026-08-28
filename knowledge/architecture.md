@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Review Loop and Repo Structure
-description: An orchestrator-owned, provider-agnostic loop exposes nine constrained base tools plus optional image-inspection and worker-verification tools, with no built-in filesystem or shell access.
+description: An orchestrator-owned, provider-agnostic loop exposes nine constrained base tools plus optional image-inspection and Anthropic worker-verification tools, with no built-in filesystem or shell access.
 tags: [architecture, orchestrator, tool-use, agent]
 timestamp: 2026-07-20T00:00:00Z
 ---
@@ -15,7 +15,7 @@ A custom tool-use loop gives the model nine base tools with **no built-in filesy
 Two configuration-gated tools can expand the active set to ten or eleven:
 
 - `describe_image_at_ref` is added when `image_understanding.enabled` is true. It returns OCR text and, when supported by the provider, a visual description of an image at HEAD or BASE.
-- `worker_check_usage_claim` is added when experimental worker delegation is enabled. It delegates focused unused-symbol, single-caller, or pattern-verification claims to a cheaper worker and returns a structured verdict.
+- `worker_check_usage_claim` is added only when experimental worker delegation is enabled and the resolved provider is Anthropic. OpenAI runs disable worker delegation, so this tool is not registered for them. It delegates focused unused-symbol, single-caller, or pattern-verification claims to a cheaper worker and returns a structured verdict.
 
 Before accepting an inline finding, `post_inline_comment` validates `(file_path, line)` against the actual diff — the agent cannot comment on lines that do not exist. On rejection it gets a structured hint listing the real reviewable lines so it can self-correct.
 

@@ -11,11 +11,11 @@ timestamp: 2026-07-20T00:00:00Z
 When `security.enabled` is true, six deterministic scanners are enabled by default. [`buildEnabledScanners`](../src/scanners/registry.ts) constructs them in a stable order after applying each scanner's `enabled` flag:
 
 - **`dependency-cve`** — parses changed lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `requirements.txt`) and queries [OSV.dev](https://osv.dev) for known CVEs. Findings appear inline on the lockfile line with the version pin, tagged `_via OSV · GHSA-…_`.
-- **`secrets`** — scans added lines in the diff for ~14 high-confidence credential patterns (AWS keys, GitHub PATs, Slack tokens, Stripe keys, Google API keys, npm tokens, PEM private keys). Matches are masked before posting.
+- **`secrets`** — scans added lines in the diff for 15 default high-confidence credential patterns (AWS keys, GitHub PATs, Slack tokens, Stripe keys, Google API keys, npm tokens, PEM private keys, and JWTs), with generic-entropy matching available as an opt-in. Matches are masked before posting.
 - **`sast`** — fans out to the language-appropriate installed tools: ESLint, Ruff, Dart analyzer, actionlint, Knip, Semgrep, TypeScript (`tsc --noEmit`), and golangci-lint. Semgrep uses `--config=auto` and also loads `.vor/semgrep-rules/` when that configured path exists.
 - **`debris`** — catches PR-added merge-conflict markers, debugger statements, focused tests, and stray debug logging.
 - **`migration-safety`** — flags risky DDL in migration files, including destructive statements and adding `NOT NULL` columns without defaults.
-- **`dependency-hygiene`** — reports lockfile drift, loose or unpinned dependency ranges, and non-registry dependency sources.
+- **`dependency-hygiene`** — inspects npm-style `package.json` manifests and reports lockfile drift, newly added open-ended or wildcard ranges (`*`, `latest`, `>=…`), and git, URL, or file dependency sources. It does not cover other manifest formats or package ecosystems.
 
 ## Opt-in and reserved scanners
 
