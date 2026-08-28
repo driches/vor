@@ -25,7 +25,7 @@ When `security.enabled` is true, six deterministic scanners are enabled by defau
 
 ## Shared pipeline
 
-The defaults live in [`src/config/defaults.ts`](../src/config/defaults.ts). `security.enabled` controls the complete scanner track; `security.scanners.<name>.enabled` and optional `min_severity` values control individual scanners. Findings can be suppressed through `.vor/security-ignore.yml`.
+The defaults live in [`src/config/defaults.ts`](../src/config/defaults.ts). `security.enabled` controls the complete scanner track; `security.scanners.<name>.enabled` and optional `min_severity` values control individual scanners. Implemented non-SAST scanners consult `.vor/security-ignore.yml`. SAST linter findings currently bypass that ignore list and must instead be suppressed through the underlying linter configuration or the available SAST options.
 
 Scanners run alongside the LLM agent by default. Inline findings are validated, deduplicated, filtered by scanner and global severity floors, and passed through the shared per-file and global caps before posting in the PR review.
 
