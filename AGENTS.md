@@ -304,3 +304,16 @@ Pre-1.0, breaking changes can land in minor versions; just call them out in the 
 - [SECURITY.md](SECURITY.md) — vulnerability disclosure (do NOT file public issues)
 
 If you're stuck for more than 30 minutes on getting the dev environment running, open a Discussion. The setup steps in [CONTRIBUTING.md](CONTRIBUTING.md) should work on a fresh machine; if they don't, that's a bug worth filing.
+
+---
+
+## 10. Knowledge bundle
+
+Repository knowledge for agents lives in `knowledge/` as an OKF bundle. Use [knowledge/index.md](knowledge/index.md) as the starting point for repository questions, then consult the linked concept pages and source files needed for exact or current behavior.
+
+When maintaining the bundle:
+
+- Preserve raw source material; synthesize new facts into the relevant concept pages.
+- Add new concept pages to `knowledge/index.md` and append an entry to `knowledge/log.md`.
+- Check for contradictions, orphaned pages, and broken links during substantial knowledge changes.
+- Do not introduce a vector store or embeddings without first documenting why the bundle is insufficient.
