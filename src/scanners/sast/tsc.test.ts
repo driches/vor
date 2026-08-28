@@ -146,7 +146,6 @@ function makeDeps(
     persistence: { enabled: false },
   };
   return {
-    octokit: {} as never,
     owner: 'test',
     repo: 'test',
     pull_number: 1,

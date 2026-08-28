@@ -32,6 +32,13 @@ export default defineConfig({
       },
       sidebar: [
         {
+          label: 'Setup',
+          items: [
+            { label: 'GitHub Actions', link: '/github-actions/' },
+            { label: 'Bitbucket Pipelines', link: '/bitbucket-pipelines/' },
+          ],
+        },
+        {
           label: 'Getting started',
           items: [
             { label: 'Overview', link: '/overview/' },

@@ -1,6 +1,6 @@
 /**
- * Dedup utilities used by the runner + orchestrator to collapse overlapping
- * findings before they hit the GitHub comment posting path.
+ * Dedup utilities used by the shared review runner to collapse overlapping
+ * findings before they reach a platform adapter.
  *
  * Two passes exist:
  *
@@ -12,21 +12,12 @@
  *      appear in the input array — that preserves the runner's stable
  *      ordering so metrics stay deterministic.
  *
- *   2. {@link dedupKeptScannerComments} — across the AI agent's surviving
- *      comments, AFTER the final filter caps have run. When a scanner
- *      flags the same neighborhood as an AI security comment, the AI
- *      usually has richer context and a more digestible explanation, so we
- *      prefer it. The big exception is `dependency-cve`: those findings
- *      carry hard, verifiable evidence (CVE id, version range, fix version)
- *      that the AI cannot supply, so they are NEVER suppressed by AI overlap.
- *
- *      Why post-filter? An earlier "predict-then-dedup" version ran dedup
- *      against AI comments PREDICTED to survive the caps. That was still
- *      wrong: if a predicted-survivor AI got bumped out of the combined cap
- *      by other scanner findings, its scanner counterpart had already been
- *      dropped by dedup and the line area silently lost ALL signal. Moving
- *      dedup AFTER the cap means scanner findings only lose to AI comments
- *      that actually post. See Codex P1 on PR #8.
+ *   2. {@link dedupCommentsWithScannerPrecedence} — across scanner and AI
+ *      comments before cap filtering. When both tracks report the same issue,
+ *      the validated deterministic scanner finding is canonical and the
+ *      overlapping AI comment is removed. Running this before caps is safe
+ *      because the scanner finding can no longer be discarded in favor of an
+ *      AI comment that is later capped out.
  *
  * Both passes are pure functions — they consume readonly inputs and produce
  * fresh arrays. Order of the output preserves first-appearance order from
@@ -48,16 +39,15 @@ const CONFIDENCE_RANK: Record<Confidence, number> = {
 };
 
 /**
- * Categories that overlap "security-adjacent" enough that an AI comment in
- * one of these should suppress a co-located scanner finding. Anything else
- * (readability, naming, generic `bug`, etc.) is unrelated and we keep both.
+ * Categories that describe the same security issue family even when the
+ * scanner and agent choose different labels.
  *
- * Why `bug` is NOT in this set: it's too broad. A nearby unrelated bug
- * comment (e.g. a null-deref note) would suppress a real scanner finding
- * (e.g. a leaked secret) purely by line proximity, hiding security signal.
- * We only suppress against categories that genuinely cover security ground.
+ * Why `bug` is NOT in this set: it's too broad. A leaked-secret scanner
+ * finding must not suppress a nearby, unrelated null-dereference comment
+ * purely by line proximity. Non-security categories require an exact line
+ * and category match.
  */
-const AI_SECURITY_ADJACENT_CATEGORIES: ReadonlySet<string> = new Set([
+const SECURITY_ADJACENT_CATEGORIES: ReadonlySet<string> = new Set([
   'security',
   'vulnerability',
   'data-loss',
@@ -162,45 +152,39 @@ export function dedupAcrossScanners(findings: readonly ScanFinding[]): ScanFindi
 }
 
 /**
- * Pass 2 (post-filter): drop scanner-sourced comments in the kept list that
- * overlap a surviving AI comment in a security-adjacent category.
+ * Pass 2: drop AI comments that overlap a deterministic scanner finding.
+ * Scanner results are canonical when the two tracks disagree.
  *
- * This runs AFTER {@link filterComments} so the only AI comments scanner
- * findings can lose to are the ones that ACTUALLY post (per Codex P1). The
- * earlier predict-then-dedup approach was still wrong: if a predicted-
- * survivor AI got bumped from the combined cap by other scanner findings,
- * its scanner counterpart had already been dropped and the line area
- * silently lost ALL security signal.
- *
- * Overlap criteria (ALL must hold) for a scanner comment to be suppressed:
+ * Overlap criteria (ALL must hold) for an AI comment to be suppressed:
  *   - same `file_path`,
  *   - same `side` (LEFT vs RIGHT) — a LEFT-side AI comment anchors at the
  *     PR's BASE blob while a RIGHT-side scanner finding points at HEAD;
  *     they reference different code positions and must not cross-dedup,
  *   - `|scan.line - ai.line| <= 3`,
- *   - the AI comment's `category` is in
- *     {'security','vulnerability','data-loss'}.
+ *   - both categories are security-adjacent, OR both use the same category
+ *     on the same line.
  *
- * Hard exception: scanner findings whose `source.scanner === 'dependency-cve'`
- * are NEVER suppressed by an AI overlap — they carry verifiable CVE
- * metadata the AI cannot reproduce, and we'd rather have a duplicate
- * comment than silently drop a CVE.
- *
- * Non-scanner comments (i.e. AI comments) are returned unchanged.
+ * Scanner comments are always returned unchanged. An AI comment with no
+ * `source` is still treated as agent-originated for backward compatibility.
  */
-export function dedupKeptScannerComments(kept: readonly PostedComment[]): PostedComment[] {
-  // Snapshot surviving AI comments once so the per-scanner overlap check
-  // doesn't re-scan the full list each iteration.
-  const survivingAi = kept.filter((c) => c.source?.kind !== 'scanner');
-  return kept.filter((c) => {
-    if (c.source?.kind !== 'scanner') return true;
-    if (c.source.scanner === 'dependency-cve') return true;
-    return !survivingAi.some(
-      (ai) =>
-        ai.file_path === c.file_path &&
-        ai.side === c.side &&
-        Math.abs(ai.line - c.line) <= AI_OVERLAP_LINE_WINDOW &&
-        AI_SECURITY_ADJACENT_CATEGORIES.has(ai.category),
-    );
+export function dedupCommentsWithScannerPrecedence(
+  comments: readonly PostedComment[],
+): PostedComment[] {
+  const scannerComments = comments.filter((comment) => comment.source?.kind === 'scanner');
+  return comments.filter((comment) => {
+    if (comment.source?.kind === 'scanner') return true;
+    return !scannerComments.some((scanner) => commentsOverlap(scanner, comment));
   });
+}
+
+function commentsOverlap(scanner: PostedComment, agent: PostedComment): boolean {
+  if (scanner.file_path !== agent.file_path || scanner.side !== agent.side) return false;
+
+  const distance = Math.abs(scanner.line - agent.line);
+  const securityOverlap =
+    SECURITY_ADJACENT_CATEGORIES.has(scanner.category) &&
+    SECURITY_ADJACENT_CATEGORIES.has(agent.category) &&
+    distance <= AI_OVERLAP_LINE_WINDOW;
+  const exactCategoryOverlap = scanner.category === agent.category && distance === 0;
+  return securityOverlap || exactCategoryOverlap;
 }

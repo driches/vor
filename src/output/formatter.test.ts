@@ -28,6 +28,12 @@ const c = (severity: PostedComment['severity']): PostedComment => ({
   confidence: 'high',
 });
 
+const scannerComment = (severity: PostedComment['severity']): PostedComment => ({
+  ...c(severity),
+  category: 'vulnerability',
+  source: { kind: 'scanner', scanner: 'dependency-cve', cve_id: 'CVE-2026-1000' },
+});
+
 describe('renderSummary — severity header', () => {
   it('shows "Critical findings" when at least one critical comment is posted', () => {
     const r = renderSummary({
@@ -317,7 +323,7 @@ describe('renderSummary — body content', () => {
   });
 });
 
-describe('renderSummary — event selection (unchanged)', () => {
+describe('renderSummary — event selection', () => {
   it('returns APPROVE event when agent approves and config allows', () => {
     const r = renderSummary({
       draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
@@ -365,6 +371,82 @@ describe('renderSummary — event selection (unchanged)', () => {
     });
     expect(r.event).toBe('REQUEST_CHANGES');
   });
+
+  it('lets a blocking scanner finding override an agent approval', () => {
+    const r = renderSummary({
+      draft: baseDraft({
+        summary: baseSummary({
+          assessment: 'approve',
+          assessment_reasoning: 'The agent found nothing that should block this change.',
+        }),
+      }),
+      keptComments: [scannerComment('important')],
+      truncatedCount: 0,
+      configEvent: 'APPROVE',
+      modelName: 'm',
+    });
+
+    expect(r.event).toBe('COMMENT');
+    expect(r.body).toContain('Deterministic scanner result');
+    expect(r.body).toContain("take precedence over the agent's approve assessment");
+    expect(r.body).not.toContain('The agent found nothing');
+  });
+
+  it('requests changes for a blocking scanner finding when config permits', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'comment' }) }),
+      keptComments: [scannerComment('critical')],
+      truncatedCount: 0,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+
+    expect(r.event).toBe('REQUEST_CHANGES');
+    expect(r.body).toContain("take precedence over the agent's comment assessment");
+  });
+
+  it('does not let non-blocking scanner findings override an approval', () => {
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [scannerComment('minor')],
+      truncatedCount: 0,
+      configEvent: 'APPROVE',
+      modelName: 'm',
+    });
+
+    expect(r.event).toBe('APPROVE');
+    expect(r.body).not.toContain('Deterministic scanner result');
+  });
+
+  it('uses a blocking scanner result when the agent summary is missing', () => {
+    const r = renderSummary({
+      draft: { comments: [], skipped: [] },
+      keptComments: [scannerComment('important')],
+      truncatedCount: 0,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+
+    expect(r.event).toBe('REQUEST_CHANGES');
+    expect(r.body).toContain('take precedence over the missing agent assessment');
+  });
+
+  it('uses an eligible scanner finding even when comment caps remove it', () => {
+    const cappedScanner = scannerComment('important');
+    const r = renderSummary({
+      draft: baseDraft({ summary: baseSummary({ assessment: 'approve' }) }),
+      keptComments: [],
+      scannerCommentsForAssessment: [cappedScanner],
+      truncatedCount: 1,
+      configEvent: 'REQUEST_CHANGES',
+      modelName: 'm',
+    });
+
+    expect(r.event).toBe('REQUEST_CHANGES');
+    expect(r.body).toContain('### Important findings');
+    expect(r.body).toContain('Deterministic scanner result');
+    expect(r.body).toContain('1 additional comment');
+  });
 });
 
 describe('renderSummary — binary-file findings (non-inline channel)', () => {
@@ -403,6 +485,20 @@ describe('renderSummary — binary-file findings (non-inline channel)', () => {
     expect(r.body).toContain('pattern `aws-access-key-id`');
     expect(r.body).toContain('OCR confidence 92%');
     expect(r.body).toContain('masked match `AKIA…WXYZ`');
+  });
+
+  it('uses the active platform name in the binary-anchor explanation', () => {
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      platformName: 'Bitbucket',
+      binaryFindings: [ocrFinding()],
+    });
+    expect(r.body).toContain("Bitbucket can't anchor inline comments on binary files");
+    expect(r.body).not.toContain("GitHub can't anchor inline comments on binary files");
   });
 
   it('counts a binary finding toward the severity headline even with no inline comments', () => {

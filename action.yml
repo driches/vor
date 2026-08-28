@@ -11,7 +11,7 @@ inputs:
     description: 'Anthropic API key. Required when using a Claude model (the default). Optional for OpenAI-only setups.'
     required: false
   openai_api_key:
-    description: 'OpenAI API key. Required when using a GPT or o-series model.'
+    description: 'OpenAI API key. Required when using OpenAI. If it is the only LLM key and no different model is selected, Vor uses gpt-5.6-sol.'
     required: false
   provider:
     description: 'LLM provider override (anthropic | openai). Inferred from `model` when omitted.'
@@ -21,7 +21,7 @@ inputs:
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-5.6-sol, gpt-4.1, gpt-4o-mini, o4-mini, …). Default claude-sonnet-4-6.'
+    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-5.6-sol, gpt-4.1, gpt-4o-mini, o4-mini, …). Overall default claude-sonnet-4-6; OpenAI default gpt-5.6-sol.'
     required: false
     default: 'claude-sonnet-4-6'
   max_turns:

@@ -16,53 +16,14 @@
  */
 
 import type { Octokit } from '@octokit/rest';
+import { isRejectionReply, type PriorReviewThread } from '../platform/prior-review-threads.js';
 import { AGENT_REVIEW_MARKER } from './prior-reviews.js';
 
-export interface PriorReviewReply {
-  /** GitHub login of the reply author (PR author or another reviewer). */
-  author: string;
-  /** Trimmed, truncated body of the reply. */
-  excerpt: string;
-}
-
-export interface PriorReviewThread {
-  file_path: string;
-  /**
-   * Current-HEAD line of the finding. Falls back to `original_line` when GitHub
-   * marks the comment outdated (the author pushed past it). `null` when neither
-   * is known.
-   */
-  line: number | null;
-  /** True when GitHub no longer anchors the root comment to a current line. */
-  outdated: boolean;
-  /** First-line excerpt of the agent's original finding (severity tag + title). */
-  finding_excerpt: string;
-  /**
-   * True when the originating review's state is CHANGES_REQUESTED or APPROVED —
-   * the states `dismissPriorAgentReviews` dismisses. Such a finding loses its
-   * active (blocking) state IF the sticky step runs this turn, so the
-   * orchestrator must not blanket-suppress it then; see the filter at the call
-   * site. (Config-dependent: only matters when `review.sticky` is on.)
-   */
-  from_dismissable_review: boolean;
-  /**
-   * True when the originating review's state is already DISMISSED (a prior
-   * sticky run superseded it). Such a finding has no active backing regardless
-   * of the current `review.sticky` setting, so it must never blanket-suppress a
-   * still-valid finding on a rerun.
-   */
-  already_dismissed: boolean;
-  /**
-   * True when at least one reply REJECTS the finding (matches the pushback
-   * phrases the agent prompt names — "won't fix", "by design", etc.). Distinct
-   * from "has any reply": an acknowledgement like "good catch" or "fixed in
-   * next push" is a reply but NOT pushback. Used to decide whether a thread
-   * that loses its active backing is worth keeping in the dedup block.
-   */
-  has_pushback: boolean;
-  /** Author replies on the thread, oldest first. */
-  replies: PriorReviewReply[];
-}
+export {
+  isRejectionReply,
+  type PriorReviewReply,
+  type PriorReviewThread,
+} from '../platform/prior-review-threads.js';
 
 export interface PriorThreadsRef {
   owner: string;
@@ -94,42 +55,6 @@ const EXCERPT_MAX = 200;
 // run (it skips COMMENTED / DISMISSED / PENDING). Findings from these reviews
 // go inactive when that step runs.
 const DISMISSABLE_STATES = new Set(['CHANGES_REQUESTED', 'APPROVED']);
-
-// Phrases that signal the author REJECTED a finding — mirrors the pushback
-// language named in the agent system prompt. Deliberately narrow: an
-// acknowledgement ("good catch", "fixed in next push", "will address") is a
-// reply but NOT a rejection, and must not match, or a soon-/already-dismissed
-// blocking finding would be wrongly suppressed.
-const REJECTION_PATTERNS: RegExp[] = [
-  /won['’]?t\s*fix/i,
-  /wont\s*fix/i,
-  /won['’]?t\s*do/i,
-  /wont\s*do/i,
-  /by\s*design/i,
-  // `\b` so "unintentional" (an acknowledgement) doesn't match "intentional"
-  // and wrongly suppress a finding. addressing #58 (Codex review).
-  /\bintentional/i,
-  /as\s*(documented|designed|intended)/i,
-  /working\s*as\s*intended/i,
-  /\bwai\b/i,
-  /disagree/i,
-  /not\s*a\s*(real\s*)?(bug|issue|problem)/i,
-];
-
-/** True when a reply body rejects the finding (vs. merely acknowledging it). */
-export function isRejectionReply(body: string): boolean {
-  // Classify only the author's OWN text, not quoted review content. GitHub's
-  // reply UI prepends `> <quoted finding>`, which can itself contain rejection
-  // phrases (e.g. a prior "by design" finding); matching the quote would
-  // wrongly flag an acknowledgement like "good catch — fixing" as pushback and
-  // suppress a still-open blocking finding. Mirrors the blockquote skip in
-  // `excerpt`. addressing #58 (Codex P2 review).
-  const authorText = body
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('>'))
-    .join('\n');
-  return REJECTION_PATTERNS.some((re) => re.test(authorText));
-}
 
 export async function fetchPriorReviewThreads(
   octokit: Octokit,

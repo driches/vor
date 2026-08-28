@@ -4,16 +4,12 @@
  */
 
 import type { Octokit } from '@octokit/rest';
+import type { FileReadRef, RepoFileReader } from '../platform/types.js';
 import { GitHubApiError } from '../util/errors.js';
 
-export interface FileReadRef {
-  owner: string;
-  repo: string;
-  path: string;
-  ref: string;
-}
+export type { FileReadRef, RepoFileReader } from '../platform/types.js';
 
-export class FileReader {
+export class FileReader implements RepoFileReader {
   private cache = new Map<string, string>();
   // Binary reads use a separate cache so a UTF-8 read and a raw read of the
   // same path don't alias (one stores a string, the other a Buffer).

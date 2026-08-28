@@ -10,7 +10,6 @@
  * Shares the redactor-global cleanup discipline with secrets.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Octokit } from '@octokit/rest';
 import type { ChangedFile } from '../types.js';
 import type { FileReader } from '../github/file-reader.js';
 import { InMemoryScanCache } from './cache.js';
@@ -68,7 +67,6 @@ function makeReader(over: Partial<FileReader> = {}): FileReader {
 function makeScannerDeps(over: Partial<ScannerDeps> = {}): ScannerDeps {
   const config = { scanners: { image_ocr: { enabled: true } } } as unknown as SecurityConfig;
   return {
-    octokit: {} as Octokit,
     owner: 'o',
     repo: 'r',
     pull_number: 1,

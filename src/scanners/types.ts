@@ -7,11 +7,10 @@
  * interfaces are forward-declared here so the implementation files can import
  * them without introducing a cycle.
  */
-import type { Octokit } from '@octokit/rest';
 import type { Category, ChangedFile, Confidence, ScannerId, Severity } from '../types.js';
 import type { RepoContextEntry } from '../agent/system-prompt.js';
 import type { SecurityConfig } from '../config/types.js';
-import type { FileReader } from '../github/file-reader.js';
+import type { RepoFileReader } from '../platform/types.js';
 
 /**
  * A single security scanner plugin. The runner calls `applies()` cheaply on
@@ -40,7 +39,6 @@ export interface Scanner {
  * defined below.
  */
 export interface ScannerDeps {
-  octokit: Octokit;
   owner: string;
   repo: string;
   pull_number: number;
@@ -56,7 +54,7 @@ export interface ScannerDeps {
   ignoreList: IgnoreList;
   /** Reads files at the PR HEAD ref. Shared across scanners so a single fetch
    *  of e.g. a lockfile is reused via the reader's own LRU. */
-  fileReader: FileReader;
+  fileReader: RepoFileReader;
   config: SecurityConfig;
   /** Aborts when the per-scanner timeout fires (or the orchestrator-level
    *  deadline elapses). Scanners doing network I/O MUST thread this through

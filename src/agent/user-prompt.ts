@@ -8,7 +8,7 @@
  */
 
 import type { ScanFinding } from '../scanners/types.js';
-import type { PriorReviewThread } from '../github/prior-review-threads.js';
+import type { PriorReviewThread } from '../platform/prior-review-threads.js';
 import type { BlastRadiusMap } from '../context/blast-radius.js';
 
 export function buildUserPrompt(input: {

@@ -24,6 +24,16 @@ export class GitHubApiError extends CodeReviewError {
   }
 }
 
+export class BitbucketApiError extends CodeReviewError {
+  constructor(
+    message: string,
+    public readonly status?: number,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
 export class AgentError extends CodeReviewError {}
 
 export class BudgetError extends CodeReviewError {}
