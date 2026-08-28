@@ -63,13 +63,26 @@ export interface CompleteOptions {
   openai?: OpenAICompleteOptions;
 }
 
-export interface OpenAICompleteOptions {
+interface OpenAICompleteOptionsBase {
   service_tier?: 'auto' | 'default' | 'flex';
   prompt_cache_key?: string;
   prompt_cache_retention?: 'in_memory' | '24h';
-  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   text_verbosity?: 'low' | 'medium' | 'high';
 }
+
+type SupportedOpenAIReasoningOptions = {
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  unsafe_reasoning_effort_override?: never;
+};
+
+type UnsafeOpenAIReasoningOptions = {
+  reasoning_effort?: never;
+  /** Explicit, warned escape hatch for provider-documented future effort values. */
+  unsafe_reasoning_effort_override: string;
+};
+
+export type OpenAICompleteOptions = OpenAICompleteOptionsBase &
+  (SupportedOpenAIReasoningOptions | UnsafeOpenAIReasoningOptions);
 
 /**
  * Token accounting normalized across vendors. Canonical naming drops the
@@ -87,12 +100,12 @@ export interface CanonicalUsage {
    */
   cache_read_tokens?: number;
   /**
-   * Tokens written into the prompt cache. Anthropic-only — OpenAI's cache
-   * writes are free and not separately surfaced.
+   * Tokens written into the prompt cache. Both providers can report these;
+   * pricing depends on the selected model.
    */
   cache_creation_tokens?: number;
   /**
-   * Hidden chain-of-thought tokens billed as output, OpenAI o-series only.
+   * Hidden chain-of-thought tokens billed as output for OpenAI reasoning models.
    * Already included in `output_tokens` — surfaced separately for telemetry,
    * not for double-counting in cost math.
    */
@@ -137,13 +150,13 @@ export interface CompleteResponse {
  * an Anthropic-shape `ModelUsage` to the per-model Budget accumulator
  * (whose billable formula is `input_tokens + cache_creation_input_tokens`).
  *  - Anthropic: `usage.input_tokens` unchanged (already excludes cache_read).
- *  - OpenAI: `usage.input_tokens - cache_read_tokens` (cache_read is a
- *    subset of input_tokens that's charged at the discounted rate).
+ *  - OpenAI: `usage.input_tokens - cache_read_tokens - cache_creation_tokens`
+ *    (both cache buckets are subsets of input_tokens charged separately).
  */
 export function inputTokensFullRateFor(providerId: ProviderId, usage: CanonicalUsage): number {
   if (providerId === 'anthropic') return usage.input_tokens;
   // openai
-  return usage.input_tokens - (usage.cache_read_tokens ?? 0);
+  return usage.input_tokens - (usage.cache_read_tokens ?? 0) - (usage.cache_creation_tokens ?? 0);
 }
 
 export interface LLMProvider {

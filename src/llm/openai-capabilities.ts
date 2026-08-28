@@ -1,6 +1,8 @@
 export interface OpenAIModelCapabilities {
   reasoning: boolean;
   temperature: boolean;
+  /** Explicit false for models that replaced prompt_cache_retention. */
+  legacyPromptCacheRetention?: boolean;
   promptCacheRetention24h: boolean;
 }
 
@@ -17,6 +19,18 @@ const OPENAI_MODEL_CAPABILITIES: Record<string, OpenAIModelCapabilities> = {
   'o3-mini': { reasoning: true, temperature: false, promptCacheRetention24h: false },
   'o4-mini': { reasoning: true, temperature: false, promptCacheRetention24h: false },
   'gpt-5.5': { reasoning: true, temperature: false, promptCacheRetention24h: true },
+  'gpt-5.6': {
+    reasoning: true,
+    temperature: false,
+    legacyPromptCacheRetention: false,
+    promptCacheRetention24h: false,
+  },
+  'gpt-5.6-sol': {
+    reasoning: true,
+    temperature: false,
+    legacyPromptCacheRetention: false,
+    promptCacheRetention24h: false,
+  },
   'gpt-5.4': { reasoning: true, temperature: false, promptCacheRetention24h: true },
   'gpt-5.4-mini': { reasoning: true, temperature: false, promptCacheRetention24h: true },
   'gpt-5.4-nano': { reasoning: true, temperature: false, promptCacheRetention24h: true },
@@ -26,7 +40,8 @@ const OPENAI_MODEL_CAPABILITIES: Record<string, OpenAIModelCapabilities> = {
 const DEFAULT_GPT5_CAPABILITIES: OpenAIModelCapabilities = {
   reasoning: true,
   temperature: false,
-  promptCacheRetention24h: true,
+  legacyPromptCacheRetention: false,
+  promptCacheRetention24h: false,
 };
 
 const DEFAULT_O_SERIES_CAPABILITIES: OpenAIModelCapabilities = {

@@ -40,6 +40,7 @@ vi.mock('../llm/index.js', async (importActual) => {
 import { runAgent } from './runner.js';
 import * as llmIndex from '../llm/index.js';
 import { buildFakeDeps } from '../tools/test-helpers.js';
+import { logger } from '../util/logger.js';
 
 /**
  * Scriptable LLMProvider for runner tests. Construct with a list of
@@ -183,6 +184,42 @@ describe('runAgent', () => {
       prompt_cache_key: 'owner/repo',
       reasoning_effort: 'low',
     });
+  });
+
+  it('forwards and warns once for an unsafe reasoning-effort override', async () => {
+    const provider = new FakeProvider([makeResponse()], 'openai');
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+    const warnSpy = vi.spyOn(logger, 'warn').mockResolvedValue(undefined);
+
+    await runAgent({
+      ...baseInput(),
+      model: 'gpt-5.6-sol',
+      providerHint: 'openai',
+      openai: { unsafe_reasoning_effort_override: 'future-1' },
+    });
+
+    expect(provider.completeCalls[0]!.opts.openai).toEqual({
+      unsafe_reasoning_effort_override: 'future-1',
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('cannot validate provider/model compatibility or cost impact'),
+    );
+  });
+
+  it('does not warn for a dormant OpenAI override during an Anthropic run', async () => {
+    const provider = new FakeProvider([makeResponse()], 'anthropic');
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+    const warnSpy = vi.spyOn(logger, 'warn').mockResolvedValue(undefined);
+
+    await runAgent({
+      ...baseInput(),
+      openai: { unsafe_reasoning_effort_override: 'future-1' },
+    });
+
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('unsafe_reasoning_effort_override'),
+    );
   });
 
   it('omits abortSignal when no abortController is supplied', async () => {

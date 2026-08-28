@@ -64,6 +64,8 @@ describe('pricingForModel', () => {
       'gpt-5.4-mini',
       'gpt-5.4-nano',
       'gpt-5.5',
+      'gpt-5.6',
+      'gpt-5.6-sol',
       'o1',
       'o1-mini',
       'o1-preview',
@@ -141,6 +143,16 @@ describe('pricingForModel', () => {
     });
   });
 
+  it('prices GPT-5.6 Sol including cache writes', () => {
+    expect(pricingForModel('gpt-5.6-sol')).toEqual({
+      input: 4,
+      output: 20,
+      cache_creation: 5,
+      cache_read: 0.4,
+    });
+    expect(pricingForModel('gpt-5.6')).toEqual(pricingForModel('gpt-5.6-sol'));
+  });
+
   it('prices o1 at $15/$60 with $7.5 cache read', () => {
     const p = pricingForModel('o1');
     expect(p).toBeDefined();
@@ -212,5 +224,21 @@ describe('costFromUsage', () => {
   it('falls back to Sonnet rates for unknown model (no NaN cost)', () => {
     const cost = costFromUsage('claude-imaginary-99', { inputTokens: 1_000_000 });
     expect(cost).toBeCloseTo(3, 4);
+  });
+
+  it('computes GPT-5.6 Sol base-rate cost below the long-context threshold', () => {
+    const cost = costFromUsage('gpt-5.6-sol', {
+      inputTokens: 100_000,
+      outputTokens: 100_000,
+    });
+    expect(cost).toBeCloseTo(2.4, 4);
+  });
+
+  it('charges GPT-5.6 Sol cache writes and reads at their published rates', () => {
+    const cost = costFromUsage('gpt-5.6-sol', {
+      cacheCreationTokens: 100_000,
+      cacheReadTokens: 100_000,
+    });
+    expect(cost).toBeCloseTo(0.54, 4);
   });
 });

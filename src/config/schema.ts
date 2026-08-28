@@ -3,7 +3,24 @@ import { z } from 'zod';
 const severitySchema = z.enum(['critical', 'important', 'minor', 'nit']);
 const eventSchema = z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
 const providerSchema = z.enum(['anthropic', 'openai']);
-const openaiReasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const openaiReasoningEffortSchema = z.enum([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+const unsafeOpenAIReasoningEffortOverrideSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
+    'must be a 1-64 character provider value containing only letters, numbers, dot, underscore, or hyphen',
+  )
+  .refine((value) => value !== 'pro' && value !== 'standard', {
+    message: 'cannot use an OpenAI reasoning mode as a reasoning effort',
+  });
 
 const scannerCommon = z.object({
   enabled: z.boolean(),
@@ -72,15 +89,34 @@ const experimentalSchema = z.object({
   scanner_findings_in_user_prompt: z.boolean(),
 });
 
-const providerConfigSchema = z.object({
-  openai: z.object({
+const openaiProviderConfigSchema = z
+  .object({
     service_tier: z.enum(['auto', 'default', 'flex']).optional(),
     prompt_cache_key: z.string().min(1).max(256).optional(),
     prompt_cache_retention: z.enum(['in_memory', '24h']).optional(),
     reasoning_effort: openaiReasoningEffortSchema.optional(),
+    unsafe_reasoning_effort_override: unsafeOpenAIReasoningEffortOverrideSchema.optional(),
     text_verbosity: z.enum(['low', 'medium', 'high']).optional(),
-  }),
-});
+  })
+  .strict()
+  .superRefine((config, ctx) => {
+    if (
+      config.reasoning_effort !== undefined &&
+      config.unsafe_reasoning_effort_override !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['unsafe_reasoning_effort_override'],
+        message: 'cannot be combined with reasoning_effort',
+      });
+    }
+  });
+
+const providerConfigSchema = z
+  .object({
+    openai: openaiProviderConfigSchema,
+  })
+  .strict();
 
 /**
  * Zod schema for `.vor.yml`. All fields optional; missing values are

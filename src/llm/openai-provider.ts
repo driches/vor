@@ -17,7 +17,7 @@
  * NOT use OpenAI's server-side `previous_response_id` continuation. The full
  * conversation is re-sent each turn (parity with the Anthropic adapter and
  * with how `src/agent/runner.ts` already operates). To preserve reasoning
- * across stateless turns for o-series models, the prior turn's full
+ * across stateless turns for reasoning models, the prior turn's full
  * `response.output[]` array is stashed verbatim into the canonical
  * `assistant.provider_state` and splatted back into the next request's
  * `input[]`. This carries the encrypted reasoning items (requested via
@@ -58,6 +58,31 @@ export class OpenAIProvider implements LLMProvider {
 
     const capabilities = openaiCapabilitiesForModel(opts.model);
     const promptCacheRetention = opts.openai?.prompt_cache_retention;
+    const supportedReasoningEffort = opts.openai?.reasoning_effort;
+    const unsafeReasoningEffort = opts.openai?.unsafe_reasoning_effort_override;
+    if (supportedReasoningEffort !== undefined && unsafeReasoningEffort !== undefined) {
+      throw new Error(
+        'OpenAI reasoning_effort cannot be combined with unsafe_reasoning_effort_override',
+      );
+    }
+    if (unsafeReasoningEffort === 'pro' || unsafeReasoningEffort === 'standard') {
+      throw new Error(
+        `OpenAI reasoning mode "${unsafeReasoningEffort}" cannot be used as a reasoning effort`,
+      );
+    }
+    type SDKReasoningEffort = Exclude<
+      NonNullable<OpenAI.Responses.ResponseCreateParamsNonStreaming['reasoning']>['effort'],
+      null | undefined
+    >;
+    const reasoningEffort =
+      supportedReasoningEffort ??
+      // The named unsafe field is the sole type escape for future provider
+      // values. Normal configuration remains checked against the closed enum.
+      (unsafeReasoningEffort as SDKReasoningEffort | undefined);
+    // An unsafe override also asserts that the selected future model accepts
+    // the reasoning request shape; otherwise silently omitting it would make
+    // the explicit escape hatch ineffective and hide operator intent.
+    const reasoningRequested = capabilities.reasoning || unsafeReasoningEffort !== undefined;
     const requestBody: OpenAI.Responses.ResponseCreateParamsNonStreaming & Record<string, unknown> =
       {
         model: opts.model,
@@ -69,24 +94,27 @@ export class OpenAIProvider implements LLMProvider {
         // entire conversation ourselves (see provider_state replay in the
         // module JSDoc).
         store: false,
-        // For o-series, ask for the encrypted reasoning items so we can replay
+        // For reasoning models, ask for encrypted reasoning items so we can replay
         // them next turn without retention. No-op on non-reasoning models, but
         // gpt-* will 400 if you pass an unsupported `include` value, hence the
         // conditional.
-        ...(capabilities.reasoning ? { include: ['reasoning.encrypted_content' as const] } : {}),
+        ...(reasoningRequested ? { include: ['reasoning.encrypted_content' as const] } : {}),
         // Reasoning models reject the `temperature` parameter. Only send it
         // for models whose capability row says it is supported.
-        ...(supportsTemperature(opts.model) ? { temperature: opts.temperature ?? 0.5 } : {}),
+        ...(supportsTemperature(opts.model) && unsafeReasoningEffort === undefined
+          ? { temperature: opts.temperature ?? 0.5 }
+          : {}),
         ...(opts.openai?.service_tier ? { service_tier: opts.openai.service_tier } : {}),
         ...(opts.openai?.prompt_cache_key
           ? { prompt_cache_key: opts.openai.prompt_cache_key }
           : {}),
         ...(promptCacheRetention &&
+        capabilities.legacyPromptCacheRetention !== false &&
         (promptCacheRetention !== '24h' || capabilities.promptCacheRetention24h)
           ? { prompt_cache_retention: promptCacheRetention }
           : {}),
-        ...(opts.openai?.reasoning_effort && capabilities.reasoning
-          ? { reasoning: { effort: opts.openai.reasoning_effort } }
+        ...(reasoningEffort && reasoningRequested
+          ? { reasoning: { effort: reasoningEffort } }
           : {}),
         ...(opts.openai?.text_verbosity ? { text: { verbosity: opts.openai.text_verbosity } } : {}),
       };
@@ -335,8 +363,8 @@ export function canonicalToolsToResponses(tools: CanonicalTool[]): OpenAI.Respon
  *
  * Usage mapping:
  *  - Cache fields omitted when 0 (parity with the Anthropic adapter's
- *    "noisy cache_r=0 line" reasoning). `cache_creation_tokens` is never
- *    set — OpenAI doesn't charge for cache writes and doesn't surface them.
+ *    "noisy cache_r=0 line" reasoning). Newer Responses models surface
+ *    `cache_write_tokens`, which maps to canonical cache creation usage.
  *
  * `provider_state` is set to the FULL `response.output` array so the next
  * turn's request can splat it back into `input[]` (see
@@ -459,10 +487,10 @@ export function responsesResponseToCanonical(
   };
   const cacheRead = response.usage?.input_tokens_details?.cached_tokens ?? 0;
   if (cacheRead > 0) usage.cache_read_tokens = cacheRead;
+  const cacheCreation = response.usage?.input_tokens_details?.cache_write_tokens ?? 0;
+  if (cacheCreation > 0) usage.cache_creation_tokens = cacheCreation;
   const reasoning = response.usage?.output_tokens_details?.reasoning_tokens ?? 0;
   if (reasoning > 0) usage.reasoning_tokens = reasoning;
-  // cache_creation_tokens is intentionally left unset — OpenAI doesn't bill
-  // for cache writes and the canonical type allows undefined.
 
   return {
     text,
