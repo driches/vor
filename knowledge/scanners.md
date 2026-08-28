@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Deterministic Scanners and Finding Pipeline
-description: Six deterministic scanners are enabled by default, with coverage and image OCR available as opt-ins; all findings share the review severity, deduplication, and cap pipeline.
+description: Six deterministic scanners are enabled by default, with coverage and image OCR available as opt-ins; inline findings share the review pipeline while binary OCR findings render separately.
 tags: [security, scanners, cve, secrets, sast, osv]
 timestamp: 2026-07-20T00:00:00Z
 ---
@@ -27,4 +27,6 @@ When `security.enabled` is true, six deterministic scanners are enabled by defau
 
 The defaults live in [`src/config/defaults.ts`](../src/config/defaults.ts). `security.enabled` controls the complete scanner track; `security.scanners.<name>.enabled` and optional `min_severity` values control individual scanners. Findings can be suppressed through `.vor/security-ignore.yml`.
 
-Scanners run alongside the LLM agent by default. Their findings are validated, deduplicated, filtered by scanner and global severity floors, and passed through the shared per-file and global caps before everything posts in one PR review. An [architecture](architecture.md) invariant is that scanners handle deterministic checks while the LLM handles semantic judgment.
+Scanners run alongside the LLM agent by default. Inline findings are validated, deduplicated, filtered by scanner and global severity floors, and passed through the shared per-file and global caps before posting in the PR review.
+
+Binary `image-ocr` findings cannot be anchored to GitHub diff lines. After the scanner and global severity floors are applied, they bypass inline validation and the per-file and global comment caps and render in a dedicated review-summary section instead. An [architecture](architecture.md) invariant is that scanners handle deterministic checks while the LLM handles semantic judgment.

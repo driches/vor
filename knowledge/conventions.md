@@ -35,9 +35,4 @@ User-facing changes also need a `CHANGELOG.md` entry under `## [Unreleased]`.
 
 ## Eval and local workflows
 
-npm scripts evidence a golden-eval harness and local tooling: `golden:capture`, `golden:capture-batch`, `golden:discover`, `golden:eval`, `golden:plant` (`scripts/golden/`, `scripts/plant.ts`), plus `record-fixture`, `local-review`, and `smoke-openai`. AGENTS.md defines "done" as including eval-harness verification for behavior changes.
-
-## Open questions
-
-- The full AGENTS.md content (auto-reject list, dogfooding specifics, eval procedure) — ingest AGENTS.md directly.
-- What the golden eval harness measures and how results gate changes.
+npm scripts provide `golden:capture`, `golden:capture-batch`, `golden:discover`, `golden:eval`, and `golden:plant` (`scripts/golden/`, `scripts/plant.ts`), plus `record-fixture`, `local-review`, and `smoke-openai`. `golden:eval` runs the selected model against captured cases in a separate private `GOLDEN_REPO_PATH`, compares normalized findings with stored Codex findings, and records matches, misses, turns, token use, and cost. AGENTS.md requires behavioral eval evidence for changes to prompts, tools, the agent loop, or scanners.

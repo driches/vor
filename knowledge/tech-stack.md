@@ -14,20 +14,16 @@ TypeScript, ESM (`"type": "module"`), Node `>=20` (`.nvmrc` present). Built with
 
 - **LLM providers**: `@anthropic-ai/sdk` (^0.39.0), `openai` (^6.39.0) — the dual-provider core of [the review loop](architecture.md).
 - **GitHub**: `@actions/core`, `@octokit/rest` with `@octokit/plugin-retry` and `@octokit/plugin-throttling`.
-- **MCP**: `@modelcontextprotocol/sdk` (^1.29.0) — there is a `src/mcp` module.
+- **MCP**: `@modelcontextprotocol/sdk` (^1.29.0) — the stdio server exposes local review, run-history, and configuration tools.
 - **Diff/parsing**: `parse-diff`, `semver`, `yaml`.
-- **Schemas**: `zod` + `zod-to-json-schema` (likely how tool schemas are produced; unconfirmed).
+- **Schemas**: `zod` validates tool and configuration inputs; `zod-to-json-schema` converts agent-tool schemas for model providers.
 - **CLI**: `commander`.
 
 ## Optional dependencies
 
-- `tesseract.js` / `tesseract.js-core` (^7.0.0) — OCR; `assets/ocr/` and `src/ocr` exist, and `assets/ocr/` ships in the published package.
+- `tesseract.js` / `tesseract.js-core` (^7.0.0) — offline OCR for the opt-in `image-ocr` scanner and conditional `describe_image_at_ref` agent tool. Vendored runtime assets under `assets/ocr/` ship in the package.
 
 ## Subprojects
 
 - Dashboard: Svelte via `@sveltejs/vite-plugin-svelte`, built with Vite.
 - Docs site: Astro (`site/astro.config.mjs`), separate package.json.
-
-## Open questions
-
-- Which OCR/vision features are user-facing (e.g. reviewing images in PRs?) — the digest only evidences the modules and deps.
