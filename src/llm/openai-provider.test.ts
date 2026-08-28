@@ -43,6 +43,7 @@ describe('isReasoningModel', () => {
   });
 
   it('returns true for GPT-5.x and Codex reasoning models', () => {
+    expect(isReasoningModel('gpt-5.6-sol')).toBe(true);
     expect(isReasoningModel('gpt-5.5')).toBe(true);
     expect(isReasoningModel('gpt-5.4-mini')).toBe(true);
     expect(isReasoningModel('gpt-5.3-codex')).toBe(true);
@@ -65,6 +66,7 @@ describe('supportsTemperature', () => {
     expect(supportsTemperature('gpt-4o')).toBe(true);
     expect(supportsTemperature('chatgpt-4o-latest')).toBe(true);
     expect(supportsTemperature('gpt-5.5')).toBe(false);
+    expect(supportsTemperature('gpt-5.6-sol')).toBe(false);
   });
 });
 
@@ -778,6 +780,22 @@ describe('responsesResponseToCanonical', () => {
     expect(result.usage.cache_read_tokens).toBe(600);
   });
 
+  it('surfaces cache_creation_tokens from input_tokens_details.cache_write_tokens', () => {
+    const result = responsesResponseToCanonical(
+      fakeResponse({
+        usage: {
+          input_tokens: 1000,
+          output_tokens: 50,
+          total_tokens: 1050,
+          input_tokens_details: { cached_tokens: 300, cache_write_tokens: 200 },
+          output_tokens_details: { reasoning_tokens: 0 },
+        },
+      } as unknown as Partial<OpenAI.Responses.Response>),
+    );
+    expect(result.usage.cache_read_tokens).toBe(300);
+    expect(result.usage.cache_creation_tokens).toBe(200);
+  });
+
   it('surfaces reasoning_tokens (from output_tokens_details.reasoning_tokens) when > 0', async () => {
     const result = responsesResponseToCanonical(
       fakeResponse({
@@ -791,8 +809,7 @@ describe('responsesResponseToCanonical', () => {
       } as unknown as Partial<OpenAI.Responses.Response>),
     );
     expect(result.usage.reasoning_tokens).toBe(150);
-    // cache_creation_tokens is intentionally never set for OpenAI (no
-    // creation cost surfaced by the API).
+    // No cache write count was surfaced by this response.
     expect(result.usage.cache_creation_tokens).toBeUndefined();
   });
 
@@ -837,6 +854,17 @@ describe('OpenAIProvider', () => {
           cache_read_tokens: 600,
         }),
       ).toBe(400);
+    });
+
+    it('subtracts both OpenAI cache buckets from input_tokens', () => {
+      expect(
+        provider.inputTokensFullRate({
+          input_tokens: 1000,
+          output_tokens: 50,
+          cache_read_tokens: 300,
+          cache_creation_tokens: 200,
+        }),
+      ).toBe(500);
     });
 
     it('returns input_tokens unchanged when cache_read_tokens is missing', () => {
@@ -953,6 +981,74 @@ describe('OpenAIProvider', () => {
       expect(body.reasoning).toEqual({ effort: 'low' });
       expect(body.text).toEqual({ verbosity: 'low' });
       expect(body).not.toHaveProperty('temperature');
+    });
+
+    it('sends max reasoning effort for GPT-5.6 Sol', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('gpt-5.6-sol'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-5.6-sol',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: { reasoning_effort: 'max' },
+      });
+
+      const body = createSpy.mock.calls[0]![0];
+      expect(body.reasoning).toEqual({ effort: 'max' });
+      expect(body.include).toEqual(['reasoning.encrypted_content']);
+      expect(body).not.toHaveProperty('temperature');
+    });
+
+    it('omits legacy prompt_cache_retention for GPT-5.6 Sol', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('gpt-5.6-sol'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-5.6-sol',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: { prompt_cache_retention: 'in_memory' },
+      });
+
+      expect(createSpy.mock.calls[0]![0]).not.toHaveProperty('prompt_cache_retention');
+    });
+
+    it('forwards an unsafe future effort and asserts the reasoning request shape', async () => {
+      createSpy.mockResolvedValueOnce(emptyCompletedResponse('future-openai-model'));
+      await new OpenAIProvider('sk-test').complete([], [], {
+        model: 'future-openai-model',
+        maxOutputTokens: 100,
+        system: 's',
+        openai: { unsafe_reasoning_effort_override: 'future-1' },
+      });
+
+      const body = createSpy.mock.calls[0]![0];
+      expect(body.reasoning).toEqual({ effort: 'future-1' });
+      expect(body.include).toEqual(['reasoning.encrypted_content']);
+      expect(body).not.toHaveProperty('temperature');
+    });
+
+    it('rejects simultaneous normal and unsafe efforts before calling the SDK', async () => {
+      const request = new OpenAIProvider('sk-test').complete([], [], {
+        model: 'gpt-5.6-sol',
+        maxOutputTokens: 100,
+        system: 's',
+        // @ts-expect-error Runtime guard protects JavaScript and untyped callers.
+        openai: { reasoning_effort: 'max', unsafe_reasoning_effort_override: 'future-1' },
+      });
+
+      await expect(request).rejects.toThrow(/cannot be combined/);
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects reasoning modes passed through the unsafe effort override', async () => {
+      for (const value of ['pro', 'standard']) {
+        const request = new OpenAIProvider('sk-test').complete([], [], {
+          model: 'gpt-5.6-sol',
+          maxOutputTokens: 100,
+          system: 's',
+          openai: { unsafe_reasoning_effort_override: value },
+        });
+        await expect(request).rejects.toThrow(/cannot be used as a reasoning effort/);
+      }
+      expect(createSpy).not.toHaveBeenCalled();
     });
 
     it('does not send reasoning effort for non-reasoning GPT-4 models', async () => {

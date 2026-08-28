@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CONFIG } from './defaults.js';
 import { loadConfigFromString, loadConfigStrict } from './loader.js';
 import { configSchema, partialConfigSchema } from './schema.js';
 import { ConfigError } from '../util/errors.js';
+import { logger } from '../util/logger.js';
 
 describe('loadConfigFromString', () => {
   it('returns defaults for empty/null input', () => {
@@ -227,5 +228,106 @@ providers:
       providers: { openai: { service_tier: 'premium' } },
     });
     expect(result.success).toBe(false);
+  });
+
+  it('accepts max as a catalogued OpenAI reasoning effort', () => {
+    const cfg = loadConfigStrict(`
+model: gpt-5.6-sol
+providers:
+  openai:
+    reasoning_effort: max
+`);
+    expect(cfg.providers.openai.reasoning_effort).toBe('max');
+  });
+
+  it('rejects unknown values on the normal reasoning-effort field', () => {
+    expect(() =>
+      loadConfigStrict(`
+providers:
+  openai:
+    reasoning_effort: ultra
+`),
+    ).toThrowError(ConfigError);
+  });
+
+  it('preserves an explicitly unsafe future reasoning-effort override', () => {
+    const cfg = loadConfigStrict(`
+model: gpt-future
+providers:
+  openai:
+    unsafe_reasoning_effort_override: future-1
+`);
+    expect(cfg.providers.openai.unsafe_reasoning_effort_override).toBe('future-1');
+  });
+
+  it('rejects simultaneous normal and unsafe reasoning-effort fields', () => {
+    expect(() =>
+      loadConfigStrict(`
+providers:
+  openai:
+    reasoning_effort: high
+    unsafe_reasoning_effort_override: future-1
+`),
+    ).toThrowError(/cannot be combined with reasoning_effort/);
+  });
+
+  it('rejects empty, whitespace, and log-unsafe override values', () => {
+    for (const value of ['""', '" future "', '"future/value"']) {
+      expect(() =>
+        loadConfigStrict(`
+providers:
+  openai:
+    unsafe_reasoning_effort_override: ${value}
+`),
+      ).toThrowError(ConfigError);
+    }
+  });
+
+  it('rejects reasoning mode names in the unsafe effort override', () => {
+    for (const value of ['pro', 'standard']) {
+      expect(() =>
+        loadConfigStrict(`
+providers:
+  openai:
+    unsafe_reasoning_effort_override: ${value}
+`),
+      ).toThrowError(/cannot use an OpenAI reasoning mode as a reasoning effort/);
+    }
+  });
+
+  it('rejects misspelled OpenAI keys instead of stripping them', () => {
+    expect(() =>
+      loadConfigStrict(`
+providers:
+  openai:
+    reasoning_effrot: max
+`),
+    ).toThrowError(/Unrecognized key/);
+  });
+
+  it('rejects a misspelled OpenAI provider key instead of stripping it', () => {
+    expect(() =>
+      loadConfigStrict(`
+providers:
+  opneai:
+    reasoning_effort: max
+`),
+    ).toThrowError(/Unrecognized key/);
+  });
+
+  it('warns and falls back to defaults for a misspelled OpenAI key in safe loading', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockResolvedValue(undefined);
+    try {
+      const cfg = loadConfigFromString(`
+model: gpt-5.6-sol
+providers:
+  openai:
+    reasoning_effrot: max
+`);
+      expect(cfg).toEqual(DEFAULT_CONFIG);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unrecognized key'));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

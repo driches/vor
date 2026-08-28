@@ -48,6 +48,10 @@ vor config show            # print the resolved .vor.yml for this directory
 vor config validate        # validate .vor.yml and report any errors
 ```
 
+These commands do not require an API key and do not make provider requests.
+`config show` includes any explicitly unsafe provider override in the resolved
+output, and both commands warn when one is present.
+
 ## Dashboard
 
 A small web UI for browsing run history and kicking off new reviews:

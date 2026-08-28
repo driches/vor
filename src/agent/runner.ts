@@ -36,6 +36,7 @@ import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
 import { logger } from '../util/logger.js';
 import { costFromUsage, pricingForModel } from '../util/pricing.js';
+import { unsafeReasoningEffortWarning } from '../config/warnings.js';
 import {
   createProvider,
   type CanonicalMessage,
@@ -172,6 +173,15 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     apiKey: input.apiKey,
     ...(input.providerHint !== undefined ? { providerHint: input.providerHint } : {}),
   });
+
+  const unsafeReasoningEffort = input.openai?.unsafe_reasoning_effort_override;
+  if (
+    provider.id === 'openai' &&
+    unsafeReasoningEffort !== undefined &&
+    input.openai?.reasoning_effort === undefined
+  ) {
+    await logger.warn(unsafeReasoningEffortWarning(input.model, unsafeReasoningEffort));
+  }
 
   // Wire optional worker delegation. ONLY available when the resolved
   // provider is Anthropic — pre-flight Haiku and the worker tool both use

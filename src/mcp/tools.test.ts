@@ -105,12 +105,19 @@ describe('MCP tool handlers', () => {
     const repo = mkdtempSync(join(tmpdir(), 'vor-cfg-'));
     execFileSync('git', ['init', '-q'], { cwd: repo });
     // Recognizable in-repo config, plus an out-of-repo file a traversal would hit.
-    writeFileSync(join(repo, '.vor.yml'), 'max_turns: 13\n');
+    writeFileSync(
+      join(repo, '.vor.yml'),
+      'model: gpt-future\nmax_turns: 13\nproviders:\n  openai:\n    unsafe_reasoning_effort_override: future-1\n',
+    );
     writeFileSync(join(repo, '..', 'outside.yml'), 'max_turns: 7\n');
     try {
       const h = createHandlers(deps({ workspace: repo }));
-      const inside = parse(await h.get_config({})) as { max_turns: number };
+      const inside = parse(await h.get_config({})) as {
+        max_turns: number;
+        providers: { openai: { unsafe_reasoning_effort_override?: string } };
+      };
       expect(inside.max_turns).toBe(13);
+      expect(inside.providers.openai.unsafe_reasoning_effort_override).toBe('future-1');
       // A '../' escape must not read outside.yml; it falls back to defaults (40).
       const escaped = parse(await h.get_config({ config_path: '../outside.yml' })) as {
         max_turns: number;

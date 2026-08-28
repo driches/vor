@@ -21,7 +21,7 @@ inputs:
     required: true
     default: ${{ github.token }}
   model:
-    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-4.1, gpt-4o-mini, o4-mini, …). Default claude-sonnet-4-6.'
+    description: 'Model ID — Claude (claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-7) or OpenAI (gpt-5.6-sol, gpt-4.1, gpt-4o-mini, o4-mini, …). Default claude-sonnet-4-6.'
     required: false
     default: 'claude-sonnet-4-6'
   max_turns:
@@ -55,7 +55,7 @@ outputs:
     description: 'How the review ended (summary_posted | max_turns | output_truncated | budget_exceeded | aborted | error | skipped_draft | skipped_no_key_anthropic | skipped_no_key_openai).'
     value: ${{ steps.run.outputs.ended }}
   cost_usd:
-    description: 'Total API cost in USD.'
+    description: "Estimated API cost in USD using Vor's pricing catalog."
     value: ${{ steps.run.outputs.cost_usd }}
 
 runs:

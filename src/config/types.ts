@@ -101,18 +101,34 @@ export interface ImageUnderstandingConfig {
   max_images?: number;
 }
 
-export interface OpenAIProviderConfig {
+interface OpenAIProviderConfigBase {
   /** Responses API service tier. `flex` can reduce cost with slower/less available processing. */
   service_tier?: 'auto' | 'default' | 'flex';
   /** Stable cache-routing key for prompt caching. Keep low-cardinality. */
   prompt_cache_key?: string;
   /** Prompt cache retention policy when supported by the selected model. */
   prompt_cache_retention?: 'in_memory' | '24h';
-  /** Reasoning effort for reasoning-capable OpenAI models. */
-  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   /** GPT-5 text verbosity knob when supported. */
   text_verbosity?: 'low' | 'medium' | 'high';
 }
+
+type SupportedOpenAIReasoningConfig = {
+  /** Reasoning effort from Vor's supported OpenAI catalog. */
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  unsafe_reasoning_effort_override?: never;
+};
+
+type UnsafeOpenAIReasoningConfig = {
+  reasoning_effort?: never;
+  /**
+   * Explicit escape hatch for a provider-documented future effort absent
+   * from Vor's catalog. The schema rejects use alongside reasoning_effort.
+   */
+  unsafe_reasoning_effort_override: string;
+};
+
+export type OpenAIProviderConfig = OpenAIProviderConfigBase &
+  (SupportedOpenAIReasoningConfig | UnsafeOpenAIReasoningConfig);
 
 export interface ExperimentalConfig {
   /**

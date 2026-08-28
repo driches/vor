@@ -416,8 +416,8 @@ describe('evalRun', () => {
     // Anthropic: returns input_tokens unchanged (cache_creation rides on
     // the Budget accumulator's separate field; cache_read is excluded).
     expect(anth.inputTokensFullRate(usage)).toBe(1000);
-    // OpenAI: input - cache_read = 400.
-    expect(oai.inputTokensFullRate(usage)).toBe(400);
+    // OpenAI: input - cache_read - cache_creation = 200.
+    expect(oai.inputTokensFullRate(usage)).toBe(200);
   });
 
   it('throws when invoked concurrently (module-scope state would corrupt)', async () => {
