@@ -1,0 +1,6 @@
+# Python sidecar deps for the webhook receiver's offline replay tool.
+# Used by ops to reprocess a window of deliveries when the warehouse
+# is behind.
+flask==2.3.0
+requests==2.31.0
+pyyaml==6.0.1
