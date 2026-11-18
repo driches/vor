@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Zod 4.** The bundled schema library moves from Zod 3.25.76 to 4.6.7, which carries the fix for the memory-exhaustion advisory GHSA-mrhx-c7xc-m3w5, and `zod-to-json-schema` is dropped in favour of Zod's built-in JSON Schema output. The tool schemas sent to the model are byte-identical to before. `.vor.yml` validation is unchanged except that an integer above JavaScript's safe-integer range (2^53 - 1) is now rejected instead of silently rounded, which falls back to defaults like any other invalid config. The local MCP server's advertised tool schemas no longer carry `additionalProperties: false`; unknown arguments are still dropped before a tool runs. The action bundle grows by about 0.58 MB because Zod 4 ships its error-message locales in the main entry point.
 - **README restructured as a sales pitch and getting started guide.** The configuration reference, security scanning docs, trigger options, local CLI reference, and architecture internals have moved to dedicated pages on the docs site. The README now covers: what Vor is, why to use it, getting started in three steps, what a review looks like, local usage, and links to the new reference pages.
 
 ### Added

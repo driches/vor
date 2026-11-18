@@ -268,6 +268,32 @@ describe('runAgent', () => {
     expect(tools.some((t) => t.name === 'post_summary')).toBe(true);
   });
 
+  it('describes tool inputs from the caller side: defaults stay optional, no safe-integer bounds', async () => {
+    const provider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    await runAgent(baseInput());
+
+    const tools = provider.completeCalls[0]!.tools;
+    const readFile = tools.find((t) => t.name === 'read_file_at_ref')!;
+    // `ref` has a Zod default, so the model may omit it. Zod 4's default
+    // (output) view would mark it required.
+    expect(readFile.input_schema.required).toEqual(['path']);
+    const props = readFile.input_schema.properties as Record<string, Record<string, unknown>>;
+    expect(props.ref).toMatchObject({ type: 'string', enum: ['head', 'base'], default: 'head' });
+    // Zod 4 adds `maximum: Number.MAX_SAFE_INTEGER` to an unbounded int; the
+    // runner strips it so the tool block matches what shipped under Zod 3.
+    expect(props.start_line).toEqual({
+      type: 'integer',
+      exclusiveMinimum: 0,
+      description: 'First line to return (1-indexed, inclusive).',
+    });
+    // A real bound must survive the strip.
+    const diff = tools.find((t) => t.name === 'get_pr_diff')!;
+    const diffProps = diff.input_schema.properties as Record<string, Record<string, unknown>>;
+    expect(diffProps.max_bytes).toMatchObject({ maximum: 200_000, default: 100_000 });
+  });
+
   it('registers describe_image_at_ref only when image_understanding is enabled', async () => {
     // Default (image_understanding.enabled: false) — the tool, and its vendored
     // OCR fallback, must not be exposed to the agent.

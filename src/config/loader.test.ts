@@ -75,6 +75,53 @@ prompt:
   });
 });
 
+describe('partial schema keeps what the full schema enforces', () => {
+  it('rejects an unknown top-level key (the root object is strict)', () => {
+    expect(() => loadConfigStrict('modle: claude-haiku-4-5\n')).toThrowError(/Unrecognized key/);
+  });
+
+  it('strips an unknown key under a non-strict section and keeps its siblings', () => {
+    const cfg = loadConfigStrict(`
+severity:
+  floor: nit
+  not_a_field: 1
+`);
+    expect(cfg.severity).toEqual({ ...DEFAULT_CONFIG.severity, floor: 'nit' });
+  });
+
+  it('accepts a single deeply nested override', () => {
+    const cfg = loadConfigStrict(`
+context:
+  blast_radius:
+    max_symbols: 5
+`);
+    expect(cfg.context.blast_radius).toEqual({
+      ...DEFAULT_CONFIG.context.blast_radius,
+      max_symbols: 5,
+    });
+    expect(cfg.context.include).toEqual(DEFAULT_CONFIG.context.include);
+  });
+
+  it('still applies bounds to a nested override', () => {
+    expect(() =>
+      loadConfigStrict(`
+context:
+  blast_radius:
+    max_symbols: 500
+`),
+    ).toThrowError(ConfigError);
+  });
+
+  it('rejects an integer above the safe-integer range instead of rounding it', () => {
+    expect(() =>
+      loadConfigStrict(`
+budget:
+  max_input_tokens: 9007199254740993
+`),
+    ).toThrowError(ConfigError);
+  });
+});
+
 describe('loadConfigStrict', () => {
   it('throws on invalid YAML', () => {
     expect(() => loadConfigStrict(': bad : yaml :')).toThrowError(ConfigError);
