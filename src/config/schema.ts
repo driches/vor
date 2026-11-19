@@ -105,7 +105,7 @@ const openaiProviderConfigSchema = z
       config.unsafe_reasoning_effort_override !== undefined
     ) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         path: ['unsafe_reasoning_effort_override'],
         message: 'cannot be combined with reasoning_effort',
       });
@@ -183,7 +183,43 @@ export const configSchema = z
   })
   .strict();
 
-/** Partial schema for user-supplied YAML. Deep-partial via deepPartial(). */
-export const partialConfigSchema = configSchema.deepPartial();
+type DeepPartial<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T;
 
-export type PartialConfig = z.infer<typeof partialConfigSchema>;
+/**
+ * Zod 4 removed `ZodObject.deepPartial()`, and `.partial()` throws on an
+ * object that carries refinements, so the partial schema is rebuilt here.
+ * Each object is recreated with every key optional, keeping what the
+ * original enforced: strictness (a `never` catchall) and refinement checks.
+ * Arrays are left alone — the loader replaces arrays wholesale, and no
+ * config array holds objects.
+ */
+function deepPartial(schema: z.ZodType): z.ZodType {
+  if (schema instanceof z.ZodOptional) return deepPartial(schema.unwrap() as z.ZodType);
+  if (!(schema instanceof z.ZodObject)) return schema;
+
+  const shape: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(schema.shape)) {
+    shape[key] = deepPartial(field as z.ZodType).optional();
+  }
+  const isStrict = schema.def.catchall instanceof z.ZodNever;
+  const rebuilt = isStrict ? z.strictObject(shape) : z.object(shape);
+  // Zod types a stored check against `never`, so it cannot be handed back to
+  // `.check()` without widening. A refinement written for the full object now
+  // sees every key as possibly undefined; the only refined object today
+  // (`providers.openai`) was already all-optional, so its check is unaffected.
+  const checks = (schema.def.checks ?? []) as z.core.$ZodCheck<Record<string, unknown>>[];
+  return checks.length > 0 ? rebuilt.check(...checks) : rebuilt;
+}
+
+export type PartialConfig = DeepPartial<z.infer<typeof configSchema>>;
+
+/**
+ * Partial schema for user-supplied YAML. `deepPartial` walks the schema at
+ * runtime, so its static return type is the erased `z.ZodType`; the assertion
+ * restores the output type that walk produces.
+ */
+export const partialConfigSchema = deepPartial(configSchema) as z.ZodType<PartialConfig>;

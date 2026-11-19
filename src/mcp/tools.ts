@@ -57,10 +57,10 @@ export const getConfigInput = {
   config_path: z.string().optional(),
 };
 
-type ReviewArgs = z.objectOutputType<typeof reviewInput, z.ZodTypeAny>;
-type ListRunsArgs = z.objectOutputType<typeof listRunsInput, z.ZodTypeAny>;
-type GetRunArgs = z.objectOutputType<typeof getRunInput, z.ZodTypeAny>;
-type GetConfigArgs = z.objectOutputType<typeof getConfigInput, z.ZodTypeAny>;
+type ReviewArgs = z.infer<z.ZodObject<typeof reviewInput>>;
+type ListRunsArgs = z.infer<z.ZodObject<typeof listRunsInput>>;
+type GetRunArgs = z.infer<z.ZodObject<typeof getRunInput>>;
+type GetConfigArgs = z.infer<z.ZodObject<typeof getConfigInput>>;
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 
