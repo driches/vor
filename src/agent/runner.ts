@@ -30,7 +30,6 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
 import { AgentError, BudgetError } from '../util/errors.js';
 import { Budget } from '../util/budget.js';
@@ -546,9 +545,21 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
 
   return mcpTools.map((mcp) => {
     const zodSchema = z.object(mcp.inputSchema as z.ZodRawShape);
-    const rawJson = zodToJsonSchema(zodSchema, {
-      target: 'jsonSchema7',
-      $refStrategy: 'none',
+    // `io: 'input'` describes what the model must send: a field with a Zod
+    // default is optional on the way in. The output view would list every
+    // defaulted field as required and push the model to spell them all out.
+    //
+    // Zod 4 also stamps every unbounded `.int()` with the safe-integer range.
+    // Those bounds say nothing a line number needs said, and dropping them
+    // keeps the tool block the model sees (and the cached prefix it anchors)
+    // identical to what the Zod 3 converter produced.
+    const rawJson = z.toJSONSchema(zodSchema, {
+      target: 'draft-7',
+      io: 'input',
+      override: ({ jsonSchema }) => {
+        if (jsonSchema.maximum === Number.MAX_SAFE_INTEGER) delete jsonSchema.maximum;
+        if (jsonSchema.minimum === Number.MIN_SAFE_INTEGER) delete jsonSchema.minimum;
+      },
     }) as Record<string, unknown>;
     // Strip $schema (API doesn't need it) and force `type: 'object'`.
     if ('$schema' in rawJson) delete rawJson['$schema'];
