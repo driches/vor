@@ -97968,7 +97968,7 @@ var FileReader = class {
   binaryCache = /* @__PURE__ */ new Map();
   /**
    * Read a file's full UTF-8 content at the given ref.
-   * Returns `null` if the file doesn't exist at that ref (404) or is too large.
+   * Returns `null` if the file doesn't exist at that ref (404).
    */
   async read(ref) {
     const key = `${ref.owner}/${ref.repo}@${ref.ref}::${ref.path}`;
@@ -97978,26 +97978,11 @@ var FileReader = class {
       this.cache.set(key, cached2);
       return cached2;
     }
-    try {
-      const r2 = await this.octokit.rest.repos.getContent({
-        owner: ref.owner,
-        repo: ref.repo,
-        path: ref.path,
-        ref: ref.ref
-      });
-      if (Array.isArray(r2.data) || r2.data.type !== "file") {
-        return null;
-      }
-      const content = Buffer.from(r2.data.content, r2.data.encoding).toString(
-        "utf-8"
-      );
-      this.set(key, content);
-      return content;
-    } catch (err) {
-      const status2 = err.status;
-      if (status2 === 404) return null;
-      throw new GitHubApiError(`Failed to read ${ref.path}@${ref.ref}`, status2, { cause: err });
-    }
+    const buf = await this.fetchBytes(ref);
+    if (buf == null) return null;
+    const content = buf.toString("utf-8");
+    this.set(key, content);
+    return content;
   }
   /** Read a specific line range. Returns null if file doesn't exist. */
   async readRange(ref, startLine, endLine) {
@@ -98027,6 +98012,24 @@ var FileReader = class {
       this.binaryCache.set(key, cached2);
       return cached2;
     }
+    const buf = await this.fetchBytes(ref);
+    if (buf == null) return null;
+    this.setBinary(key, buf);
+    return buf;
+  }
+  /**
+   * Fetch a file's bytes at the given ref. Returns `null` on 404 or when the
+   * path is a directory.
+   *
+   * The Contents API only inlines base64 content up to 1 MB; for larger blobs
+   * it returns `encoding: "none"` with an empty `content`, and
+   * `Buffer.from('', 'none')` throws "Unknown encoding: none". Both callers
+   * need the large-file path: screenshots for OCR (default cap 10 MB) and
+   * lockfiles for the dependency-CVE scanner, which routinely pass 1 MB. Fall
+   * back to the Git Blobs API, which base64-encodes blobs up to 100 MB, keyed
+   * by the blob SHA the Contents API still returns.
+   */
+  async fetchBytes(ref) {
     try {
       const r2 = await this.octokit.rest.repos.getContent({
         owner: ref.owner,
@@ -98037,19 +98040,15 @@ var FileReader = class {
       if (Array.isArray(r2.data) || r2.data.type !== "file") {
         return null;
       }
-      let buf;
-      if (r2.data.encoding === "base64" && r2.data.content) {
-        buf = Buffer.from(r2.data.content, "base64");
-      } else {
-        const blob = await this.octokit.rest.git.getBlob({
-          owner: ref.owner,
-          repo: ref.repo,
-          file_sha: r2.data.sha
-        });
-        buf = Buffer.from(blob.data.content, blob.data.encoding);
+      if (r2.data.encoding === "base64") {
+        return Buffer.from(r2.data.content, "base64");
       }
-      this.setBinary(key, buf);
-      return buf;
+      const blob = await this.octokit.rest.git.getBlob({
+        owner: ref.owner,
+        repo: ref.repo,
+        file_sha: r2.data.sha
+      });
+      return Buffer.from(blob.data.content, blob.data.encoding);
     } catch (err) {
       const status2 = err.status;
       if (status2 === 404) return null;
@@ -99209,8 +99208,7 @@ var yarnLockParser = new YarnLockParser();
 var import_node_path6 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
 function parsePnpmKey(rawKey) {
-  if (!rawKey.startsWith("/")) return null;
-  let s2 = rawKey.slice(1);
+  let s2 = rawKey.startsWith("/") ? rawKey.slice(1) : rawKey;
   const parenIdx = s2.indexOf("(");
   if (parenIdx >= 0) {
     s2 = s2.slice(0, parenIdx);
@@ -99218,7 +99216,7 @@ function parsePnpmKey(rawKey) {
   const initial = parseSurface(s2);
   if (initial == null) return null;
   if (initial.version.startsWith("npm:")) {
-    return parsePnpmKey("/" + initial.version.slice("npm:".length));
+    return parsePnpmKey(initial.version.slice("npm:".length));
   }
   return initial;
 }
@@ -99262,9 +99260,10 @@ function parseSurface(s2) {
   return { name, version: version2 };
 }
 function findKeyLine(lines, rawKey) {
-  const needle = `${rawKey}:`;
+  const needles = [`${rawKey}:`, `'${rawKey}':`, `"${rawKey}":`];
   for (let i2 = 0; i2 < lines.length; i2++) {
-    if (lines[i2].trimStart().startsWith(needle)) {
+    const trimmed = lines[i2].trimStart();
+    if (needles.some((needle) => trimmed.startsWith(needle))) {
       return i2 + 1;
     }
   }

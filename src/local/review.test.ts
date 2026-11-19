@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorInput, OrchestratorOutput } from '../orchestrator.js';
@@ -27,7 +34,9 @@ describe('runLocalReview', () => {
   let repo: string;
 
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'vor-review-'));
+    // macOS's tmpdir is a symlink (/var → /private/var) and git reports the
+    // resolved toplevel, so compare against the real path.
+    repo = realpathSync(mkdtempSync(join(tmpdir(), 'vor-review-')));
     g(repo, ['init', '-q']);
     g(repo, ['config', 'user.email', 'test@example.com']);
     g(repo, ['config', 'user.name', 'Test']);

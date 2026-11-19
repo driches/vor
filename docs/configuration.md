@@ -8,12 +8,14 @@
 | `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI model (`gpt-*`, `o<digit>*`, `chatgpt-*`). |
 | `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted. |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI: `gpt-5.6-sol` (highest quality), `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
-| `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
+| `model` | no | `.vor.yml` `model`, else `claude-sonnet-4-6` | Model ID. When set, overrides `model` in `.vor.yml`. Anthropic: `claude-sonnet-4-6`, `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI: `gpt-5.6-sol` (highest quality), `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
+| `max_turns` | no | `.vor.yml` `max_turns`, else `40` | Max agent turns. When set, overrides `max_turns` in `.vor.yml`. Larger PRs may need more. |
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config file. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |
 | `pr_number` | no | (auto) | PR number; auto-detected from `pull_request` events. |
 | `allow_auto_trigger` | no | `true` | Set to `false` to restrict to manual `workflow_dispatch` triggers only. See [Trigger options](https://driches.github.io/vor/triggers/) for details. |
+
+> **Precedence for `model` and `max_turns`:** action input, then `.vor.yml`, then the built-in default. Leave the input unset to let `.vor.yml` decide. An expression that always produces a value, such as `model: ${{ inputs.model || 'claude-sonnet-4-6' }}`, counts as set and overrides the config file on every run.
 
 > **Codex models:** OpenAI ids prefixed `gpt-` (e.g. `gpt-5-codex`) are inferred automatically. A bare `codex-*` id isn't matched by the prefix rules — set `provider: openai` explicitly for those.
 

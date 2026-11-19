@@ -26,7 +26,7 @@ export class FileReader {
 
   /**
    * Read a file's full UTF-8 content at the given ref.
-   * Returns `null` if the file doesn't exist at that ref (404) or is too large.
+   * Returns `null` if the file doesn't exist at that ref (404).
    */
   async read(ref: FileReadRef): Promise<string | null> {
     const key = `${ref.owner}/${ref.repo}@${ref.ref}::${ref.path}`;
@@ -38,26 +38,11 @@ export class FileReader {
       return cached;
     }
 
-    try {
-      const r = await this.octokit.rest.repos.getContent({
-        owner: ref.owner,
-        repo: ref.repo,
-        path: ref.path,
-        ref: ref.ref,
-      });
-      if (Array.isArray(r.data) || r.data.type !== 'file') {
-        return null;
-      }
-      const content = Buffer.from(r.data.content, r.data.encoding as BufferEncoding).toString(
-        'utf-8',
-      );
-      this.set(key, content);
-      return content;
-    } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 404) return null;
-      throw new GitHubApiError(`Failed to read ${ref.path}@${ref.ref}`, status, { cause: err });
-    }
+    const buf = await this.fetchBytes(ref);
+    if (buf == null) return null;
+    const content = buf.toString('utf-8');
+    this.set(key, content);
+    return content;
   }
 
   /** Read a specific line range. Returns null if file doesn't exist. */
@@ -96,6 +81,25 @@ export class FileReader {
       return cached;
     }
 
+    const buf = await this.fetchBytes(ref);
+    if (buf == null) return null;
+    this.setBinary(key, buf);
+    return buf;
+  }
+
+  /**
+   * Fetch a file's bytes at the given ref. Returns `null` on 404 or when the
+   * path is a directory.
+   *
+   * The Contents API only inlines base64 content up to 1 MB; for larger blobs
+   * it returns `encoding: "none"` with an empty `content`, and
+   * `Buffer.from('', 'none')` throws "Unknown encoding: none". Both callers
+   * need the large-file path: screenshots for OCR (default cap 10 MB) and
+   * lockfiles for the dependency-CVE scanner, which routinely pass 1 MB. Fall
+   * back to the Git Blobs API, which base64-encodes blobs up to 100 MB, keyed
+   * by the blob SHA the Contents API still returns.
+   */
+  private async fetchBytes(ref: FileReadRef): Promise<Buffer | null> {
     try {
       const r = await this.octokit.rest.repos.getContent({
         owner: ref.owner,
@@ -106,26 +110,17 @@ export class FileReader {
       if (Array.isArray(r.data) || r.data.type !== 'file') {
         return null;
       }
-      // The Contents API only inlines base64 content up to 1 MB; for larger
-      // blobs it returns `encoding: "none"` with an empty `content`.
-      // `Buffer.from('', 'none')` would throw "Unknown encoding: none" and the
-      // caller would treat a perfectly readable multi-MB screenshot as a read
-      // error — exactly the size range OCR cares about (the default cap is
-      // 10 MB). Fall back to the Git Blobs API, which base64-encodes blobs up
-      // to 100 MB, keyed by the blob SHA the Contents API still returns.
-      let buf: Buffer;
-      if (r.data.encoding === 'base64' && r.data.content) {
-        buf = Buffer.from(r.data.content, 'base64');
-      } else {
-        const blob = await this.octokit.rest.git.getBlob({
-          owner: ref.owner,
-          repo: ref.repo,
-          file_sha: r.data.sha,
-        });
-        buf = Buffer.from(blob.data.content, blob.data.encoding as BufferEncoding);
+      // Keyed on the encoding, not on `content` being non-empty: an empty file
+      // is legitimately `base64` + `''` and must not cost a second request.
+      if (r.data.encoding === 'base64') {
+        return Buffer.from(r.data.content, 'base64');
       }
-      this.setBinary(key, buf);
-      return buf;
+      const blob = await this.octokit.rest.git.getBlob({
+        owner: ref.owner,
+        repo: ref.repo,
+        file_sha: r.data.sha,
+      });
+      return Buffer.from(blob.data.content, blob.data.encoding as BufferEncoding);
     } catch (err) {
       const status = (err as { status?: number }).status;
       if (status === 404) return null;
