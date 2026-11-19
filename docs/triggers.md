@@ -17,9 +17,8 @@ on:
         description: 'PR number to review'
         required: true
       model:
-        description: 'Model to use'
+        description: 'Model to use (blank: .vor.yml, else the built-in default)'
         required: false
-        default: 'claude-sonnet-4-6'
       dry_run:
         description: 'Log review instead of posting comments'
         required: false
@@ -41,7 +40,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allow_auto_trigger: 'false'
           pr_number: ${{ inputs.pr_number }}
-          model: ${{ inputs.model || 'claude-sonnet-4-6' }}
+          model: ${{ inputs.model }}
           dry_run: ${{ inputs.dry_run || 'false' }}
 ```
 
