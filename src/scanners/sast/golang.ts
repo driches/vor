@@ -133,7 +133,12 @@ export const golangLinter: LinterModule = {
         // binary is the same across module groups, so a miss on one means
         // a miss on all — stop and report the quiet no-op.
         if (isMissingBinary(msg)) {
-          return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
+          return {
+            findings,
+            errors,
+            filesExamined: ranAny ? targetFiles.length : 0,
+            skipped: 'not installed',
+          };
         }
         errors.push({
           message: `golangci-lint failed (module ${group.root}): ${msg}`,

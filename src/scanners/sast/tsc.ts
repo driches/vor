@@ -138,7 +138,7 @@ export const tscLinter: LinterModule = {
       await logger.debug(
         `tsc: skipped — no tsc binary at ${deps.workspaceDir}/node_modules/.bin/tsc (workspace not npm-installed?)`,
       );
-      return { findings: [], errors: [], filesExamined: 0 };
+      return { findings: [], errors: [], filesExamined: 0, skipped: 'not installed' };
     }
 
     let rawOutput: string;
@@ -156,7 +156,7 @@ export const tscLinter: LinterModule = {
         msg.includes('exited 9009') ||
         msg.includes('exited 127');
       if (isMissingBinary) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: 'not installed' };
       }
       errors.push({ message: `tsc failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };

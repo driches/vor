@@ -698,6 +698,22 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // counts dedup-suppressed comments too.
   filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
 
+  // A scanner that errors, times out, or lacks its tool returns zero findings.
+  // Carry that into the summary so the PR reader can tell "nothing found"
+  // from "not checked" without opening the Actions log.
+  const scannerStatus = {
+    failures:
+      scanOutcome.status === 'rejected'
+        ? scanners.map((s) => ({
+            scanner: s.id,
+            message: `scanner pipeline failed: ${(scanOutcome.reason as Error).message}`,
+          }))
+        : scanRunResult.perScanner.flatMap((r) =>
+            r.errors.map((e) => ({ scanner: r.scanner, message: e.message })),
+          ),
+    skipped: scanRunResult.perScanner.flatMap((r) => r.skipped ?? []),
+  };
+
   const rendered = renderSummary({
     draft: aggregator.snapshot(),
     keptComments: filtered.kept,
@@ -707,6 +723,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     agentEnded: result.ended,
     unreviewedPaths: agentScope.unreviewedPaths,
     binaryFindings,
+    scannerStatus,
   });
 
   // `review.post_summary: false` suppresses the human-facing summary body,
@@ -717,6 +734,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // Trade-off the operator opts into: binary-file findings (e.g. image-OCR
   // secrets) only surface in the summary body, so they are dropped too.
   const summaryBody = config.review.post_summary ? rendered.body : '';
+  if (!config.review.post_summary && scannerStatus.failures.length > 0) {
+    await logger.warn(
+      `review.post_summary is false — ${scannerStatus.failures.length} scanner failure(s) will not ` +
+        `be shown on the PR. See the warnings above.`,
+    );
+  }
   if (!config.review.post_summary && binaryFindings.length > 0) {
     await logger.warn(
       `review.post_summary is false — ${binaryFindings.length} binary-file finding(s) have no ` +

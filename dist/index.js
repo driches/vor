@@ -82371,6 +82371,20 @@ function renderSummary(input2) {
     );
     sections.push(formatBinaryFindings(input2.binaryFindings));
   }
+  const scannerFailures = formatScannerFailures(input2.scannerStatus?.failures ?? []);
+  if (scannerFailures) {
+    sections.push("### Scanner coverage");
+    sections.push(
+      "_These scanners did not complete, so findings they would have raised may be missing:_"
+    );
+    sections.push(scannerFailures);
+  }
+  const notInstalled = uniqueSkippedTools(input2.scannerStatus?.skipped ?? []);
+  if (notInstalled.length > 0) {
+    sections.push(
+      `_Static tools not run (not installed in this workspace):_ ${notInstalled.join(", ")}`
+    );
+  }
   if (summary2?.coverage_note) {
     sections.push("### Coverage");
     sections.push(summary2.coverage_note);
@@ -82480,6 +82494,31 @@ function formatScannerCountsLine(comments) {
   }).filter((s2) => s2 !== null).join(", ");
   const noun = total === 1 ? "finding" : "findings";
   return `**Security:** ${total} ${noun} from scanners (${breakdown})`;
+}
+var MAX_ERRORS_PER_SCANNER = 3;
+var MAX_ERROR_CHARS = 200;
+function sanitizeScannerMessage(message) {
+  const flat = redact(message).replace(/`/g, "'").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_ERROR_CHARS ? `${flat.slice(0, MAX_ERROR_CHARS - 1)}\u2026` : flat;
+}
+function formatScannerFailures(failures) {
+  if (failures.length === 0) return null;
+  const byScanner = /* @__PURE__ */ new Map();
+  for (const f2 of failures) {
+    const messages = byScanner.get(f2.scanner) ?? [];
+    messages.push(sanitizeScannerMessage(f2.message));
+    byScanner.set(f2.scanner, messages);
+  }
+  const lines = [];
+  for (const [scanner, messages] of byScanner) {
+    const shown = messages.slice(0, MAX_ERRORS_PER_SCANNER).join("; ");
+    const extra = messages.length - MAX_ERRORS_PER_SCANNER;
+    lines.push(`- \`${scanner}\`: ${shown}${extra > 0 ? ` (+${extra} more)` : ""}`);
+  }
+  return lines.join("\n");
+}
+function uniqueSkippedTools(skipped) {
+  return [...new Set(skipped.map((s2) => s2.name))];
 }
 
 // src/scanners/adapter.ts
@@ -84492,7 +84531,7 @@ var eslintLinter = {
       await logger.debug(
         `eslint: skipped \u2014 no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`
       );
-      return { findings: [], errors: [], filesExamined: 0 };
+      return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
     }
     const { safe, dropped } = filterShellSafePaths(
       targetFiles.map((f2) => f2.path),
@@ -84692,7 +84731,7 @@ var ruffLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `ruff failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -84873,7 +84912,7 @@ var dartLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `dart analyze failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -85044,7 +85083,7 @@ var actionlintLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `actionlint failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -85196,7 +85235,7 @@ var knipLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `knip failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -85432,7 +85471,7 @@ var semgrepLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `semgrep failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -85678,7 +85717,7 @@ var tscLinter = {
       await logger.debug(
         `tsc: skipped \u2014 no tsc binary at ${deps.workspaceDir}/node_modules/.bin/tsc (workspace not npm-installed?)`
       );
-      return { findings: [], errors: [], filesExamined: 0 };
+      return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
     }
     let rawOutput;
     try {
@@ -85687,7 +85726,7 @@ var tscLinter = {
       const msg = err.message;
       const isMissingBinary2 = msg.includes("ENOENT") || msg.includes("command not found") || msg.includes("is not recognized") || msg.includes("exited 9009") || msg.includes("exited 127");
       if (isMissingBinary2) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: "not installed" };
       }
       errors.push({ message: `tsc failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
@@ -85871,7 +85910,12 @@ var golangLinter = {
       } catch (err) {
         const msg = err.message;
         if (isMissingBinary(msg)) {
-          return { findings, errors, filesExamined: ranAny ? targetFiles.length : 0 };
+          return {
+            findings,
+            errors,
+            filesExamined: ranAny ? targetFiles.length : 0,
+            skipped: "not installed"
+          };
         }
         errors.push({
           message: `golangci-lint failed (module ${group2.root}): ${msg}`,
@@ -86161,6 +86205,7 @@ async function orchestrate(deps) {
   );
   const findings = [];
   const errors = [];
+  const skipped = [];
   let filesExamined = 0;
   let networkCalls = 0;
   for (let i2 = 0; i2 < runs.length; i2++) {
@@ -86169,6 +86214,7 @@ async function orchestrate(deps) {
     if (r2.status === "fulfilled") {
       findings.push(...r2.value.findings);
       errors.push(...r2.value.errors);
+      if (r2.value.skipped !== void 0) skipped.push({ name: linterId, reason: r2.value.skipped });
       filesExamined += r2.value.filesExamined;
       networkCalls += r2.value.networkCalls ?? 0;
     } else {
@@ -86182,6 +86228,7 @@ async function orchestrate(deps) {
     scanner: SCANNER_ID3,
     findings,
     errors,
+    ...skipped.length > 0 ? { skipped } : {},
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,
@@ -87881,6 +87928,15 @@ ${base}` : base;
     filtered.kept = dedupedKept;
   }
   filtered.dropped = aggregator.acceptedComments.length - filtered.kept.length;
+  const scannerStatus = {
+    failures: scanOutcome.status === "rejected" ? scanners.map((s2) => ({
+      scanner: s2.id,
+      message: `scanner pipeline failed: ${scanOutcome.reason.message}`
+    })) : scanRunResult.perScanner.flatMap(
+      (r2) => r2.errors.map((e2) => ({ scanner: r2.scanner, message: e2.message }))
+    ),
+    skipped: scanRunResult.perScanner.flatMap((r2) => r2.skipped ?? [])
+  };
   const rendered = renderSummary({
     draft: aggregator.snapshot(),
     keptComments: filtered.kept,
@@ -87889,9 +87945,15 @@ ${base}` : base;
     modelName: config2.model,
     agentEnded: result.ended,
     unreviewedPaths: agentScope.unreviewedPaths,
-    binaryFindings
+    binaryFindings,
+    scannerStatus
   });
   const summaryBody = config2.review.post_summary ? rendered.body : "";
+  if (!config2.review.post_summary && scannerStatus.failures.length > 0) {
+    await logger.warn(
+      `review.post_summary is false \u2014 ${scannerStatus.failures.length} scanner failure(s) will not be shown on the PR. See the warnings above.`
+    );
+  }
   if (!config2.review.post_summary && binaryFindings.length > 0) {
     await logger.warn(
       `review.post_summary is false \u2014 ${binaryFindings.length} binary-file finding(s) have no inline anchor and will not be reported.`

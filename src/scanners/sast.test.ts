@@ -97,6 +97,12 @@ describe('sast scanner (fan-out orchestrator)', () => {
       const result = await scanner.scan(deps);
       expect(result.scanner).toBe('sast');
       expect(result.findings).toEqual([]);
+      // A missing binary is not an error, but it must not be invisible
+      // either: the result names the linter so the review summary can say
+      // it was not run. ESLint resolves only from the workspace, so in an
+      // empty directory it is deterministically "not installed".
+      expect(result.skipped).toContainEqual({ name: 'eslint', reason: 'not installed' });
+      expect(result.errors.some((e) => e.message.includes('eslint'))).toBe(false);
       // ESLint short-circuits silently when bin missing → no errors.
       // Ruff/dart/actionlint may produce ENOENT-wrapped silent skips OR
       // actual errors depending on PATH state; we tolerate both as long

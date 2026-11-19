@@ -29,7 +29,14 @@
  * Adding a new language: write one module under `./sast/` exporting a
  * LinterModule, and add it to the LINTERS array below.
  */
-import type { Scanner, ScannerDeps, ScanResult, ScanError, ScanFinding } from './types.js';
+import type {
+  Scanner,
+  ScannerDeps,
+  ScanResult,
+  ScanError,
+  ScanFinding,
+  ScanSkip,
+} from './types.js';
 import type { ChangedFile, ScannerId } from '../types.js';
 import { emptyResult } from './types.js';
 import { eslintLinter } from './sast/eslint.js';
@@ -133,6 +140,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
 
   const findings: ScanFinding[] = [];
   const errors: ScanError[] = [];
+  const skipped: ScanSkip[] = [];
   let filesExamined = 0;
   let networkCalls = 0;
   for (let i = 0; i < runs.length; i++) {
@@ -141,6 +149,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     if (r.status === 'fulfilled') {
       findings.push(...r.value.findings);
       errors.push(...r.value.errors);
+      if (r.value.skipped !== undefined) skipped.push({ name: linterId, reason: r.value.skipped });
       filesExamined += r.value.filesExamined;
       networkCalls += r.value.networkCalls ?? 0;
     } else {
@@ -159,6 +168,7 @@ async function orchestrate(deps: ScannerDeps): Promise<ScanResult> {
     scanner: SCANNER_ID,
     findings,
     errors,
+    ...(skipped.length > 0 ? { skipped } : {}),
     metrics: {
       duration_ms: Date.now() - startTime,
       files_examined: filesExamined,

@@ -90,7 +90,7 @@ export const actionlintLinter: LinterModule = {
         msg.includes('exited 9009') ||
         msg.includes('exited 127');
       if (isMissingBinary) {
-        return { findings: [], errors: [], filesExamined: 0 };
+        return { findings: [], errors: [], filesExamined: 0, skipped: 'not installed' };
       }
       errors.push({ message: `actionlint failed: ${msg}`, fatal: false });
       return { findings: [], errors, filesExamined: 0 };
