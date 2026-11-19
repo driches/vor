@@ -71,6 +71,67 @@ describe('pnpmLockParser.parse', () => {
     expect(scoped!.line).toBe(9);
   });
 
+  it('parses lockfile v9 keys (no leading slash, scoped keys quoted)', () => {
+    // pnpm 9 dropped the leading `/` from package keys, quotes scoped keys
+    // (a bare `@` cannot start a YAML plain scalar), and repeats every key
+    // under `snapshots:` with the peer suffix that used to live in `packages:`.
+    const content = [
+      "lockfileVersion: '9.0'", // 1
+      '', // 2
+      'importers:', // 3
+      '', // 4
+      '  .:', // 5
+      '    dependencies:', // 6
+      '      lodash:', // 7
+      '        specifier: ^4.17.20', // 8
+      '        version: 4.17.20', // 9
+      '', // 10
+      'packages:', // 11
+      '', // 12
+      "  '@scope/pkg@2.0.4':", // 13
+      '    resolution: {integrity: sha512-bar}', // 14
+      '', // 15
+      '  lodash@4.17.20:', // 16
+      '    resolution: {integrity: sha512-foo}', // 17
+      '', // 18
+      '  react-dom@18.2.0:', // 19
+      '    resolution: {integrity: sha512-baz}', // 20
+      '    peerDependencies:', // 21
+      '      react: ^18.2.0', // 22
+      '', // 23
+      'snapshots:', // 24
+      '', // 25
+      "  '@scope/pkg@2.0.4': {}", // 26
+      '', // 27
+      '  lodash@4.17.20: {}', // 28
+      '', // 29
+      '  react-dom@18.2.0(react@18.2.0):', // 30
+      '    dependencies:', // 31
+      '      react: 18.2.0', // 32
+      '',
+    ].join('\n');
+
+    const deps = pnpmLockParser.parse(content);
+    expect(deps.map((d) => `${d.name}@${d.version}:${d.line}`).sort()).toEqual([
+      '@scope/pkg@2.0.4:13',
+      'lodash@4.17.20:16',
+      'react-dom@18.2.0:19',
+    ]);
+  });
+
+  it('anchors a double-quoted scoped key on its own line', () => {
+    const content = [
+      "lockfileVersion: '9.0'",
+      'packages:',
+      '  "@scope/pkg@2.0.4":',
+      '    resolution: {integrity: sha512-bar}',
+      '',
+    ].join('\n');
+    expect(pnpmLockParser.parse(content)).toEqual([
+      { ecosystem: 'npm', name: '@scope/pkg', version: '2.0.4', line: 3 },
+    ]);
+  });
+
   it('parses lockfile v5 keys (name/version)', () => {
     const content = [
       'lockfileVersion: 5.4',

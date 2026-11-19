@@ -1,6 +1,7 @@
 /**
- * Parser for `pnpm-lock.yaml`. Supports both lockfile-version 5 (key format
- * `/<name>/<version>`) and lockfile-version 6+ (key format `/<name>@<version>`).
+ * Parser for `pnpm-lock.yaml`. Supports lockfile-version 5 (key format
+ * `/<name>/<version>`), 6 (`/<name>@<version>`), and 9 (`<name>@<version>`,
+ * no leading slash).
  *
  * Example (v6):
  *
@@ -16,6 +17,16 @@
  *   lockfileVersion: 5.4
  *   packages:
  *     /lodash/4.17.21:
+ *       resolution: { integrity: ... }
+ *
+ * Example (v9) — scoped keys are quoted, and every key repeats under
+ * `snapshots:` (with the peer suffix), which we do not read:
+ *
+ *   lockfileVersion: '9.0'
+ *   packages:
+ *     lodash@4.17.21:
+ *       resolution: { integrity: ... }
+ *     '@scope/pkg@2.0.0':
  *       resolution: { integrity: ... }
  *
  * Line anchoring: we re-scan the raw text for the key (with its leading
@@ -40,10 +51,13 @@ interface PnpmLockfileShape {
  *   /@scope/pkg@2.0.0            → ('@scope/pkg', '2.0.0')
  *   /@scope/pkg/2.0.0            → ('@scope/pkg', '2.0.0')       (v5)
  *   /lodash@4.17.21(peer@1.0.0)  → ('lodash', '4.17.21')         (peer-id suffix)
+ *   lodash@4.17.21               → ('lodash', '4.17.21')         (v9)
+ *   @scope/pkg@2.0.0             → ('@scope/pkg', '2.0.0')       (v9)
  */
 function parsePnpmKey(rawKey: string): { name: string; version: string } | null {
-  if (!rawKey.startsWith('/')) return null;
-  let s = rawKey.slice(1);
+  // v9 dropped the leading slash. Requiring it made every v9 lockfile parse
+  // to zero dependencies, which reads as "no CVEs" rather than as a failure.
+  let s = rawKey.startsWith('/') ? rawKey.slice(1) : rawKey;
 
   // Strip a v6 peer-dep ID suffix like `(react@18.0.0)`. Multiple peer ids may
   // chain together; take everything up to the first `(`.
@@ -63,7 +77,7 @@ function parsePnpmKey(rawKey: string): { name: string; version: string } | null 
   // not the alias label — for OSV lookups. Scoped alias targets work too:
   // `/my-react@npm:@scope/real@1.0.0` → name `@scope/real`, version `1.0.0`.
   if (initial.version.startsWith('npm:')) {
-    return parsePnpmKey('/' + initial.version.slice('npm:'.length));
+    return parsePnpmKey(initial.version.slice('npm:'.length));
   }
 
   return initial;
@@ -122,9 +136,12 @@ function parseSurface(s: string): { name: string; version: string } | null {
 
 function findKeyLine(lines: string[], rawKey: string): number {
   // Keys are emitted indented and followed by ':'. e.g. `  /lodash@4.17.21:`.
-  const needle = `${rawKey}:`;
+  // A v9 scoped key is quoted (`'@scope/pkg@2.0.0':`) because a bare `@`
+  // cannot start a YAML plain scalar, so try the quoted spellings too.
+  const needles = [`${rawKey}:`, `'${rawKey}':`, `"${rawKey}":`];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i]!.trimStart().startsWith(needle)) {
+    const trimmed = lines[i]!.trimStart();
+    if (needles.some((needle) => trimmed.startsWith(needle))) {
       return i + 1;
     }
   }

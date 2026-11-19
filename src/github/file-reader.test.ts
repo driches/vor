@@ -93,6 +93,35 @@ describe('FileReader', () => {
     expect(oct.rest.repos.getContent).toHaveBeenCalledTimes(4); // a re-fetched
   });
 
+  it('reads a file over 1 MB through the Git Blobs API', async () => {
+    // Above 1 MB the Contents API returns `encoding: "none"` and an empty
+    // `content`. Lockfiles routinely cross that line, and a throw here made
+    // the dependency-CVE scanner skip them with only a log warning.
+    const text = 'lockfileVersion: 3\n' + 'x'.repeat(64);
+    const getBlob = vi.fn().mockResolvedValue({
+      data: { content: Buffer.from(text, 'utf-8').toString('base64'), encoding: 'base64' },
+    });
+    const oct = {
+      rest: {
+        repos: {
+          getContent: vi.fn().mockResolvedValue({
+            data: { type: 'file', content: '', encoding: 'none', sha: 'blobsha456' },
+          }),
+        },
+        git: { getBlob },
+      },
+    };
+    const reader = new FileReader(oct as never);
+    const ref = { owner: 'o', repo: 'r', path: 'package-lock.json', ref: 'x' };
+    expect(await reader.read(ref)).toBe(text);
+    expect(getBlob).toHaveBeenCalledWith({ owner: 'o', repo: 'r', file_sha: 'blobsha456' });
+
+    // Cached like any other read: no second round trip to either endpoint.
+    expect(await reader.read(ref)).toBe(text);
+    expect(oct.rest.repos.getContent).toHaveBeenCalledTimes(1);
+    expect(getBlob).toHaveBeenCalledTimes(1);
+  });
+
   describe('readBinary', () => {
     /** getContent mock that returns raw bytes (base64-encoded) for given paths. */
     function mockBinaryGetContent(byPath: Record<string, Buffer | null>) {
