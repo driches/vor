@@ -197,6 +197,18 @@ export interface ScanError {
   fatal: false;
 }
 
+/**
+ * A check inside a scanner that was not run, and why — e.g. a linter whose
+ * binary is not installed in the workspace. Not an error (many repos lack
+ * some linters), but it is reported in the review summary so "no findings"
+ * is not read as "checked and clean".
+ */
+export interface ScanSkip {
+  /** The tool that did not run, e.g. `semgrep`. */
+  name: string;
+  reason: string;
+}
+
 export interface ScannerMetrics {
   duration_ms: number;
   files_examined: number;
@@ -221,6 +233,8 @@ export interface ScanResult {
   scanner: ScannerId;
   findings: ScanFinding[];
   errors: ScanError[];
+  /** Checks this scanner would have run but could not. Omitted when none. */
+  skipped?: ScanSkip[];
   metrics: ScannerMetrics;
 }
 

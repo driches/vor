@@ -47,6 +47,12 @@ export interface LinterRun {
    * the binary is missing.
    */
   networkCalls?: number;
+  /**
+   * Set when the linter did not run at all because its binary is not
+   * installed. Still not an error, but the sast scanner passes it up so the
+   * review summary can name the tools that were not run.
+   */
+  skipped?: 'not installed';
 }
 
 /**

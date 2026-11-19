@@ -1499,11 +1499,16 @@ describe('runOrchestrator — Scenario 4: scanner error does not block AI review
 
     const call = octokitState.createReviewCalls[0]!.args as {
       comments: Array<{ path: string; body: string }>;
+      body: string;
     };
     // The AI comment IS in the review. No scanner comment (CVE rejected by validate).
     expect(call.comments).toHaveLength(1);
     expect(call.comments[0]!.path).toBe('src/app.ts');
     expect(result.comment_count).toBe(1);
+    // The reader is told the dependency scan did not complete — otherwise a
+    // review with no CVE comments reads as "no vulnerable dependencies".
+    expect(call.body).toContain('### Scanner coverage');
+    expect(call.body).toContain('- `dependency-cve`: OSV batch query failed');
   });
 });
 

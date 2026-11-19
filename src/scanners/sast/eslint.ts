@@ -73,7 +73,7 @@ export const eslintLinter: LinterModule = {
       await logger.debug(
         `eslint: skipped — no eslint binary at ${deps.workspaceDir}/node_modules/.bin/eslint (workspace not npm-installed?)`,
       );
-      return { findings: [], errors: [], filesExamined: 0 };
+      return { findings: [], errors: [], filesExamined: 0, skipped: 'not installed' };
     }
 
     // When the resolved binary is a Windows .cmd shim, spawn uses

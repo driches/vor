@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PostedComment, ReviewDraft, SummaryInput } from '../types.js';
 import type { ScanFinding } from '../scanners/types.js';
+import { _clearRegisteredSecrets, registerSecret } from '../util/secrets.js';
 import { renderSummary } from './formatter.js';
 
 const baseSummary = (over: Partial<SummaryInput> = {}): SummaryInput => ({
@@ -442,5 +443,84 @@ describe('renderSummary — binary-file findings (non-inline channel)', () => {
       binaryFindings: many,
     });
     expect(r.body).toContain('_+3 more_');
+  });
+});
+
+describe('renderSummary — scanner status', () => {
+  const render = (scannerStatus: Parameters<typeof renderSummary>[0]['scannerStatus']) =>
+    renderSummary({
+      draft: baseDraft(),
+      keptComments: [],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+      ...(scannerStatus !== undefined ? { scannerStatus } : {}),
+    }).body;
+
+  it('names each scanner that did not complete, so a clean review is not mistaken for a clean scan', () => {
+    const body = render({
+      failures: [
+        { scanner: 'dependency-cve', message: 'OSV batch query failed (cache-only fallback)' },
+        { scanner: 'sast', message: 'scanner sast timed out after 240000ms' },
+      ],
+      skipped: [],
+    });
+    expect(body).toContain('### Scanner coverage');
+    expect(body).toContain('findings they would have raised may be missing');
+    expect(body).toContain('- `dependency-cve`: OSV batch query failed (cache-only fallback)');
+    expect(body).toContain('- `sast`: scanner sast timed out after 240000ms');
+  });
+
+  it('groups several errors from one scanner on one line and caps them', () => {
+    const body = render({
+      failures: ['a', 'b', 'c', 'd', 'e'].map((m) => ({ scanner: 'sast', message: `linter ${m}` })),
+      skipped: [],
+    });
+    expect(body).toContain('- `sast`: linter a; linter b; linter c (+2 more)');
+    expect(body.match(/- `sast`/g)).toHaveLength(1);
+  });
+
+  it('flattens, truncates and redacts error text before it reaches a PR comment', () => {
+    registerSecret('sk-live-abcdefghijklmnop');
+    try {
+      const body = render({
+        failures: [
+          {
+            scanner: 'sast',
+            message: `ruff failed:\n  token=sk-live-abcdefghijklmnop \`rm\` ${'x'.repeat(400)}`,
+          },
+        ],
+        skipped: [],
+      });
+      const line = body.split('\n').find((l) => l.startsWith('- `sast`'))!;
+      expect(line).not.toContain('sk-live-abcdefghijklmnop');
+      expect(line).not.toContain('`rm`');
+      expect(line).toContain('ruff failed: token=');
+      expect(line.endsWith('…')).toBe(true);
+      expect(line.length).toBeLessThan(260);
+    } finally {
+      _clearRegisteredSecrets();
+    }
+  });
+
+  it('lists tools that were not installed on a single line, without a section header', () => {
+    const body = render({
+      failures: [],
+      skipped: [
+        { name: 'semgrep', reason: 'not installed' },
+        { name: 'knip', reason: 'not installed' },
+        { name: 'semgrep', reason: 'not installed' },
+      ],
+    });
+    expect(body).not.toContain('### Scanner coverage');
+    expect(body).toContain(
+      '_Static tools not run (not installed in this workspace):_ semgrep, knip',
+    );
+  });
+
+  it('adds nothing when every scanner completed', () => {
+    expect(render({ failures: [], skipped: [] })).toBe(render(undefined));
+    expect(render(undefined)).not.toContain('Scanner coverage');
+    expect(render(undefined)).not.toContain('Static tools not run');
   });
 });

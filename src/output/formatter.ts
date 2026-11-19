@@ -6,7 +6,8 @@
 import type { RunAgentResult } from '../agent/runner.js';
 import type { PostedComment, ReviewDraft, ReviewEvent, ScannerId, Severity } from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
-import type { ScanFinding } from '../scanners/types.js';
+import type { ScanFinding, ScanSkip } from '../scanners/types.js';
+import { redact } from '../util/secrets.js';
 
 export interface SummaryRenderInput {
   draft: ReviewDraft;
@@ -31,6 +32,19 @@ export interface SummaryRenderInput {
    * out of a committed screenshot.
    */
   binaryFindings?: readonly ScanFinding[];
+  /**
+   * Scanners that did not complete and tools that were not run. A scanner
+   * that fails or is skipped returns zero findings, which is indistinguishable
+   * from a clean scan unless the summary says so.
+   */
+  scannerStatus?: ScannerStatus;
+}
+
+export interface ScannerStatus {
+  /** One entry per non-fatal scanner error (timeout, crash, upstream outage). */
+  failures: ReadonlyArray<{ scanner: ScannerId; message: string }>;
+  /** Tools a scanner would have run but could not, e.g. a linter not installed. */
+  skipped: readonly ScanSkip[];
 }
 
 export interface RenderedSummary {
@@ -111,6 +125,21 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
       "_GitHub can't anchor inline comments on binary files, so these are reported here._",
     );
     sections.push(formatBinaryFindings(input.binaryFindings));
+  }
+
+  const scannerFailures = formatScannerFailures(input.scannerStatus?.failures ?? []);
+  if (scannerFailures) {
+    sections.push('### Scanner coverage');
+    sections.push(
+      '_These scanners did not complete, so findings they would have raised may be missing:_',
+    );
+    sections.push(scannerFailures);
+  }
+  const notInstalled = uniqueSkippedTools(input.scannerStatus?.skipped ?? []);
+  if (notInstalled.length > 0) {
+    sections.push(
+      `_Static tools not run (not installed in this workspace):_ ${notInstalled.join(', ')}`,
+    );
   }
 
   // Coverage notes (only available from the agent's summary)
@@ -292,4 +321,41 @@ function formatScannerCountsLine(comments: readonly PostedComment[]): string | n
 
   const noun = total === 1 ? 'finding' : 'findings';
   return `**Security:** ${total} ${noun} from scanners (${breakdown})`;
+}
+
+/** Errors shown per scanner before collapsing the rest into a count. */
+const MAX_ERRORS_PER_SCANNER = 3;
+const MAX_ERROR_CHARS = 200;
+
+/**
+ * Scanner error text is written for the Actions log and can carry linter
+ * stderr: multi-line, arbitrarily long, and possibly quoting file content.
+ * Before it goes into a PR comment it is masked with the same secret list the
+ * logger uses, flattened to one line, stripped of backticks (so it cannot
+ * open a code span), and truncated.
+ */
+function sanitizeScannerMessage(message: string): string {
+  const flat = redact(message).replace(/`/g, "'").replace(/\s+/g, ' ').trim();
+  return flat.length > MAX_ERROR_CHARS ? `${flat.slice(0, MAX_ERROR_CHARS - 1)}…` : flat;
+}
+
+function formatScannerFailures(failures: ScannerStatus['failures']): string | null {
+  if (failures.length === 0) return null;
+  const byScanner = new Map<ScannerId, string[]>();
+  for (const f of failures) {
+    const messages = byScanner.get(f.scanner) ?? [];
+    messages.push(sanitizeScannerMessage(f.message));
+    byScanner.set(f.scanner, messages);
+  }
+  const lines: string[] = [];
+  for (const [scanner, messages] of byScanner) {
+    const shown = messages.slice(0, MAX_ERRORS_PER_SCANNER).join('; ');
+    const extra = messages.length - MAX_ERRORS_PER_SCANNER;
+    lines.push(`- \`${scanner}\`: ${shown}${extra > 0 ? ` (+${extra} more)` : ''}`);
+  }
+  return lines.join('\n');
+}
+
+function uniqueSkippedTools(skipped: readonly ScanSkip[]): string[] {
+  return [...new Set(skipped.map((s) => s.name))];
 }
