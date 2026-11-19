@@ -28,6 +28,14 @@ export interface ToolDeps {
    */
   runContext: RunContext;
   /**
+   * Repo context files whose full content is already in the system prompt's
+   * "Repo context" block. `read_repo_context_file` answers for these without
+   * repeating the content, because a second copy in the message history is
+   * re-read on every later turn. Absent (eval harness, older callers) means
+   * nothing is embedded and every file is returned in full.
+   */
+  embeddedContextFiles?: ReadonlySet<string>;
+  /**
    * Optional Haiku worker client. Present only when
    * `experimental.worker_delegation.enabled` is true; tool factories that
    * need it should fail fast when it's missing.

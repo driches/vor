@@ -75895,7 +75895,7 @@ function makeReadFileAtRefTool(deps) {
 function makeReadRepoContextFileTool(deps) {
   return tool(
     "read_repo_context_file",
-    "Reads one or more repo-convention files (CLAUDE.md, AGENTS.md, package.json, tsconfig.json, README.md, .vor.yml, etc.) at HEAD. Call this EARLY (turn 2 or 3) to ground your judgments in the repo's actual conventions. Returns content for each file or { exists: false }.",
+    `Reads one or more repo-convention files (CLAUDE.md, AGENTS.md, package.json, tsconfig.json, README.md, .vor.yml, etc.) at HEAD. Call this EARLY (turn 2 or 3) to ground your judgments in the repo's actual conventions. Returns content for each file or { exists: false }. A file whose full text is already in your system prompt under "Repo context" comes back as { exists: true, in_system_prompt: true } without repeating it.`,
     {
       files: external_exports.array(external_exports.enum(REPO_CONTEXT_FILES)).optional().describe("Files to read. Defaults to all whitelisted files.")
     },
@@ -75904,6 +75904,10 @@ function makeReadRepoContextFileTool(deps) {
       const sha = deps.prContext.metadata.head_sha;
       const results = {};
       for (const file2 of targets) {
+        if (deps.embeddedContextFiles?.has(file2)) {
+          results[file2] = { exists: true, in_system_prompt: true };
+          continue;
+        }
         const content = await deps.fileReader.read({
           owner: deps.owner,
           repo: deps.repo,
@@ -77344,28 +77348,34 @@ function buildFocusBlock(config2) {
 
 Prioritize: ${focused.join(", ")}. Areas not listed should only get comments for clearly serious issues.`;
 }
-function buildContextBlock(repoName, files, maxBytes) {
-  if (files.length === 0) return null;
-  const sections = [`### Repo context (${repoName})`];
-  let bytes = 0;
-  for (const entry of files) {
-    const header = `
+function contextFileBlock(entry) {
+  return `
 #### ${entry.file}
 
-`;
-    const fenced = `\`\`\`
+\`\`\`
 ${entry.content.trim()}
 \`\`\``;
-    const block = header + fenced;
-    if (bytes + block.length > maxBytes) {
-      sections.push(
-        `
-_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`
-      );
-      break;
-    }
-    sections.push(block);
-    bytes += block.length;
+}
+function selectEmbeddedContextFiles(files, maxBytes) {
+  const embedded = [];
+  let bytes = 0;
+  for (const entry of files) {
+    const size = contextFileBlock(entry).length;
+    if (bytes + size > maxBytes) break;
+    embedded.push(entry);
+    bytes += size;
+  }
+  return embedded;
+}
+function buildContextBlock(repoName, files, maxBytes) {
+  if (files.length === 0) return null;
+  const embedded = selectEmbeddedContextFiles(files, maxBytes);
+  const sections = [`### Repo context (${repoName})`, ...embedded.map(contextFileBlock)];
+  if (embedded.length < files.length) {
+    sections.push(
+      `
+_(${files.length - embedded.length} additional context file(s) omitted due to size cap.)_`
+    );
   }
   return sections.join("\n");
 }
@@ -87680,6 +87690,9 @@ async function runOrchestrator(input2) {
     repoName: `${input2.owner}/${input2.repo}`,
     contextFiles
   });
+  const embeddedContextFiles = new Set(
+    selectEmbeddedContextFiles(contextFiles, config2.context.max_context_bytes).map((e2) => e2.file)
+  );
   const agentScope = scopePrContextForAgent(prContext, config2.exclude);
   if (agentScope.unreviewedPaths.length > 0) {
     await logger.info(
@@ -87801,7 +87814,8 @@ ${base}` : base;
       aggregator,
       config: config2,
       workspaceDir: input2.workspace_dir,
-      runContext: createRunContext()
+      runContext: createRunContext(),
+      embeddedContextFiles
     },
     systemPrompt,
     userPrompt: finalUserPrompt,

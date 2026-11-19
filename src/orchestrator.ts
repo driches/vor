@@ -8,7 +8,11 @@ import { runAgent } from './agent/runner.js';
 import { buildAgentScopeNotice, scopePrContextForAgent } from './agent/pr-scope.js';
 import { computeBlastRadius, type BlastRadiusMap } from './context/blast-radius.js';
 import { createRunContext } from './agent/run-context.js';
-import { buildSystemPrompt, type RepoContextEntry } from './agent/system-prompt.js';
+import {
+  buildSystemPrompt,
+  selectEmbeddedContextFiles,
+  type RepoContextEntry,
+} from './agent/system-prompt.js';
 import { buildUserPrompt } from './agent/user-prompt.js';
 import { loadConfigFromString } from './config/loader.js';
 import { DEFAULT_CONFIG } from './config/defaults.js';
@@ -278,6 +282,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     repoName: `${input.owner}/${input.repo}`,
     contextFiles,
   });
+  // Same selection buildSystemPrompt just made. The agent's context tool uses
+  // it to avoid returning a second copy of a file the system prompt carries.
+  const embeddedContextFiles = new Set(
+    selectEmbeddedContextFiles(contextFiles, config.context.max_context_bytes).map((e) => e.file),
+  );
   const agentScope = scopePrContextForAgent(prContext, config.exclude);
   if (agentScope.unreviewedPaths.length > 0) {
     await logger.info(
@@ -483,6 +492,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
             config,
             workspaceDir: input.workspace_dir,
             runContext: createRunContext(),
+            embeddedContextFiles,
           },
           systemPrompt,
           userPrompt: finalUserPrompt,

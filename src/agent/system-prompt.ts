@@ -196,6 +196,35 @@ function buildFocusBlock(config: ReviewConfig): string | null {
   return `### Areas of focus for THIS repo\n\nPrioritize: ${focused.join(', ')}. Areas not listed should only get comments for clearly serious issues.`;
 }
 
+function contextFileBlock(entry: RepoContextEntry): string {
+  return `\n#### ${entry.file}\n\n\`\`\`\n${entry.content.trim()}\n\`\`\``;
+}
+
+/**
+ * The prefix of `files` that fits under `maxBytes` and is therefore embedded
+ * in the system prompt. Selection stops at the first file that does not fit —
+ * later, smaller files are not pulled forward — so the embedded set is always
+ * a leading run of the configured `context.include` order.
+ *
+ * Exported so the orchestrator can tell `read_repo_context_file` which files
+ * the agent already has; a file cut by the cap must stay readable through the
+ * tool.
+ */
+export function selectEmbeddedContextFiles(
+  files: readonly RepoContextEntry[],
+  maxBytes: number,
+): RepoContextEntry[] {
+  const embedded: RepoContextEntry[] = [];
+  let bytes = 0;
+  for (const entry of files) {
+    const size = contextFileBlock(entry).length;
+    if (bytes + size > maxBytes) break;
+    embedded.push(entry);
+    bytes += size;
+  }
+  return embedded;
+}
+
 function buildContextBlock(
   repoName: string,
   files: RepoContextEntry[],
@@ -203,21 +232,12 @@ function buildContextBlock(
 ): string | null {
   if (files.length === 0) return null;
 
-  const sections: string[] = [`### Repo context (${repoName})`];
-  let bytes = 0;
-
-  for (const entry of files) {
-    const header = `\n#### ${entry.file}\n\n`;
-    const fenced = `\`\`\`\n${entry.content.trim()}\n\`\`\``;
-    const block = header + fenced;
-    if (bytes + block.length > maxBytes) {
-      sections.push(
-        `\n_(${files.length - sections.length + 1} additional context file(s) omitted due to size cap.)_`,
-      );
-      break;
-    }
-    sections.push(block);
-    bytes += block.length;
+  const embedded = selectEmbeddedContextFiles(files, maxBytes);
+  const sections: string[] = [`### Repo context (${repoName})`, ...embedded.map(contextFileBlock)];
+  if (embedded.length < files.length) {
+    sections.push(
+      `\n_(${files.length - embedded.length} additional context file(s) omitted due to size cap.)_`,
+    );
   }
 
   return sections.join('\n');

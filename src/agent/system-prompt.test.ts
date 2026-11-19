@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import { buildSystemPrompt, selectEmbeddedContextFiles } from './system-prompt.js';
 
 describe('buildSystemPrompt', () => {
   it('includes the base discipline text', () => {
@@ -65,6 +65,35 @@ describe('buildSystemPrompt', () => {
     });
     expect(p.length).toBeLessThan(15_000);
     expect(p).toMatch(/omitted due to size cap/);
+  });
+
+  it('reports exactly the context files that made it into the prompt', () => {
+    // The orchestrator tells read_repo_context_file which files are already
+    // in the system prompt. A file dropped by the size cap is NOT there, so
+    // it must not be reported as embedded or the agent could never read it.
+    const files = [
+      { file: 'CLAUDE.md', content: 'short conventions' },
+      { file: 'AGENTS.md', content: 'x'.repeat(40_000) },
+    ];
+    const embedded = selectEmbeddedContextFiles(files, 5_000);
+    expect(embedded.map((e) => e.file)).toEqual(['CLAUDE.md']);
+
+    const p = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, max_context_bytes: 5_000 },
+      },
+      repoName: 'r',
+      contextFiles: files,
+    });
+    expect(p).toContain('short conventions');
+    expect(p).not.toContain('x'.repeat(100));
+    expect(p).toContain('_(1 additional context file(s) omitted due to size cap.)_');
+
+    expect(selectEmbeddedContextFiles(files, 100_000).map((e) => e.file)).toEqual([
+      'CLAUDE.md',
+      'AGENTS.md',
+    ]);
   });
 
   it('emits the static-analysis section when sast is enabled (default config)', () => {
