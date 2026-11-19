@@ -6,7 +6,7 @@ describe('vor CLI program', () => {
     const names = buildProgram()
       .commands.map((c) => c.name())
       .sort();
-    expect(names).toEqual(['config', 'dashboard', 'mcp', 'review', 'runs'].sort());
+    expect(names).toEqual(['bitbucket', 'config', 'dashboard', 'mcp', 'review', 'runs'].sort());
   });
 
   it('exposes a version', () => {

@@ -5,10 +5,10 @@
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `anthropic_api_key` | no | — | Anthropic API key. Store as a repo secret. Required when using a Claude model (the default). |
-| `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI model (`gpt-*`, `o<digit>*`, `chatgpt-*`). |
+| `openai_api_key` | no | — | OpenAI API key. Required when `model` is an OpenAI model (`gpt-*`, `o<digit>*`, `chatgpt-*`). OpenAI-only setups default to `gpt-5.6-sol`. |
 | `provider` | no | (inferred) | LLM provider override (`anthropic` \| `openai`). Inferred from `model` when omitted. |
 | `github_token` | no | `${{ github.token }}` | Needs `pull-requests: write` permission. |
-| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (default), `claude-haiku-4-5` (lower cost), `claude-opus-4-7` (higher capability). OpenAI: `gpt-5.6-sol` (highest quality), `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
+| `model` | no | `claude-sonnet-4-6` | Model ID. Anthropic: `claude-sonnet-4-6` (overall default), `claude-haiku-4-5`, `claude-opus-4-7`. OpenAI: `gpt-5.6-sol` (provider default and highest quality), `gpt-4.1`, `gpt-4o-mini`, `o4-mini`, etc. |
 | `max_turns` | no | `40` | Max agent turns. Larger PRs may need more. |
 | `config_path` | no | `.vor.yml` | Path in consumer repo to optional config file. |
 | `dry_run` | no | `false` | If `true`, logs the review instead of posting. |

@@ -5,31 +5,12 @@
 
 import type { Octokit } from '@octokit/rest';
 import type { ChangedFile } from '../types.js';
+import type { PRContext, PRMetadata } from '../platform/types.js';
 import { GitHubApiError } from '../util/errors.js';
 import { fetchPullRequestDiff, type DiffRef } from './diff-fetcher.js';
-import { parseUnifiedDiff } from './diff-parser.js';
+import { parseUnifiedDiff } from '../platform/diff-parser.js';
 
-export interface PRMetadata {
-  number: number;
-  title: string;
-  body: string;
-  author: string;
-  base_sha: string;
-  head_sha: string;
-  base_ref: string;
-  head_ref: string;
-  labels: string[];
-  changed_file_count: number;
-  additions: number;
-  deletions: number;
-  draft: boolean;
-}
-
-export interface PRContext {
-  metadata: PRMetadata;
-  files: ChangedFile[];
-  diff: string;
-}
+export type { PRContext, PRMetadata } from '../platform/types.js';
 
 export async function fetchPRContext(octokit: Octokit, ref: DiffRef): Promise<PRContext> {
   let prData: Awaited<ReturnType<typeof octokit.rest.pulls.get>>['data'];

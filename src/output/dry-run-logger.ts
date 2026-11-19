@@ -4,7 +4,7 @@
  */
 
 import type { PostedComment, ReviewDraft, ReviewEvent } from '../types.js';
-import { renderCommentBody } from '../github/review-poster.js';
+import { renderCommentBody } from './comment-body.js';
 import { logger } from '../util/logger.js';
 
 export interface DryRunInput {

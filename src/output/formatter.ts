@@ -1,10 +1,17 @@
 /**
  * Renders a ReviewDraft into the Markdown body for the summary review.
- * Inline comment bodies are rendered separately in github/review-poster.ts.
+ * Platform adapters render and post inline comment bodies separately.
  */
 
 import type { RunAgentResult } from '../agent/runner.js';
-import type { PostedComment, ReviewDraft, ReviewEvent, ScannerId, Severity } from '../types.js';
+import type {
+  PostedComment,
+  ReviewDraft,
+  ReviewEvent,
+  ScannerId,
+  Severity,
+  SummaryInput,
+} from '../types.js';
 import { SEVERITY_RANK } from '../types.js';
 import type { ScanFinding } from '../scanners/types.js';
 
@@ -24,13 +31,22 @@ export interface SummaryRenderInput {
    */
   agentEnded?: RunAgentResult['ended'];
   /**
-   * Scanner findings on binary files. GitHub can't anchor inline review
+   * Scanner findings on binary files. Review platforms can't anchor inline
    * comments on a binary blob, so these never make it into `keptComments` —
    * they're reported in a dedicated summary section instead of being dropped.
    * The canonical case is the `image-ocr` scanner surfacing a secret it read
    * out of a committed screenshot.
    */
   binaryFindings?: readonly ScanFinding[];
+  /**
+   * Scanner comments that passed the configured severity floor, including
+   * comments later removed by caps. These still inform review state so a
+   * known deterministic finding cannot be converted into an approval merely
+   * because the visible-comment budget was exhausted.
+   */
+  scannerCommentsForAssessment?: readonly PostedComment[];
+  /** Human-readable review platform name. Defaults to GitHub for compatibility. */
+  platformName?: string;
 }
 
 export interface RenderedSummary {
@@ -47,17 +63,31 @@ export interface RenderedSummary {
  * event is misleading (the review isn't actually approving anything). The
  * severity label tells the reader at a glance what was found.
  *
- * The agent's `assessment` still drives the GitHub event when the repo opts
- * into APPROVE / REQUEST_CHANGES via `.vor.yml`; the configured event
- * is the ceiling and the agent cannot escalate above it.
+ * The agent's `assessment` still drives the platform review state when the
+ * repo opts into APPROVE / REQUEST_CHANGES via `.vor.yml`; the configured
+ * event is the ceiling and the agent cannot escalate above it.
  */
 export function renderSummary(input: SummaryRenderInput): RenderedSummary {
+  const platformName = input.platformName ?? 'GitHub';
   const summary = input.draft.summary;
   const unreviewedPaths = mergeUniquePaths(
     summary?.unreviewed_paths ?? [],
     input.unreviewedPaths ?? [],
   );
   const sections: string[] = [];
+  const scannerCommentsForAssessment =
+    input.scannerCommentsForAssessment ??
+    input.keptComments.filter((comment) => comment.source?.kind === 'scanner');
+  const blockingScannerFindings = [
+    ...scannerCommentsForAssessment.filter(
+      (comment) => comment.severity === 'critical' || comment.severity === 'important',
+    ),
+    ...(input.binaryFindings ?? []).filter(
+      (finding) => finding.severity === 'critical' || finding.severity === 'important',
+    ),
+  ];
+  const scannerOverridesAssessment =
+    blockingScannerFindings.length > 0 && summary?.assessment !== 'request_changes';
 
   // Headline: severity of the highest-severity finding (or "No findings").
   // Always rendered, even without an agent-supplied summary, so the body has a
@@ -66,6 +96,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   // even though it can't be posted inline.
   const headlineSeverities: Severity[] = [
     ...input.keptComments.map((c) => c.severity),
+    ...scannerCommentsForAssessment.map((c) => c.severity),
     ...(input.binaryFindings ?? []).map((f) => f.severity),
   ];
   sections.push(`### ${severityHeader(headlineSeverities)}`);
@@ -78,7 +109,9 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     sections.push(missingSummaryWarning(input.agentEnded));
   }
 
-  if (summary) {
+  if (scannerOverridesAssessment) {
+    sections.push(scannerAssessmentOverride(blockingScannerFindings.length, summary?.assessment));
+  } else if (summary) {
     sections.push(summary.assessment_reasoning);
   }
 
@@ -108,7 +141,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   if (input.binaryFindings && input.binaryFindings.length > 0) {
     sections.push('### Security findings in binary files');
     sections.push(
-      "_GitHub can't anchor inline comments on binary files, so these are reported here._",
+      `_${platformName} can't anchor inline comments on binary files, so these are reported here._`,
     );
     sections.push(formatBinaryFindings(input.binaryFindings));
   }
@@ -126,7 +159,7 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
   }
   if (input.truncatedCount > 0) {
     sections.push(
-      `_${input.truncatedCount} additional comment(s) were dropped due to per-file or global caps._`,
+      `_${input.truncatedCount} additional comment(s) were removed by severity filtering, overlap reconciliation, or comment caps._`,
     );
   }
 
@@ -135,8 +168,11 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     `_Reviewed by [driches/vor](https://github.com/driches/vor) using \`${input.modelName}\`._`,
   );
 
-  // Choose the final event: take the min of (agent assessment, configured ceiling).
-  // No summary → no assessment → default to COMMENT.
+  // Scanner-backed critical/important findings are authoritative. They request
+  // changes only when the repository opted into that event; every other
+  // configuration falls back to COMMENT rather than allowing an approval.
+  // Without a blocking scanner result, preserve the existing agent/config
+  // ceiling behavior.
   const agentEvent: ReviewEvent = !summary
     ? 'COMMENT'
     : summary.assessment === 'approve'
@@ -144,9 +180,25 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
       : summary.assessment === 'request_changes'
         ? 'REQUEST_CHANGES'
         : 'COMMENT';
-  const event = chooseEvent(input.configEvent, agentEvent);
+  const event =
+    blockingScannerFindings.length > 0
+      ? input.configEvent === 'REQUEST_CHANGES'
+        ? 'REQUEST_CHANGES'
+        : 'COMMENT'
+      : chooseEvent(input.configEvent, agentEvent);
 
   return { body: sections.join('\n\n'), event };
+}
+
+function scannerAssessmentOverride(count: number, assessment?: SummaryInput['assessment']): string {
+  const noun = count === 1 ? 'finding' : 'findings';
+  const prior = assessment
+    ? `the agent's ${assessment} assessment`
+    : 'the missing agent assessment';
+  return (
+    `> **Deterministic scanner result:** ${count} critical or important ${noun} ` +
+    `take precedence over ${prior}. Treat the scanner-backed findings as authoritative.`
+  );
 }
 
 function mergeUniquePaths(a: readonly string[], b: readonly string[]): string[] {

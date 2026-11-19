@@ -17,7 +17,7 @@ import { parse as parseYaml } from 'yaml';
 import { satisfies as semverSatisfies, valid as semverValid } from 'semver';
 import { z } from 'zod';
 import { canonicalizePackageName } from './canonicalize.js';
-import type { FileReader } from '../github/file-reader.js';
+import type { RepoFileReader } from '../platform/types.js';
 import { GitHubApiError } from '../util/errors.js';
 import { logger } from '../util/logger.js';
 import type { IgnoreList as IgnoreListContract, IgnoreMatchResult, ScanFinding } from './types.js';
@@ -147,7 +147,7 @@ export class IgnoreList implements IgnoreListContract {
    * {@link IgnoreList.empty} with a logger entry. We never throw — a typo in
    * the security file should NOT block a code review.
    */
-  static async load(reader: FileReader, args: IgnoreListLoadArgs): Promise<IgnoreList> {
+  static async load(reader: RepoFileReader, args: IgnoreListLoadArgs): Promise<IgnoreList> {
     let raw: string | null;
     try {
       raw = await reader.read({

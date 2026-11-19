@@ -331,3 +331,17 @@ providers:
     }
   });
 });
+
+describe('config isolation', () => {
+  it('returns independent defaults for separate review runs', () => {
+    const first = loadConfigFromString(null);
+    first.model = 'gpt-5.6-sol';
+    first.review.sticky = false;
+
+    const second = loadConfigFromString(null);
+    expect(second.model).toBe(DEFAULT_CONFIG.model);
+    expect(second.review.sticky).toBe(true);
+    expect(DEFAULT_CONFIG.model).toBe('claude-sonnet-4-6');
+    expect(DEFAULT_CONFIG.review.sticky).toBe(true);
+  });
+});

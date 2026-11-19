@@ -647,16 +647,15 @@ describe('runOrchestrator — review.post_summary: false', () => {
 });
 
 // -----------------------------------------------------------------
-// Scenario 2: Cross-AI dedup suppresses an overlapping scanner finding.
+// Scenario 2: deterministic scanner precedence for overlapping findings.
 //
 // The agent posts a 'security' comment on src/auth.ts:10 (within 3 lines of
-// the scanner-detected AWS key on line 11). Dedup pass 2 should drop the
-// scanner finding because non-CVE scanner findings are suppressed by an
-// overlapping AI security-adjacent comment.
+// the scanner-detected AWS key on line 11). The scanner finding is canonical,
+// so the overlapping AI version is removed.
 // -----------------------------------------------------------------
 
 describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
-  it('drops a non-CVE scanner finding when an AI security comment overlaps within 3 lines', async () => {
+  it('keeps the scanner finding when an AI security comment overlaps within 3 lines', async () => {
     const base = buildBaseDiff();
     octokitState.diff = base.diff;
     octokitState.filesApi = base.filesApi;
@@ -675,8 +674,8 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
     );
 
     // Agent comments on line 10 of src/auth.ts (the const declaration). The
-    // scanner will flag line 11 (the AWS key value). Distance = 1 → dedup
-    // suppresses the scanner finding.
+    // scanner will flag line 11 (the AWS key value). Distance = 1, so the
+    // deterministic result replaces the AI version of the same issue.
     scriptOneCommentAndSummary({
       severity: 'critical',
       file_path: 'src/auth.ts',
@@ -696,10 +695,11 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
       comments: Array<{ path: string; body: string }>;
     };
 
-    // Only the AI comment survives.
+    // Only the scanner comment survives.
     expect(call.comments).toHaveLength(1);
-    expect(call.comments[0]!.body).toContain('Hard-coded credentials in source');
-    expect(call.comments[0]!.body).not.toContain('via secrets scan');
+    expect(call.comments[0]!.body).toContain('AWS access key id');
+    expect(call.comments[0]!.body).toContain('via secrets scan');
+    expect(call.comments[0]!.body).not.toContain('Hard-coded credentials in source');
   });
 });
 
@@ -710,23 +710,20 @@ describe('runOrchestrator — Scenario 2: cross-AI dedup', () => {
 // 'security' comment ON THE SAME LINE as the scanner-detected AWS key
 // (distance = 0, not 1). In production both shipped — two CRITICAL inline
 // comments on the same line of the same file, one labeled `security` (AI)
-// and one labeled `vulnerability · via secrets scan` (scanner). Dedup
-// should suppress the scanner finding here just as it does in the
-// distance-1 case (Scenario 2 above), but the smoke test proved it does not.
+// and one labeled `vulnerability · via secrets scan` (scanner). The scanner
+// result must be the single canonical credential finding.
 // -----------------------------------------------------------------
 
 describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)', () => {
-  it('drops the secrets scanner finding when the AI security comment sits on the same line (PR #12 regression)', async () => {
+  it('keeps the secrets scanner finding when the AI security comment sits on the same line', async () => {
     // Faithful replay of smoke-test PR #12: a single file with TWO planted
     // bugs (AWS key on line 11, SQL injection on line 20). The agent posts
     // category='security' on BOTH lines. The secrets scanner produces one
     // finding (line 11, category='vulnerability'). Production posted three
     // comments — AI/security:11, AI/security:20, AND scanner/vulnerability:11
-    // — so the scanner finding was NOT dedup-suppressed against the
-    // co-located AI/security:11 comment. The expected behavior is two
-    // comments (the two AI findings); the scanner finding on line 11 should
-    // be suppressed because the AI's security-adjacent finding on the same
-    // line takes precedence.
+    // — so overlap reconciliation failed. The expected behavior remains two
+    // comments, but the line-11 comment must come from the deterministic
+    // scanner while the distinct SQL-injection AI finding remains.
     const smokeDiff = [
       'diff --git a/examples/smoke-test-bad-code.ts b/examples/smoke-test-bad-code.ts',
       'index 0000000..1111111 100644',
@@ -778,7 +775,7 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
     // tool() helper now parses input through Zod before the handler runs, so
     // the default fills in `side: 'RIGHT'` on the in-memory PostedComment.
     // The scanner adapter also uses `side: 'RIGHT'`, so the dedup overlap
-    // check sees a match and suppresses the co-located scanner finding. This
+    // check sees a match and suppresses the co-located AI finding. This
     // replays PR #12's smoke-test scenario and pins that dedup behavior —
     // it historically regressed when an omitted `side` reached the handler as
     // `undefined` (the schema default never applied) and `undefined !==
@@ -849,24 +846,18 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
       comments: Array<{ path: string; body: string; line: number }>;
     };
 
-    // The scanner finding on line 11 must be suppressed by the co-located AI
-    // security comment. Two comments survive — the two AI findings.
+    // The scanner finding replaces the co-located AI security comment. The
+    // unrelated SQL-injection AI finding survives.
     const scannerComments = call.comments.filter((c) => c.body.includes('via secrets scan'));
-    expect(scannerComments).toHaveLength(0);
+    expect(scannerComments).toHaveLength(1);
     expect(call.comments).toHaveLength(2);
-    expect(call.comments.some((c) => c.body.includes('Hardcoded AWS access key ID'))).toBe(true);
+    expect(call.comments.some((c) => c.body.includes('Hardcoded AWS access key ID'))).toBe(false);
     expect(call.comments.some((c) => c.body.includes('SQL injection'))).toBe(true);
   });
 });
 
 // -----------------------------------------------------------------
-// Scenario 2b: Predicted-survivor dedup — an AI comment that won't ship MUST
-// NOT suppress an overlapping scanner finding.
-//
-// Bug: the OLD ordering deduped scanner findings against the FULL
-// `acceptedComments` list before the cap pass. So a low-severity AI comment
-// that was about to be capped out could still "win" dedup, taking down a
-// higher-severity scanner finding with it.
+// Scenario 2b: scanner precedence is applied before per-file caps.
 //
 // Setup that exercises it: 3 AI 'security' comments on `src/auth.ts`. The
 // per-file cap is 2, so the lowest-severity AI ('minor') gets dropped by the
@@ -874,18 +865,13 @@ describe('runOrchestrator — Scenario 2a: same-line overlap (PR #12 regression)
 // on line 11. The two surviving AIs ('important') sit on lines 5 and 7, both
 // outside the 3-line overlap window for the scanner on line 11.
 //
-//   OLD: dedup scanner vs [imp5, imp7, min10] — overlap with min10 → SUPPRESSED.
-//        filter([imp5, imp7, min10], per_file=2) → [imp5, imp7]. Scanner lost.
-//
-//   NEW: aiPredictedSurvivors = filter([imp5, imp7, min10], per_file=2) =
-//        [imp5, imp7]. dedup scanner vs [imp5, imp7] — distances 6 and 4,
-//        neither within window → scanner SURVIVES.
-//        Final filter on [imp5, imp7, min10, scan11] (sorted critical desc):
-//        [scan11(crit), imp5, imp7, min10]. per_file=2 → [scan11, imp5].
+// Reconciliation removes the overlapping minor AI comment first. The cap then
+// applies to [scanner-critical, AI-important, AI-important], retaining the
+// scanner and one AI comment.
 // -----------------------------------------------------------------
 
-describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not suppress scanner', () => {
-  it('keeps the scanner finding when the overlapping AI comment gets dropped by per-file cap', async () => {
+describe('runOrchestrator — Scenario 2b: scanner precedence before per-file cap', () => {
+  it('keeps the scanner finding and applies the cap to reconciled comments', async () => {
     // Extend the base diff for src/auth.ts to cover more added lines so all
     // AI lines (5, 7) and the scanner line (11) are reviewable.
     const authDiff = [
@@ -1025,17 +1011,7 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
 });
 
 // -----------------------------------------------------------------
-// Scenario 2c: post-filter dedup — scanner survives when its overlapping AI
-// counterpart is capped out by the combined cap. Regression for Codex P1 on
-// PR #8.
-//
-// Bug being fixed: the OLD predict-then-dedup ran filterComments() over the
-// AI-only list to compute "predicted survivors", deduped scanner findings
-// against them, then added scanners to the aggregator. If an AI that was a
-// predicted-survivor got bumped from the combined cap by scanner findings
-// (sort-by-severity reshuffles the order), its scanner counterpart had
-// ALREADY been deduped away. Net: nothing posts in the line area, security
-// signal silently lost.
+// Scenario 2c: scanner precedence is applied before the combined cap.
 //
 // Setup:
 //   - 4 critical AI 'performance' comments on lines 5, 7, 9, 13 (not
@@ -1045,20 +1021,8 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
 //     AI-50 security comment).
 //   - per_file_cap = 5.
 //
-// OLD flow (predict-then-dedup):
-//   - Predict survivors: filter(5 AI, cap=5) = all 5 (incl. AI-50).
-//   - Dedup: scanner@51 distance=1 to AI-50 'security' → DROPPED.
-//   - Combined: 5 AI (no scanner). All 5 fit cap=5. Posted: 4 critical AI +
-//     important AI-50. Line 51 has NOTHING. ← bug
-//
-// NEW flow (post-filter dedup):
-//   - All to aggregator: 5 AI + scanner = 6.
-//   - filterComments(cap=5): sort severity desc — 5 critical (4 AI + scanner)
-//     + 1 important (AI-50). Per-file cap=5 → keep first 5 critical: 4 AI +
-//     scanner. AI-50 capped out.
-//   - Post-filter dedup: surviving AI in kept list = 4 AI 'performance' on
-//     lines 5/7/9/13. None are security-adjacent. Scanner stays.
-//   - Posted: 4 critical AI + scanner. Line 51 HAS scanner finding. ← fix
+// Reconciliation removes AI-50 because it overlaps scanner-51. The cap then
+// receives exactly 4 unrelated critical AI comments plus the scanner finding.
 //
 // Assertions:
 //   - Total kept comments = 5 (the cap).
@@ -1068,8 +1032,8 @@ describe('runOrchestrator — Scenario 2b: AI comment dropped by cap does not su
 //   - The 4 critical AI 'performance' comments ARE in the posted review.
 // -----------------------------------------------------------------
 
-describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI would have suppressed it', () => {
-  it('keeps the scanner finding after post-filter dedup when the overlapping AI gets capped', async () => {
+describe('runOrchestrator — Scenario 2c: scanner precedence before combined cap', () => {
+  it('keeps the scanner finding after overlap reconciliation and cap filtering', async () => {
     // Extended auth.ts diff: 47 added lines starting at line 5 so lines 5, 7,
     // 9, 13, 50, 51 are all reviewable. The planted AWS key sits on line 51.
     // We intersperse harmless filler so each commented line has reviewable
@@ -1266,6 +1230,71 @@ describe('runOrchestrator — Scenario 2c: scanner survives when capped-out AI w
     for (const t of perfTitles) {
       expect(authComments.some((c) => c.body.includes(t))).toBe(true);
     }
+  });
+});
+
+// -----------------------------------------------------------------
+// Scenario 2d: the configured severity floor remains authoritative.
+//
+// The debris scanner reports `debugger;` as minor while the agent reports an
+// important bug on the same line. Because the repository selected an
+// important floor, the scanner finding is excluded before reconciliation and
+// therefore cannot suppress the eligible agent finding.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — Scenario 2d: severity floor before scanner precedence', () => {
+  it('keeps an eligible agent finding when the overlapping scanner finding is below the floor', async () => {
+    const appDiff = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 3333333..4444444 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -0,0 +1,3 @@',
+      '+export function app() {',
+      '+  debugger;',
+      '+}',
+    ].join('\n');
+    octokitState.diff = `${appDiff}\n`;
+    octokitState.filesApi = [{ filename: 'src/app.ts', changes: 3, patch: appDiff }];
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: true',
+        '  scanners:',
+        '    dependency_cve:',
+        '      enabled: false',
+        '    secrets:',
+        '      enabled: false',
+        '    debris:',
+        '      enabled: true',
+        'severity:',
+        '  floor: important',
+      ].join('\n'),
+    );
+
+    scriptOneCommentAndSummary({
+      severity: 'important',
+      file_path: 'src/app.ts',
+      line: 2,
+      side: 'RIGHT',
+      category: 'bug',
+      title: 'Debugger statement can halt production execution',
+      why_it_matters:
+        'Execution pauses when developer tools are attached, which can stall a production request.',
+      suggestion: '  // Remove the debugger statement before shipping.',
+      confidence: 'high',
+    });
+
+    await runOrchestrator(baseInput());
+
+    expect(octokitState.createReviewCalls).toHaveLength(1);
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ body: string }>;
+    };
+    expect(call.comments).toHaveLength(1);
+    expect(call.comments[0]!.body).toContain('Debugger statement can halt production execution');
+    expect(call.comments[0]!.body).not.toContain('via debris scan');
   });
 });
 

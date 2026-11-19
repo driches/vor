@@ -1,5 +1,5 @@
 import { tool } from './tool-helper.js';
-import { formatRanges } from '../github/reviewable-lines.js';
+import { formatRanges } from '../platform/reviewable-lines.js';
 import { jsonResult, type ToolDeps } from './types.js';
 
 export function makeListChangedFilesTool(deps: ToolDeps) {

@@ -25,7 +25,7 @@ export function deepMerge<T>(base: T, override: unknown): T {
  */
 export function loadConfigFromString(yaml: string | null | undefined): ReviewConfig {
   if (!yaml || yaml.trim().length === 0) {
-    return DEFAULT_CONFIG;
+    return cloneDefaultConfig();
   }
 
   let parsed: unknown;
@@ -33,21 +33,21 @@ export function loadConfigFromString(yaml: string | null | undefined): ReviewCon
     parsed = parseYaml(yaml);
   } catch (err) {
     void logger.warn(`Failed to parse .vor.yml: ${(err as Error).message}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return cloneDefaultConfig();
   }
 
   if (parsed == null || typeof parsed !== 'object') {
-    return DEFAULT_CONFIG;
+    return cloneDefaultConfig();
   }
 
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
     const errMsg = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return cloneDefaultConfig();
   }
 
-  return deepMerge(DEFAULT_CONFIG, result.data as PartialConfig);
+  return deepMerge(cloneDefaultConfig(), result.data as PartialConfig);
 }
 
 /**
@@ -65,5 +65,9 @@ export function loadConfigStrict(yaml: string): ReviewConfig {
   if (!result.success) {
     throw new ConfigError(`Config validation failed: ${result.error.message}`);
   }
-  return deepMerge(DEFAULT_CONFIG, result.data as PartialConfig);
+  return deepMerge(cloneDefaultConfig(), result.data as PartialConfig);
+}
+
+function cloneDefaultConfig(): ReviewConfig {
+  return structuredClone(DEFAULT_CONFIG);
 }

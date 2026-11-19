@@ -39,7 +39,9 @@ export function makePostInlineCommentTool(deps: ToolDeps) {
       side: z
         .enum(['RIGHT', 'LEFT'])
         .default('RIGHT')
-        .describe('RIGHT = new file (default; almost always what you want).'),
+        .describe(
+          'RIGHT = new file (required). LEFT is rejected until base-side ranges are tracked.',
+        ),
       category: categorySchema,
       title: z.string().min(8).max(120).describe('One-line headline of the issue.'),
       why_it_matters: z

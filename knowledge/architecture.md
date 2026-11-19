@@ -1,9 +1,9 @@
 ---
 type: Architecture
 title: Review Loop and Repo Structure
-description: An orchestrator-owned, provider-agnostic loop exposes nine constrained base tools plus optional image-inspection and Anthropic worker-verification tools, with no built-in filesystem or shell access.
-tags: [architecture, orchestrator, tool-use, agent]
-timestamp: 2026-07-20T00:00:00Z
+description: An orchestrator-owned, provider- and platform-agnostic loop exposes nine constrained base tools plus optional image-inspection and Anthropic worker-verification tools, with no built-in filesystem or shell access.
+tags: [architecture, orchestrator, platform-adapter, tool-use, agent]
+timestamp: 2026-08-28T00:00:00Z
 ---
 
 # Review Loop and Repo Structure
@@ -25,13 +25,21 @@ Before accepting an inline finding, `post_inline_comment` validates `(file_path,
 - **Scanners are deterministic** — see [scanners](scanners.md).
 - **Tools validate before they take effect.**
 
+## Platform boundary
+
+`src/platform/runner.ts` owns the shared fetch → config → context → agent/scanner → filter → post pipeline. `src/orchestrator.ts` preserves the public GitHub-shaped entry point and creates the GitHub adapter; `src/bitbucket/review.ts` creates the Bitbucket adapter for the CLI. Both adapters implement `ReviewPlatform` and provide platform-neutral PR context, repository reads, prior-thread loading, sticky supersession, and final posting.
+
+GitHub posts the summary and inline findings atomically as one native review. Bitbucket Cloud has no equivalent batch review endpoint, so its adapter posts a summary and inline comments sequentially. It rechecks the PR source commit around writes and delays sticky cleanup until all replacement comments exist; a partial replacement must not erase the prior complete review.
+
 ## Source layout
 
-`src/` modules (top-level per the digest): `orchestrator.ts`, `types.ts`, `index.ts`, plus directories `tools`, `llm`, `context`, `agent`, `mcp`, `scanners`, `github`, `output`, `config`, `cli`, `local`, `dashboard`, `ocr`, `vision`, `util`, `eval`. Tests sit alongside source (`src/orchestrator.test.ts`) with fixtures in `tests/fixtures`.
+`src/` modules (top-level per the digest): `orchestrator.ts`, `types.ts`, `index.ts`, plus directories `tools`, `llm`, `context`, `agent`, `mcp`, `scanners`, `platform`, `github`, `bitbucket`, `output`, `config`, `cli`, `local`, `dashboard`, `ocr`, `vision`, `util`, `eval`. Tests sit alongside source (`src/orchestrator.test.ts`) with fixtures in `tests/fixtures`.
 
 Notable support modules:
 
 - `src/local/` builds git-backed PR context, runs the production orchestrator against a range or working tree, and persists local run history for the CLI, dashboard, and MCP server.
+- `src/platform/` contains the shared runner, platform contract, GitHub adapter, and platform-neutral diff/review helpers.
+- `src/bitbucket/` contains the Bitbucket Cloud REST client, adapter, review entry point, and mocked integration coverage.
 - `src/mcp/` exposes local review, history, and configuration tools over a stdio MCP server.
 - `src/ocr/` provides offline Tesseract text extraction for the image scanner and image-reading agent tool.
 - `src/vision/` provides the optional model-backed visual description used by `describe_image_at_ref`.

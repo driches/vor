@@ -1,9 +1,9 @@
 ---
 type: Dependency
 title: Tech Stack and Key Dependencies
-description: TypeScript ESM Node >=20 project using the Anthropic and OpenAI SDKs, Octokit, zod, and vitest, with Svelte (dashboard) and Astro (site) subprojects.
-tags: [typescript, node, dependencies, tooling]
-timestamp: 2026-07-20T00:00:00Z
+description: TypeScript ESM Node >=20 project using the Anthropic and OpenAI SDKs, Octokit, the Bitbucket Cloud REST API, zod, and vitest, with Svelte (dashboard) and Astro (site) subprojects.
+tags: [typescript, node, dependencies, github, bitbucket, tooling]
+timestamp: 2026-08-28T00:00:00Z
 ---
 
 # Tech Stack and Key Dependencies
@@ -12,8 +12,9 @@ TypeScript, ESM (`"type": "module"`), Node `>=20` (`.nvmrc` present). Built with
 
 ## Runtime dependencies
 
-- **LLM providers**: `@anthropic-ai/sdk` (^0.39.0), `openai` (^6.39.0) — the dual-provider core of [the review loop](architecture.md).
+- **LLM providers**: `@anthropic-ai/sdk` (^0.39.0), `openai` (^6.49.0) — the dual-provider core of [the review loop](architecture.md).
 - **GitHub**: `@actions/core`, `@octokit/rest` with `@octokit/plugin-retry` and `@octokit/plugin-throttling`.
+- **Bitbucket Cloud**: the built-in Fetch API calls Bitbucket REST 2.0 with scoped API-token Basic authentication; no extra runtime dependency is added.
 - **MCP**: `@modelcontextprotocol/sdk` (^1.29.0) — the stdio server exposes local review, run-history, and configuration tools.
 - **Diff/parsing**: `parse-diff`, `semver`, `yaml`.
 - **Schemas**: `zod` validates tool and configuration inputs; `zod-to-json-schema` converts agent-tool schemas for model providers.
@@ -26,4 +27,4 @@ TypeScript, ESM (`"type": "module"`), Node `>=20` (`.nvmrc` present). Built with
 ## Subprojects
 
 - Dashboard: Svelte via `@sveltejs/vite-plugin-svelte`, built with Vite.
-- Docs site: Astro (`site/astro.config.mjs`), separate package.json.
+- Docs site: Astro 7 + Starlight (`site/astro.config.mjs`), separate package.json requiring Node >=22.12.

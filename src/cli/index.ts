@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { useStderr } from '../util/logger.js';
 import { packageVersion } from '../util/package-version.js';
 import { status } from './output.js';
+import { registerBitbucket } from './commands/bitbucket.js';
 import { registerConfig } from './commands/config.js';
 import { registerDashboard } from './commands/dashboard.js';
 import { registerMcp } from './commands/mcp.js';
@@ -23,6 +24,7 @@ export function buildProgram(): Command {
     .version(packageVersion(), '-v, --version');
 
   registerReview(program);
+  registerBitbucket(program);
   registerRuns(program);
   registerConfig(program);
   registerDashboard(program);

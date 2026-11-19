@@ -1,7 +1,7 @@
 /**
  * Offline `ToolDeps` for the golden-dataset eval harness.
  *
- * Mirrors what `fetchPRContext` + `new FileReader(octokit)` produce in the live
+ * Mirrors the platform PR context and repository reader used by the live
  * orchestrator path, but loads everything from a captured case directory:
  *
  *   <caseDir>/
@@ -21,15 +21,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { Octokit } from '@octokit/rest';
 import { parse as parseYaml } from 'yaml';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import { loadConfigFromString } from '../config/loader.js';
 import type { ReviewConfig } from '../config/types.js';
 import { parseUnifiedDiff } from '../github/diff-parser.js';
-import type { FileReadRef, FileReader } from '../github/file-reader.js';
 import type { PRContext, PRMetadata } from '../github/pr-context.js';
 import { ReviewAggregator } from '../output/aggregator.js';
+import type { FileReadRef, RepoFileReader } from '../platform/types.js';
 import { createRunContext } from '../agent/run-context.js';
 import type { RepoContextEntry } from '../agent/system-prompt.js';
 import type { ToolDeps } from '../tools/types.js';
@@ -86,12 +85,11 @@ export async function buildLocalDeps(input: BuildLocalDepsInput): Promise<BuildL
   }
 
   const deps: ToolDeps = {
-    octokit: {} as Octokit,
     owner: meta.owner,
     repo: meta.repo,
     pull_number: meta.pull_number,
     prContext,
-    fileReader: fileReader as unknown as FileReader,
+    fileReader,
     aggregator: new ReviewAggregator(),
     config,
     workspaceDir: resolve(caseDir, 'repo'),
@@ -340,10 +338,10 @@ async function readJson<T>(path: string): Promise<T> {
 
 /**
  * Reads files from a local git checkout via `git show <ref>:<path>`. Mirrors
- * `FileReader.read` / `readRange` semantics, including returning `null` when
+ * `RepoFileReader.read` / `readRange` semantics, including returning `null` when
  * the path does not exist at that ref.
  */
-class LocalFileReader {
+class LocalFileReader implements RepoFileReader {
   private cache = new Map<string, string | null>();
 
   constructor(private readonly repoDir: string) {}
@@ -372,15 +370,24 @@ class LocalFileReader {
     const slice = lines.slice(start - 1, end).join('\n');
     return { content: slice, total_lines: total, returned_range: [start, end] };
   }
+
+  readBinary(ref: FileReadRef): Promise<Buffer | null> {
+    return runGitShowBuffer(this.repoDir, ref.ref, ref.path);
+  }
 }
 
-function runGitShow(cwd: string, ref: string, path: string): Promise<string | null> {
+async function runGitShow(cwd: string, ref: string, path: string): Promise<string | null> {
+  const bytes = await runGitShowBuffer(cwd, ref, path);
+  return bytes?.toString('utf-8') ?? null;
+}
+
+function runGitShowBuffer(cwd: string, ref: string, path: string): Promise<Buffer | null> {
   return new Promise((res, rej) => {
     const child = spawn('git', ['show', `${ref}:${path}`], { cwd });
-    let stdout = '';
+    const stdout: Buffer[] = [];
     let stderr = '';
     child.stdout.on('data', (b: Buffer) => {
-      stdout += b.toString('utf-8');
+      stdout.push(b);
     });
     child.stderr.on('data', (b: Buffer) => {
       stderr += b.toString('utf-8');
@@ -388,7 +395,7 @@ function runGitShow(cwd: string, ref: string, path: string): Promise<string | nu
     child.on('error', rej);
     child.on('close', (code) => {
       if (code === 0) {
-        res(stdout);
+        res(Buffer.concat(stdout));
         return;
       }
       // Mirror FileReader: missing path / bad ref → null, not an error.

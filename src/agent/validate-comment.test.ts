@@ -100,6 +100,14 @@ describe('validateInlineComment', () => {
     expect(r.hint).toContain('25-30');
   });
 
+  it('rejects LEFT-side anchors because reviewable lines are HEAD-side only', () => {
+    const r = validateInlineComment(makeInput({ side: 'LEFT' }), makeCtx());
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.reason).toBe('LEFT-side comments are not supported');
+    expect(r.hint).toContain('RIGHT-side line');
+  });
+
   it('rejects start_line >= line (4)', () => {
     const r = validateInlineComment(makeInput({ line: 11, start_line: 11 }), makeCtx());
     expect(r.ok).toBe(false);

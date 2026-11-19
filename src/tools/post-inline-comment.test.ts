@@ -146,9 +146,7 @@ describe('post_inline_comment tool', () => {
     expect(deps.aggregator.acceptedComments).toHaveLength(0);
   });
 
-  it('preserves valid `side: LEFT` and `confidence: medium` when explicitly provided', async () => {
-    // Pins the pass-through of a valid non-default enum value: LEFT/medium
-    // must survive the schema parse unchanged and reach the aggregator as-is.
+  it('rejects `side: LEFT` with a corrective HEAD-side hint', async () => {
     const deps = buildFakeDeps({ files: [makeFile()] });
     const tool = makePostInlineCommentTool(deps);
     const result = await callTool(tool, {
@@ -161,11 +159,13 @@ describe('post_inline_comment tool', () => {
       why_it_matters: 'A short rationale that makes future readers care.',
       confidence: 'medium',
     });
-    const json = getResultJson(result) as { accepted: boolean };
-    expect(json.accepted).toBe(true);
-    const stored = deps.aggregator.acceptedComments[0]!;
-    expect(stored.side).toBe('LEFT');
-    expect(stored.confidence).toBe('medium');
+    const json = getResultJson(result) as { accepted: boolean; reason: string; hint: string };
+    expect(json).toMatchObject({
+      accepted: false,
+      reason: 'LEFT-side comments are not supported',
+    });
+    expect(json.hint).toContain('RIGHT-side line');
+    expect(deps.aggregator.acceptedComments).toHaveLength(0);
   });
 
   it('strips an accidental outer ```suggestion fence from suggestion input', async () => {

@@ -54,7 +54,6 @@ export function buildFakeDeps(input: FakeDepsInput = {}): ToolDeps {
   };
 
   return {
-    octokit: {} as ToolDeps['octokit'],
     owner: 'owner',
     repo: 'repo',
     pull_number: 1,

@@ -6,15 +6,13 @@
  * the earlier-listed scanner so the runner's perScanner-order metric stays
  * deterministic.
  *
- * Pass 2 (post-filter cross-AI): drops scanner-sourced comments that overlap
- * a surviving AI comment in a security-adjacent category within 3 lines,
- * EXCEPT for dependency-cve findings which carry hard CVE evidence and
- * should never be silently suppressed. Runs over the post-filter kept list
- * so scanner findings only lose to AI comments that actually post.
+ * Pass 2 (scanner precedence): removes AI comments that overlap a validated
+ * scanner finding. Security-adjacent findings may overlap within 3 lines;
+ * other categories must match on the exact line.
  */
 import { describe, expect, it } from 'vitest';
 import type { Category, Confidence, PostedComment, ScannerId, Severity } from '../types.js';
-import { dedupAcrossScanners, dedupKeptScannerComments } from './dedup.js';
+import { dedupAcrossScanners, dedupCommentsWithScannerPrecedence } from './dedup.js';
 import type { ScanFinding } from './types.js';
 
 // -----------------------------------------------------------------
@@ -178,42 +176,41 @@ describe('dedupAcrossScanners', () => {
 });
 
 // -----------------------------------------------------------------
-// dedupKeptScannerComments (Pass 2 — post-filter)
+// dedupCommentsWithScannerPrecedence
 // -----------------------------------------------------------------
 
-describe('dedupKeptScannerComments', () => {
-  it('drops a scanner comment that overlaps an AI security comment within 3 lines', () => {
+describe('dedupCommentsWithScannerPrecedence', () => {
+  it('keeps the scanner finding when it overlaps an AI security comment', () => {
     const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
     const ai = makeAiComment({ category: 'security', line: 12 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    // Only the AI comment survives.
-    expect(out).toEqual([ai]);
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner]);
   });
 
-  it('keeps a scanner comment at boundary distance=3 only if the category misses', () => {
-    // distance=3 is INSIDE the window. Pair with a non-adjacent category to
-    // verify the category check is what saves it.
+  it('keeps scanner precedence regardless of input order', () => {
     const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
-    const ai = makeAiComment({ category: 'readability', line: 7 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
+    const ai = makeAiComment({ category: 'security', line: 12 });
+    expect(dedupCommentsWithScannerPrecedence([ai, scanner])).toEqual([scanner]);
   });
 
-  it('drops the scanner comment at boundary distance=3 with a security-adjacent AI category', () => {
+  it('keeps both comments when categories do not describe the same issue family', () => {
+    const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
+    const ai = makeAiComment({ category: 'readability', line: 10 });
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner, ai]);
+  });
+
+  it('applies scanner precedence at the security overlap boundary', () => {
     const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
     const ai = makeAiComment({ category: 'data-loss', line: 7 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([ai]);
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner]);
   });
 
-  it('keeps a scanner comment when the line distance exceeds 3', () => {
+  it('keeps both security comments when the line distance exceeds 3', () => {
     const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
     const ai = makeAiComment({ category: 'security', line: 15 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner, ai]);
   });
 
-  it('protects dependency-cve scanner comments even when an AI comment overlaps closely', () => {
+  it('keeps only dependency-cve evidence when the agent reports the same vulnerability', () => {
     const cve = makeScannerComment({
       scanner: 'dependency-cve',
       line: 10,
@@ -225,64 +222,43 @@ describe('dedupKeptScannerComments', () => {
       },
     });
     const ai = makeAiComment({ category: 'vulnerability', line: 10 });
-    const out = dedupKeptScannerComments([cve, ai]);
-    expect(out).toEqual([cve, ai]);
+    expect(dedupCommentsWithScannerPrecedence([cve, ai])).toEqual([cve]);
   });
 
-  it('keeps a scanner comment when the overlapping AI comment is non-security-adjacent', () => {
+  it('uses exact-line category matching for non-security scanner findings', () => {
+    const scanner = makeScannerComment({
+      scanner: 'debris',
+      category: 'bug',
+      line: 10,
+    });
+    const sameLineAi = makeAiComment({ category: 'bug', line: 10 });
+    const nearbyAi = makeAiComment({ category: 'bug', line: 11, title: 'Different nearby bug' });
+
+    expect(dedupCommentsWithScannerPrecedence([scanner, sameLineAi, nearbyAi])).toEqual([
+      scanner,
+      nearbyAi,
+    ]);
+  });
+
+  it('keeps both comments when they refer to different files', () => {
+    const scanner = makeScannerComment({ file_path: 'src/foo.ts', line: 10 });
+    const ai = makeAiComment({ file_path: 'src/bar.ts', line: 10 });
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner, ai]);
+  });
+
+  it('passes scanner-only and empty inputs through', () => {
     const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
-    const ai = makeAiComment({ category: 'readability', line: 10 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
+    expect(dedupCommentsWithScannerPrecedence([scanner])).toEqual([scanner]);
+    expect(dedupCommentsWithScannerPrecedence([])).toEqual([]);
   });
 
-  it('keeps the scanner comment when the overlapping AI comment is category=bug', () => {
-    // Rationale (Codex P2 on the prior fix): `bug` is too broad to count as
-    // security-adjacent. A nearby unrelated bug note (e.g. null deref) must
-    // NOT suppress a real scanner secret/SAST finding by line proximity alone.
-    const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
-    const ai = makeAiComment({ category: 'bug', line: 7 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
+  it('keeps both comments when they anchor to different diff sides', () => {
+    const scanner = makeScannerComment({ line: 10, side: 'RIGHT' });
+    const ai = makeAiComment({ line: 10, side: 'LEFT' });
+    expect(dedupCommentsWithScannerPrecedence([scanner, ai])).toEqual([scanner, ai]);
   });
 
-  it('keeps the scanner comment when the AI comment is on a different file', () => {
-    const scanner = makeScannerComment({ scanner: 'secrets', file_path: 'src/foo.ts', line: 10 });
-    const ai = makeAiComment({ category: 'security', file_path: 'src/bar.ts', line: 10 });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
-  });
-
-  it('passes scanner comments through unchanged when there are no AI comments in the kept list', () => {
-    const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
-    const out = dedupKeptScannerComments([scanner]);
-    expect(out).toEqual([scanner]);
-  });
-
-  it('returns an empty array for an empty kept list', () => {
-    expect(dedupKeptScannerComments([])).toEqual([]);
-  });
-
-  it('keeps the scanner comment when the AI comment is on a different side (LEFT vs RIGHT)', () => {
-    // A LEFT-side AI comment anchors at the PR's BASE blob; a RIGHT-side
-    // scanner finding points at HEAD. They reference different code
-    // positions even though file_path + line numerically overlap, so they
-    // must NOT cross-dedup. Without the `side` check the LEFT-side AI
-    // would silently suppress the RIGHT-side scanner finding.
-    const scanner = makeScannerComment({ scanner: 'secrets', line: 10, side: 'RIGHT' });
-    const ai = makeAiComment({ category: 'security', line: 10, side: 'LEFT' });
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([scanner, ai]);
-  });
-
-  it('drops a secrets scanner finding on the SAME line as a sourceless AI security comment (PR #12 regression)', () => {
-    // Smoke-test PR #12 reproduction: agent posts category='security' on line
-    // 11 (sourceless — production AI comments do not set `source`), secrets
-    // scanner emits category='vulnerability' on the same line 11. Both
-    // shipped in production; the scanner finding should have been suppressed.
-    // Distance is 0 (same line), well inside the ±3 window. AI category is
-    // 'security' which is security-adjacent. Scanner is 'secrets' (not the
-    // protected dependency-cve), so suppression must fire.
+  it('treats a sourceless comment as AI and gives the scanner precedence', () => {
     const ai: PostedComment = {
       severity: 'critical',
       file_path: 'examples/smoke-test-bad-code.ts',
@@ -290,8 +266,7 @@ describe('dedupKeptScannerComments', () => {
       side: 'RIGHT',
       category: 'security',
       title: 'Hardcoded AWS access key ID',
-      why_it_matters:
-        'Committing an AKIA key in source code leaks credentials to anyone with repo access.',
+      why_it_matters: 'Committing a key in source exposes the credential.',
       confidence: 'high',
     };
     const scanner = makeScannerComment({
@@ -301,26 +276,7 @@ describe('dedupKeptScannerComments', () => {
       category: 'vulnerability',
       title: 'Possible AWS access key id in smoke-test-bad-code.ts',
     });
-    const out = dedupKeptScannerComments([ai, scanner]);
-    expect(out).toEqual([ai]);
-  });
 
-  it('treats a comment with no `source` as AI (backward compat) and dedups against it', () => {
-    // `source` is optional on PostedComment; absence is treated as AI per the
-    // type comment. A scanner finding overlapping a sourceless security
-    // comment should still be suppressed.
-    const scanner = makeScannerComment({ scanner: 'secrets', line: 10 });
-    const ai: PostedComment = {
-      severity: 'important',
-      file_path: 'src/foo.ts',
-      line: 12,
-      side: 'RIGHT',
-      category: 'security',
-      title: 'Sourceless AI comment',
-      why_it_matters: 'AI-originated; source field omitted for backward compat.',
-      confidence: 'high',
-    };
-    const out = dedupKeptScannerComments([scanner, ai]);
-    expect(out).toEqual([ai]);
+    expect(dedupCommentsWithScannerPrecedence([ai, scanner])).toEqual([scanner]);
   });
 });

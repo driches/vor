@@ -6,6 +6,16 @@ import { tool } from './tool-helper.js';
 import { z } from 'zod';
 import { jsonResult, type ToolDeps } from './types.js';
 
+const UNSUPPORTED_COVERAGE_CLAIM =
+  /\bclean\b|\b(?:no|without)\s+(?:known\s+)?(?:issues?|findings?|vulnerabilit(?:y|ies)|cves?|secrets?)\b|\b(?:issue|vulnerability|cve|secret)-free\b/i;
+const UNSUPPORTED_SCANNER_STATUS_CLAIM =
+  /\b(?:dependencies?|packages?|lockfiles?|requirements(?:\.txt)?|scanners?|security checks?)\b[^.!?\n]{0,100}\b(?:clean|safe|secure|(?:issue|vulnerability|cve|secret)-free|free of (?:issues?|findings?|vulnerabilities|cves?|secrets?))\b|\b(?:clean|safe|secure|(?:issue|vulnerability|cve|secret)-free)\b[^.!?\n]{0,100}\b(?:dependencies?|packages?|lockfiles?|requirements(?:\.txt)?|scanners?|security checks?)\b|\b(?:no|without)\s+(?:known\s+)?(?:cves?|vulnerabilit(?:y|ies)|scanner findings?|secrets?)\b/i;
+
+const COVERAGE_SCOPE_MESSAGE =
+  'Coverage notes may only describe reviewed or skipped scope; do not claim files or dependencies are clean or free of scanner findings.';
+const SCANNER_STATUS_MESSAGE =
+  'Summary text must not claim dependencies or scanner-covered areas are clean; deterministic scanner results are reconciled after the agent finishes.';
+
 export function makePostSummaryTool(deps: ToolDeps) {
   return tool(
     'post_summary',
@@ -18,7 +28,15 @@ export function makePostSummaryTool(deps: ToolDeps) {
       '- request_changes: at least one critical or important finding (validated)',
     {
       strengths: z
-        .array(z.string().min(10).max(280))
+        .array(
+          z
+            .string()
+            .min(10)
+            .max(280)
+            .refine((value) => !UNSUPPORTED_SCANNER_STATUS_CLAIM.test(value), {
+              message: SCANNER_STATUS_MESSAGE,
+            }),
+        )
         .min(1)
         .max(5)
         .describe('1-5 specific strengths. "Nice PR" is not specific. Cite what.'),
@@ -27,12 +45,20 @@ export function makePostSummaryTool(deps: ToolDeps) {
         .string()
         .min(30)
         .max(800)
+        .refine((value) => !UNSUPPORTED_SCANNER_STATUS_CLAIM.test(value), {
+          message: SCANNER_STATUS_MESSAGE,
+        })
         .describe('Why this assessment, in 1-3 sentences. Be concrete.'),
       coverage_note: z
         .string()
         .max(400)
+        .refine((value) => !UNSUPPORTED_COVERAGE_CLAIM.test(value), {
+          message: COVERAGE_SCOPE_MESSAGE,
+        })
         .optional()
-        .describe('Optional note about coverage gaps, e.g., "Skipped generated proto files."'),
+        .describe(
+          'Optional factual note about reviewed or skipped scope, e.g., "Skipped generated proto files." Never claim files or dependencies are clean; scanners run independently.',
+        ),
       unreviewed_paths: z
         .array(z.string())
         .optional()
