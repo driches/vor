@@ -9,6 +9,10 @@
  */
 
 import type { ReviewConfig } from '../config/types.js';
+import { resolveArchitectureSpec, type ResolvedArchitectureSpec } from '../architecture/presets.js';
+import { renderArchitecturePrompt } from '../architecture/prompt.js';
+import type { LoadedReferenceCorpus } from '../references/loader.js';
+import { renderReferencesPrompt } from '../references/prompt.js';
 
 export interface RepoContextEntry {
   file: string;
@@ -19,6 +23,10 @@ export interface BuildSystemPromptInput {
   config: ReviewConfig;
   repoName: string;
   contextFiles: RepoContextEntry[];
+  /** Optional pre-resolved architecture spec (including external `.vor/architecture.yml`). */
+  architecture?: ResolvedArchitectureSpec;
+  /** Optional pre-loaded reference docs & standards corpus. */
+  references?: LoadedReferenceCorpus;
 }
 
 export function buildSystemPrompt(input: BuildSystemPromptInput): string {
@@ -38,9 +46,24 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
 
+  const archSpec =
+    input.architecture ??
+    (input.config.architecture.enabled
+      ? resolveArchitectureSpec(input.config.architecture)
+      : undefined);
+  if (archSpec) {
+    const archSection = renderArchitecturePrompt(archSpec);
+    if (archSection) sections.push(archSection);
+  }
+
   if (input.config.prompt.additions && input.config.prompt.additions.trim().length > 0) {
     sections.push('### Repo-specific instructions');
     sections.push(input.config.prompt.additions.trim());
+  }
+
+  if (input.references) {
+    const refsSection = renderReferencesPrompt(input.references);
+    if (refsSection) sections.push(refsSection);
   }
 
   const context = buildContextBlock(

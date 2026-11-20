@@ -34,6 +34,10 @@ import { InMemoryScanCache, NoopScanCache } from './scanners/cache.js';
 import { dedupKeptScannerComments } from './scanners/dedup.js';
 import { IgnoreList } from './scanners/ignore-list.js';
 import { buildEnabledScanners } from './scanners/registry.js';
+import { createArchitectureScanner } from './scanners/architecture.js';
+import { resolveEffectiveArchitectureConfig } from './architecture/loader.js';
+import { resolveArchitectureSpec } from './architecture/presets.js';
+import { loadReferences, type LoadedReferenceCorpus } from './references/loader.js';
 import { runScanners } from './scanners/runner.js';
 import type { ScanFinding, ScannerDeps } from './scanners/types.js';
 import { validateScanFinding } from './scanners/validate.js';
@@ -57,16 +61,18 @@ const SCANNER_CONFIG_KEY = {
   'migration-safety': 'migration_safety',
   'dependency-hygiene': 'dependency_hygiene',
   'image-ocr': 'image_ocr',
-} as const satisfies Record<ScannerId, string>;
+} as const satisfies Record<Exclude<ScannerId, 'architecture'>, string>;
 
 /**
  * Resolve the configured per-scanner `min_severity`, if any. Returns
  * `undefined` when the operator hasn't set it (the global `severity.floor`
- * is the only gate in that case).
+ * is the only gate in that case). Architecture findings are governed by their
+ * own layer/rule severities plus the global floor.
  */
-function scannerMinSeverity(id: ScannerId, cfg: ReviewConfig['security']): Severity | undefined {
+function scannerMinSeverity(id: ScannerId, cfg: ReviewConfig): Severity | undefined {
+  if (id === 'architecture') return undefined;
   const key = SCANNER_CONFIG_KEY[id];
-  return cfg.scanners[key].min_severity;
+  return cfg.security.scanners[key].min_severity;
 }
 
 function filterScannerFindingsForPrompt(
@@ -79,7 +85,7 @@ function filterScannerFindingsForPrompt(
     if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[config.severity.floor]) {
       return false;
     }
-    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    const scannerFloor = scannerMinSeverity(finding.scanner, config);
     if (
       scannerFloor !== undefined &&
       SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]
@@ -268,6 +274,43 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       `event=${config.review.event}`,
   );
 
+  // Resolve optional external architecture config (.vor/architecture.yml) when enabled.
+  const effectiveArchConfig = await resolveEffectiveArchitectureConfig(config.architecture, {
+    fileReader,
+    owner: input.owner,
+    repo: input.repo,
+    ref: prContext.metadata.head_sha,
+    workspaceDir: input.workspace_dir,
+  });
+  const archSpec = effectiveArchConfig.enabled
+    ? resolveArchitectureSpec(effectiveArchConfig)
+    : undefined;
+
+  // Load and cache configured reference documentation & engineering standards.
+  let referenceCorpus: LoadedReferenceCorpus | undefined;
+  if (config.references.enabled && config.references.sources.length > 0) {
+    referenceCorpus = await loadReferences({
+      config: config.references,
+      owner: input.owner,
+      repo: input.repo,
+      ref: prContext.metadata.head_sha,
+      workspaceDir: input.workspace_dir,
+      fileReader,
+      octokit,
+    });
+    for (const w of referenceCorpus.warnings) {
+      await logger.warn(`References: ${w}`);
+    }
+    await logger.info(
+      `Loaded ${referenceCorpus.docs.length} reference doc(s) ` +
+        `(${referenceCorpus.inline_docs.length} inline / ${referenceCorpus.total_inline_bytes} bytes, ` +
+        `${referenceCorpus.on_demand_docs.length} on-demand, ` +
+        `cache hit=${referenceCorpus.cache_stats.hits} revalidated=${referenceCorpus.cache_stats.revalidated} ` +
+        `miss=${referenceCorpus.cache_stats.misses} stale=${referenceCorpus.cache_stats.stale_fallbacks}, ` +
+        `digest=${referenceCorpus.corpus_digest.slice(0, 12)})`,
+    );
+  }
+
   // Load repo context files
   const contextFiles = await loadRepoContextFiles(
     fileReader,
@@ -281,6 +324,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     config,
     repoName: `${input.owner}/${input.repo}`,
     contextFiles,
+    ...(archSpec ? { architecture: archSpec } : {}),
+    ...(referenceCorpus ? { references: referenceCorpus } : {}),
   });
   // Same selection buildSystemPrompt just made. The agent's context tool uses
   // it to avoid returning a second copy of a file the system prompt carries.
@@ -414,6 +459,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // same aggregator so the filter pipeline applies uniformly to both.
   const aggregator = new ReviewAggregator();
   const scanners = buildEnabledScanners(config.security);
+  if (archSpec && archSpec.deterministic_enforcement) {
+    scanners.push(createArchitectureScanner(archSpec));
+  }
   // Top-level scanner-side abort controller. Held outside ScannerDeps so we
   // can fire it from the agent-failure branch below: when the agent rejects,
   // we re-throw its error and would otherwise leak in-flight scanner network
@@ -443,6 +491,28 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     config: config.security,
     signal: orchestratorAbort.signal,
   };
+
+  // Derive low-cardinality OpenAI prompt cache key and optional Anthropic 1h
+  // TTL from the pre-loaded reference corpus so repeat turns and PRs reuse
+  // the cached prefix without mutating `config.providers`.
+  const effectiveOpenAI =
+    referenceCorpus &&
+    referenceCorpus.docs.length > 0 &&
+    config.references.prompt_cache.enabled &&
+    config.references.prompt_cache.auto_openai_cache_key &&
+    !config.providers.openai.prompt_cache_key
+      ? {
+          ...config.providers.openai,
+          prompt_cache_key: `vor:${input.owner}/${input.repo}:refs-${referenceCorpus.corpus_digest.slice(0, 12)}`,
+        }
+      : config.providers.openai;
+
+  const effectiveAnthropic =
+    config.references.enabled &&
+    config.references.prompt_cache.enabled &&
+    config.references.prompt_cache.anthropic_ttl === '1h'
+      ? { prompt_cache_ttl: '1h' as const }
+      : undefined;
 
   // Build the agent invocation as a thunk so we can call it AFTER scanners
   // settle (when the experimental flag is on) and re-use the same wiring
@@ -493,6 +563,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
             workspaceDir: input.workspace_dir,
             runContext: createRunContext(),
             embeddedContextFiles,
+            ...(referenceCorpus ? { references: referenceCorpus } : {}),
           },
           systemPrompt,
           userPrompt: finalUserPrompt,
@@ -501,7 +572,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
           maxInputTokens: config.budget.max_input_tokens,
           maxOutputTokens: config.budget.max_output_tokens,
           apiKey,
-          openai: config.providers.openai,
+          openai: effectiveOpenAI,
+          ...(effectiveAnthropic ? { anthropic: effectiveAnthropic } : {}),
           // Always pass the resolved provider — same string we already computed
           // above. Skips one redundant inferProviderFromModel() call inside the
           // runner and pins routing even for model ids that match no known prefix
@@ -626,7 +698,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     // Per-scanner min_severity (separate from the global severity.floor that
     // filterComments applies later). Lets operators tighten a noisy scanner
     // without raising the global floor for the AI agent.
-    const scannerFloor = scannerMinSeverity(finding.scanner, config.security);
+    const scannerFloor = scannerMinSeverity(finding.scanner, config);
     if (
       scannerFloor !== undefined &&
       SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]

@@ -1,0 +1,1142 @@
+/**
+ * Zero-dependency, comment-aware import extractor and workspace path resolver
+ * across VOR's supported languages (TypeScript/JavaScript, Python, Go, Dart,
+ * Rust, Java/Kotlin, C#).
+ *
+ * Line numbers are preserved exactly when stripping comments/docstrings so
+ * deterministic findings anchor to the exact PR-added line.
+ */
+
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { posix, resolve } from 'node:path';
+import { normalizePath } from './glob.js';
+
+export type ArchLanguage =
+  | 'typescript'
+  | 'javascript'
+  | 'python'
+  | 'go'
+  | 'dart'
+  | 'rust'
+  | 'java'
+  | 'kotlin'
+  | 'csharp';
+
+export interface ExtractedImport {
+  /** Raw module/package/path specifier as written in source. */
+  specifier: string;
+  /** 1-based line number where the specifier appears. */
+  line: number;
+  /** Trimmed source line for diagnostics/evidence. */
+  snippet: string;
+  language: ArchLanguage;
+  kindHint: 'relative' | 'package' | 'ambiguous';
+}
+
+export interface FileImportMeta {
+  /** Package declaration for Java/Kotlin or namespace declaration for C#. */
+  declaredPackage?: string;
+}
+
+export interface TsConfigPaths {
+  baseUrl?: string;
+  paths: Record<string, string[]>;
+}
+
+export interface WorkspaceResolveContext {
+  workspaceDir?: string;
+  knownFiles?: ReadonlySet<string>;
+  tsconfig?: TsConfigPaths;
+  goModule?: string;
+  dartPackage?: string;
+}
+
+export interface ResolvedImport {
+  specifier: string;
+  line: number;
+  snippet: string;
+  language: ArchLanguage;
+  /** Repo-relative path when resolved to an internal file/module/directory; undefined for external packages. */
+  resolvedPath?: string;
+  /** Normalized external package/module identifier when external; undefined for internal imports. */
+  packageName?: string;
+}
+
+const EXT_TO_LANG: Record<string, ArchLanguage> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  py: 'python',
+  go: 'go',
+  dart: 'dart',
+  rs: 'rust',
+  java: 'java',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  cs: 'csharp',
+};
+
+export function detectArchLanguage(filePath: string): ArchLanguage | null {
+  const norm = normalizePath(filePath);
+  const name = norm.split('/').pop() ?? '';
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  return EXT_TO_LANG[ext] ?? null;
+}
+
+/**
+ * Strip `//` line comments and `/* ... *\/` block comments while preserving
+ * string literals and replacing comment characters with spaces (keeping `\n`
+ * intact so 1-based line numbers never shift).
+ */
+export function stripCLikeComments(src: string): string {
+  const chars = src.split('');
+  const n = chars.length;
+  let i = 0;
+  let quote: string | null = null;
+
+  while (i < n) {
+    const ch = chars[i]!;
+    if (quote !== null) {
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '/' && chars[i + 1] === '/') {
+      chars[i] = ' ';
+      chars[i + 1] = ' ';
+      i += 2;
+      while (i < n && chars[i] !== '\n') {
+        chars[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+
+    if (ch === '/' && chars[i + 1] === '*') {
+      chars[i] = ' ';
+      chars[i + 1] = ' ';
+      i += 2;
+      while (i < n) {
+        if (chars[i] === '*' && chars[i + 1] === '/') {
+          chars[i] = ' ';
+          chars[i + 1] = ' ';
+          i += 2;
+          break;
+        }
+        if (chars[i] !== '\n') chars[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
+
+  return chars.join('');
+}
+
+/**
+ * Strip Python `#` comments and triple-quoted string literals/docstrings while
+ * preserving exact line numbers and single-line quoted strings.
+ */
+export function stripPythonCommentsAndDocstrings(src: string): string {
+  const chars = src.split('');
+  const n = chars.length;
+  let i = 0;
+  let quote: "'" | '"' | null = null;
+
+  while (i < n) {
+    const ch = chars[i]!;
+    if (quote !== null) {
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote || ch === '\n') {
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+
+    if ((ch === '"' || ch === "'") && chars[i + 1] === ch && chars[i + 2] === ch) {
+      const delim = ch;
+      chars[i] = ' ';
+      chars[i + 1] = ' ';
+      chars[i + 2] = ' ';
+      i += 3;
+      while (i < n) {
+        if (chars[i] === '\\') {
+          if (chars[i] !== '\n') chars[i] = ' ';
+          if (i + 1 < n && chars[i + 1] !== '\n') chars[i + 1] = ' ';
+          i += 2;
+          continue;
+        }
+        if (chars[i] === delim && chars[i + 1] === delim && chars[i + 2] === delim) {
+          chars[i] = ' ';
+          chars[i + 1] = ' ';
+          chars[i + 2] = ' ';
+          i += 3;
+          break;
+        }
+        if (chars[i] !== '\n') chars[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '#') {
+      while (i < n && chars[i] !== '\n') {
+        chars[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
+
+  return chars.join('');
+}
+
+function buildLineStarts(src: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] === '\n') starts.push(i + 1);
+  }
+  return starts;
+}
+
+function lineAtOffset(starts: readonly number[], offset: number): number {
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (starts[mid]! <= offset) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return hi + 1;
+}
+
+function makeSnippet(lines: readonly string[], line: number): string {
+  const raw = lines[line - 1] ?? '';
+  const trimmed = raw.trim();
+  return trimmed.length <= 140 ? trimmed : `${trimmed.slice(0, 137)}...`;
+}
+
+function dedupExtracted(items: ExtractedImport[]): ExtractedImport[] {
+  const seen = new Set<string>();
+  const out: ExtractedImport[] = [];
+  for (const item of items) {
+    const key = `${item.line}:${item.specifier}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function extractJsTsImports(
+  content: string,
+  language: 'typescript' | 'javascript',
+): ExtractedImport[] {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const pushMatch = (spec: string, offset: number): void => {
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language,
+      kindHint: spec.startsWith('./') || spec.startsWith('../') ? 'relative' : 'ambiguous',
+    });
+  };
+
+  // Static ES import/export ... from 'spec'
+  const esFrom =
+    /\b(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"]+)\1/g;
+  for (const m of cleaned.matchAll(esFrom)) {
+    const spec = m[2]!;
+    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+
+  // Side-effect import 'spec'
+  const sideEffect = /\bimport\s+(['"])([^'"]+)\1/g;
+  for (const m of cleaned.matchAll(sideEffect)) {
+    const spec = m[2]!;
+    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+
+  // CommonJS require('spec')
+  const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+  for (const m of cleaned.matchAll(req)) {
+    const spec = m[2]!;
+    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+
+  // Dynamic import('spec')
+  const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
+  for (const m of cleaned.matchAll(dyn)) {
+    const spec = m[2]!;
+    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+
+  return dedupExtracted(out);
+}
+
+function extractPythonImports(content: string): ExtractedImport[] {
+  const cleaned = stripPythonCommentsAndDocstrings(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const fromRe = /^[ \t]*from\s+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)\s+import\b/gm;
+  for (const m of cleaned.matchAll(fromRe)) {
+    const spec = m[1]!;
+    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'python',
+      kindHint: spec.startsWith('.') ? 'relative' : 'ambiguous',
+    });
+  }
+
+  const importRe = /^[ \t]*import\s+([^\n;#]+)/gm;
+  for (const m of cleaned.matchAll(importRe)) {
+    const listText = m[1]!;
+    const baseOffset = (m.index ?? 0) + m[0].indexOf(listText);
+    const line = lineAtOffset(starts, baseOffset);
+    for (const part of listText.split(',')) {
+      const mod = part
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.trim();
+      if (!mod || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(mod)) continue;
+      out.push({
+        specifier: mod,
+        line,
+        snippet: makeSnippet(rawLines, line),
+        language: 'python',
+        kindHint: 'ambiguous',
+      });
+    }
+  }
+
+  return dedupExtracted(out);
+}
+
+function extractGoImports(content: string): ExtractedImport[] {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const addSpec = (spec: string, offset: number): void => {
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'go',
+      kindHint: spec.startsWith('./') || spec.startsWith('../') ? 'relative' : 'ambiguous',
+    });
+  };
+
+  const blockRe = /\bimport\s*\(([^)]*)\)/g;
+  for (const m of cleaned.matchAll(blockRe)) {
+    const block = m[1]!;
+    const blockStart = (m.index ?? 0) + m[0].indexOf(block);
+    const itemRe = /^[ \t]*(?:[A-Za-z_]\w*|\.)?[ \t]*(?:"([^"]+)"|`([^`]+)`)/gm;
+    for (const im of block.matchAll(itemRe)) {
+      const spec = (im[1] ?? im[2])!;
+      const offset = blockStart + (im.index ?? 0) + im[0].indexOf(spec);
+      addSpec(spec, offset);
+    }
+  }
+
+  const singleRe = /^[ \t]*import[ \t]+(?:(?:[A-Za-z_]\w*|\.)[ \t]+)?(?:"([^"]+)"|`([^`]+)`)/gm;
+  for (const m of cleaned.matchAll(singleRe)) {
+    const spec = (m[1] ?? m[2])!;
+    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    addSpec(spec, offset);
+  }
+
+  return dedupExtracted(out);
+}
+
+function extractDartImports(content: string): ExtractedImport[] {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const re = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
+  for (const m of cleaned.matchAll(re)) {
+    const spec = m[2]!;
+    const offset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'dart',
+      kindHint: spec.startsWith('dart:')
+        ? 'package'
+        : spec.startsWith('package:')
+          ? 'ambiguous'
+          : 'relative',
+    });
+  }
+
+  return dedupExtracted(out);
+}
+
+interface RustLeaf {
+  path: string;
+  offset: number;
+}
+
+function splitTopLevelCommas(text: string): Array<{ part: string; offset: number }> {
+  const parts: Array<{ part: string; offset: number }> = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      parts.push({ part: text.slice(start, i), offset: start });
+      start = i + 1;
+    }
+  }
+  parts.push({ part: text.slice(start), offset: start });
+  return parts;
+}
+
+function expandRustUseTree(tree: string, baseOffset: number, prefix = ''): RustLeaf[] {
+  const trimmed = tree.trim();
+  if (!trimmed) return [];
+  const leadingSpaces = tree.length - tree.trimStart().length;
+  const trimmedOffset = baseOffset + leadingSpaces;
+
+  const braceStart = trimmed.indexOf('{');
+  if (braceStart === -1) {
+    let clean = trimmed.replace(/\s+as\s+[A-Za-z_]\w*$/, '').trim();
+    if (clean === 'self') {
+      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
+    }
+    if (clean === '*') {
+      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
+    }
+    clean = clean.replace(/::\*$/, '');
+    const full = prefix ? `${prefix}::${clean}` : clean;
+    return full ? [{ path: full, offset: trimmedOffset }] : [];
+  }
+
+  const braceEnd = trimmed.lastIndexOf('}');
+  if (braceEnd <= braceStart) return [];
+
+  const headRaw = trimmed.slice(0, braceStart).trim().replace(/::$/, '');
+  const nextPrefix = headRaw ? (prefix ? `${prefix}::${headRaw}` : headRaw) : prefix;
+  const inner = trimmed.slice(braceStart + 1, braceEnd);
+  const innerOffset = trimmedOffset + braceStart + 1;
+
+  const leaves: RustLeaf[] = [];
+  for (const chunk of splitTopLevelCommas(inner)) {
+    leaves.push(...expandRustUseTree(chunk.part, innerOffset + chunk.offset, nextPrefix));
+  }
+  return leaves;
+}
+
+function extractRustImports(content: string): ExtractedImport[] {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const classifyRustSpec = (spec: string): ExtractedImport['kindHint'] => {
+    if (spec.startsWith('crate::') || spec.startsWith('super::') || spec.startsWith('self::')) {
+      return 'relative';
+    }
+    return 'package';
+  };
+
+  const useRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/g;
+  for (const m of cleaned.matchAll(useRe)) {
+    const expr = m[1]!;
+    const exprOffset = (m.index ?? 0) + m[0].indexOf(expr);
+    for (const leaf of expandRustUseTree(expr, exprOffset)) {
+      const line = lineAtOffset(starts, leaf.offset);
+      out.push({
+        specifier: leaf.path,
+        line,
+        snippet: makeSnippet(rawLines, line),
+        language: 'rust',
+        kindHint: classifyRustSpec(leaf.path),
+      });
+    }
+  }
+
+  const externRe = /\bextern\s+crate\s+([A-Za-z_]\w*)(?:\s+as\s+[A-Za-z_]\w*)?\s*;/g;
+  for (const m of cleaned.matchAll(externRe)) {
+    const name = m[1]!;
+    const offset = (m.index ?? 0) + m[0].indexOf(name);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: name,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'rust',
+      kindHint: 'package',
+    });
+  }
+
+  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
+  for (const m of cleaned.matchAll(modRe)) {
+    const name = m[1]!;
+    const offset = (m.index ?? 0) + m[0].indexOf(name);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: `mod:${name}`,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'rust',
+      kindHint: 'relative',
+    });
+  }
+
+  return dedupExtracted(out);
+}
+
+function extractJavaKotlinImports(
+  content: string,
+  language: 'java' | 'kotlin',
+): { imports: ExtractedImport[]; meta: FileImportMeta } {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const pkgMatch = cleaned.match(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/m);
+  const declaredPackage = pkgMatch?.[1];
+
+  const importRe =
+    /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
+  for (const m of cleaned.matchAll(importRe)) {
+    const spec = m[1]!;
+    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language,
+      kindHint: 'ambiguous',
+    });
+  }
+
+  return {
+    imports: dedupExtracted(out),
+    meta: declaredPackage ? { declaredPackage } : {},
+  };
+}
+
+function extractCSharpImports(content: string): {
+  imports: ExtractedImport[];
+  meta: FileImportMeta;
+} {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split('\n');
+  const out: ExtractedImport[] = [];
+
+  const nsMatch = cleaned.match(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/m);
+  const declaredPackage = nsMatch?.[1];
+
+  const usingRe =
+    /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
+  for (const m of cleaned.matchAll(usingRe)) {
+    const spec = m[1]!;
+    if (spec === 'var') continue;
+    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: 'csharp',
+      kindHint: 'ambiguous',
+    });
+  }
+
+  return {
+    imports: dedupExtracted(out),
+    meta: declaredPackage ? { declaredPackage } : {},
+  };
+}
+
+export function extractImports(
+  filePath: string,
+  content: string,
+): { imports: ExtractedImport[]; meta: FileImportMeta } {
+  const language = detectArchLanguage(filePath);
+  if (!language) return { imports: [], meta: {} };
+
+  switch (language) {
+    case 'typescript':
+    case 'javascript':
+      return { imports: extractJsTsImports(content, language), meta: {} };
+    case 'python':
+      return { imports: extractPythonImports(content), meta: {} };
+    case 'go':
+      return { imports: extractGoImports(content), meta: {} };
+    case 'dart':
+      return { imports: extractDartImports(content), meta: {} };
+    case 'rust':
+      return { imports: extractRustImports(content), meta: {} };
+    case 'java':
+    case 'kotlin':
+      return extractJavaKotlinImports(content, language);
+    case 'csharp':
+      return extractCSharpImports(content);
+  }
+}
+
+/**
+ * Strip `//` and `/* ... *\/` comments and trailing commas from JSONC
+ * (`tsconfig.json`) while preserving string literal contents.
+ */
+function stripJsonc(text: string): string {
+  const noComments = stripCLikeComments(text);
+  // Remove trailing commas before `}` or `]` outside strings.
+  const chars = noComments.split('');
+  let quote: string | null = null;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!;
+    if (quote !== null) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === ',') {
+      let j = i + 1;
+      while (j < chars.length && /\s/.test(chars[j]!)) j += 1;
+      if (chars[j] === '}' || chars[j] === ']') {
+        chars[i] = ' ';
+      }
+    }
+  }
+  return chars.join('');
+}
+
+export function parseTsConfigContent(
+  raw: string,
+  readRelative?: (relPath: string) => string | null,
+  depth = 0,
+): TsConfigPaths | undefined {
+  if (depth > 2) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonc(raw));
+  } catch {
+    return undefined; // malformed tsconfig shouldn't abort architecture scanning
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const obj = parsed as {
+    extends?: unknown;
+    compilerOptions?: { baseUrl?: unknown; paths?: unknown };
+  };
+
+  let base: TsConfigPaths = { paths: {} };
+  if (
+    typeof obj.extends === 'string' &&
+    (obj.extends.startsWith('./') || obj.extends.startsWith('../')) &&
+    readRelative
+  ) {
+    const extRaw = readRelative(obj.extends);
+    if (extRaw) {
+      const parent = parseTsConfigContent(extRaw, readRelative, depth + 1);
+      if (parent) base = parent;
+    }
+  }
+
+  const co = obj.compilerOptions;
+  const baseUrl = typeof co?.baseUrl === 'string' ? normalizePath(co.baseUrl) : base.baseUrl;
+  const paths: Record<string, string[]> = { ...base.paths };
+  if (co?.paths && typeof co.paths === 'object') {
+    for (const [k, v] of Object.entries(co.paths)) {
+      if (Array.isArray(v)) {
+        paths[k] = v.filter((item): item is string => typeof item === 'string');
+      }
+    }
+  }
+
+  if (baseUrl === undefined && Object.keys(paths).length === 0) return undefined;
+  return { ...(baseUrl !== undefined ? { baseUrl } : {}), paths };
+}
+
+export function parseGoModModule(raw: string): string | undefined {
+  const m = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
+  return m?.[1]?.trim();
+}
+
+export function parsePubspecName(raw: string): string | undefined {
+  const m = raw.match(/^[ \t]*name:[ \t]*['"]?([A-Za-z0-9_-]+)['"]?/m);
+  return m?.[1]?.trim();
+}
+
+function readOptionalFile(workspaceDir: string, relPath: string): string | null {
+  try {
+    return readFileSync(resolve(workspaceDir, relPath), 'utf-8');
+  } catch {
+    return null; // optional workspace metadata file
+  }
+}
+
+export function loadWorkspaceResolveContext(
+  workspaceDir?: string,
+  opts: { knownFiles?: ReadonlySet<string> } = {},
+): WorkspaceResolveContext {
+  const ctx: WorkspaceResolveContext = {
+    ...(workspaceDir !== undefined ? { workspaceDir } : {}),
+    ...(opts.knownFiles !== undefined ? { knownFiles: opts.knownFiles } : {}),
+  };
+
+  if (!workspaceDir) return ctx;
+
+  const tsRaw = readOptionalFile(workspaceDir, 'tsconfig.json');
+  if (tsRaw) {
+    const tsconfig = parseTsConfigContent(tsRaw, (rel) => readOptionalFile(workspaceDir, rel));
+    if (tsconfig) ctx.tsconfig = tsconfig;
+  }
+
+  const goRaw = readOptionalFile(workspaceDir, 'go.mod');
+  if (goRaw) {
+    const goModule = parseGoModModule(goRaw);
+    if (goModule) ctx.goModule = goModule;
+  }
+
+  const pubRaw = readOptionalFile(workspaceDir, 'pubspec.yaml');
+  if (pubRaw) {
+    const dartPkg = parsePubspecName(pubRaw);
+    if (dartPkg) ctx.dartPackage = dartPkg;
+  }
+
+  return ctx;
+}
+
+function existsRepoFile(path: string, ctx: WorkspaceResolveContext): boolean {
+  const norm = normalizePath(path);
+  if (!norm) return false;
+  if (ctx.knownFiles) {
+    return ctx.knownFiles.has(norm);
+  }
+  if (!ctx.workspaceDir) return false;
+  try {
+    return statSync(resolve(ctx.workspaceDir, norm)).isFile();
+  } catch {
+    return false; // candidate path absent on disk
+  }
+}
+
+function existsRepoPrefix(prefixDir: string, ctx: WorkspaceResolveContext): boolean {
+  const norm = normalizePath(prefixDir);
+  if (!norm) return false;
+  if (ctx.knownFiles) {
+    const slash = `${norm}/`;
+    for (const f of ctx.knownFiles) {
+      if (f.startsWith(slash)) return true;
+    }
+    return false;
+  }
+  if (!ctx.workspaceDir) return false;
+  try {
+    return existsSync(resolve(ctx.workspaceDir, norm));
+  } catch {
+    return false; // directory probe failed
+  }
+}
+
+function resolveTsJsCandidate(basePath: string, ctx: WorkspaceResolveContext): string {
+  const norm = normalizePath(basePath);
+  const candidates: string[] = [norm];
+
+  // ESM TS conventions import `.js` / `.mjs` / `.cjs` while the file on disk is `.ts*`.
+  if (norm.endsWith('.js')) {
+    const stem = norm.slice(0, -3);
+    candidates.push(`${stem}.ts`, `${stem}.tsx`);
+  } else if (norm.endsWith('.jsx')) {
+    const stem = norm.slice(0, -4);
+    candidates.push(`${stem}.tsx`, `${stem}.ts`);
+  } else if (norm.endsWith('.mjs')) {
+    candidates.push(`${norm.slice(0, -4)}.mts`);
+  } else if (norm.endsWith('.cjs')) {
+    candidates.push(`${norm.slice(0, -4)}.cts`);
+  } else {
+    candidates.push(
+      `${norm}.ts`,
+      `${norm}.tsx`,
+      `${norm}.mts`,
+      `${norm}.cts`,
+      `${norm}.js`,
+      `${norm}.jsx`,
+      `${norm}.mjs`,
+      `${norm}.cjs`,
+      `${norm}/index.ts`,
+      `${norm}/index.tsx`,
+      `${norm}/index.js`,
+      `${norm}/index.jsx`,
+    );
+  }
+
+  for (const c of candidates) {
+    if (existsRepoFile(c, ctx)) return c;
+  }
+  return norm;
+}
+
+function matchTsConfigAlias(
+  specifier: string,
+  tsconfig: TsConfigPaths,
+  ctx: WorkspaceResolveContext,
+): string | undefined {
+  const basePrefix = tsconfig.baseUrl && tsconfig.baseUrl !== '.' ? `${tsconfig.baseUrl}/` : '';
+
+  for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
+    const starIdx = pattern.indexOf('*');
+    if (starIdx === -1) {
+      if (specifier === pattern && targets[0]) {
+        const joined = normalizePath(posix.join(basePrefix, targets[0]));
+        return resolveTsJsCandidate(joined, ctx);
+      }
+      continue;
+    }
+    const prefix = pattern.slice(0, starIdx);
+    const suffix = pattern.slice(starIdx + 1);
+    if (specifier.startsWith(prefix) && specifier.endsWith(suffix)) {
+      const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
+      for (const target of targets) {
+        const replaced = target.replace('*', wildcard);
+        const joined = normalizePath(posix.join(basePrefix, replaced));
+        const resolved = resolveTsJsCandidate(joined, ctx);
+        if (existsRepoFile(resolved, ctx) || targets.length === 1) {
+          return resolved;
+        }
+      }
+      if (targets[0]) {
+        return normalizePath(posix.join(basePrefix, targets[0].replace('*', wildcard)));
+      }
+    }
+  }
+
+  if (tsconfig.baseUrl) {
+    const joined = normalizePath(posix.join(basePrefix, specifier));
+    const resolved = resolveTsJsCandidate(joined, ctx);
+    if (existsRepoFile(resolved, ctx)) return resolved;
+  }
+  return undefined;
+}
+
+function extractNpmPackageName(specifier: string): string {
+  if (specifier.startsWith('node:')) return specifier;
+  if (specifier.startsWith('@')) {
+    const parts = specifier.split('/');
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier;
+  }
+  return specifier.split('/')[0] ?? specifier;
+}
+
+function joinRelativePosix(sourceFilePath: string, relSpec: string): string {
+  const dir = posix.dirname(normalizePath(sourceFilePath));
+  const raw = dir === '.' ? relSpec : posix.join(dir, relSpec);
+  return normalizePath(posix.normalize(raw));
+}
+
+const KNOWN_EXTERNAL_JVM_PREFIXES = [
+  'java.',
+  'javax.',
+  'jakarta.',
+  'kotlin.',
+  'kotlinx.',
+  'scala.',
+  'org.springframework.',
+  'org.hibernate.',
+  'io.ktor.',
+  'org.junit.',
+  'org.slf4j.',
+  'com.fasterxml.',
+];
+
+/**
+ * Resolve an {@link ExtractedImport} into either an internal repo-relative path
+ * or an external package identifier.
+ */
+export function resolveImport(
+  imp: ExtractedImport,
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+  fileMeta: FileImportMeta = {},
+): ResolvedImport {
+  const base: ResolvedImport = {
+    specifier: imp.specifier,
+    line: imp.line,
+    snippet: imp.snippet,
+    language: imp.language,
+  };
+  const normSource = normalizePath(sourceFilePath);
+
+  switch (imp.language) {
+    case 'typescript':
+    case 'javascript': {
+      if (imp.specifier.startsWith('./') || imp.specifier.startsWith('../')) {
+        const joined = joinRelativePosix(normSource, imp.specifier);
+        return { ...base, resolvedPath: resolveTsJsCandidate(joined, ctx) };
+      }
+      if (ctx.tsconfig) {
+        const aliased = matchTsConfigAlias(imp.specifier, ctx.tsconfig, ctx);
+        if (aliased) return { ...base, resolvedPath: aliased };
+      }
+      return { ...base, packageName: extractNpmPackageName(imp.specifier) };
+    }
+
+    case 'go': {
+      if (ctx.goModule) {
+        if (imp.specifier === ctx.goModule) {
+          return { ...base, resolvedPath: '.' };
+        }
+        if (imp.specifier.startsWith(`${ctx.goModule}/`)) {
+          return {
+            ...base,
+            resolvedPath: normalizePath(imp.specifier.slice(ctx.goModule.length + 1)),
+          };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+
+    case 'dart': {
+      if (imp.specifier.startsWith('dart:')) {
+        return { ...base, packageName: imp.specifier };
+      }
+      if (imp.specifier.startsWith('package:')) {
+        const rest = imp.specifier.slice('package:'.length);
+        const slash = rest.indexOf('/');
+        const pkg = slash === -1 ? rest : rest.slice(0, slash);
+        const subpath = slash === -1 ? '' : rest.slice(slash + 1);
+        if (ctx.dartPackage && pkg === ctx.dartPackage) {
+          return { ...base, resolvedPath: normalizePath(`lib/${subpath}`) };
+        }
+        return { ...base, packageName: pkg };
+      }
+      return { ...base, resolvedPath: joinRelativePosix(normSource, imp.specifier) };
+    }
+
+    case 'python': {
+      if (imp.specifier.startsWith('.')) {
+        const dotMatch = imp.specifier.match(/^(\.+)(.*)$/);
+        const dots = dotMatch?.[1]?.length ?? 1;
+        const remainder = (dotMatch?.[2] ?? '').replace(/^\./, '').replace(/\./g, '/');
+        let dir = posix.dirname(normSource);
+        for (let i = 1; i < dots; i++) {
+          dir = posix.dirname(dir);
+        }
+        const joined = normalizePath(
+          dir === '.' ? remainder : remainder ? posix.join(dir, remainder) : dir,
+        );
+        const pyFile = `${joined}.py`;
+        const pyInit = `${joined}/__init__.py`;
+        const resolved = existsRepoFile(pyFile, ctx)
+          ? pyFile
+          : existsRepoFile(pyInit, ctx)
+            ? pyInit
+            : joined;
+        return { ...base, resolvedPath: resolved };
+      }
+
+      const modPath = imp.specifier.replace(/\./g, '/');
+      const candidates = [
+        `${modPath}.py`,
+        `${modPath}/__init__.py`,
+        `src/${modPath}.py`,
+        `src/${modPath}/__init__.py`,
+      ];
+      for (const c of candidates) {
+        if (existsRepoFile(c, ctx)) return { ...base, resolvedPath: c };
+      }
+      if (existsRepoPrefix(modPath, ctx)) {
+        return { ...base, resolvedPath: modPath };
+      }
+      if (existsRepoPrefix(`src/${modPath}`, ctx)) {
+        return { ...base, resolvedPath: `src/${modPath}` };
+      }
+
+      // Algebraic fallback when files aren't on disk: match top-level package
+      // against the source file's own root package directory.
+      const sourceSegs = normSource.split('/').filter(Boolean);
+      const firstImportSeg = modPath.split('/')[0];
+      if (firstImportSeg) {
+        if (sourceSegs[0] === firstImportSeg) {
+          return { ...base, resolvedPath: modPath };
+        }
+        if (sourceSegs[0] === 'src' && sourceSegs[1] === firstImportSeg) {
+          return { ...base, resolvedPath: `src/${modPath}` };
+        }
+      }
+      return { ...base, packageName: firstImportSeg ?? imp.specifier };
+    }
+
+    case 'rust': {
+      if (imp.specifier.startsWith('mod:')) {
+        const modName = imp.specifier.slice(4);
+        const dir = posix.dirname(normSource);
+        const direct = normalizePath(dir === '.' ? `${modName}.rs` : `${dir}/${modName}.rs`);
+        const nested = normalizePath(
+          dir === '.' ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`,
+        );
+        if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
+        return { ...base, resolvedPath: direct };
+      }
+      if (imp.specifier.startsWith('crate::')) {
+        const rel = imp.specifier.slice('crate::'.length).replace(/::/g, '/');
+        const srcIdx = normSource.lastIndexOf('/src/');
+        const crateSrc =
+          srcIdx !== -1
+            ? normSource.slice(0, srcIdx + 4)
+            : normSource.startsWith('src/')
+              ? 'src'
+              : '';
+        const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
+        const rsFile = `${joined}.rs`;
+        const rsMod = `${joined}/mod.rs`;
+        return {
+          ...base,
+          resolvedPath: existsRepoFile(rsFile, ctx)
+            ? rsFile
+            : existsRepoFile(rsMod, ctx)
+              ? rsMod
+              : joined,
+        };
+      }
+      if (imp.specifier.startsWith('super::') || imp.specifier.startsWith('self::')) {
+        let dir = posix.dirname(normSource);
+        let rest = imp.specifier;
+        if (rest.startsWith('self::')) {
+          rest = rest.slice('self::'.length);
+        }
+        while (rest.startsWith('super::')) {
+          rest = rest.slice('super::'.length);
+          dir = posix.dirname(dir);
+        }
+        const rel = rest.replace(/::/g, '/');
+        const joined = normalizePath(dir === '.' ? rel : posix.join(dir, rel));
+        const rsFile = `${joined}.rs`;
+        return {
+          ...base,
+          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : joined,
+        };
+      }
+      const crateName = imp.specifier.split('::')[0] ?? imp.specifier;
+      return { ...base, packageName: crateName };
+    }
+
+    case 'java':
+    case 'kotlin': {
+      const cleanSpec = imp.specifier.replace(/\.\*$/, '');
+      const specPath = cleanSpec.replace(/\./g, '/');
+      let sourceRoot = '';
+      if (fileMeta.declaredPackage) {
+        const pkgPath = fileMeta.declaredPackage.replace(/\./g, '/');
+        const dir = posix.dirname(normSource);
+        if (dir === pkgPath) sourceRoot = '';
+        else if (dir.endsWith(`/${pkgPath}`)) {
+          sourceRoot = dir.slice(0, dir.length - pkgPath.length - 1);
+        }
+      }
+      const prefix = sourceRoot ? `${sourceRoot}/` : '';
+      const exts = imp.language === 'java' ? ['java'] : ['kt', 'kts', 'java'];
+      for (const ext of exts) {
+        const candidate = `${prefix}${specPath}.${ext}`;
+        if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
+      }
+      if (existsRepoPrefix(`${prefix}${specPath}`, ctx)) {
+        return { ...base, resolvedPath: `${prefix}${specPath}` };
+      }
+
+      if (
+        fileMeta.declaredPackage &&
+        !KNOWN_EXTERNAL_JVM_PREFIXES.some((p) => cleanSpec.startsWith(p))
+      ) {
+        const pkgSegs = fileMeta.declaredPackage.split('.');
+        const specSegs = cleanSpec.split('.');
+        const sameRoot =
+          pkgSegs.length >= 2 &&
+          specSegs.length >= 2 &&
+          pkgSegs[0] === specSegs[0] &&
+          pkgSegs[1] === specSegs[1];
+        if (sameRoot) {
+          return { ...base, resolvedPath: `${prefix}${specPath}` };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+
+    case 'csharp': {
+      const nsPath = imp.specifier.replace(/\./g, '/');
+      if (existsRepoPrefix(nsPath, ctx)) {
+        return { ...base, resolvedPath: nsPath };
+      }
+      if (fileMeta.declaredPackage) {
+        const rootNs = fileMeta.declaredPackage.split('.')[0];
+        const specRoot = imp.specifier.split('.')[0];
+        if (rootNs && specRoot === rootNs && rootNs !== 'System' && rootNs !== 'Microsoft') {
+          return { ...base, resolvedPath: nsPath };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+  }
+}

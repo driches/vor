@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
+import { sha256Hex } from '../references/cache.js';
 import { buildSystemPrompt, selectEmbeddedContextFiles } from './system-prompt.js';
 
 describe('buildSystemPrompt', () => {
@@ -136,5 +137,94 @@ describe('buildSystemPrompt', () => {
       contextFiles: [],
     });
     expect(p).not.toContain('Static analysis runs in parallel');
+  });
+
+  it('omits architecture standards section by default and includes it when enabled', () => {
+    const off = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'r',
+      contextFiles: [],
+    });
+    expect(off).not.toContain('Software architecture standards');
+
+    const on = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        architecture: {
+          ...DEFAULT_CONFIG.architecture,
+          enabled: true,
+          preset: 'hexagonal',
+        },
+      },
+      repoName: 'r',
+      contextFiles: [],
+    });
+    expect(on).toContain('Software architecture standards');
+    expect(on).toContain('**hexagonal**');
+
+    const llmOff = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        architecture: {
+          ...DEFAULT_CONFIG.architecture,
+          enabled: true,
+          preset: 'hexagonal',
+          llm_enforcement: false,
+        },
+      },
+      repoName: 'r',
+      contextFiles: [],
+    });
+    expect(llmOff).not.toContain('Software architecture standards');
+  });
+
+  it('includes reference documentation & standards section when references corpus is provided', () => {
+    const content = '# Engineering Standards\nAll handlers must validate DTOs.';
+    const p = buildSystemPrompt({
+      config: DEFAULT_CONFIG,
+      repoName: 'r',
+      contextFiles: [],
+      references: {
+        docs: [
+          {
+            id: 'docs/std.md',
+            title: 'Engineering Standards',
+            source: 'docs/std.md',
+            kind: 'repo',
+            placement: 'inline',
+            content,
+            byte_length: Buffer.byteLength(content),
+            content_sha256: sha256Hex(content),
+            headings: ['Engineering Standards'],
+            truncated: false,
+            cache_status: 'hit',
+          },
+        ],
+        inline_docs: [
+          {
+            id: 'docs/std.md',
+            title: 'Engineering Standards',
+            source: 'docs/std.md',
+            kind: 'repo',
+            placement: 'inline',
+            content,
+            byte_length: Buffer.byteLength(content),
+            content_sha256: sha256Hex(content),
+            headings: ['Engineering Standards'],
+            truncated: false,
+            cache_status: 'hit',
+          },
+        ],
+        on_demand_docs: [],
+        total_inline_bytes: Buffer.byteLength(content),
+        total_bytes: Buffer.byteLength(content),
+        corpus_digest: 'digest',
+        cache_dir: '/tmp',
+        cache_stats: { hits: 1, revalidated: 0, misses: 0, stale_fallbacks: 0, uncached: 0 },
+        warnings: [],
+      },
+    });
+    expect(p).toContain('### Reference documentation & standards');
+    expect(p).toContain('All handlers must validate DTOs.');
   });
 });

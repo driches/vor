@@ -184,4 +184,31 @@ describe('scanFindingToPostedComment', () => {
     const c = scanFindingToPostedComment(makeFinding());
     expect(c.side).toBe('RIGHT');
   });
+
+  it('converts an architecture finding with scanner provenance', () => {
+    const c = scanFindingToPostedComment(
+      makeFinding({
+        scanner: 'architecture',
+        rule_id: 'arch:layer:domain-to-adapters_out',
+        file_path: 'src/domain/order.ts',
+        line: 3,
+        severity: 'important',
+        category: 'architecture',
+        title: "Layer 'domain' cannot import 'adapters_out'",
+        evidence: {
+          kind: 'architecture',
+          rule: 'arch:layer:domain-to-adapters_out',
+          specifier: '../adapters/out/pg',
+          source_layer: 'domain',
+          target_layer: 'adapters_out',
+        },
+      }),
+    );
+    expect(c.category).toBe('architecture');
+    expect(c.source).toEqual({
+      kind: 'scanner',
+      scanner: 'architecture',
+      rule_id: 'arch:layer:domain-to-adapters_out',
+    });
+  });
 });

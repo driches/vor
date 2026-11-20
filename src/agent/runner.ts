@@ -38,6 +38,7 @@ import { costFromUsage, pricingForModel } from '../util/pricing.js';
 import { unsafeReasoningEffortWarning } from '../config/warnings.js';
 import {
   createProvider,
+  type AnthropicCompleteOptions,
   type CanonicalMessage,
   type CanonicalTool,
   type LLMProvider,
@@ -52,6 +53,7 @@ import { makePostInlineCommentTool } from '../tools/post-inline-comment.js';
 import { makePostSummaryTool } from '../tools/post-summary.js';
 import { makeReadFileAtRefTool } from '../tools/read-file-at-ref.js';
 import { makeReadRepoContextFileTool } from '../tools/read-repo-context-file.js';
+import { makeReadReferenceDocTool } from '../tools/read-reference-doc.js';
 import { makeDescribeImageAtRefTool } from '../tools/describe-image-at-ref.js';
 import { makeSkipFileTool } from '../tools/skip-file.js';
 import { makeWorkerCheckUsageClaimTool } from '../tools/worker-check-usage-claim.js';
@@ -99,6 +101,8 @@ export interface RunAgentInput {
    * omitted — see that constant's JSDoc for the recall/cost rationale.
    */
   temperature?: number;
+  /** Anthropic-only Messages API request controls. Ignored by other providers. */
+  anthropic?: AnthropicCompleteOptions;
   /** OpenAI-only Responses API request controls. Ignored by other providers. */
   openai?: OpenAICompleteOptions;
   abortController?: AbortController;
@@ -329,6 +333,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         // JSDoc for the recall/cost history. The OpenAI adapter drops the
         // field automatically for o-series reasoning models that reject it.
         temperature,
+        ...(input.anthropic !== undefined ? { anthropic: input.anthropic } : {}),
         ...(input.openai !== undefined ? { openai: input.openai } : {}),
         ...(input.abortController ? { abortSignal: input.abortController.signal } : {}),
       });
@@ -539,6 +544,7 @@ function buildToolDefinitions(deps: ToolDeps): ToolDefinition[] {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
+    ...(deps.references && deps.references.docs.length > 0 ? [makeReadReferenceDocTool(deps)] : []),
     ...(deps.config.image_understanding.enabled ? [makeDescribeImageAtRefTool(deps)] : []),
     ...(deps.worker !== undefined ? [makeWorkerCheckUsageClaimTool(deps)] : []),
   ];

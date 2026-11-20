@@ -13,11 +13,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { useStderr } from '../util/logger.js';
 import {
+  checkArchitectureInput,
   createHandlers,
   defaultDeps,
   getConfigInput,
   getRunInput,
+  listReferencesInput,
   listRunsInput,
+  readReferenceInput,
   reviewInput,
   type VorToolDeps,
 } from './tools.js';
@@ -63,6 +66,36 @@ export function buildMcpServer(deps: VorToolDeps = defaultDeps()): McpServer {
       inputSchema: getConfigInput,
     },
     handlers.get_config,
+  );
+
+  server.registerTool(
+    'check_architecture',
+    {
+      description:
+        'Run a deterministic, zero-LLM-cost architecture standards check across the entire repository (hexagonal, DDD, clean, layered, modular-monolith, or custom).',
+      inputSchema: checkArchitectureInput,
+    },
+    handlers.check_architecture,
+  );
+
+  server.registerTool(
+    'list_references',
+    {
+      description:
+        'Load and cache configured reference documentation and engineering standards, returning the document catalog and cache statistics.',
+      inputSchema: listReferencesInput,
+    },
+    handlers.list_references,
+  );
+
+  server.registerTool(
+    'read_reference',
+    {
+      description:
+        'Read a cached reference documentation or standards file by ID (with optional line range) or search across all configured reference docs by keyword.',
+      inputSchema: readReferenceInput,
+    },
+    handlers.read_reference,
   );
 
   return server;

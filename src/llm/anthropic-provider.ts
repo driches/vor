@@ -76,7 +76,23 @@ export class AnthropicProvider implements LLMProvider {
         // OpenAI's Responses API doesn't have this limit; only Anthropic.
         max_tokens: Math.min(opts.maxOutputTokens, SAFE_NON_STREAMING_MAX_TOKENS),
         temperature: opts.temperature ?? 0.5,
-        system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
+        system: [
+          {
+            type: 'text',
+            text: opts.system,
+            // `@anthropic-ai/sdk@0.39.0`'s `CacheControlEphemeral` type only declares
+            // `{ type: 'ephemeral' }`, while Anthropic's Messages API accepts `ttl: '1h'`
+            // on ephemeral cache breakpoints. Omit `ttl` for default `'5m'` so requests
+            // stay byte-identical unless `'1h'` is explicitly configured.
+            cache_control:
+              opts.anthropic?.prompt_cache_ttl === '1h'
+                ? ({
+                    type: 'ephemeral',
+                    ttl: '1h',
+                  } as unknown as Anthropic.CacheControlEphemeral)
+                : { type: 'ephemeral' },
+          },
+        ],
         messages: anthropicMessages,
         tools: anthropicTools,
       },

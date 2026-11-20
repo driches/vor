@@ -316,6 +316,48 @@ describe('runAgent', () => {
     );
   });
 
+  it('registers read_reference_doc only when reference docs are loaded', async () => {
+    const offProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(offProvider);
+    await runAgent(baseInput());
+    expect(offProvider.completeCalls[0]!.tools.some((t) => t.name === 'read_reference_doc')).toBe(
+      false,
+    );
+
+    const onProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(onProvider);
+    const deps = buildFakeDeps();
+    deps.references = {
+      docs: [
+        {
+          id: 'std',
+          title: 'Std',
+          source: 'docs/std.md',
+          kind: 'repo',
+          placement: 'on_demand',
+          content: '# Std',
+          byte_length: 5,
+          content_sha256: 'abc',
+          headings: ['Std'],
+          truncated: false,
+          cache_status: 'hit',
+        },
+      ],
+      inline_docs: [],
+      on_demand_docs: [],
+      total_inline_bytes: 0,
+      total_bytes: 5,
+      corpus_digest: 'digest',
+      cache_dir: '/tmp',
+      cache_stats: { hits: 1, revalidated: 0, misses: 0, stale_fallbacks: 0, uncached: 0 },
+      warnings: [],
+    };
+    await runAgent({ ...baseInput(), deps });
+    expect(onProvider.completeCalls[0]!.tools.some((t) => t.name === 'read_reference_doc')).toBe(
+      true,
+    );
+  });
+
   it('executes a tool_call, pushes a canonical tool message, and continues to the next turn', async () => {
     const input = baseInput();
     const provider = new FakeProvider([

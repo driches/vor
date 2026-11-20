@@ -118,6 +118,120 @@ const providerConfigSchema = z
   })
   .strict();
 
+export const architecturePresetSchema = z.enum([
+  'hexagonal',
+  'ddd',
+  'clean',
+  'layered',
+  'modular-monolith',
+  'custom',
+]);
+
+export const architectureLayerOverrideSchema = z
+  .object({
+    paths: z.array(z.string().min(1)).optional(),
+    description: z.string().optional(),
+    can_import: z.array(z.string().min(1)).optional(),
+    cannot_import: z.array(z.string().min(1)).optional(),
+    forbid_packages: z.array(z.string().min(1)).optional(),
+    allow_packages: z.array(z.string().min(1)).optional(),
+    severity: severitySchema.optional(),
+  })
+  .strict();
+
+export const architectureContextsSchema = z
+  .object({
+    pattern: z.string().min(1),
+    public_api: z.array(z.string().min(1)).optional(),
+    shared: z.array(z.string().min(1)).optional(),
+    allow_public_api_imports: z.boolean().optional(),
+    allow_dependencies: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
+    severity: severitySchema.optional(),
+  })
+  .strict();
+
+export const architectureCustomRuleSchema = z
+  .object({
+    id: z.string().min(1),
+    from: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+    forbid_imports: z.array(z.string().min(1)).optional(),
+    forbid_packages: z.array(z.string().min(1)).optional(),
+    severity: severitySchema.optional(),
+    reason: z.string().min(1),
+  })
+  .strict();
+
+export const architectureSchema = z
+  .object({
+    enabled: z.boolean(),
+    file: z.string().min(1).optional(),
+    preset: architecturePresetSchema.optional(),
+    root: z.string().min(1).optional(),
+    severity: severitySchema,
+    layers: z.record(z.string().min(1), architectureLayerOverrideSchema).optional(),
+    contexts: architectureContextsSchema.optional(),
+    rules: z.array(architectureCustomRuleSchema).optional(),
+    principles: z.array(z.string().min(1)).optional(),
+    include_preset_principles: z.boolean().optional(),
+    llm_enforcement: z.boolean(),
+    deterministic_enforcement: z.boolean(),
+    exclude: z.array(z.string().min(1)).optional(),
+    ignore_tests: z.boolean(),
+    baseline_file: z.string().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * Schema for standalone `.vor/architecture.yml` files. Every field is optional;
+ * `file` is omitted because external files shouldn't chain indefinitely.
+ */
+export const architectureExternalFileSchema = architectureSchema
+  .omit({ file: true })
+  .partial()
+  .strict();
+
+export const referenceModeSchema = z.enum(['auto', 'inline', 'on_demand']);
+
+export const referenceSourceObjectSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+    glob: z.string().min(1).optional(),
+    url: z.string().url().optional(),
+    github: z.string().min(1).optional(),
+    mode: referenceModeSchema.optional(),
+    ttl_seconds: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const referenceSourceSchema = z.union([z.string().min(1), referenceSourceObjectSchema]);
+
+export const referencesSchema = z
+  .object({
+    enabled: z.boolean(),
+    sources: z.array(referenceSourceSchema),
+    max_inline_bytes: z.number().int().positive().max(2_000_000),
+    max_doc_bytes: z.number().int().positive().max(1_000_000),
+    max_docs: z.number().int().positive().max(500),
+    cache: z
+      .object({
+        enabled: z.boolean(),
+        dir: z.string().min(1).optional(),
+        ttl_seconds: z.number().int().nonnegative(),
+        stale_on_error: z.boolean(),
+      })
+      .strict(),
+    prompt_cache: z
+      .object({
+        enabled: z.boolean(),
+        anthropic_ttl: z.enum(['5m', '1h']),
+        auto_openai_cache_key: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+
 /**
  * Zod schema for `.vor.yml`. All fields optional; missing values are
  * merged from DEFAULT_CONFIG by the loader.
@@ -179,6 +293,10 @@ export const configSchema = z
 
     image_understanding: imageUnderstandingSchema,
 
+    architecture: architectureSchema,
+
+    references: referencesSchema,
+
     experimental: experimentalSchema,
   })
   .strict();
@@ -194,8 +312,9 @@ type DeepPartial<T> = T extends readonly unknown[]
  * object that carries refinements, so the partial schema is rebuilt here.
  * Each object is recreated with every key optional, keeping what the
  * original enforced: strictness (a `never` catchall) and refinement checks.
- * Arrays are left alone — the loader replaces arrays wholesale, and no
- * config array holds objects.
+ * Arrays and records are left alone — the loader replaces them wholesale, and
+ * array/record entries (`architecture.rules`, `references.sources`,
+ * `architecture.layers`) keep their full element schemas.
  */
 function deepPartial(schema: z.ZodType): z.ZodType {
   if (schema instanceof z.ZodOptional) return deepPartial(schema.unwrap() as z.ZodType);

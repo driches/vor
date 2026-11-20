@@ -2103,7 +2103,7 @@ var require_lib2 = __commonJS({
       let accum = [];
       let accumBytes = 0;
       let abort = false;
-      return new Body.Promise(function(resolve3, reject) {
+      return new Body.Promise(function(resolve8, reject) {
         let resTimeout;
         if (_this4.timeout) {
           resTimeout = setTimeout(function() {
@@ -2137,7 +2137,7 @@ var require_lib2 = __commonJS({
           }
           clearTimeout(resTimeout);
           try {
-            resolve3(Buffer.concat(accum, accumBytes));
+            resolve8(Buffer.concat(accum, accumBytes));
           } catch (err) {
             reject(new FetchError(`Could not create Buffer from response body for ${_this4.url}: ${err.message}`, "system", err));
           }
@@ -2812,7 +2812,7 @@ var require_lib2 = __commonJS({
         throw new Error("native promise missing, set fetch.Promise to your favorite alternative");
       }
       Body.Promise = fetch3.Promise;
-      return new fetch3.Promise(function(resolve3, reject) {
+      return new fetch3.Promise(function(resolve8, reject) {
         const request2 = new Request3(url2, opts);
         const options = getNodeRequestOptions(request2);
         const send = (options.protocol === "https:" ? https2 : http2).request;
@@ -2945,7 +2945,7 @@ var require_lib2 = __commonJS({
                   requestOpts.body = void 0;
                   requestOpts.headers.delete("content-length");
                 }
-                resolve3(fetch3(new Request3(locationURL, requestOpts)));
+                resolve8(fetch3(new Request3(locationURL, requestOpts)));
                 finalize3();
                 return;
             }
@@ -2966,7 +2966,7 @@ var require_lib2 = __commonJS({
           const codings = headers.get("Content-Encoding");
           if (!request2.compress || request2.method === "HEAD" || codings === null || res.statusCode === 204 || res.statusCode === 304) {
             response = new Response4(body, response_options);
-            resolve3(response);
+            resolve8(response);
             return;
           }
           const zlibOptions = {
@@ -2976,7 +2976,7 @@ var require_lib2 = __commonJS({
           if (codings == "gzip" || codings == "x-gzip") {
             body = body.pipe(zlib.createGunzip(zlibOptions));
             response = new Response4(body, response_options);
-            resolve3(response);
+            resolve8(response);
             return;
           }
           if (codings == "deflate" || codings == "x-deflate") {
@@ -2988,12 +2988,12 @@ var require_lib2 = __commonJS({
                 body = body.pipe(zlib.createInflateRaw());
               }
               response = new Response4(body, response_options);
-              resolve3(response);
+              resolve8(response);
             });
             raw.on("end", function() {
               if (!response) {
                 response = new Response4(body, response_options);
-                resolve3(response);
+                resolve8(response);
               }
             });
             return;
@@ -3001,11 +3001,11 @@ var require_lib2 = __commonJS({
           if (codings == "br" && typeof zlib.createBrotliDecompress === "function") {
             body = body.pipe(zlib.createBrotliDecompress());
             response = new Response4(body, response_options);
-            resolve3(response);
+            resolve8(response);
             return;
           }
           response = new Response4(body, response_options);
-          resolve3(response);
+          resolve8(response);
         });
         writeToStream(req, request2);
       });
@@ -8763,9 +8763,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve8, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve3(data);
+              return err ? reject(err) : resolve8(data);
             });
           });
         }
@@ -8803,12 +8803,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve8, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve3(data);
+              ) : resolve8(data);
             });
           });
         }
@@ -11075,8 +11075,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise2 = new Promise((resolve3, reject) => {
-        res = resolve3;
+      const promise2 = new Promise((resolve8, reject) => {
+        res = resolve8;
         rej = reject;
       });
       return { promise: promise2, resolve: res, reject: rej };
@@ -13327,12 +13327,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve3, reject) => {
+      const waitForDrain = () => new Promise((resolve8, reject) => {
         assert2(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve3;
+          callback = resolve8;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -14002,12 +14002,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve3, reject) => {
+      const waitForDrain = () => new Promise((resolve8, reject) => {
         assert2(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve3;
+          callback = resolve8;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -14486,16 +14486,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve3) => {
+        return new Promise((resolve8) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve3;
+            this[kClosedResolve] = resolve8;
           } else {
-            resolve3(null);
+            resolve8(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve3) => {
+        return new Promise((resolve8) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i2 = 0; i2 < requests.length; i2++) {
             const request2 = requests[i2];
@@ -14506,7 +14506,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve3(null);
+            resolve8(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -14557,7 +14557,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve3, reject) => {
+        const socket = await new Promise((resolve8, reject) => {
           client[kConnector]({
             host,
             hostname: hostname3,
@@ -14569,7 +14569,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve3(socket2);
+              resolve8(socket2);
             }
           });
         });
@@ -14905,8 +14905,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c2) => c2.close()));
         } else {
-          await new Promise((resolve3) => {
-            this[kClosedResolve] = resolve3;
+          await new Promise((resolve8) => {
+            this[kClosedResolve] = resolve8;
           });
         }
       }
@@ -16175,7 +16175,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve3, reject) => {
+        return await new Promise((resolve8, reject) => {
           if (this[kContentLength] > limit2) {
             this.destroy(new AbortError());
           }
@@ -16188,7 +16188,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve3(null);
+              resolve8(null);
             }
           }).on("error", noop4).on("data", function(chunk2) {
             limit2 -= chunk2.length;
@@ -16207,7 +16207,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert2(!stream[kConsume]);
-      return new Promise((resolve3, reject) => {
+      return new Promise((resolve8, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -16224,7 +16224,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve: resolve3,
+              resolve: resolve8,
               reject,
               length: 0,
               body: []
@@ -16294,18 +16294,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve: resolve3, stream, length } = consume2;
+      const { type, body, resolve: resolve8, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve3(chunksDecode(body, length));
+          resolve8(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve3(JSON.parse(chunksDecode(body, length)));
+          resolve8(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve3(chunksConcat(body, length).buffer);
+          resolve8(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve3(new Blob(body, { type: stream[kContentType] }));
+          resolve8(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve3(chunksConcat(body, length));
+          resolve8(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -16562,9 +16562,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve8, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve8(data);
           });
         });
       }
@@ -16787,9 +16787,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve8, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve8(data);
           });
         });
       }
@@ -17074,9 +17074,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve8, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve8(data);
           });
         });
       }
@@ -17168,9 +17168,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve8, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve8(data);
           });
         });
       }
@@ -21033,7 +21033,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url2 = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve3, reject) => agent.dispatch(
+        return new Promise((resolve8, reject) => agent.dispatch(
           {
             path: url2.pathname + url2.search,
             origin: url2.origin,
@@ -21109,7 +21109,7 @@ var require_fetch = __commonJS({
               }
               this.body = new Readable2({ read: resume });
               const onError = this.onError.bind(this);
-              resolve3({
+              resolve8({
                 status,
                 statusText,
                 headersList,
@@ -21152,7 +21152,7 @@ var require_fetch = __commonJS({
               for (let i2 = 0; i2 < rawHeaders.length; i2 += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i2]), rawHeaders[i2 + 1].toString("latin1"), true);
               }
-              resolve3({
+              resolve8({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -24893,8 +24893,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms) {
-      return new Promise((resolve3) => {
-        setTimeout(resolve3, ms).unref();
+      return new Promise((resolve8) => {
+        setTimeout(resolve8, ms).unref();
       });
     }
     module2.exports = {
@@ -25763,11 +25763,11 @@ var init_lib = __esm({
     import_undici = __toESM(require_undici(), 1);
     __awaiter = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -25783,7 +25783,7 @@ var init_lib = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -25853,26 +25853,26 @@ var init_lib = __esm({
       }
       readBody() {
         return __awaiter(this, void 0, void 0, function* () {
-          return new Promise((resolve3) => __awaiter(this, void 0, void 0, function* () {
+          return new Promise((resolve8) => __awaiter(this, void 0, void 0, function* () {
             let output2 = Buffer.alloc(0);
             this.message.on("data", (chunk2) => {
               output2 = Buffer.concat([output2, chunk2]);
             });
             this.message.on("end", () => {
-              resolve3(output2.toString());
+              resolve8(output2.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter(this, void 0, void 0, function* () {
-          return new Promise((resolve3) => __awaiter(this, void 0, void 0, function* () {
+          return new Promise((resolve8) => __awaiter(this, void 0, void 0, function* () {
             const chunks = [];
             this.message.on("data", (chunk2) => {
               chunks.push(chunk2);
             });
             this.message.on("end", () => {
-              resolve3(Buffer.concat(chunks));
+              resolve8(Buffer.concat(chunks));
             });
           }));
         });
@@ -26075,14 +26075,14 @@ var init_lib = __esm({
        */
       requestRaw(info2, data) {
         return __awaiter(this, void 0, void 0, function* () {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve8, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve3(res);
+                resolve8(res);
               }
             }
             this.requestRawWithCallback(info2, data, callbackForResult);
@@ -26326,12 +26326,12 @@ var init_lib = __esm({
         return __awaiter(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve3) => setTimeout(() => resolve3(), ms));
+          return new Promise((resolve8) => setTimeout(() => resolve8(), ms));
         });
       }
       _processResponse(res, options) {
         return __awaiter(this, void 0, void 0, function* () {
-          return new Promise((resolve3, reject) => __awaiter(this, void 0, void 0, function* () {
+          return new Promise((resolve8, reject) => __awaiter(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -26339,7 +26339,7 @@ var init_lib = __esm({
               headers: {}
             };
             if (statusCode === HttpCodes.NotFound) {
-              resolve3(response);
+              resolve8(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -26378,7 +26378,7 @@ var init_lib = __esm({
               err.result = response.result;
               reject(err);
             } else {
-              resolve3(response);
+              resolve8(response);
             }
           }));
         });
@@ -26394,11 +26394,11 @@ var init_auth = __esm({
   "node_modules/@actions/http-client/lib/auth.js"() {
     __awaiter2 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -26414,7 +26414,7 @@ var init_auth = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -26453,11 +26453,11 @@ var init_oidc_utils = __esm({
     init_core();
     __awaiter3 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -26473,7 +26473,7 @@ var init_oidc_utils = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -26547,11 +26547,11 @@ var init_summary = __esm({
     import_fs2 = require("fs");
     __awaiter4 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -26567,7 +26567,7 @@ var init_summary = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -26947,11 +26947,11 @@ var init_io_util = __esm({
     path2 = __toESM(require("path"), 1);
     __awaiter5 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -26967,7 +26967,7 @@ var init_io_util = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -27050,11 +27050,11 @@ var init_io = __esm({
     init_io_util();
     __awaiter6 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -27070,7 +27070,7 @@ var init_io = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -27135,11 +27135,11 @@ var init_toolrunner = __esm({
     import_timers = require("timers");
     __awaiter7 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -27155,7 +27155,7 @@ var init_toolrunner = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -27374,7 +27374,7 @@ var init_toolrunner = __esm({
             this.toolPath = path4.resolve(process.cwd(), this.options.cwd || process.cwd(), this.toolPath);
           }
           this.toolPath = yield which(this.toolPath, true);
-          return new Promise((resolve3, reject) => __awaiter7(this, void 0, void 0, function* () {
+          return new Promise((resolve8, reject) => __awaiter7(this, void 0, void 0, function* () {
             this._debug(`exec tool: ${this.toolPath}`);
             this._debug("arguments:");
             for (const arg of this.args) {
@@ -27457,7 +27457,7 @@ var init_toolrunner = __esm({
               if (error63) {
                 reject(error63);
               } else {
-                resolve3(exitCode);
+                resolve8(exitCode);
               }
             });
             if (this.options.input) {
@@ -27587,11 +27587,11 @@ var init_exec = __esm({
     init_toolrunner();
     __awaiter8 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -27607,7 +27607,7 @@ var init_exec = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -27643,11 +27643,11 @@ var init_platform = __esm({
     init_exec();
     __awaiter9 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -27663,7 +27663,7 @@ var init_platform = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -27872,11 +27872,11 @@ var init_core = __esm({
     init_platform();
     __awaiter10 = function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve8) {
+          resolve8(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve8, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -27892,7 +27892,7 @@ var init_core = __esm({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve8(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -28010,7 +28010,7 @@ var require_runtime = __commonJS({
         return { __await: arg };
       };
       function AsyncIterator(generator, PromiseImpl) {
-        function invoke(method, arg, resolve3, reject) {
+        function invoke(method, arg, resolve8, reject) {
           var record2 = tryCatch(generator[method], generator, arg);
           if (record2.type === "throw") {
             reject(record2.arg);
@@ -28019,24 +28019,24 @@ var require_runtime = __commonJS({
             var value = result.value;
             if (value && typeof value === "object" && hasOwn3.call(value, "__await")) {
               return PromiseImpl.resolve(value.__await).then(function(value2) {
-                invoke("next", value2, resolve3, reject);
+                invoke("next", value2, resolve8, reject);
               }, function(err) {
-                invoke("throw", err, resolve3, reject);
+                invoke("throw", err, resolve8, reject);
               });
             }
             return PromiseImpl.resolve(value).then(function(unwrapped) {
               result.value = unwrapped;
-              resolve3(result);
+              resolve8(result);
             }, function(error63) {
-              return invoke("throw", error63, resolve3, reject);
+              return invoke("throw", error63, resolve8, reject);
             });
           }
         }
         var previousPromise;
         function enqueue(method, arg) {
           function callInvokeWithMethodAndArg() {
-            return new PromiseImpl(function(resolve3, reject) {
-              invoke(method, arg, resolve3, reject);
+            return new PromiseImpl(function(resolve8, reject) {
+              invoke(method, arg, resolve8, reject);
             });
           }
           return previousPromise = // If enqueue has been called before, then we want to wait until
@@ -28494,13 +28494,13 @@ var require_createScheduler = __commonJS({
           }
         }
       };
-      const queue = (action, payload) => new Promise((resolve3, reject) => {
+      const queue = (action, payload) => new Promise((resolve8, reject) => {
         const job = createJob({ action, payload });
         jobQueue.push(async (w2) => {
           jobQueue.shift();
           runningWorkers[w2.id] = job;
           try {
-            resolve3(await w2[action].apply(exports2, [...payload, job.id]));
+            resolve8(await w2[action].apply(exports2, [...payload, job.id]));
           } catch (err) {
             reject(err);
           } finally {
@@ -28777,8 +28777,8 @@ var require_createWorker = __commonJS({
       const lstmOnlyCore = [OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore;
       let workerResReject;
       let workerResResolve;
-      const workerRes = new Promise((resolve3, reject) => {
-        workerResResolve = resolve3;
+      const workerRes = new Promise((resolve8, reject) => {
+        workerResResolve = resolve8;
         workerResReject = reject;
       });
       const workerError = (event) => {
@@ -28787,10 +28787,10 @@ var require_createWorker = __commonJS({
       let worker = spawnWorker(options);
       worker.onerror = workerError;
       workerCounter += 1;
-      const startJob = ({ id: jobId, action, payload }) => new Promise((resolve3, reject) => {
+      const startJob = ({ id: jobId, action, payload }) => new Promise((resolve8, reject) => {
         log2(`[${id}]: Start ${jobId}, action=${action}`);
         const promiseId = `${action}-${jobId}`;
-        promises3[promiseId] = { resolve: resolve3, reject };
+        promises3[promiseId] = { resolve: resolve8, reject };
         send(worker, {
           workerId: id,
           jobId,
@@ -36989,8 +36989,8 @@ var require_light = __commonJS({
           return this.Promise.resolve();
         }
         yieldLoop(t2 = 0) {
-          return new this.Promise(function(resolve3, reject) {
-            return setTimeout(resolve3, t2);
+          return new this.Promise(function(resolve8, reject) {
+            return setTimeout(resolve8, t2);
           });
         }
         computePenalty() {
@@ -37201,15 +37201,15 @@ var require_light = __commonJS({
           return this._queue.length === 0;
         }
         async _tryToRun() {
-          var args, cb, error63, reject, resolve3, returned, task;
+          var args, cb, error63, reject, resolve8, returned, task;
           if (this._running < 1 && this._queue.length > 0) {
             this._running++;
-            ({ task, args, resolve: resolve3, reject } = this._queue.shift());
+            ({ task, args, resolve: resolve8, reject } = this._queue.shift());
             cb = await (async function() {
               try {
                 returned = await task(...args);
                 return function() {
-                  return resolve3(returned);
+                  return resolve8(returned);
                 };
               } catch (error1) {
                 error63 = error1;
@@ -37224,13 +37224,13 @@ var require_light = __commonJS({
           }
         }
         schedule(task, ...args) {
-          var promise2, reject, resolve3;
-          resolve3 = reject = null;
+          var promise2, reject, resolve8;
+          resolve8 = reject = null;
           promise2 = new this.Promise(function(_resolve, _reject) {
-            resolve3 = _resolve;
+            resolve8 = _resolve;
             return reject = _reject;
           });
-          this._queue.push({ task, args, resolve: resolve3, reject });
+          this._queue.push({ task, args, resolve: resolve8, reject });
           this._tryToRun();
           return promise2;
         }
@@ -37631,14 +37631,14 @@ var require_light = __commonJS({
                 counts = this._states.counts;
                 return counts[0] + counts[1] + counts[2] + counts[3] === at2;
               };
-              return new this.Promise((resolve3, reject) => {
+              return new this.Promise((resolve8, reject) => {
                 if (finished()) {
-                  return resolve3();
+                  return resolve8();
                 } else {
                   return this.on("done", () => {
                     if (finished()) {
                       this.removeAllListeners("done");
-                      return resolve3();
+                      return resolve8();
                     }
                   });
                 }
@@ -37731,9 +37731,9 @@ var require_light = __commonJS({
               options = parser$5.load(options, this.jobDefaults);
             }
             task = (...args2) => {
-              return new this.Promise(function(resolve3, reject) {
+              return new this.Promise(function(resolve8, reject) {
                 return fn(...args2, function(...args3) {
-                  return (args3[0] != null ? reject : resolve3)(args3);
+                  return (args3[0] != null ? reject : resolve8)(args3);
                 });
               });
             };
@@ -40128,7 +40128,7 @@ var import_promises2 = require("node:fs/promises");
 
 // src/orchestrator.ts
 var import_promises = require("node:fs/promises");
-var import_node_path22 = require("node:path");
+var import_node_path27 = require("node:path");
 
 // node_modules/@anthropic-ai/sdk/version.mjs
 var VERSION = "0.39.0";
@@ -41137,8 +41137,8 @@ function _addRequestID(value, response) {
 }
 var APIPromise = class _APIPromise extends Promise {
   constructor(responsePromise, parseResponse2 = defaultParseResponse) {
-    super((resolve3) => {
-      resolve3(null);
+    super((resolve8) => {
+      resolve8(null);
     });
     this.responsePromise = responsePromise;
     this.parseResponse = parseResponse2;
@@ -41730,7 +41730,7 @@ var startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
 var isAbsoluteURL = (url2) => {
   return startsWithSchemeRegexp.test(url2);
 };
-var sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+var sleep = (ms) => new Promise((resolve8) => setTimeout(resolve8, ms));
 var validatePositiveInteger = (name, n2) => {
   if (typeof n2 !== "number" || !Number.isInteger(n2)) {
     throw new AnthropicError(`${name} must be an integer`);
@@ -42343,12 +42343,12 @@ var BetaMessageStream = class _BetaMessageStream {
       }
       return this._emit("error", new AnthropicError(String(error63)));
     });
-    __classPrivateFieldSet7(this, _BetaMessageStream_connectedPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet7(this, _BetaMessageStream_resolveConnectedPromise, resolve3, "f");
+    __classPrivateFieldSet7(this, _BetaMessageStream_connectedPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet7(this, _BetaMessageStream_resolveConnectedPromise, resolve8, "f");
       __classPrivateFieldSet7(this, _BetaMessageStream_rejectConnectedPromise, reject, "f");
     }), "f");
-    __classPrivateFieldSet7(this, _BetaMessageStream_endPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet7(this, _BetaMessageStream_resolveEndPromise, resolve3, "f");
+    __classPrivateFieldSet7(this, _BetaMessageStream_endPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet7(this, _BetaMessageStream_resolveEndPromise, resolve8, "f");
       __classPrivateFieldSet7(this, _BetaMessageStream_rejectEndPromise, reject, "f");
     }), "f");
     __classPrivateFieldGet8(this, _BetaMessageStream_connectedPromise, "f").catch(() => {
@@ -42506,11 +42506,11 @@ var BetaMessageStream = class _BetaMessageStream {
    *   const message = await stream.emitted('message') // rejects if the stream errors
    */
   emitted(event) {
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve8, reject) => {
       __classPrivateFieldSet7(this, _BetaMessageStream_catchingPromiseCreated, true, "f");
       if (event !== "error")
         this.once("error", reject);
-      this.once(event, resolve3);
+      this.once(event, resolve8);
     });
   }
   async done() {
@@ -42794,7 +42794,7 @@ var BetaMessageStream = class _BetaMessageStream {
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
         }
         const chunk2 = pushQueue.shift();
         return { value: chunk2, done: false };
@@ -43068,12 +43068,12 @@ var MessageStream = class _MessageStream {
       }
       return this._emit("error", new AnthropicError(String(error63)));
     });
-    __classPrivateFieldSet8(this, _MessageStream_connectedPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet8(this, _MessageStream_resolveConnectedPromise, resolve3, "f");
+    __classPrivateFieldSet8(this, _MessageStream_connectedPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet8(this, _MessageStream_resolveConnectedPromise, resolve8, "f");
       __classPrivateFieldSet8(this, _MessageStream_rejectConnectedPromise, reject, "f");
     }), "f");
-    __classPrivateFieldSet8(this, _MessageStream_endPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet8(this, _MessageStream_resolveEndPromise, resolve3, "f");
+    __classPrivateFieldSet8(this, _MessageStream_endPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet8(this, _MessageStream_resolveEndPromise, resolve8, "f");
       __classPrivateFieldSet8(this, _MessageStream_rejectEndPromise, reject, "f");
     }), "f");
     __classPrivateFieldGet9(this, _MessageStream_connectedPromise, "f").catch(() => {
@@ -43231,11 +43231,11 @@ var MessageStream = class _MessageStream {
    *   const message = await stream.emitted('message') // rejects if the stream errors
    */
   emitted(event) {
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve8, reject) => {
       __classPrivateFieldSet8(this, _MessageStream_catchingPromiseCreated, true, "f");
       if (event !== "error")
         this.once("error", reject);
-      this.once(event, resolve3);
+      this.once(event, resolve8);
     });
   }
   async done() {
@@ -43519,7 +43519,7 @@ var MessageStream = class _MessageStream {
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
         }
         const chunk2 = pushQueue.shift();
         return { value: chunk2, done: false };
@@ -48797,7 +48797,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve3) {
+function isRecursive(inst, stack, resolve8) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -48807,7 +48807,7 @@ function isRecursive(inst, stack, resolve3) {
   let result = NONE;
   const check2 = (child2) => {
     if (result !== PROVEN && child2?._zod) {
-      const answer = isRecursive(child2, stack, resolve3);
+      const answer = isRecursive(child2, stack, resolve8);
       if (answer > result)
         result = answer;
     }
@@ -48818,7 +48818,7 @@ function isRecursive(inst, stack, resolve3) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child2 = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
+      const child2 = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve8) : NONE;
       if (child2 > answer)
         answer = child2;
     }
@@ -48882,7 +48882,7 @@ function isRecursive(inst, stack, resolve3) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve8 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -63457,6 +63457,8 @@ var CodeReviewError = class extends Error {
     }
   }
 };
+var ConfigError = class extends CodeReviewError {
+};
 var GitHubApiError = class extends CodeReviewError {
   constructor(message, status, options) {
     super(message, options);
@@ -63754,7 +63756,20 @@ var AnthropicProvider = class {
         // OpenAI's Responses API doesn't have this limit; only Anthropic.
         max_tokens: Math.min(opts.maxOutputTokens, SAFE_NON_STREAMING_MAX_TOKENS),
         temperature: opts.temperature ?? 0.5,
-        system: [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }],
+        system: [
+          {
+            type: "text",
+            text: opts.system,
+            // `@anthropic-ai/sdk@0.39.0`'s `CacheControlEphemeral` type only declares
+            // `{ type: 'ephemeral' }`, while Anthropic's Messages API accepts `ttl: '1h'`
+            // on ephemeral cache breakpoints. Omit `ttl` for default `'5m'` so requests
+            // stay byte-identical unless `'1h'` is explicitly configured.
+            cache_control: opts.anthropic?.prompt_cache_ttl === "1h" ? {
+              type: "ephemeral",
+              ttl: "1h"
+            } : { type: "ephemeral" }
+          }
+        ],
         messages: anthropicMessages,
         tools: anthropicTools
       },
@@ -64148,7 +64163,7 @@ var safeJSON2 = (text) => {
 };
 
 // node_modules/openai/internal/utils/sleep.mjs
-var sleep2 = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+var sleep2 = (ms) => new Promise((resolve8) => setTimeout(resolve8, ms));
 
 // node_modules/openai/version.mjs
 var VERSION2 = "6.49.0";
@@ -65259,8 +65274,8 @@ function addRequestID(value, response) {
 var _APIPromise_client;
 var APIPromise2 = class _APIPromise extends Promise {
   constructor(client, responsePromise, parseResponse2 = defaultParseResponse2) {
-    super((resolve3) => {
-      resolve3(null);
+    super((resolve8) => {
+      resolve8(null);
     });
     this.responsePromise = responsePromise;
     this.parseResponse = parseResponse2;
@@ -66157,12 +66172,12 @@ var EventStream = class {
     _EventStream_errored.set(this, false);
     _EventStream_aborted.set(this, false);
     _EventStream_catchingPromiseCreated.set(this, false);
-    __classPrivateFieldSet9(this, _EventStream_connectedPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet9(this, _EventStream_resolveConnectedPromise, resolve3, "f");
+    __classPrivateFieldSet9(this, _EventStream_connectedPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet9(this, _EventStream_resolveConnectedPromise, resolve8, "f");
       __classPrivateFieldSet9(this, _EventStream_rejectConnectedPromise, reject, "f");
     }), "f");
-    __classPrivateFieldSet9(this, _EventStream_endPromise, new Promise((resolve3, reject) => {
-      __classPrivateFieldSet9(this, _EventStream_resolveEndPromise, resolve3, "f");
+    __classPrivateFieldSet9(this, _EventStream_endPromise, new Promise((resolve8, reject) => {
+      __classPrivateFieldSet9(this, _EventStream_resolveEndPromise, resolve8, "f");
       __classPrivateFieldSet9(this, _EventStream_rejectEndPromise, reject, "f");
     }), "f");
     __classPrivateFieldGet10(this, _EventStream_connectedPromise, "f").catch(() => {
@@ -66262,11 +66277,11 @@ var EventStream = class {
    *   const message = await stream.emitted('message') // rejects if the stream errors
    */
   emitted(event) {
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve8, reject) => {
       __classPrivateFieldSet9(this, _EventStream_catchingPromiseCreated, true, "f");
       if (event !== "error")
         this.once("error", reject);
-      this.once(event, resolve3);
+      this.once(event, resolve8);
     });
   }
   /**
@@ -66349,8 +66364,8 @@ var EventStream = class {
         }
         if (ended)
           return Promise.resolve(doneResult());
-        return new Promise((resolve3, reject) => {
-          readQueue.push({ resolve: resolve3, reject });
+        return new Promise((resolve8, reject) => {
+          readQueue.push({ resolve: resolve8, reject });
         });
       },
       return: () => {
@@ -67441,7 +67456,7 @@ var ChatCompletionStream = class _ChatCompletionStream extends AbstractChatCompl
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
         }
         const chunk2 = pushQueue.shift();
         return { value: chunk2, done: false };
@@ -67623,7 +67638,7 @@ var ChatCompletionStreamingRunner = class _ChatCompletionStreamingRunner extends
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((event2) => event2 ? { value: event2, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((event2) => event2 ? { value: event2, done: false } : { value: void 0, done: true });
         }
         const event = pushQueue.shift();
         if (!event) {
@@ -70905,7 +70920,7 @@ var AssistantStream = class extends EventStream {
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((chunk3) => chunk3 ? { value: chunk3, done: false } : { value: void 0, done: true });
         }
         const chunk2 = pushQueue.shift();
         return { value: chunk2, done: false };
@@ -73282,7 +73297,7 @@ var ResponseStream = class _ResponseStream extends EventStream {
           if (done) {
             return { value: void 0, done: true };
           }
-          return new Promise((resolve3, reject) => readQueue.push({ resolve: resolve3, reject })).then((event2) => event2 ? { value: event2, done: false } : { value: void 0, done: true });
+          return new Promise((resolve8, reject) => readQueue.push({ resolve: resolve8, reject })).then((event2) => event2 ? { value: event2, done: false } : { value: void 0, done: true });
         }
         const event = pushQueue.shift();
         return { value: event, done: false };
@@ -75166,6 +75181,12 @@ function tool(name, description, inputSchema, handler2) {
 }
 
 // src/tools/types.ts
+function textResult(text, isError = false) {
+  return {
+    content: [{ type: "text", text }],
+    ...isError ? { isError: true } : {}
+  };
+}
 function jsonResult(value) {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
@@ -75299,7 +75320,7 @@ async function runGitGrep(opts) {
   if (opts.pathGlob) args.push(opts.pathGlob);
   for (const ex of opts.excludePaths ?? []) args.push(`:(exclude,literal)${ex}`);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const child2 = (0, import_node_child_process.spawn)("git", args, { cwd: opts.cwd });
     let stdout = "";
     let stderr = "";
@@ -75322,7 +75343,7 @@ async function runGitGrep(opts) {
         resolved = true;
         clearTimeout(timer);
         killChild(child2);
-        resolve3(parseGrepOutput(stdout, opts.maxResults));
+        resolve8(parseGrepOutput(stdout, opts.maxResults));
       }
     });
     child2.stderr.on("data", (b2) => {
@@ -75336,7 +75357,7 @@ async function runGitGrep(opts) {
         reject(new Error(`git grep exited ${code}: ${stderr.trim()}`));
         return;
       }
-      resolve3(parseGrepOutput(stdout, opts.maxResults));
+      resolve8(parseGrepOutput(stdout, opts.maxResults));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -75925,6 +75946,141 @@ function makeReadRepoContextFileTool(deps) {
   );
 }
 
+// src/references/search.ts
+var DEFAULT_SLICE_LINES = 400;
+var MAX_SLICE_BYTES = 24e3;
+function listReferenceCatalog(corpus) {
+  return corpus.docs.map((d2) => ({
+    id: d2.id,
+    title: d2.title,
+    kind: d2.kind,
+    placement: d2.placement,
+    byte_length: d2.byte_length,
+    headings: d2.headings
+  }));
+}
+function readReferenceSlice(corpus, opts) {
+  const doc = corpus.docs.find((d2) => d2.id === opts.id);
+  if (!doc) {
+    return {
+      ok: false,
+      error: `Reference document '${opts.id}' was not found.`,
+      available_ids: corpus.docs.map((d2) => d2.id)
+    };
+  }
+  const lines = doc.content.split("\n");
+  const totalLines = lines.length;
+  const start = Math.max(1, opts.start_line ?? 1);
+  if (start > totalLines) {
+    return {
+      ok: true,
+      id: doc.id,
+      title: doc.title,
+      source: doc.source,
+      kind: doc.kind,
+      total_lines: totalLines,
+      returned_range: [totalLines, totalLines],
+      truncated: false,
+      content: ""
+    };
+  }
+  const requestedEnd = opts.end_line ?? start + DEFAULT_SLICE_LINES - 1;
+  const hardEnd = Math.min(totalLines, Math.max(start, requestedEnd));
+  const kept = [];
+  let byteCount = 0;
+  let actualEnd = start - 1;
+  let truncated = hardEnd < totalLines;
+  for (let ln = start; ln <= hardEnd; ln++) {
+    const lineText = lines[ln - 1] ?? "";
+    const lineBytes = Buffer.byteLength(lineText, "utf-8") + (kept.length > 0 ? 1 : 0);
+    if (kept.length > 0 && byteCount + lineBytes > MAX_SLICE_BYTES) {
+      truncated = true;
+      break;
+    }
+    kept.push(lineText);
+    byteCount += lineBytes;
+    actualEnd = ln;
+  }
+  return {
+    ok: true,
+    id: doc.id,
+    title: doc.title,
+    source: doc.source,
+    kind: doc.kind,
+    total_lines: totalLines,
+    returned_range: [start, Math.max(start, actualEnd)],
+    truncated,
+    content: kept.join("\n")
+  };
+}
+function searchReferenceCorpus(corpus, query, maxMatches = 15) {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const hits = [];
+  for (const doc of corpus.docs) {
+    const lines = doc.content.split("\n");
+    for (let i2 = 0; i2 < lines.length; i2++) {
+      const line = lines[i2];
+      const lower = line.toLowerCase();
+      const matched = lower.includes(trimmed) || tokens.length > 1 && tokens.every((t2) => lower.includes(t2));
+      if (!matched) continue;
+      const clean = line.trim();
+      hits.push({
+        id: doc.id,
+        title: doc.title,
+        line: i2 + 1,
+        excerpt: clean.length <= 200 ? clean : `${clean.slice(0, 197)}...`
+      });
+      if (hits.length >= maxMatches) return hits;
+    }
+  }
+  return hits;
+}
+
+// src/tools/read-reference-doc.ts
+function makeReadReferenceDocTool(deps) {
+  return tool(
+    "read_reference_doc",
+    "Reads or searches configured team/org reference documentation and engineering standards. Call with `{ id }` (optionally `start_line`, `end_line`) to read an on-demand reference document from the catalog, `{ query }` to search across all reference docs, or `{}` to list all available document IDs.",
+    {
+      id: external_exports.string().min(1).optional().describe("Document ID from the reference docs catalog."),
+      query: external_exports.string().min(1).optional().describe("Case-insensitive keyword or phrase to search across all reference docs."),
+      start_line: external_exports.number().int().positive().optional().describe("1-based starting line."),
+      end_line: external_exports.number().int().positive().optional().describe("1-based inclusive end line.")
+    },
+    async (args) => {
+      const corpus = deps.references;
+      if (!corpus || corpus.docs.length === 0) {
+        return textResult("No reference documentation is loaded for this review.", true);
+      }
+      if (args.id) {
+        const res = readReferenceSlice(corpus, {
+          id: args.id,
+          ...args.start_line !== void 0 ? { start_line: args.start_line } : {},
+          ...args.end_line !== void 0 ? { end_line: args.end_line } : {}
+        });
+        if (!res.ok) {
+          return textResult(`${res.error} Available IDs: ${res.available_ids.join(", ")}`, true);
+        }
+        return jsonResult(res);
+      }
+      if (args.query) {
+        const matches = searchReferenceCorpus(corpus, args.query);
+        return jsonResult({
+          query: args.query,
+          match_count: matches.length,
+          matches
+        });
+      }
+      return jsonResult({
+        total_docs: corpus.docs.length,
+        docs: listReferenceCatalog(corpus)
+      });
+    }
+  );
+}
+
 // src/ocr/recognize.ts
 var import_node_path = __toESM(require("node:path"), 1);
 var import_node_fs2 = require("node:fs");
@@ -76011,7 +76167,7 @@ function createTesseractEngine(options = {}) {
 function recognizeWithLimit(engine, image, limit2 = {}) {
   const { timeoutMs, signal } = limit2;
   if (timeoutMs === void 0 && signal === void 0) return engine.recognize(image);
-  return new Promise((resolve3) => {
+  return new Promise((resolve8) => {
     let settled = false;
     let timer;
     const finish = (result) => {
@@ -76019,7 +76175,7 @@ function recognizeWithLimit(engine, image, limit2 = {}) {
       settled = true;
       if (timer !== void 0) clearTimeout(timer);
       if (signal !== void 0) signal.removeEventListener("abort", onAbort);
-      resolve3(result);
+      resolve8(result);
     };
     const onAbort = () => {
       void engine.terminate();
@@ -76374,7 +76530,7 @@ function renderUserPrompt(args) {
 async function runGitGrep2(pattern, cwd, pathGlob) {
   const args = ["grep", "-n", "-E", "--no-color", "--", pattern];
   if (pathGlob !== void 0) args.push(pathGlob);
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const child2 = (0, import_node_child_process2.spawn)("git", args, { cwd });
     let stdout = "";
     let stderr = "";
@@ -76404,7 +76560,7 @@ async function runGitGrep2(pattern, cwd, pathGlob) {
         return;
       }
       const matches = parseGrepOutput2(stdout);
-      resolve3(matches.slice(0, GREP_RESULT_CAP));
+      resolve8(matches.slice(0, GREP_RESULT_CAP));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -76789,6 +76945,7 @@ async function runAgent(input2) {
         // JSDoc for the recall/cost history. The OpenAI adapter drops the
         // field automatically for o-series reasoning models that reject it.
         temperature,
+        ...input2.anthropic !== void 0 ? { anthropic: input2.anthropic } : {},
         ...input2.openai !== void 0 ? { openai: input2.openai } : {},
         ...input2.abortController ? { abortSignal: input2.abortController.signal } : {}
       });
@@ -76927,6 +77084,7 @@ function buildToolDefinitions(deps) {
     makePostInlineCommentTool(deps),
     makePostSummaryTool(deps),
     makeSkipFileTool(deps),
+    ...deps.references && deps.references.docs.length > 0 ? [makeReadReferenceDocTool(deps)] : [],
     ...deps.config.image_understanding.enabled ? [makeDescribeImageAtRefTool(deps)] : [],
     ...deps.worker !== void 0 ? [makeWorkerCheckUsageClaimTool(deps)] : []
   ];
@@ -77204,6 +77362,706 @@ function extractGoSymbols(line) {
   return [];
 }
 
+// src/architecture/presets.ts
+var import_yaml = __toESM(require_dist(), 1);
+
+// src/architecture/glob.ts
+var regexCache2 = /* @__PURE__ */ new Map();
+function normalizePath(filePath) {
+  return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+function escapeRegexChar2(ch) {
+  return /[\\^$+?.()|{}[\]]/.test(ch) ? `\\${ch}` : ch;
+}
+function compileGlobBody(pattern) {
+  let out = "";
+  for (let i2 = 0; i2 < pattern.length; i2++) {
+    const ch = pattern[i2];
+    if (ch === "{") {
+      const close = pattern.indexOf("}", i2 + 1);
+      if (close !== -1) {
+        const inner = pattern.slice(i2 + 1, close);
+        const parts = inner.split(",").map((p2) => compileGlobBody(p2));
+        out += `(?:${parts.join("|")})`;
+        i2 = close;
+        continue;
+      }
+    }
+    if (ch === "*") {
+      const next = pattern[i2 + 1];
+      if (next === "*") {
+        const after = pattern[i2 + 2];
+        if (after === "/") {
+          out += "(?:.*/)?";
+          i2 += 2;
+        } else {
+          out += ".*";
+          i2 += 1;
+        }
+      } else {
+        out += "[^/]*";
+      }
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      continue;
+    }
+    out += escapeRegexChar2(ch);
+  }
+  return out;
+}
+function globToRegExp2(pattern) {
+  const norm = normalizePath(pattern);
+  const cached2 = regexCache2.get(norm);
+  if (cached2) return cached2;
+  const re2 = new RegExp(`^${compileGlobBody(norm)}$`);
+  regexCache2.set(norm, re2);
+  return re2;
+}
+function matchesGlob(filePath, pattern) {
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return globToRegExp2(pattern).test(norm);
+}
+function matchesAnyGlob(filePath, patterns) {
+  if (patterns.length === 0) return false;
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return patterns.some((p2) => globToRegExp2(p2).test(norm));
+}
+function globSpecificity(pattern) {
+  const norm = normalizePath(pattern);
+  const segments = norm.split("/").filter(Boolean);
+  let literalSegments = 0;
+  let wildcardSegments = 0;
+  for (const seg of segments) {
+    if (seg === "**") continue;
+    if (seg.includes("*") || seg.includes("?") || seg.includes("{")) {
+      wildcardSegments += 1;
+    } else {
+      literalSegments += 1;
+    }
+  }
+  const literalChars = norm.replace(/[*?{}/,]/g, "").length;
+  return literalSegments * 100 + wildcardSegments * 10 + literalChars;
+}
+var contextRegexCache = /* @__PURE__ */ new Map();
+function buildContextRegex(pattern) {
+  let norm = normalizePath(pattern);
+  if (norm.endsWith("/**")) {
+    norm = norm.slice(0, -3);
+  }
+  const cached2 = contextRegexCache.get(norm);
+  if (cached2 !== void 0) return cached2;
+  const segments = norm.split("/").filter(Boolean);
+  const starIdx = segments.indexOf("*");
+  if (starIdx === -1) {
+    contextRegexCache.set(norm, null);
+    return null;
+  }
+  const prefixSegments = segments.slice(0, starIdx);
+  const suffixSegments = segments.slice(starIdx + 1);
+  const compileSegmentPrefix = (segs) => {
+    if (segs.length === 0) return "";
+    const parts = segs.map((s2) => s2 === "**" ? "(?:.*?/)?" : `${compileGlobBody(s2)}/`);
+    return parts.join("");
+  };
+  const prefixBody = compileSegmentPrefix(prefixSegments);
+  const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
+  const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
+  contextRegexCache.set(norm, re2);
+  return re2;
+}
+function extractContext(filePath, pattern) {
+  const norm = normalizePath(filePath);
+  if (!norm) return null;
+  const re2 = buildContextRegex(pattern);
+  if (!re2) return null;
+  const m2 = norm.match(re2);
+  if (!m2 || !m2[1] || !m2[2]) return null;
+  return {
+    contextRoot: m2[1],
+    context: m2[2],
+    relativePath: m2[3] ?? ""
+  };
+}
+var TEST_FILE_PATTERNS = [
+  /(?:^|\/)(?:__tests__|tests?|spec|specs)\//i,
+  /\.(?:test|spec)\.[^/]+$/i,
+  /_test\.(?:go|py|rs|dart)$/i,
+  /(?:^|\/)test_[^/]+\.py$/i,
+  /(?:Test|Tests|Spec)\.(?:java|kt|kts|cs)$/
+];
+function isTestFile(filePath) {
+  const norm = normalizePath(filePath);
+  return TEST_FILE_PATTERNS.some((re2) => re2.test(norm));
+}
+
+// src/architecture/presets.ts
+var DEFAULT_DOMAIN_FORBIDDEN_PACKAGES = [
+  // TypeScript / JavaScript
+  "express",
+  "fastify",
+  "koa",
+  "hono",
+  "@nestjs/*",
+  "prisma",
+  "@prisma/client",
+  "typeorm",
+  "drizzle-orm",
+  "sequelize",
+  "mongoose",
+  "knex",
+  "pg",
+  "mysql2",
+  "ioredis",
+  "redis",
+  "axios",
+  "node-fetch",
+  "aws-sdk",
+  "@aws-sdk/*",
+  // Python
+  "fastapi",
+  "flask",
+  "django",
+  "starlette",
+  "sqlalchemy",
+  "psycopg2",
+  "pymongo",
+  "requests",
+  "httpx",
+  "aiohttp",
+  "boto3",
+  // Go
+  "net/http",
+  "database/sql",
+  "github.com/gin-gonic/gin",
+  "github.com/labstack/echo*",
+  "github.com/gofiber/fiber*",
+  "gorm.io/gorm",
+  "github.com/jackc/pgx*",
+  // Dart / Flutter
+  "http",
+  "dio",
+  "sqflite",
+  "drift",
+  "cloud_firestore",
+  "firebase_*",
+  // Rust
+  "sqlx",
+  "diesel",
+  "sea_orm",
+  "axum",
+  "actix_web",
+  "rocket",
+  "reqwest",
+  // Java / Kotlin
+  "org.springframework.*",
+  "jakarta.persistence.*",
+  "javax.persistence.*",
+  "org.hibernate.*",
+  "java.sql.*",
+  "io.ktor.*",
+  // C# / .NET
+  "Microsoft.EntityFrameworkCore*",
+  "Microsoft.AspNetCore*",
+  "System.Data.SqlClient*",
+  "Dapper"
+];
+function scopeGlobsToRoot(globs, root) {
+  if (!root) return [...globs];
+  const cleanRoot = normalizePath(root);
+  if (!cleanRoot) return [...globs];
+  const scoped = [];
+  for (const g2 of globs) {
+    const norm = normalizePath(g2);
+    if (norm.startsWith("**/")) {
+      const rest = norm.slice(3);
+      scoped.push(`${cleanRoot}/${rest}`, `${cleanRoot}/**/${rest}`);
+    } else if (norm === cleanRoot || norm.startsWith(`${cleanRoot}/`)) {
+      scoped.push(norm);
+    } else {
+      scoped.push(`${cleanRoot}/${norm}`);
+    }
+  }
+  return scoped;
+}
+function buildPreset(id, root) {
+  const cleanRoot = root ? normalizePath(root) : void 0;
+  switch (id) {
+    case "hexagonal":
+      return {
+        id: "hexagonal",
+        name: "Hexagonal Architecture (Ports & Adapters)",
+        summary: "Isolates pure domain and application core behind explicit ports; inbound and outbound adapters depend inward on ports/domain and never on each other.",
+        layers: {
+          domain: {
+            description: "Pure business entities, value objects, domain services, and invariants.",
+            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
+            can_import: ["domain", "ports"],
+            cannot_import: ["application", "adapters_in", "adapters_out", "adapters"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          ports: {
+            description: "Inbound and outbound interfaces owned by the core.",
+            paths: scopeGlobsToRoot(["**/ports/**", "**/application/ports/**"], cleanRoot),
+            can_import: ["ports", "domain"],
+            cannot_import: ["adapters_in", "adapters_out", "adapters"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          application: {
+            description: "Use-case orchestrators coordinating domain objects through ports.",
+            paths: scopeGlobsToRoot(
+              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
+              cleanRoot
+            ),
+            can_import: ["application", "domain", "ports"],
+            cannot_import: ["adapters_in", "adapters_out", "adapters"]
+          },
+          adapters_in: {
+            description: "Driving/inbound adapters (HTTP handlers, CLI commands, message consumers).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/adapters/in/**",
+                "**/adapters/inbound/**",
+                "**/adapters/driving/**",
+                "**/adapters/primary/**",
+                "**/driving/**",
+                "**/inbound/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["adapters_in", "ports", "application", "domain"],
+            cannot_import: ["adapters_out"]
+          },
+          adapters_out: {
+            description: "Driven/outbound adapters (DB repositories, HTTP clients, queues).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/adapters/out/**",
+                "**/adapters/outbound/**",
+                "**/adapters/driven/**",
+                "**/adapters/secondary/**",
+                "**/driven/**",
+                "**/outbound/**",
+                "**/infrastructure/**",
+                "**/infra/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["adapters_out", "ports", "domain"],
+            cannot_import: ["adapters_in", "application"]
+          },
+          adapters: {
+            description: "General adapter implementations when not split into inbound/outbound.",
+            paths: scopeGlobsToRoot(["**/adapters/**"], cleanRoot),
+            can_import: ["adapters", "ports", "application", "domain"]
+          }
+        },
+        principles: [
+          "Keep business rules and domain state transitions inside `domain` and `application`, never in `adapters_in` controllers or `adapters_out` repositories.",
+          "Ports belong to the core and must express signatures using domain entities, value objects, and domain errors \u2014 never framework/ORM/HTTP types.",
+          "Inbound adapters should only parse/validate transport inputs, invoke an application use case or inbound port, and map the response.",
+          "Outbound adapters must implement core port interfaces and translate persistence/network models at the boundary without leaking DB entities upward.",
+          "Concrete adapter wiring and dependency injection belong only in the composition root (`main`, bootstrap, DI container)."
+        ]
+      };
+    case "ddd":
+      return {
+        id: "ddd",
+        name: "Domain-Driven Design (DDD)",
+        summary: "Separates tactical layers (domain, application, infrastructure, interfaces) and enforces bounded-context encapsulation through explicit public APIs.",
+        layers: {
+          domain: {
+            description: "Aggregates, entities, value objects, domain events, and repository interfaces.",
+            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
+            can_import: ["domain", "shared"],
+            cannot_import: ["application", "infrastructure", "interfaces"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          application: {
+            description: "Application services, command/query handlers, transaction boundaries.",
+            paths: scopeGlobsToRoot(
+              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
+              cleanRoot
+            ),
+            can_import: ["application", "domain", "shared"],
+            cannot_import: ["infrastructure", "interfaces"]
+          },
+          infrastructure: {
+            description: "Persistence implementations, event buses, external integrations.",
+            paths: scopeGlobsToRoot(
+              ["**/infrastructure/**", "**/infra/**", "**/persistence/**"],
+              cleanRoot
+            ),
+            can_import: ["infrastructure", "domain", "application", "shared"],
+            cannot_import: ["interfaces"]
+          },
+          interfaces: {
+            description: "Delivery mechanisms (HTTP/GraphQL/gRPC/CLI/UI entry points).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/interfaces/**",
+                "**/presentation/**",
+                "**/controllers/**",
+                "**/http/**",
+                "**/ui/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["interfaces", "application", "domain", "shared"],
+            cannot_import: ["infrastructure"]
+          },
+          shared: {
+            description: "Shared kernel primitives and cross-context value types.",
+            paths: scopeGlobsToRoot(
+              ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
+              cleanRoot
+            ),
+            can_import: ["shared"],
+            cannot_import: ["domain", "application", "infrastructure", "interfaces"]
+          }
+        },
+        contexts: {
+          pattern: cleanRoot ? `${cleanRoot}/contexts/*` : "**/contexts/*",
+          public_api: ["index.*", "public/**", "contracts/**", "api/**"],
+          shared: scopeGlobsToRoot(
+            ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
+            cleanRoot
+          ),
+          allow_public_api_imports: true
+        },
+        principles: [
+          "Enforce aggregate root invariants inside aggregate methods rather than allowing external services to mutate internal entities directly (avoid anemic domain models).",
+          "Model domain concepts as immutable, self-validating Value Objects instead of primitive obsession where domain constraints apply.",
+          "Bounded contexts must communicate only via explicit public APIs/contracts or domain events; use Anti-Corruption Layers when translating foreign models.",
+          "Repositories should load and persist whole aggregates using domain language rather than exposing raw ORM query builders to callers.",
+          "Maintain ubiquitous language consistently across types, methods, events, and modules within each bounded context."
+        ]
+      };
+    case "clean":
+      return {
+        id: "clean",
+        name: "Clean Architecture",
+        summary: "Enforces the concentric Dependency Rule: source dependencies may point only inward from frameworks -> interface adapters -> use cases -> entities.",
+        layers: {
+          entities: {
+            description: "Enterprise-wide business rules and core entities.",
+            paths: scopeGlobsToRoot(["**/entities/**", "**/domain/**"], cleanRoot),
+            can_import: ["entities"],
+            cannot_import: ["use_cases", "interface_adapters", "frameworks"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          use_cases: {
+            description: "Application-specific business rules and interactors.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/use-cases/**",
+                "**/use_cases/**",
+                "**/usecases/**",
+                "**/application/**",
+                "**/interactors/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["use_cases", "entities"],
+            cannot_import: ["interface_adapters", "frameworks"]
+          },
+          interface_adapters: {
+            description: "Controllers, presenters, gateways, and view models.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/interface-adapters/**",
+                "**/adapters/**",
+                "**/controllers/**",
+                "**/presenters/**",
+                "**/gateways/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["interface_adapters", "use_cases", "entities"],
+            cannot_import: ["frameworks"]
+          },
+          frameworks: {
+            description: "Web frameworks, database drivers, external devices.",
+            paths: scopeGlobsToRoot(
+              ["**/frameworks/**", "**/drivers/**", "**/infrastructure/**", "**/infra/**"],
+              cleanRoot
+            ),
+            can_import: ["frameworks", "interface_adapters", "use_cases", "entities"]
+          }
+        },
+        principles: [
+          "Follow the Dependency Rule strictly: inner circles (`entities`, `use_cases`) must have zero knowledge of outer circles (`interface_adapters`, `frameworks`).",
+          "Keep enterprise rules in `entities` separate from application orchestration in `use_cases`.",
+          "Boundary input/output DTOs must be defined and owned by the inner layer (`use_cases`), not by web frameworks or ORM models."
+        ]
+      };
+    case "layered":
+      return {
+        id: "layered",
+        name: "Classic Layered (N-Tier) Architecture",
+        summary: "Separates presentation -> service -> data -> model layers so requests flow downward without presentation bypassing services to touch persistence.",
+        layers: {
+          presentation: {
+            description: "HTTP routes, controllers, views, and UI components.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/presentation/**",
+                "**/controllers/**",
+                "**/routes/**",
+                "**/views/**",
+                "**/api/**",
+                "**/ui/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["presentation", "service", "model", "shared"],
+            cannot_import: ["data"]
+          },
+          service: {
+            description: "Business services and domain logic.",
+            paths: scopeGlobsToRoot(
+              ["**/services/**", "**/service/**", "**/business/**", "**/domain/**"],
+              cleanRoot
+            ),
+            can_import: ["service", "data", "model", "shared"],
+            cannot_import: ["presentation"]
+          },
+          data: {
+            description: "Repositories, DAOs, and persistence queries.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/data/**",
+                "**/repositories/**",
+                "**/repository/**",
+                "**/dal/**",
+                "**/persistence/**",
+                "**/db/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["data", "model", "shared"],
+            cannot_import: ["presentation", "service"]
+          },
+          model: {
+            description: "Shared domain models, DTOs, and schemas.",
+            paths: scopeGlobsToRoot(
+              ["**/models/**", "**/model/**", "**/types/**", "**/schemas/**"],
+              cleanRoot
+            ),
+            can_import: ["model", "shared"],
+            cannot_import: ["presentation", "service", "data"]
+          },
+          shared: {
+            description: "Cross-cutting utilities.",
+            paths: scopeGlobsToRoot(
+              ["**/shared/**", "**/common/**", "**/utils/**", "**/util/**"],
+              cleanRoot
+            ),
+            can_import: ["shared"],
+            cannot_import: ["presentation", "service", "data"]
+          }
+        },
+        principles: [
+          "Keep `presentation` handlers thin: no direct SQL/ORM queries or multi-step business logic inside controllers or route handlers.",
+          "Keep `data` repositories focused on persistence mechanics without embedding authorization or pricing/business rules.",
+          "Never introduce upward dependencies from lower layers (`data`, `service`) back into `presentation`."
+        ]
+      };
+    case "modular-monolith":
+      return {
+        id: "modular-monolith",
+        name: "Modular Monolith",
+        summary: "Enforces strong module boundaries where feature modules interact exclusively through declared public entrypoints or a lean shared kernel.",
+        layers: {
+          shared: {
+            description: "Shared kernel primitives with zero upward dependencies on feature modules.",
+            paths: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
+            can_import: ["shared"]
+          }
+        },
+        contexts: {
+          pattern: cleanRoot ? `${cleanRoot}/modules/*` : "**/modules/*",
+          public_api: ["index.*", "public/**", "api/**", "contracts/**"],
+          shared: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
+          allow_public_api_imports: true
+        },
+        principles: [
+          "Feature modules must expose a clean public facade (`index`, `public/`, or `contracts/`) and never leak internal repositories, tables, or private helpers.",
+          "Keep the `shared` kernel minimal \u2014 avoid turning `shared` into a dumping ground that hides cross-module coupling.",
+          "Avoid circular module dependencies; prefer event-driven decoupling or an explicit orchestration module when cycles emerge."
+        ]
+      };
+    case "custom":
+      return {
+        id: "custom",
+        name: "Custom Architecture",
+        summary: "User-defined layers, bounded contexts, import rules, and semantic principles.",
+        layers: {},
+        principles: []
+      };
+  }
+}
+function mergeLayerOverride(base, override) {
+  const paths = override.paths ?? base?.paths;
+  if (!paths || paths.length === 0) {
+    return null;
+  }
+  return {
+    paths: [...paths],
+    ...override.description !== void 0 ? { description: override.description } : base?.description !== void 0 ? { description: base.description } : {},
+    ...override.can_import !== void 0 ? { can_import: [...override.can_import] } : base?.can_import !== void 0 ? { can_import: [...base.can_import] } : {},
+    ...override.cannot_import !== void 0 ? { cannot_import: [...override.cannot_import] } : base?.cannot_import !== void 0 ? { cannot_import: [...base.cannot_import] } : {},
+    ...override.forbid_packages !== void 0 ? { forbid_packages: [...override.forbid_packages] } : base?.forbid_packages !== void 0 ? { forbid_packages: [...base.forbid_packages] } : {},
+    ...override.allow_packages !== void 0 ? { allow_packages: [...override.allow_packages] } : base?.allow_packages !== void 0 ? { allow_packages: [...base.allow_packages] } : {},
+    ...override.severity !== void 0 ? { severity: override.severity } : base?.severity !== void 0 ? { severity: base.severity } : {}
+  };
+}
+function resolveArchitectureSpec(config2) {
+  const hasCustomStructure = config2.layers !== void 0 && Object.keys(config2.layers).length > 0 || config2.contexts !== void 0 || config2.rules !== void 0 && config2.rules.length > 0;
+  const presetId = config2.preset ?? (hasCustomStructure ? "custom" : "hexagonal");
+  const preset = buildPreset(presetId, config2.root);
+  const layers = {};
+  for (const [name, def] of Object.entries(preset.layers)) {
+    const override = config2.layers?.[name];
+    const merged = override ? mergeLayerOverride(def, override) : { ...def, paths: [...def.paths] };
+    if (merged) layers[name] = merged;
+  }
+  if (config2.layers) {
+    for (const [name, override] of Object.entries(config2.layers)) {
+      if (layers[name]) continue;
+      const added = mergeLayerOverride(void 0, override);
+      if (added) layers[name] = added;
+    }
+  }
+  const contexts = config2.contexts ?? preset.contexts;
+  const includePresetPrinciples = config2.include_preset_principles !== false;
+  const principles = [
+    ...includePresetPrinciples ? preset.principles : [],
+    ...config2.principles ?? []
+  ];
+  const rules = (config2.rules ?? []).filter(
+    (r2) => r2.forbid_imports !== void 0 && r2.forbid_imports.length > 0 || r2.forbid_packages !== void 0 && r2.forbid_packages.length > 0
+  );
+  return {
+    enabled: config2.enabled,
+    preset: presetId,
+    ...config2.root !== void 0 ? { root: normalizePath(config2.root) } : {},
+    severity: config2.severity,
+    layers,
+    ...contexts !== void 0 ? { contexts } : {},
+    rules,
+    principles,
+    llm_enforcement: config2.llm_enforcement,
+    deterministic_enforcement: config2.deterministic_enforcement,
+    exclude: [...config2.exclude ?? []],
+    ignore_tests: config2.ignore_tests,
+    ...config2.baseline_file !== void 0 ? { baseline_file: config2.baseline_file } : {}
+  };
+}
+
+// src/architecture/prompt.ts
+function renderArchitecturePrompt(spec) {
+  if (!spec.enabled || !spec.llm_enforcement) return null;
+  const layerEntries = Object.entries(spec.layers);
+  const hasContent = layerEntries.length > 0 || spec.contexts !== void 0 || spec.rules.length > 0 || spec.principles.length > 0;
+  if (!hasContent) return null;
+  const lines = [
+    "### Software architecture standards",
+    "",
+    `This repository enforces **${spec.preset}** architecture standards` + (spec.root ? ` (scoped under \`${spec.root}\`)` : "") + `. Default violation severity: \`${spec.severity}\`.`
+  ];
+  if (spec.deterministic_enforcement) {
+    lines.push(
+      "",
+      "A deterministic architecture scanner runs in parallel for direct import, layer-dependency, bounded-context, and forbidden-package violations. Do NOT duplicate straightforward import-path violations; focus your judgment on **semantic** architecture concerns that static import rules cannot verify (e.g., business logic leaking into controllers/repositories, anemic domain models, domain types exposing persistence/HTTP concepts, boundary DTO leakage, or subtle coupling)."
+    );
+  }
+  if (layerEntries.length > 0) {
+    lines.push(
+      "",
+      "| Layer | Paths | Allowed layer imports | Forbidden imports / packages |",
+      "|---|---|---|---|"
+    );
+    for (const [name, def] of layerEntries) {
+      const pathsText = def.paths.slice(0, 3).map((p2) => `\`${p2}\``).join(", ") + (def.paths.length > 3 ? ` (+${def.paths.length - 3})` : "");
+      const allowed = def.can_import && def.can_import.length > 0 ? def.can_import.join(", ") : "\u2014";
+      const forbiddenParts = [];
+      if (def.cannot_import?.length) forbiddenParts.push(`layers: ${def.cannot_import.join(", ")}`);
+      if (def.forbid_packages?.length) {
+        forbiddenParts.push(
+          `packages: ${def.forbid_packages.slice(0, 5).join(", ")}` + (def.forbid_packages.length > 5 ? ` (+${def.forbid_packages.length - 5})` : "")
+        );
+      }
+      if (def.allow_packages !== void 0) {
+        forbiddenParts.push(`allow_packages only (${def.allow_packages.length})`);
+      }
+      const forbidden = forbiddenParts.length > 0 ? forbiddenParts.join("; ") : "\u2014";
+      lines.push(`| \`${name}\` | ${pathsText} | ${allowed} | ${forbidden} |`);
+    }
+  }
+  if (spec.contexts) {
+    lines.push("");
+    const pub = (spec.contexts.public_api ?? ["index.*", "public/**", "contracts/**", "api/**"]).map((p2) => `\`${p2}\``).join(", ");
+    lines.push(
+      `**Bounded contexts / modules (\`${spec.contexts.pattern}\`):** cross-context imports ` + (spec.contexts.allow_public_api_imports === false ? "are disabled (use shared kernel or events)." : `must target public API (${pub})${spec.contexts.shared?.length ? ` or shared paths (${spec.contexts.shared.map((s2) => `\`${s2}\``).join(", ")})` : ""}.`)
+    );
+    if (spec.contexts.allow_dependencies) {
+      const deps = Object.entries(spec.contexts.allow_dependencies).map(([ctx, targets]) => `\`${ctx}\` -> [${targets.join(", ")}]`).join("; ");
+      if (deps) lines.push(`Allowed context dependencies: ${deps}.`);
+    }
+  }
+  if (spec.rules.length > 0) {
+    lines.push("", "**Custom architecture rules:**");
+    for (const rule of spec.rules) {
+      lines.push(`- \`${rule.id}\`: ${rule.reason}`);
+    }
+  }
+  if (spec.principles.length > 0) {
+    lines.push("", "**Semantic architecture principles to enforce:**");
+    for (const principle of spec.principles) {
+      lines.push(`- ${principle}`);
+    }
+  }
+  lines.push(
+    "",
+    'When reporting an architecture violation via `post_inline_comment`, use `category: "architecture"`, verify the full file and related boundaries with `read_file_at_ref` first, explain the concrete decoupling impact in `why_it_matters`, and include a concrete `suggestion` for Critical/Important findings.'
+  );
+  return lines.join("\n");
+}
+
+// src/references/prompt.ts
+function renderReferencesPrompt(corpus) {
+  if (corpus.docs.length === 0) return null;
+  const lines = [
+    "### Reference documentation & standards",
+    "",
+    "Follow these authoritative team/organization standards when reviewing changes. Cite the relevant standard by title or document ID when flagging a violation."
+  ];
+  for (const doc of corpus.inline_docs) {
+    lines.push("", `#### ${doc.title} (\`${doc.id}\`)`, "", doc.content);
+  }
+  if (corpus.on_demand_docs.length > 0) {
+    lines.push(
+      "",
+      "#### Additional reference docs (on-demand via `read_reference_doc`)",
+      "",
+      "These documents exceeded the inline prompt budget or are marked on-demand. Whenever a change touches their domain, call `read_reference_doc({ id })` or `read_reference_doc({ query })` to verify compliance:",
+      "",
+      "| ID | Title | Size | Key sections |",
+      "|---|---|---|---|"
+    );
+    for (const doc of corpus.on_demand_docs) {
+      const sizeKb = `${Math.max(1, Math.round(doc.byte_length / 1024))} KB`;
+      const sections = doc.headings.length > 0 ? doc.headings.slice(0, 4).join(", ") : "\u2014";
+      lines.push(`| \`${doc.id}\` | ${doc.title} | ${sizeKb} | ${sections} |`);
+    }
+  }
+  return lines.join("\n");
+}
+
 // src/agent/system-prompt.ts
 function buildSystemPrompt(input2) {
   const sections = [BASE_PROMPT];
@@ -77212,9 +78070,18 @@ function buildSystemPrompt(input2) {
   if (input2.config.security.enabled && input2.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
+  const archSpec = input2.architecture ?? (input2.config.architecture.enabled ? resolveArchitectureSpec(input2.config.architecture) : void 0);
+  if (archSpec) {
+    const archSection = renderArchitecturePrompt(archSpec);
+    if (archSection) sections.push(archSection);
+  }
   if (input2.config.prompt.additions && input2.config.prompt.additions.trim().length > 0) {
     sections.push("### Repo-specific instructions");
     sections.push(input2.config.prompt.additions.trim());
+  }
+  if (input2.references) {
+    const refsSection = renderReferencesPrompt(input2.references);
+    if (refsSection) sections.push(refsSection);
   }
   const context = buildContextBlock(
     input2.repoName,
@@ -77534,7 +78401,7 @@ function renderBlastRadius(map2, maxBytes = MAX_BLAST_RADIUS_BYTES) {
 }
 
 // src/config/loader.ts
-var import_yaml = __toESM(require_dist(), 1);
+var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/config/defaults.ts
 var DEFAULT_CONFIG = {
@@ -77660,6 +78527,35 @@ var DEFAULT_CONFIG = {
   image_understanding: {
     enabled: false
   },
+  // Software architecture standards enforcement. Off by default; opt in via
+  // `architecture.enabled: true` and a preset (`hexagonal`, `ddd`, `clean`,
+  // `layered`, `modular-monolith`, `custom`) or external `.vor/architecture.yml`.
+  architecture: {
+    enabled: false,
+    severity: "important",
+    llm_enforcement: true,
+    deterministic_enforcement: true,
+    ignore_tests: true
+  },
+  // Reference documentation & engineering standards reading + two-layer cache.
+  // Off by default; opt in via `references.enabled: true` and `references.sources`.
+  references: {
+    enabled: false,
+    sources: [],
+    max_inline_bytes: 8e4,
+    max_doc_bytes: 1e5,
+    max_docs: 100,
+    cache: {
+      enabled: true,
+      ttl_seconds: 86400,
+      stale_on_error: true
+    },
+    prompt_cache: {
+      enabled: true,
+      anthropic_ttl: "5m",
+      auto_openai_cache_key: true
+    }
+  },
   experimental: {
     worker_delegation: {
       enabled: false,
@@ -77765,6 +78661,87 @@ var openaiProviderConfigSchema = external_exports.object({
 var providerConfigSchema = external_exports.object({
   openai: openaiProviderConfigSchema
 }).strict();
+var architecturePresetSchema = external_exports.enum([
+  "hexagonal",
+  "ddd",
+  "clean",
+  "layered",
+  "modular-monolith",
+  "custom"
+]);
+var architectureLayerOverrideSchema = external_exports.object({
+  paths: external_exports.array(external_exports.string().min(1)).optional(),
+  description: external_exports.string().optional(),
+  can_import: external_exports.array(external_exports.string().min(1)).optional(),
+  cannot_import: external_exports.array(external_exports.string().min(1)).optional(),
+  forbid_packages: external_exports.array(external_exports.string().min(1)).optional(),
+  allow_packages: external_exports.array(external_exports.string().min(1)).optional(),
+  severity: severitySchema2.optional()
+}).strict();
+var architectureContextsSchema = external_exports.object({
+  pattern: external_exports.string().min(1),
+  public_api: external_exports.array(external_exports.string().min(1)).optional(),
+  shared: external_exports.array(external_exports.string().min(1)).optional(),
+  allow_public_api_imports: external_exports.boolean().optional(),
+  allow_dependencies: external_exports.record(external_exports.string().min(1), external_exports.array(external_exports.string().min(1))).optional(),
+  severity: severitySchema2.optional()
+}).strict();
+var architectureCustomRuleSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  from: external_exports.union([external_exports.string().min(1), external_exports.array(external_exports.string().min(1)).min(1)]),
+  forbid_imports: external_exports.array(external_exports.string().min(1)).optional(),
+  forbid_packages: external_exports.array(external_exports.string().min(1)).optional(),
+  severity: severitySchema2.optional(),
+  reason: external_exports.string().min(1)
+}).strict();
+var architectureSchema = external_exports.object({
+  enabled: external_exports.boolean(),
+  file: external_exports.string().min(1).optional(),
+  preset: architecturePresetSchema.optional(),
+  root: external_exports.string().min(1).optional(),
+  severity: severitySchema2,
+  layers: external_exports.record(external_exports.string().min(1), architectureLayerOverrideSchema).optional(),
+  contexts: architectureContextsSchema.optional(),
+  rules: external_exports.array(architectureCustomRuleSchema).optional(),
+  principles: external_exports.array(external_exports.string().min(1)).optional(),
+  include_preset_principles: external_exports.boolean().optional(),
+  llm_enforcement: external_exports.boolean(),
+  deterministic_enforcement: external_exports.boolean(),
+  exclude: external_exports.array(external_exports.string().min(1)).optional(),
+  ignore_tests: external_exports.boolean(),
+  baseline_file: external_exports.string().min(1).optional()
+}).strict();
+var architectureExternalFileSchema = architectureSchema.omit({ file: true }).partial().strict();
+var referenceModeSchema = external_exports.enum(["auto", "inline", "on_demand"]);
+var referenceSourceObjectSchema = external_exports.object({
+  id: external_exports.string().min(1).optional(),
+  title: external_exports.string().min(1).optional(),
+  path: external_exports.string().min(1).optional(),
+  glob: external_exports.string().min(1).optional(),
+  url: external_exports.string().url().optional(),
+  github: external_exports.string().min(1).optional(),
+  mode: referenceModeSchema.optional(),
+  ttl_seconds: external_exports.number().int().nonnegative().optional()
+}).strict();
+var referenceSourceSchema = external_exports.union([external_exports.string().min(1), referenceSourceObjectSchema]);
+var referencesSchema = external_exports.object({
+  enabled: external_exports.boolean(),
+  sources: external_exports.array(referenceSourceSchema),
+  max_inline_bytes: external_exports.number().int().positive().max(2e6),
+  max_doc_bytes: external_exports.number().int().positive().max(1e6),
+  max_docs: external_exports.number().int().positive().max(500),
+  cache: external_exports.object({
+    enabled: external_exports.boolean(),
+    dir: external_exports.string().min(1).optional(),
+    ttl_seconds: external_exports.number().int().nonnegative(),
+    stale_on_error: external_exports.boolean()
+  }).strict(),
+  prompt_cache: external_exports.object({
+    enabled: external_exports.boolean(),
+    anthropic_ttl: external_exports.enum(["5m", "1h"]),
+    auto_openai_cache_key: external_exports.boolean()
+  }).strict()
+}).strict();
 var configSchema = external_exports.object({
   model: external_exports.string().min(1),
   provider: providerSchema.optional(),
@@ -77810,6 +78787,8 @@ var configSchema = external_exports.object({
   security: securitySchema,
   providers: providerConfigSchema,
   image_understanding: imageUnderstandingSchema,
+  architecture: architectureSchema,
+  references: referencesSchema,
   experimental: experimentalSchema
 }).strict();
 function deepPartial2(schema) {
@@ -77843,7 +78822,7 @@ function loadConfigFromString(yaml) {
   }
   let parsed;
   try {
-    parsed = (0, import_yaml.parse)(yaml);
+    parsed = (0, import_yaml2.parse)(yaml);
   } catch (err) {
     void logger.warn(`Failed to parse .vor.yml: ${err.message}. Using defaults.`);
     return DEFAULT_CONFIG;
@@ -82258,6 +83237,8 @@ _via OSV \xB7 ${id}_`;
       return "\n\n_via dependency hygiene scan_";
     case "image-ocr":
       return "\n\n_via image OCR scan_";
+    case "architecture":
+      return "\n\n_via architecture scan_";
     default: {
       const _exhaustive = c2.source.scanner;
       void _exhaustive;
@@ -82371,6 +83352,8 @@ function renderSummary(input2) {
     sections.push(formatCountsLine(counts));
     const scannerLine = formatScannerCountsLine(input2.keptComments);
     if (scannerLine) sections.push(scannerLine);
+    const archLine = formatArchitectureCountsLine(input2.keptComments);
+    if (archLine) sections.push(archLine);
   } else if (summary2 && summary2.assessment !== "approve") {
     sections.push("_No inline comments were posted._");
   }
@@ -82482,7 +83465,7 @@ function capitalizeSeverity(s2) {
 function formatScannerCountsLine(comments) {
   const byScanner = /* @__PURE__ */ new Map();
   for (const c2 of comments) {
-    if (c2.source?.kind !== "scanner") continue;
+    if (c2.source?.kind !== "scanner" || c2.source.scanner === "architecture") continue;
     byScanner.set(c2.source.scanner, (byScanner.get(c2.source.scanner) ?? 0) + 1);
   }
   const total = Array.from(byScanner.values()).reduce((a2, b2) => a2 + b2, 0);
@@ -82495,7 +83478,8 @@ function formatScannerCountsLine(comments) {
     ["coverage-delta", "coverage gap", "coverage gaps"],
     ["debris", "debris finding", "debris findings"],
     ["migration-safety", "migration risk", "migration risks"],
-    ["dependency-hygiene", "dependency issue", "dependency issues"]
+    ["dependency-hygiene", "dependency issue", "dependency issues"],
+    ["image-ocr", "image OCR finding", "image OCR findings"]
   ];
   const breakdown = labels.map(([id, singular, plural2]) => {
     const n2 = byScanner.get(id) ?? 0;
@@ -82529,6 +83513,17 @@ function formatScannerFailures(failures) {
 }
 function uniqueSkippedTools(skipped) {
   return [...new Set(skipped.map((s2) => s2.name))];
+}
+function formatArchitectureCountsLine(comments) {
+  let count = 0;
+  for (const c2 of comments) {
+    if (c2.source?.kind === "scanner" && c2.source.scanner === "architecture") {
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const noun = count === 1 ? "violation" : "violations";
+  return `**Architecture:** ${count} ${noun} from architecture scan`;
 }
 
 // src/scanners/adapter.ts
@@ -82576,6 +83571,7 @@ function buildSource(f2) {
     case "debris":
     case "migration":
     case "dependency":
+    case "architecture":
       return { kind: "scanner", scanner: f2.scanner, rule_id: f2.rule_id };
   }
 }
@@ -82680,7 +83676,7 @@ function dedupKeptScannerComments(kept) {
 }
 
 // src/scanners/ignore-list.ts
-var import_yaml2 = __toESM(require_dist(), 1);
+var import_yaml3 = __toESM(require_dist(), 1);
 var import_semver = __toESM(require_semver2(), 1);
 
 // src/scanners/canonicalize.ts
@@ -82767,6 +83763,35 @@ var IgnoreList = class _IgnoreList {
     return new _IgnoreList([]);
   }
   /**
+   * Parse and validate ignore-list YAML from an in-memory string. Degrades to
+   * {@link IgnoreList.empty} with a warning on parse/schema failure.
+   */
+  static fromString(raw, sourceLabel = "ignore file") {
+    if (raw == null || raw.trim().length === 0) {
+      return _IgnoreList.empty();
+    }
+    let parsed;
+    try {
+      parsed = (0, import_yaml3.parse)(raw);
+    } catch (err) {
+      void logger.warn(
+        `Failed to parse ${sourceLabel}: ${err.message}. Treating as empty.`
+      );
+      return _IgnoreList.empty();
+    }
+    if (parsed == null || typeof parsed !== "object") {
+      void logger.warn(`${sourceLabel} did not parse to an object. Treating as empty.`);
+      return _IgnoreList.empty();
+    }
+    const result = ignoreFileSchema.safeParse(parsed);
+    if (!result.success) {
+      const detail = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
+      void logger.warn(`${sourceLabel} validation failed: ${detail}. Treating as empty.`);
+      return _IgnoreList.empty();
+    }
+    return new _IgnoreList(result.data.entries);
+  }
+  /**
    * Load the ignore file from the PR HEAD via {@link FileReader}. Any failure
    * (missing file, malformed YAML, schema violation) degrades to
    * {@link IgnoreList.empty} with a logger entry. We never throw — a typo in
@@ -82792,26 +83817,7 @@ var IgnoreList = class _IgnoreList {
       void logger.debug(`No ignore file at ${args.path}@${args.ref}; using empty list.`);
       return _IgnoreList.empty();
     }
-    let parsed;
-    try {
-      parsed = (0, import_yaml2.parse)(raw);
-    } catch (err) {
-      void logger.warn(
-        `Failed to parse ignore file ${args.path}: ${err.message}. Treating as empty.`
-      );
-      return _IgnoreList.empty();
-    }
-    if (parsed == null || typeof parsed !== "object") {
-      void logger.warn(`Ignore file ${args.path} did not parse to an object. Treating as empty.`);
-      return _IgnoreList.empty();
-    }
-    const result = ignoreFileSchema.safeParse(parsed);
-    if (!result.success) {
-      const detail = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
-      void logger.warn(`Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`);
-      return _IgnoreList.empty();
-    }
-    return new _IgnoreList(result.data.entries);
+    return _IgnoreList.fromString(raw, `Ignore file ${args.path}`);
   }
   matches(finding) {
     for (const entry of this.entries) {
@@ -83017,7 +84023,7 @@ var yarnLockParser = new YarnLockParser();
 
 // src/scanners/parsers/pnpm-lock.ts
 var import_node_path4 = __toESM(require("node:path"), 1);
-var import_yaml3 = __toESM(require_dist(), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 function parsePnpmKey(rawKey) {
   let s2 = rawKey.startsWith("/") ? rawKey.slice(1) : rawKey;
   const parenIdx = s2.indexOf("(");
@@ -83088,7 +84094,7 @@ var PnpmLockParser = class {
   parse(content) {
     let doc;
     try {
-      doc = (0, import_yaml3.parse)(content);
+      doc = (0, import_yaml4.parse)(content);
     } catch {
       return [];
     }
@@ -83321,14 +84327,14 @@ function resolveOptions(opts) {
   };
 }
 function sleep3(ms, signal) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     if (signal?.aborted) {
       reject(new DOMException("Aborted", "AbortError"));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve3();
+      resolve8();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -84588,7 +85594,7 @@ var eslintLinter = {
   }
 };
 function runCli(bin, files, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["--format", "json", "--no-error-on-unmatched-pattern", ...files],
@@ -84650,7 +85656,7 @@ function runCli(bin, files, deps) {
         reject(new Error(`eslint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -84781,7 +85787,7 @@ function locateBin(workspaceDir) {
   return { path: "ruff", needsShell: isWindows2 };
 }
 function runCli2(bin, files, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["check", "--output-format=json", "--exit-zero", ...files],
@@ -84832,7 +85838,7 @@ function runCli2(bin, files, deps) {
         reject(new Error(`ruff exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -84966,7 +85972,7 @@ function parseDartLine(line) {
   };
 }
 function runCli3(files, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const child2 = (0, import_node_child_process5.spawn)("dart", ["analyze", "--format=machine", ...files], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv()
@@ -85011,7 +86017,7 @@ function runCli3(files, deps) {
         return;
       }
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
-      resolve3(stderr + "\n" + stdout);
+      resolve8(stderr + "\n" + stdout);
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -85123,7 +86129,7 @@ var actionlintLinter = {
   }
 };
 function runCli4(files, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const child2 = (0, import_node_child_process6.spawn)("actionlint", ["-no-color", "-format", "{{json .}}", ...files], {
       cwd: deps.workspaceDir,
       env: buildLinterEnv()
@@ -85167,7 +86173,7 @@ function runCli4(files, deps) {
         reject(new Error(`actionlint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -85326,7 +86332,7 @@ function locateBin2(workspaceDir) {
   return { path: "knip", needsShell: isWindows2 };
 }
 function runCli5(bin, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["--reporter", "json"],
@@ -85377,7 +86383,7 @@ function runCli5(bin, deps) {
         reject(new Error(`knip exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -85544,7 +86550,7 @@ async function resolveCustomRulesPath(deps) {
   return absPath;
 }
 function runCli6(files, deps, customRulesPath) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const args = [
       "scan",
       "--json",
@@ -85616,7 +86622,7 @@ function runCli6(files, deps, customRulesPath) {
         reject(new Error(`semgrep exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -85787,7 +86793,7 @@ ${line.trim()}`;
   return diagnostics;
 }
 function runCli7(bin, deps) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       ["--noEmit", "--pretty", "false", "--incremental", "false"],
@@ -85840,7 +86846,7 @@ function runCli7(bin, deps) {
         reject(new Error(`tsc exited ${code}: ${detail}`));
         return;
       }
-      resolve3(stdout);
+      resolve8(stdout);
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -86042,7 +87048,7 @@ function looksLikeUnknownFlag(msg) {
   return msg.includes("unknown flag") || msg.includes("unknown shorthand") || msg.includes("unknown command") || msg.includes("Usage:");
 }
 function runCli8(bin, args, deps, cwd) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve8, reject) => {
     const { command, argsForSpawn } = buildSpawnInvocation(
       shellQuoteBinary(bin),
       args,
@@ -86095,7 +87101,7 @@ function runCli8(bin, args, deps, cwd) {
         reject(new Error(`golangci-lint exited ${code}: ${stderr.trim().slice(0, 500)}`));
         return;
       }
-      resolve3(Buffer.concat(stdoutChunks).toString("utf-8"));
+      resolve8(Buffer.concat(stdoutChunks).toString("utf-8"));
     });
     child2.on("error", (err) => {
       if (resolved) return;
@@ -86493,7 +87499,7 @@ function buildFinding9(tool2, file_path, line) {
 }
 async function runCoverageCli(tool2, deps) {
   const { command, args, env } = buildCoverageInvocation(tool2, deps);
-  return new Promise((resolve3) => {
+  return new Promise((resolve8) => {
     const child2 = (0, import_node_child_process11.spawn)(command, args, {
       cwd: deps.workspaceDir,
       env,
@@ -86509,10 +87515,10 @@ async function runCoverageCli(tool2, deps) {
       settled = true;
       clearTimeout(timer);
       if ((0, import_node_fs7.existsSync)(tool2.artifact)) {
-        resolve3({ ok: true });
+        resolve8({ ok: true });
       } else {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim().slice(0, 500);
-        resolve3({
+        resolve8({
           ok: false,
           reason: `${tool2.id} produced no coverage artifact at ${tool2.artifact}${stderr ? `; stderr: ${stderr}` : ""}`
         });
@@ -86523,7 +87529,7 @@ async function runCoverageCli(tool2, deps) {
       settled = true;
       clearTimeout(timer);
       killChild(child2);
-      resolve3({ ok: false, reason });
+      resolve8({ ok: false, reason });
     };
     const timer = setTimeout(() => {
       finishErr(`${tool2.id} timed out after ${COVERAGE_TIMEOUT_MS}ms`);
@@ -87264,20 +88270,20 @@ function isImageFile(f2) {
 }
 function recognizeCancellable(engine, bytes, signal) {
   if (signal.aborted) return Promise.resolve("aborted");
-  return new Promise((resolve3) => {
+  return new Promise((resolve8) => {
     const onAbort = () => {
       void engine.terminate();
-      resolve3("aborted");
+      resolve8("aborted");
     };
     signal.addEventListener("abort", onAbort, { once: true });
     void engine.recognize(bytes).then(
       (res) => {
         signal.removeEventListener("abort", onAbort);
-        resolve3(res);
+        resolve8(res);
       },
       () => {
         signal.removeEventListener("abort", onAbort);
-        resolve3("aborted");
+        resolve8("aborted");
       }
     );
   });
@@ -87466,6 +88472,2520 @@ function buildEnabledScanners(config2, options = {}) {
   return out;
 }
 
+// src/scanners/architecture.ts
+var import_node_fs9 = require("node:fs");
+var import_node_path23 = require("node:path");
+
+// src/architecture/evaluator.ts
+var import_node_crypto7 = require("node:crypto");
+
+// src/architecture/imports.ts
+var import_node_fs8 = require("node:fs");
+var import_node_path22 = require("node:path");
+var EXT_TO_LANG = {
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  go: "go",
+  dart: "dart",
+  rs: "rust",
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  cs: "csharp"
+};
+function detectArchLanguage(filePath) {
+  const norm = normalizePath(filePath);
+  const name = norm.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  return EXT_TO_LANG[ext] ?? null;
+}
+function stripCLikeComments(src) {
+  const chars = src.split("");
+  const n2 = chars.length;
+  let i2 = 0;
+  let quote = null;
+  while (i2 < n2) {
+    const ch = chars[i2];
+    if (quote !== null) {
+      if (ch === "\\") {
+        i2 += 2;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      i2 += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+      i2 += 1;
+      continue;
+    }
+    if (ch === "/" && chars[i2 + 1] === "/") {
+      chars[i2] = " ";
+      chars[i2 + 1] = " ";
+      i2 += 2;
+      while (i2 < n2 && chars[i2] !== "\n") {
+        chars[i2] = " ";
+        i2 += 1;
+      }
+      continue;
+    }
+    if (ch === "/" && chars[i2 + 1] === "*") {
+      chars[i2] = " ";
+      chars[i2 + 1] = " ";
+      i2 += 2;
+      while (i2 < n2) {
+        if (chars[i2] === "*" && chars[i2 + 1] === "/") {
+          chars[i2] = " ";
+          chars[i2 + 1] = " ";
+          i2 += 2;
+          break;
+        }
+        if (chars[i2] !== "\n") chars[i2] = " ";
+        i2 += 1;
+      }
+      continue;
+    }
+    i2 += 1;
+  }
+  return chars.join("");
+}
+function stripPythonCommentsAndDocstrings(src) {
+  const chars = src.split("");
+  const n2 = chars.length;
+  let i2 = 0;
+  let quote = null;
+  while (i2 < n2) {
+    const ch = chars[i2];
+    if (quote !== null) {
+      if (ch === "\\") {
+        i2 += 2;
+        continue;
+      }
+      if (ch === quote || ch === "\n") {
+        quote = null;
+      }
+      i2 += 1;
+      continue;
+    }
+    if ((ch === '"' || ch === "'") && chars[i2 + 1] === ch && chars[i2 + 2] === ch) {
+      const delim = ch;
+      chars[i2] = " ";
+      chars[i2 + 1] = " ";
+      chars[i2 + 2] = " ";
+      i2 += 3;
+      while (i2 < n2) {
+        if (chars[i2] === "\\") {
+          if (chars[i2] !== "\n") chars[i2] = " ";
+          if (i2 + 1 < n2 && chars[i2 + 1] !== "\n") chars[i2 + 1] = " ";
+          i2 += 2;
+          continue;
+        }
+        if (chars[i2] === delim && chars[i2 + 1] === delim && chars[i2 + 2] === delim) {
+          chars[i2] = " ";
+          chars[i2 + 1] = " ";
+          chars[i2 + 2] = " ";
+          i2 += 3;
+          break;
+        }
+        if (chars[i2] !== "\n") chars[i2] = " ";
+        i2 += 1;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      i2 += 1;
+      continue;
+    }
+    if (ch === "#") {
+      while (i2 < n2 && chars[i2] !== "\n") {
+        chars[i2] = " ";
+        i2 += 1;
+      }
+      continue;
+    }
+    i2 += 1;
+  }
+  return chars.join("");
+}
+function buildLineStarts(src) {
+  const starts = [0];
+  for (let i2 = 0; i2 < src.length; i2++) {
+    if (src[i2] === "\n") starts.push(i2 + 1);
+  }
+  return starts;
+}
+function lineAtOffset(starts, offset) {
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    if (starts[mid] <= offset) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return hi + 1;
+}
+function makeSnippet(lines, line) {
+  const raw = lines[line - 1] ?? "";
+  const trimmed = raw.trim();
+  return trimmed.length <= 140 ? trimmed : `${trimmed.slice(0, 137)}...`;
+}
+function dedupExtracted(items) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const item of items) {
+    const key = `${item.line}:${item.specifier}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+function extractJsTsImports(content, language) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const pushMatch = (spec, offset) => {
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language,
+      kindHint: spec.startsWith("./") || spec.startsWith("../") ? "relative" : "ambiguous"
+    });
+  };
+  const esFrom = /\b(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"]+)\1/g;
+  for (const m2 of cleaned.matchAll(esFrom)) {
+    const spec = m2[2];
+    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+  const sideEffect = /\bimport\s+(['"])([^'"]+)\1/g;
+  for (const m2 of cleaned.matchAll(sideEffect)) {
+    const spec = m2[2];
+    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+  const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+  for (const m2 of cleaned.matchAll(req)) {
+    const spec = m2[2];
+    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+  const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
+  for (const m2 of cleaned.matchAll(dyn)) {
+    const spec = m2[2];
+    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    pushMatch(spec, specOffset);
+  }
+  return dedupExtracted(out);
+}
+function extractPythonImports(content) {
+  const cleaned = stripPythonCommentsAndDocstrings(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const fromRe = /^[ \t]*from\s+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)\s+import\b/gm;
+  for (const m2 of cleaned.matchAll(fromRe)) {
+    const spec = m2[1];
+    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "python",
+      kindHint: spec.startsWith(".") ? "relative" : "ambiguous"
+    });
+  }
+  const importRe = /^[ \t]*import\s+([^\n;#]+)/gm;
+  for (const m2 of cleaned.matchAll(importRe)) {
+    const listText = m2[1];
+    const baseOffset = (m2.index ?? 0) + m2[0].indexOf(listText);
+    const line = lineAtOffset(starts, baseOffset);
+    for (const part of listText.split(",")) {
+      const mod = part.trim().split(/\s+as\s+/)[0]?.trim();
+      if (!mod || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(mod)) continue;
+      out.push({
+        specifier: mod,
+        line,
+        snippet: makeSnippet(rawLines, line),
+        language: "python",
+        kindHint: "ambiguous"
+      });
+    }
+  }
+  return dedupExtracted(out);
+}
+function extractGoImports(content) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const addSpec = (spec, offset) => {
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "go",
+      kindHint: spec.startsWith("./") || spec.startsWith("../") ? "relative" : "ambiguous"
+    });
+  };
+  const blockRe = /\bimport\s*\(([^)]*)\)/g;
+  for (const m2 of cleaned.matchAll(blockRe)) {
+    const block = m2[1];
+    const blockStart = (m2.index ?? 0) + m2[0].indexOf(block);
+    const itemRe = /^[ \t]*(?:[A-Za-z_]\w*|\.)?[ \t]*(?:"([^"]+)"|`([^`]+)`)/gm;
+    for (const im of block.matchAll(itemRe)) {
+      const spec = im[1] ?? im[2];
+      const offset = blockStart + (im.index ?? 0) + im[0].indexOf(spec);
+      addSpec(spec, offset);
+    }
+  }
+  const singleRe = /^[ \t]*import[ \t]+(?:(?:[A-Za-z_]\w*|\.)[ \t]+)?(?:"([^"]+)"|`([^`]+)`)/gm;
+  for (const m2 of cleaned.matchAll(singleRe)) {
+    const spec = m2[1] ?? m2[2];
+    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    addSpec(spec, offset);
+  }
+  return dedupExtracted(out);
+}
+function extractDartImports(content) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const re2 = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
+  for (const m2 of cleaned.matchAll(re2)) {
+    const spec = m2[2];
+    const offset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "dart",
+      kindHint: spec.startsWith("dart:") ? "package" : spec.startsWith("package:") ? "ambiguous" : "relative"
+    });
+  }
+  return dedupExtracted(out);
+}
+function splitTopLevelCommas(text) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i2 = 0; i2 < text.length; i2++) {
+    const ch = text[i2];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      parts.push({ part: text.slice(start, i2), offset: start });
+      start = i2 + 1;
+    }
+  }
+  parts.push({ part: text.slice(start), offset: start });
+  return parts;
+}
+function expandRustUseTree(tree, baseOffset, prefix = "") {
+  const trimmed = tree.trim();
+  if (!trimmed) return [];
+  const leadingSpaces = tree.length - tree.trimStart().length;
+  const trimmedOffset = baseOffset + leadingSpaces;
+  const braceStart = trimmed.indexOf("{");
+  if (braceStart === -1) {
+    let clean = trimmed.replace(/\s+as\s+[A-Za-z_]\w*$/, "").trim();
+    if (clean === "self") {
+      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
+    }
+    if (clean === "*") {
+      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
+    }
+    clean = clean.replace(/::\*$/, "");
+    const full = prefix ? `${prefix}::${clean}` : clean;
+    return full ? [{ path: full, offset: trimmedOffset }] : [];
+  }
+  const braceEnd = trimmed.lastIndexOf("}");
+  if (braceEnd <= braceStart) return [];
+  const headRaw = trimmed.slice(0, braceStart).trim().replace(/::$/, "");
+  const nextPrefix = headRaw ? prefix ? `${prefix}::${headRaw}` : headRaw : prefix;
+  const inner = trimmed.slice(braceStart + 1, braceEnd);
+  const innerOffset = trimmedOffset + braceStart + 1;
+  const leaves = [];
+  for (const chunk2 of splitTopLevelCommas(inner)) {
+    leaves.push(...expandRustUseTree(chunk2.part, innerOffset + chunk2.offset, nextPrefix));
+  }
+  return leaves;
+}
+function extractRustImports(content) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const classifyRustSpec = (spec) => {
+    if (spec.startsWith("crate::") || spec.startsWith("super::") || spec.startsWith("self::")) {
+      return "relative";
+    }
+    return "package";
+  };
+  const useRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/g;
+  for (const m2 of cleaned.matchAll(useRe)) {
+    const expr = m2[1];
+    const exprOffset = (m2.index ?? 0) + m2[0].indexOf(expr);
+    for (const leaf of expandRustUseTree(expr, exprOffset)) {
+      const line = lineAtOffset(starts, leaf.offset);
+      out.push({
+        specifier: leaf.path,
+        line,
+        snippet: makeSnippet(rawLines, line),
+        language: "rust",
+        kindHint: classifyRustSpec(leaf.path)
+      });
+    }
+  }
+  const externRe = /\bextern\s+crate\s+([A-Za-z_]\w*)(?:\s+as\s+[A-Za-z_]\w*)?\s*;/g;
+  for (const m2 of cleaned.matchAll(externRe)) {
+    const name = m2[1];
+    const offset = (m2.index ?? 0) + m2[0].indexOf(name);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: name,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "rust",
+      kindHint: "package"
+    });
+  }
+  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
+  for (const m2 of cleaned.matchAll(modRe)) {
+    const name = m2[1];
+    const offset = (m2.index ?? 0) + m2[0].indexOf(name);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: `mod:${name}`,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "rust",
+      kindHint: "relative"
+    });
+  }
+  return dedupExtracted(out);
+}
+function extractJavaKotlinImports(content, language) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const pkgMatch = cleaned.match(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/m);
+  const declaredPackage = pkgMatch?.[1];
+  const importRe = /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
+  for (const m2 of cleaned.matchAll(importRe)) {
+    const spec = m2[1];
+    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language,
+      kindHint: "ambiguous"
+    });
+  }
+  return {
+    imports: dedupExtracted(out),
+    meta: declaredPackage ? { declaredPackage } : {}
+  };
+}
+function extractCSharpImports(content) {
+  const cleaned = stripCLikeComments(content);
+  const starts = buildLineStarts(cleaned);
+  const rawLines = content.split("\n");
+  const out = [];
+  const nsMatch = cleaned.match(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/m);
+  const declaredPackage = nsMatch?.[1];
+  const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
+  for (const m2 of cleaned.matchAll(usingRe)) {
+    const spec = m2[1];
+    if (spec === "var") continue;
+    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const line = lineAtOffset(starts, offset);
+    out.push({
+      specifier: spec,
+      line,
+      snippet: makeSnippet(rawLines, line),
+      language: "csharp",
+      kindHint: "ambiguous"
+    });
+  }
+  return {
+    imports: dedupExtracted(out),
+    meta: declaredPackage ? { declaredPackage } : {}
+  };
+}
+function extractImports(filePath, content) {
+  const language = detectArchLanguage(filePath);
+  if (!language) return { imports: [], meta: {} };
+  switch (language) {
+    case "typescript":
+    case "javascript":
+      return { imports: extractJsTsImports(content, language), meta: {} };
+    case "python":
+      return { imports: extractPythonImports(content), meta: {} };
+    case "go":
+      return { imports: extractGoImports(content), meta: {} };
+    case "dart":
+      return { imports: extractDartImports(content), meta: {} };
+    case "rust":
+      return { imports: extractRustImports(content), meta: {} };
+    case "java":
+    case "kotlin":
+      return extractJavaKotlinImports(content, language);
+    case "csharp":
+      return extractCSharpImports(content);
+  }
+}
+function stripJsonc(text) {
+  const noComments = stripCLikeComments(text);
+  const chars = noComments.split("");
+  let quote = null;
+  for (let i2 = 0; i2 < chars.length; i2++) {
+    const ch = chars[i2];
+    if (quote !== null) {
+      if (ch === "\\") {
+        i2 += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === ",") {
+      let j2 = i2 + 1;
+      while (j2 < chars.length && /\s/.test(chars[j2])) j2 += 1;
+      if (chars[j2] === "}" || chars[j2] === "]") {
+        chars[i2] = " ";
+      }
+    }
+  }
+  return chars.join("");
+}
+function parseTsConfigContent(raw, readRelative, depth = 0) {
+  if (depth > 2) return void 0;
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonc(raw));
+  } catch {
+    return void 0;
+  }
+  if (!parsed || typeof parsed !== "object") return void 0;
+  const obj = parsed;
+  let base = { paths: {} };
+  if (typeof obj.extends === "string" && (obj.extends.startsWith("./") || obj.extends.startsWith("../")) && readRelative) {
+    const extRaw = readRelative(obj.extends);
+    if (extRaw) {
+      const parent = parseTsConfigContent(extRaw, readRelative, depth + 1);
+      if (parent) base = parent;
+    }
+  }
+  const co = obj.compilerOptions;
+  const baseUrl = typeof co?.baseUrl === "string" ? normalizePath(co.baseUrl) : base.baseUrl;
+  const paths = { ...base.paths };
+  if (co?.paths && typeof co.paths === "object") {
+    for (const [k2, v2] of Object.entries(co.paths)) {
+      if (Array.isArray(v2)) {
+        paths[k2] = v2.filter((item) => typeof item === "string");
+      }
+    }
+  }
+  if (baseUrl === void 0 && Object.keys(paths).length === 0) return void 0;
+  return { ...baseUrl !== void 0 ? { baseUrl } : {}, paths };
+}
+function parseGoModModule(raw) {
+  const m2 = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
+  return m2?.[1]?.trim();
+}
+function parsePubspecName(raw) {
+  const m2 = raw.match(/^[ \t]*name:[ \t]*['"]?([A-Za-z0-9_-]+)['"]?/m);
+  return m2?.[1]?.trim();
+}
+function readOptionalFile(workspaceDir, relPath) {
+  try {
+    return (0, import_node_fs8.readFileSync)((0, import_node_path22.resolve)(workspaceDir, relPath), "utf-8");
+  } catch {
+    return null;
+  }
+}
+function loadWorkspaceResolveContext(workspaceDir, opts = {}) {
+  const ctx = {
+    ...workspaceDir !== void 0 ? { workspaceDir } : {},
+    ...opts.knownFiles !== void 0 ? { knownFiles: opts.knownFiles } : {}
+  };
+  if (!workspaceDir) return ctx;
+  const tsRaw = readOptionalFile(workspaceDir, "tsconfig.json");
+  if (tsRaw) {
+    const tsconfig = parseTsConfigContent(tsRaw, (rel) => readOptionalFile(workspaceDir, rel));
+    if (tsconfig) ctx.tsconfig = tsconfig;
+  }
+  const goRaw = readOptionalFile(workspaceDir, "go.mod");
+  if (goRaw) {
+    const goModule = parseGoModModule(goRaw);
+    if (goModule) ctx.goModule = goModule;
+  }
+  const pubRaw = readOptionalFile(workspaceDir, "pubspec.yaml");
+  if (pubRaw) {
+    const dartPkg = parsePubspecName(pubRaw);
+    if (dartPkg) ctx.dartPackage = dartPkg;
+  }
+  return ctx;
+}
+function existsRepoFile(path28, ctx) {
+  const norm = normalizePath(path28);
+  if (!norm) return false;
+  if (ctx.knownFiles) {
+    return ctx.knownFiles.has(norm);
+  }
+  if (!ctx.workspaceDir) return false;
+  try {
+    return (0, import_node_fs8.statSync)((0, import_node_path22.resolve)(ctx.workspaceDir, norm)).isFile();
+  } catch {
+    return false;
+  }
+}
+function existsRepoPrefix(prefixDir, ctx) {
+  const norm = normalizePath(prefixDir);
+  if (!norm) return false;
+  if (ctx.knownFiles) {
+    const slash = `${norm}/`;
+    for (const f2 of ctx.knownFiles) {
+      if (f2.startsWith(slash)) return true;
+    }
+    return false;
+  }
+  if (!ctx.workspaceDir) return false;
+  try {
+    return (0, import_node_fs8.existsSync)((0, import_node_path22.resolve)(ctx.workspaceDir, norm));
+  } catch {
+    return false;
+  }
+}
+function resolveTsJsCandidate(basePath, ctx) {
+  const norm = normalizePath(basePath);
+  const candidates = [norm];
+  if (norm.endsWith(".js")) {
+    const stem = norm.slice(0, -3);
+    candidates.push(`${stem}.ts`, `${stem}.tsx`);
+  } else if (norm.endsWith(".jsx")) {
+    const stem = norm.slice(0, -4);
+    candidates.push(`${stem}.tsx`, `${stem}.ts`);
+  } else if (norm.endsWith(".mjs")) {
+    candidates.push(`${norm.slice(0, -4)}.mts`);
+  } else if (norm.endsWith(".cjs")) {
+    candidates.push(`${norm.slice(0, -4)}.cts`);
+  } else {
+    candidates.push(
+      `${norm}.ts`,
+      `${norm}.tsx`,
+      `${norm}.mts`,
+      `${norm}.cts`,
+      `${norm}.js`,
+      `${norm}.jsx`,
+      `${norm}.mjs`,
+      `${norm}.cjs`,
+      `${norm}/index.ts`,
+      `${norm}/index.tsx`,
+      `${norm}/index.js`,
+      `${norm}/index.jsx`
+    );
+  }
+  for (const c2 of candidates) {
+    if (existsRepoFile(c2, ctx)) return c2;
+  }
+  return norm;
+}
+function matchTsConfigAlias(specifier, tsconfig, ctx) {
+  const basePrefix = tsconfig.baseUrl && tsconfig.baseUrl !== "." ? `${tsconfig.baseUrl}/` : "";
+  for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
+    const starIdx = pattern.indexOf("*");
+    if (starIdx === -1) {
+      if (specifier === pattern && targets[0]) {
+        const joined = normalizePath(import_node_path22.posix.join(basePrefix, targets[0]));
+        return resolveTsJsCandidate(joined, ctx);
+      }
+      continue;
+    }
+    const prefix = pattern.slice(0, starIdx);
+    const suffix = pattern.slice(starIdx + 1);
+    if (specifier.startsWith(prefix) && specifier.endsWith(suffix)) {
+      const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
+      for (const target of targets) {
+        const replaced = target.replace("*", wildcard);
+        const joined = normalizePath(import_node_path22.posix.join(basePrefix, replaced));
+        const resolved = resolveTsJsCandidate(joined, ctx);
+        if (existsRepoFile(resolved, ctx) || targets.length === 1) {
+          return resolved;
+        }
+      }
+      if (targets[0]) {
+        return normalizePath(import_node_path22.posix.join(basePrefix, targets[0].replace("*", wildcard)));
+      }
+    }
+  }
+  if (tsconfig.baseUrl) {
+    const joined = normalizePath(import_node_path22.posix.join(basePrefix, specifier));
+    const resolved = resolveTsJsCandidate(joined, ctx);
+    if (existsRepoFile(resolved, ctx)) return resolved;
+  }
+  return void 0;
+}
+function extractNpmPackageName(specifier) {
+  if (specifier.startsWith("node:")) return specifier;
+  if (specifier.startsWith("@")) {
+    const parts = specifier.split("/");
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier;
+  }
+  return specifier.split("/")[0] ?? specifier;
+}
+function joinRelativePosix(sourceFilePath, relSpec) {
+  const dir = import_node_path22.posix.dirname(normalizePath(sourceFilePath));
+  const raw = dir === "." ? relSpec : import_node_path22.posix.join(dir, relSpec);
+  return normalizePath(import_node_path22.posix.normalize(raw));
+}
+var KNOWN_EXTERNAL_JVM_PREFIXES = [
+  "java.",
+  "javax.",
+  "jakarta.",
+  "kotlin.",
+  "kotlinx.",
+  "scala.",
+  "org.springframework.",
+  "org.hibernate.",
+  "io.ktor.",
+  "org.junit.",
+  "org.slf4j.",
+  "com.fasterxml."
+];
+function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
+  const base = {
+    specifier: imp.specifier,
+    line: imp.line,
+    snippet: imp.snippet,
+    language: imp.language
+  };
+  const normSource = normalizePath(sourceFilePath);
+  switch (imp.language) {
+    case "typescript":
+    case "javascript": {
+      if (imp.specifier.startsWith("./") || imp.specifier.startsWith("../")) {
+        const joined = joinRelativePosix(normSource, imp.specifier);
+        return { ...base, resolvedPath: resolveTsJsCandidate(joined, ctx) };
+      }
+      if (ctx.tsconfig) {
+        const aliased = matchTsConfigAlias(imp.specifier, ctx.tsconfig, ctx);
+        if (aliased) return { ...base, resolvedPath: aliased };
+      }
+      return { ...base, packageName: extractNpmPackageName(imp.specifier) };
+    }
+    case "go": {
+      if (ctx.goModule) {
+        if (imp.specifier === ctx.goModule) {
+          return { ...base, resolvedPath: "." };
+        }
+        if (imp.specifier.startsWith(`${ctx.goModule}/`)) {
+          return {
+            ...base,
+            resolvedPath: normalizePath(imp.specifier.slice(ctx.goModule.length + 1))
+          };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+    case "dart": {
+      if (imp.specifier.startsWith("dart:")) {
+        return { ...base, packageName: imp.specifier };
+      }
+      if (imp.specifier.startsWith("package:")) {
+        const rest = imp.specifier.slice("package:".length);
+        const slash = rest.indexOf("/");
+        const pkg = slash === -1 ? rest : rest.slice(0, slash);
+        const subpath = slash === -1 ? "" : rest.slice(slash + 1);
+        if (ctx.dartPackage && pkg === ctx.dartPackage) {
+          return { ...base, resolvedPath: normalizePath(`lib/${subpath}`) };
+        }
+        return { ...base, packageName: pkg };
+      }
+      return { ...base, resolvedPath: joinRelativePosix(normSource, imp.specifier) };
+    }
+    case "python": {
+      if (imp.specifier.startsWith(".")) {
+        const dotMatch = imp.specifier.match(/^(\.+)(.*)$/);
+        const dots = dotMatch?.[1]?.length ?? 1;
+        const remainder = (dotMatch?.[2] ?? "").replace(/^\./, "").replace(/\./g, "/");
+        let dir = import_node_path22.posix.dirname(normSource);
+        for (let i2 = 1; i2 < dots; i2++) {
+          dir = import_node_path22.posix.dirname(dir);
+        }
+        const joined = normalizePath(
+          dir === "." ? remainder : remainder ? import_node_path22.posix.join(dir, remainder) : dir
+        );
+        const pyFile = `${joined}.py`;
+        const pyInit = `${joined}/__init__.py`;
+        const resolved = existsRepoFile(pyFile, ctx) ? pyFile : existsRepoFile(pyInit, ctx) ? pyInit : joined;
+        return { ...base, resolvedPath: resolved };
+      }
+      const modPath = imp.specifier.replace(/\./g, "/");
+      const candidates = [
+        `${modPath}.py`,
+        `${modPath}/__init__.py`,
+        `src/${modPath}.py`,
+        `src/${modPath}/__init__.py`
+      ];
+      for (const c2 of candidates) {
+        if (existsRepoFile(c2, ctx)) return { ...base, resolvedPath: c2 };
+      }
+      if (existsRepoPrefix(modPath, ctx)) {
+        return { ...base, resolvedPath: modPath };
+      }
+      if (existsRepoPrefix(`src/${modPath}`, ctx)) {
+        return { ...base, resolvedPath: `src/${modPath}` };
+      }
+      const sourceSegs = normSource.split("/").filter(Boolean);
+      const firstImportSeg = modPath.split("/")[0];
+      if (firstImportSeg) {
+        if (sourceSegs[0] === firstImportSeg) {
+          return { ...base, resolvedPath: modPath };
+        }
+        if (sourceSegs[0] === "src" && sourceSegs[1] === firstImportSeg) {
+          return { ...base, resolvedPath: `src/${modPath}` };
+        }
+      }
+      return { ...base, packageName: firstImportSeg ?? imp.specifier };
+    }
+    case "rust": {
+      if (imp.specifier.startsWith("mod:")) {
+        const modName = imp.specifier.slice(4);
+        const dir = import_node_path22.posix.dirname(normSource);
+        const direct = normalizePath(dir === "." ? `${modName}.rs` : `${dir}/${modName}.rs`);
+        const nested = normalizePath(
+          dir === "." ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`
+        );
+        if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
+        return { ...base, resolvedPath: direct };
+      }
+      if (imp.specifier.startsWith("crate::")) {
+        const rel = imp.specifier.slice("crate::".length).replace(/::/g, "/");
+        const srcIdx = normSource.lastIndexOf("/src/");
+        const crateSrc = srcIdx !== -1 ? normSource.slice(0, srcIdx + 4) : normSource.startsWith("src/") ? "src" : "";
+        const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
+        const rsFile = `${joined}.rs`;
+        const rsMod = `${joined}/mod.rs`;
+        return {
+          ...base,
+          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : existsRepoFile(rsMod, ctx) ? rsMod : joined
+        };
+      }
+      if (imp.specifier.startsWith("super::") || imp.specifier.startsWith("self::")) {
+        let dir = import_node_path22.posix.dirname(normSource);
+        let rest = imp.specifier;
+        if (rest.startsWith("self::")) {
+          rest = rest.slice("self::".length);
+        }
+        while (rest.startsWith("super::")) {
+          rest = rest.slice("super::".length);
+          dir = import_node_path22.posix.dirname(dir);
+        }
+        const rel = rest.replace(/::/g, "/");
+        const joined = normalizePath(dir === "." ? rel : import_node_path22.posix.join(dir, rel));
+        const rsFile = `${joined}.rs`;
+        return {
+          ...base,
+          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : joined
+        };
+      }
+      const crateName = imp.specifier.split("::")[0] ?? imp.specifier;
+      return { ...base, packageName: crateName };
+    }
+    case "java":
+    case "kotlin": {
+      const cleanSpec = imp.specifier.replace(/\.\*$/, "");
+      const specPath = cleanSpec.replace(/\./g, "/");
+      let sourceRoot = "";
+      if (fileMeta.declaredPackage) {
+        const pkgPath = fileMeta.declaredPackage.replace(/\./g, "/");
+        const dir = import_node_path22.posix.dirname(normSource);
+        if (dir === pkgPath) sourceRoot = "";
+        else if (dir.endsWith(`/${pkgPath}`)) {
+          sourceRoot = dir.slice(0, dir.length - pkgPath.length - 1);
+        }
+      }
+      const prefix = sourceRoot ? `${sourceRoot}/` : "";
+      const exts = imp.language === "java" ? ["java"] : ["kt", "kts", "java"];
+      for (const ext of exts) {
+        const candidate = `${prefix}${specPath}.${ext}`;
+        if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
+      }
+      if (existsRepoPrefix(`${prefix}${specPath}`, ctx)) {
+        return { ...base, resolvedPath: `${prefix}${specPath}` };
+      }
+      if (fileMeta.declaredPackage && !KNOWN_EXTERNAL_JVM_PREFIXES.some((p2) => cleanSpec.startsWith(p2))) {
+        const pkgSegs = fileMeta.declaredPackage.split(".");
+        const specSegs = cleanSpec.split(".");
+        const sameRoot = pkgSegs.length >= 2 && specSegs.length >= 2 && pkgSegs[0] === specSegs[0] && pkgSegs[1] === specSegs[1];
+        if (sameRoot) {
+          return { ...base, resolvedPath: `${prefix}${specPath}` };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+    case "csharp": {
+      const nsPath = imp.specifier.replace(/\./g, "/");
+      if (existsRepoPrefix(nsPath, ctx)) {
+        return { ...base, resolvedPath: nsPath };
+      }
+      if (fileMeta.declaredPackage) {
+        const rootNs = fileMeta.declaredPackage.split(".")[0];
+        const specRoot = imp.specifier.split(".")[0];
+        if (rootNs && specRoot === rootNs && rootNs !== "System" && rootNs !== "Microsoft") {
+          return { ...base, resolvedPath: nsPath };
+        }
+      }
+      return { ...base, packageName: imp.specifier };
+    }
+  }
+}
+
+// src/architecture/evaluator.ts
+function matchesLayerPath(filePath, patterns) {
+  const norm = normalizePath(filePath);
+  if (!norm) return -1;
+  const extensionless = !/\.[^/]+$/.test(norm);
+  let best = -1;
+  for (const pattern of patterns) {
+    if (matchesGlob(norm, pattern) || extensionless && matchesGlob(`${norm}/index`, pattern)) {
+      const score = globSpecificity(pattern);
+      if (score > best) best = score;
+    }
+  }
+  return best;
+}
+function classifyLayer(filePath, spec) {
+  let best = null;
+  let bestScore = -1;
+  for (const [name, def] of Object.entries(spec.layers)) {
+    const score = matchesLayerPath(filePath, def.paths);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { name, def };
+    }
+  }
+  return best;
+}
+function matchesPackagePattern(packageName, rawSpecifier, pattern) {
+  const p2 = pattern.trim();
+  if (!p2) return false;
+  if (p2.endsWith("*")) {
+    const prefix = p2.slice(0, -1);
+    return packageName.startsWith(prefix) || rawSpecifier.startsWith(prefix);
+  }
+  return packageName === p2 || rawSpecifier === p2 || rawSpecifier.startsWith(`${p2}/`);
+}
+function fingerprintOf7(rule_id, file_path, specifier, occurrence) {
+  return (0, import_node_crypto7.createHash)("sha1").update(`${rule_id}:${file_path}:${specifier}:${occurrence}`).digest("hex").slice(0, 12);
+}
+var DEFAULT_PUBLIC_API_PATTERNS = ["index.*", "public/**", "contracts/**", "api/**"];
+function matchesAnyTarget(target, resolvedPath, targetLayer) {
+  if (targetLayer && target === targetLayer.name) return true;
+  if (!resolvedPath) return false;
+  if (matchesGlob(resolvedPath, target)) return true;
+  const extensionless = !/\.[^/]+$/.test(resolvedPath);
+  return extensionless && matchesGlob(`${resolvedPath}/index`, target);
+}
+function evaluateFileArchitecture(input2) {
+  const normFile = normalizePath(input2.filePath);
+  if (!normFile) return [];
+  if (input2.spec.ignore_tests && isTestFile(normFile)) return [];
+  if (matchesAnyGlob(normFile, input2.spec.exclude)) return [];
+  const { imports, meta: meta3 } = extractImports(normFile, input2.content);
+  if (imports.length === 0) return [];
+  const filtered = input2.onlyLines ? imports.filter((i2) => input2.onlyLines.has(i2.line)) : imports;
+  if (filtered.length === 0) return [];
+  const sourceLayer = classifyLayer(normFile, input2.spec);
+  const sourceCtx = input2.spec.contexts ? extractContext(normFile, input2.spec.contexts.pattern) : null;
+  const violations = [];
+  const occCounts = /* @__PURE__ */ new Map();
+  const pushViolation = (v2) => {
+    const key = `${v2.rule_id}:${v2.specifier}`;
+    const occ = occCounts.get(key) ?? 0;
+    occCounts.set(key, occ + 1);
+    violations.push({
+      ...v2,
+      fingerprint: fingerprintOf7(v2.rule_id, normFile, v2.specifier, occ)
+    });
+  };
+  for (const imp of filtered) {
+    const resolved = resolveImport(imp, normFile, input2.resolveCtx, meta3);
+    const targetLayer = resolved.resolvedPath ? classifyLayer(resolved.resolvedPath, input2.spec) : null;
+    if (sourceLayer && targetLayer && sourceLayer.name !== targetLayer.name) {
+      const forbiddenExplicit = sourceLayer.def.cannot_import?.includes(targetLayer.name) ?? false;
+      const disallowedByAllowlist = sourceLayer.def.can_import !== void 0 && !sourceLayer.def.can_import.includes(targetLayer.name);
+      if (forbiddenExplicit || disallowedByAllowlist) {
+        const rule_id = `arch:layer:${sourceLayer.name}-to-${targetLayer.name}`;
+        const allowedText = sourceLayer.def.can_import && sourceLayer.def.can_import.length > 0 ? ` Allowed layer dependencies for \`${sourceLayer.name}\`: ${sourceLayer.def.can_import.map((l2) => `\`${l2}\``).join(", ")}.` : "";
+        pushViolation({
+          rule_id,
+          file_path: normFile,
+          line: resolved.line,
+          severity: sourceLayer.def.severity ?? input2.spec.severity,
+          title: `Layer '${sourceLayer.name}' cannot import '${targetLayer.name}'`,
+          description: `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports \`${resolved.specifier}\` (resolved to \`${resolved.resolvedPath}\`, layer \`${targetLayer.name}\`), which violates the configured \`${input2.spec.preset}\` architecture boundaries.${allowedText}`,
+          specifier: resolved.specifier,
+          snippet: resolved.snippet,
+          source_layer: sourceLayer.name,
+          target_layer: targetLayer.name
+        });
+      }
+    }
+    if (!resolved.resolvedPath && resolved.packageName && sourceLayer?.def.forbid_packages?.length) {
+      const matchedPattern = sourceLayer.def.forbid_packages.find(
+        (p2) => matchesPackagePattern(resolved.packageName, resolved.specifier, p2)
+      );
+      if (matchedPattern) {
+        pushViolation({
+          rule_id: `arch:forbidden-package:${sourceLayer.name}`,
+          file_path: normFile,
+          line: resolved.line,
+          severity: sourceLayer.def.severity ?? input2.spec.severity,
+          title: `Forbidden package '${resolved.packageName}' in '${sourceLayer.name}' layer`,
+          description: `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports package \`${resolved.packageName}\` (matched rule \`${matchedPattern}\`). Pure \`${sourceLayer.name}\` code must remain independent of framework, transport, and persistence libraries; depend on a port/interface instead.`,
+          specifier: resolved.specifier,
+          snippet: resolved.snippet,
+          source_layer: sourceLayer.name
+        });
+      }
+    }
+    if (!resolved.resolvedPath && resolved.packageName && sourceLayer?.def.allow_packages !== void 0) {
+      const allowed = sourceLayer.def.allow_packages.some(
+        (p2) => matchesPackagePattern(resolved.packageName, resolved.specifier, p2)
+      );
+      if (!allowed) {
+        const allowListText = sourceLayer.def.allow_packages.length > 0 ? ` Allowed packages: ${sourceLayer.def.allow_packages.map((p2) => `\`${p2}\``).join(", ")}.` : " No external packages are permitted in this layer.";
+        pushViolation({
+          rule_id: `arch:disallowed-package:${sourceLayer.name}`,
+          file_path: normFile,
+          line: resolved.line,
+          severity: sourceLayer.def.severity ?? input2.spec.severity,
+          title: `Package '${resolved.packageName}' is not allowlisted for '${sourceLayer.name}'`,
+          description: `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports external package \`${resolved.packageName}\`, which is outside the layer's \`allow_packages\` policy.${allowListText}`,
+          specifier: resolved.specifier,
+          snippet: resolved.snippet,
+          source_layer: sourceLayer.name
+        });
+      }
+    }
+    if (input2.spec.contexts && sourceCtx && resolved.resolvedPath) {
+      const targetCtx = extractContext(resolved.resolvedPath, input2.spec.contexts.pattern);
+      if (targetCtx && targetCtx.context !== sourceCtx.context) {
+        const isShared = input2.spec.contexts.shared !== void 0 && matchesAnyGlob(resolved.resolvedPath, input2.spec.contexts.shared);
+        if (!isShared) {
+          const ctxSeverity = input2.spec.contexts.severity ?? input2.spec.severity;
+          const allowDeps = input2.spec.contexts.allow_dependencies?.[sourceCtx.context];
+          if (allowDeps !== void 0 && !allowDeps.includes(targetCtx.context)) {
+            const permitted = allowDeps.length > 0 ? ` Allowed context dependencies: ${allowDeps.map((c2) => `\`${c2}\``).join(", ")}.` : " This context has no allowed cross-context dependencies.";
+            pushViolation({
+              rule_id: "arch:context-boundary",
+              file_path: normFile,
+              line: resolved.line,
+              severity: ctxSeverity,
+              title: `Context '${sourceCtx.context}' cannot depend on context '${targetCtx.context}'`,
+              description: `\`${normFile}\` (context \`${sourceCtx.context}\`) imports \`${resolved.resolvedPath}\` (context \`${targetCtx.context}\`).${permitted}`,
+              specifier: resolved.specifier,
+              snippet: resolved.snippet,
+              source_context: sourceCtx.context,
+              target_context: targetCtx.context
+            });
+          } else {
+            const publicGlobs = input2.spec.contexts.public_api ?? DEFAULT_PUBLIC_API_PATTERNS;
+            const allowPublicApi = input2.spec.contexts.allow_public_api_imports !== false;
+            const allowsRootIndex = publicGlobs.some(
+              (g2) => g2.startsWith("index") || g2.startsWith("__init__")
+            );
+            const isPublicTarget = matchesAnyGlob(targetCtx.relativePath, publicGlobs) || allowsRootIndex && (targetCtx.relativePath === "" || targetCtx.relativePath === "index");
+            if (!allowPublicApi || !isPublicTarget) {
+              pushViolation({
+                rule_id: "arch:context-boundary",
+                file_path: normFile,
+                line: resolved.line,
+                severity: ctxSeverity,
+                title: `Cross-context import bypasses '${targetCtx.context}' public API`,
+                description: `\`${normFile}\` (context \`${sourceCtx.context}\`) imports internal path \`${resolved.resolvedPath}\` from context \`${targetCtx.context}\`. ` + (allowPublicApi ? `Import through \`${targetCtx.context}\`'s public API (${publicGlobs.map((g2) => `\`${g2}\``).join(", ")}) or shared kernel instead.` : `Direct cross-context imports are disabled; communicate via events or shared contracts.`),
+                specifier: resolved.specifier,
+                snippet: resolved.snippet,
+                source_context: sourceCtx.context,
+                target_context: targetCtx.context
+              });
+            }
+          }
+        }
+      }
+    }
+    for (const rule of input2.spec.rules) {
+      const fromList = Array.isArray(rule.from) ? rule.from : [rule.from];
+      const matchesFrom = fromList.some(
+        (f2) => sourceLayer && f2 === sourceLayer.name || matchesGlob(normFile, f2)
+      );
+      if (!matchesFrom) continue;
+      let violated = false;
+      if (rule.forbid_imports?.length && resolved.resolvedPath) {
+        violated = rule.forbid_imports.some(
+          (t2) => matchesAnyTarget(t2, resolved.resolvedPath, targetLayer)
+        );
+      }
+      if (!violated && rule.forbid_packages?.length && !resolved.resolvedPath && resolved.packageName) {
+        violated = rule.forbid_packages.some(
+          (p2) => matchesPackagePattern(resolved.packageName, resolved.specifier, p2)
+        );
+      }
+      if (violated) {
+        pushViolation({
+          rule_id: `arch:rule:${rule.id}`,
+          file_path: normFile,
+          line: resolved.line,
+          severity: rule.severity ?? input2.spec.severity,
+          title: `Architecture rule '${rule.id}' violated`,
+          description: `${rule.reason} (offending import: \`${resolved.specifier}\`).`,
+          specifier: resolved.specifier,
+          snippet: resolved.snippet,
+          ...sourceLayer ? { source_layer: sourceLayer.name } : {},
+          ...targetLayer ? { target_layer: targetLayer.name } : {}
+        });
+      }
+    }
+  }
+  return violations;
+}
+
+// src/scanners/architecture.ts
+var SCANNER_ID9 = "architecture";
+function reconstructFromHeadLines(file2) {
+  if (file2.head_line_text.size === 0) return "";
+  let maxLine = 0;
+  for (const ln of file2.head_line_text.keys()) {
+    if (ln > maxLine) maxLine = ln;
+  }
+  const lines = new Array(maxLine).fill("");
+  for (const [ln, text] of file2.head_line_text) {
+    if (ln >= 1) lines[ln - 1] = text;
+  }
+  return lines.join("\n");
+}
+async function readHeadFileContent(deps, file2) {
+  try {
+    const remote = await deps.fileReader.read({
+      owner: deps.owner,
+      repo: deps.repo,
+      path: file2.path,
+      ref: deps.head_sha
+    });
+    if (remote !== null) return remote;
+  } catch {
+  }
+  if (deps.workspaceDir) {
+    try {
+      return (0, import_node_fs9.readFileSync)((0, import_node_path23.resolve)(deps.workspaceDir, file2.path), "utf-8");
+    } catch {
+    }
+  }
+  return reconstructFromHeadLines(file2);
+}
+async function readMetadataFile(deps, path28) {
+  try {
+    return await deps.fileReader.read({
+      owner: deps.owner,
+      repo: deps.repo,
+      path: path28,
+      ref: deps.head_sha
+    });
+  } catch {
+    return null;
+  }
+}
+async function hydrateResolveContext(deps, languagesPresent) {
+  const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
+  if (!ctx.tsconfig && (languagesPresent.has("typescript") || languagesPresent.has("javascript"))) {
+    const raw = await readMetadataFile(deps, "tsconfig.json");
+    if (raw) {
+      const parsed = parseTsConfigContent(raw);
+      if (parsed) ctx.tsconfig = parsed;
+    }
+  }
+  if (!ctx.goModule && languagesPresent.has("go")) {
+    const raw = await readMetadataFile(deps, "go.mod");
+    if (raw) {
+      const goModule = parseGoModModule(raw);
+      if (goModule) ctx.goModule = goModule;
+    }
+  }
+  if (!ctx.dartPackage && languagesPresent.has("dart")) {
+    const raw = await readMetadataFile(deps, "pubspec.yaml");
+    if (raw) {
+      const dartPkg = parsePubspecName(raw);
+      if (dartPkg) ctx.dartPackage = dartPkg;
+    }
+  }
+  return ctx;
+}
+function isFileApplicable(file2, spec) {
+  if (file2.status === "removed" || file2.is_binary || file2.is_generated) return false;
+  if (detectArchLanguage(file2.path) === null) return false;
+  if (spec.ignore_tests && isTestFile(file2.path)) return false;
+  if (matchesAnyGlob(file2.path, spec.exclude)) return false;
+  return true;
+}
+function createArchitectureScanner(spec, options = {}) {
+  const log2 = options.logger ?? logger;
+  const hasDeterministicRules = spec.enabled && spec.deterministic_enforcement && (Object.keys(spec.layers).length > 0 || spec.contexts !== void 0 || spec.rules.length > 0);
+  return {
+    id: SCANNER_ID9,
+    applies(files) {
+      if (!hasDeterministicRules) return false;
+      return files.some((f2) => isFileApplicable(f2, spec));
+    },
+    async scan(deps) {
+      const started = Date.now();
+      if (!hasDeterministicRules) {
+        return emptyResult(SCANNER_ID9, Date.now() - started);
+      }
+      const applicable = deps.changedFiles.filter(
+        (f2) => f2.added_lines.size > 0 && isFileApplicable(f2, spec)
+      );
+      if (applicable.length === 0) {
+        return emptyResult(SCANNER_ID9, Date.now() - started);
+      }
+      const languagesPresent = /* @__PURE__ */ new Set();
+      for (const f2 of applicable) {
+        const lang = detectArchLanguage(f2.path);
+        if (lang) languagesPresent.add(lang);
+      }
+      const resolveCtx = await hydrateResolveContext(deps, languagesPresent);
+      const findings = [];
+      const errors = [];
+      let filesExamined = 0;
+      for (const file2 of applicable) {
+        if (deps.signal.aborted) break;
+        try {
+          const content = await readHeadFileContent(deps, file2);
+          filesExamined += 1;
+          const violations = evaluateFileArchitecture({
+            filePath: file2.path,
+            content,
+            spec,
+            resolveCtx,
+            onlyLines: file2.added_lines
+          });
+          for (const v2 of violations) {
+            const finding = {
+              scanner: SCANNER_ID9,
+              rule_id: v2.rule_id,
+              file_path: v2.file_path,
+              line: v2.line,
+              severity: v2.severity,
+              category: "architecture",
+              title: v2.title,
+              description: v2.description,
+              confidence: "high",
+              evidence: {
+                kind: "architecture",
+                rule: v2.rule_id,
+                specifier: v2.specifier,
+                ...v2.source_layer ? { source_layer: v2.source_layer } : {},
+                ...v2.target_layer ? { target_layer: v2.target_layer } : {},
+                ...v2.source_context ? { source_context: v2.source_context } : {},
+                ...v2.target_context ? { target_context: v2.target_context } : {}
+              },
+              fingerprint: v2.fingerprint
+            };
+            const match = deps.ignoreList.matches(finding);
+            if (!match.ignored) {
+              findings.push(finding);
+            } else if (match.expired) {
+              void log2.notice(expiredIgnoreNotice("architecture", finding, match));
+            }
+          }
+        } catch (err) {
+          void log2.warn(`architecture: failed scanning ${file2.path}: ${err.message}`);
+          errors.push({
+            message: `Architecture scan failed on ${file2.path}`,
+            cause: err.message,
+            fatal: false
+          });
+        }
+      }
+      return {
+        scanner: SCANNER_ID9,
+        findings,
+        errors,
+        metrics: {
+          duration_ms: Date.now() - started,
+          files_examined: filesExamined,
+          network_calls: 0,
+          cache_hits: 0
+        }
+      };
+    }
+  };
+}
+
+// src/architecture/loader.ts
+var import_node_fs10 = require("node:fs");
+var import_node_path24 = require("node:path");
+var import_yaml5 = __toESM(require_dist(), 1);
+var baselineFileSchema = external_exports.object({
+  version: external_exports.literal(1),
+  fingerprints: external_exports.array(external_exports.string().min(1))
+});
+function isSafeRelativePath(workspaceDir, relPath) {
+  if (!relPath || relPath.trim().length === 0 || (0, import_node_path24.isAbsolute)(relPath)) return false;
+  const root = (0, import_node_path24.resolve)(workspaceDir);
+  const target = (0, import_node_path24.resolve)(root, relPath);
+  const rel = (0, import_node_path24.relative)(root, target);
+  return rel !== "" && !rel.startsWith("..") && !(0, import_node_path24.isAbsolute)(rel);
+}
+function validateArchitectureRules(rules) {
+  const issues = [];
+  for (const rule of rules) {
+    const hasImports = rule.forbid_imports !== void 0 && rule.forbid_imports.length > 0;
+    const hasPackages = rule.forbid_packages !== void 0 && rule.forbid_packages.length > 0;
+    if (!hasImports && !hasPackages) {
+      issues.push(
+        `rule '${rule.id}' must specify at least one of forbid_imports or forbid_packages`
+      );
+    }
+  }
+  return issues;
+}
+function parseExternalArchitectureYamlStrict(yaml) {
+  let parsed;
+  try {
+    parsed = (0, import_yaml5.parse)(yaml);
+  } catch (err) {
+    throw new ConfigError(`Architecture YAML parse error: ${err.message}`, {
+      cause: err
+    });
+  }
+  if (parsed == null) return {};
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ConfigError("Architecture file must parse to a YAML mapping/object.");
+  }
+  const result = architectureExternalFileSchema.safeParse(parsed);
+  if (!result.success) {
+    const detail = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
+    throw new ConfigError(`Architecture config validation failed: ${detail}`);
+  }
+  const data = result.data;
+  if (data.rules) {
+    const ruleIssues = validateArchitectureRules(data.rules);
+    if (ruleIssues.length > 0) {
+      throw new ConfigError(`Architecture config validation failed: ${ruleIssues.join("; ")}`);
+    }
+  }
+  return data;
+}
+function parseExternalArchitectureYamlSafe(yaml, sourceLabel) {
+  try {
+    return parseExternalArchitectureYamlStrict(yaml);
+  } catch (err) {
+    void logger.warn(
+      `Failed to load ${sourceLabel}: ${err.message}. Ignoring external architecture file.`
+    );
+    return null;
+  }
+}
+function mergeArchitectureConfig(inline, external, rawInline) {
+  const def = DEFAULT_CONFIG.architecture;
+  const pickScalar = (key) => {
+    if (rawInline && key in rawInline && rawInline[key] !== void 0) {
+      return inline[key];
+    }
+    if (external[key] !== void 0 && inline[key] === def[key]) {
+      return external[key];
+    }
+    return inline[key];
+  };
+  let mergedLayers;
+  if (external.layers || inline.layers) {
+    mergedLayers = {};
+    const names = /* @__PURE__ */ new Set([
+      ...Object.keys(external.layers ?? {}),
+      ...Object.keys(inline.layers ?? {})
+    ]);
+    for (const name of names) {
+      mergedLayers[name] = {
+        ...external.layers?.[name] ?? {},
+        ...inline.layers?.[name] ?? {}
+      };
+    }
+  }
+  const enabled = external.enabled === false ? false : inline.enabled;
+  return {
+    enabled,
+    ...inline.file !== void 0 ? { file: inline.file } : {},
+    ...inline.preset !== void 0 ? { preset: inline.preset } : external.preset !== void 0 ? { preset: external.preset } : {},
+    ...inline.root !== void 0 ? { root: inline.root } : external.root !== void 0 ? { root: external.root } : {},
+    severity: pickScalar("severity"),
+    ...mergedLayers !== void 0 ? { layers: mergedLayers } : {},
+    ...inline.contexts !== void 0 ? { contexts: inline.contexts } : external.contexts !== void 0 ? { contexts: external.contexts } : {},
+    ...inline.rules !== void 0 ? { rules: inline.rules } : external.rules !== void 0 ? { rules: external.rules } : {},
+    ...inline.principles !== void 0 ? { principles: inline.principles } : external.principles !== void 0 ? { principles: external.principles } : {},
+    ...inline.include_preset_principles !== void 0 ? { include_preset_principles: inline.include_preset_principles } : external.include_preset_principles !== void 0 ? { include_preset_principles: external.include_preset_principles } : {},
+    llm_enforcement: pickScalar("llm_enforcement"),
+    deterministic_enforcement: pickScalar("deterministic_enforcement"),
+    ...inline.exclude !== void 0 ? { exclude: inline.exclude } : external.exclude !== void 0 ? { exclude: external.exclude } : {},
+    ignore_tests: pickScalar("ignore_tests"),
+    ...inline.baseline_file !== void 0 ? { baseline_file: inline.baseline_file } : external.baseline_file !== void 0 ? { baseline_file: external.baseline_file } : {}
+  };
+}
+async function resolveEffectiveArchitectureConfig(config2, opts = {}) {
+  if (!config2.enabled || !config2.file) {
+    return config2;
+  }
+  const baseDir = opts.workspaceDir ?? process.cwd();
+  if (!isSafeRelativePath(baseDir, config2.file)) {
+    void logger.warn(
+      `Architecture file path '${config2.file}' escapes workspace root. Using inline config.`
+    );
+    return config2;
+  }
+  let raw = null;
+  if (opts.fileReader && opts.owner && opts.repo && opts.ref) {
+    try {
+      raw = await opts.fileReader.read({
+        owner: opts.owner,
+        repo: opts.repo,
+        path: config2.file,
+        ref: opts.ref
+      });
+    } catch (err) {
+      const status = err instanceof GitHubApiError && err.status != null ? ` (status ${err.status})` : "";
+      void logger.debug(
+        `Could not read ${config2.file}@${opts.ref}${status}: ${err.message}`
+      );
+    }
+  }
+  if (raw == null && opts.workspaceDir) {
+    try {
+      raw = (0, import_node_fs10.readFileSync)((0, import_node_path24.resolve)(opts.workspaceDir, config2.file), "utf-8");
+    } catch {
+    }
+  }
+  if (raw == null || raw.trim().length === 0) {
+    void logger.warn(
+      `Configured architecture file '${config2.file}' was not found or is empty. Using inline config.`
+    );
+    return config2;
+  }
+  const parsed = parseExternalArchitectureYamlSafe(raw, config2.file);
+  if (!parsed) return config2;
+  return mergeArchitectureConfig(config2, parsed, opts.rawInline);
+}
+
+// src/references/loader.ts
+var import_node_child_process12 = require("node:child_process");
+var import_node_fs12 = require("node:fs");
+var import_node_path26 = require("node:path");
+
+// src/references/cache.ts
+var import_node_crypto8 = require("node:crypto");
+var import_node_fs11 = require("node:fs");
+var import_node_os2 = require("node:os");
+var import_node_path25 = require("node:path");
+var cacheMetaSchema = external_exports.object({
+  version: external_exports.literal(1),
+  key: external_exports.string().min(1),
+  source_id: external_exports.string().min(1),
+  title: external_exports.string().min(1),
+  kind: external_exports.enum(["repo", "url", "github"]),
+  content_sha256: external_exports.string().min(1),
+  etag: external_exports.string().optional(),
+  last_modified: external_exports.string().optional(),
+  source_fingerprint: external_exports.string().optional(),
+  fetched_at: external_exports.string().min(1),
+  ttl_seconds: external_exports.number().int().nonnegative(),
+  byte_length: external_exports.number().int().nonnegative(),
+  headings: external_exports.array(external_exports.string())
+});
+function sha256Hex(value) {
+  return (0, import_node_crypto8.createHash)("sha256").update(value, "utf-8").digest("hex");
+}
+function defaultCacheDir() {
+  const cacheOverride = process.env.VOR_CACHE_DIR?.trim();
+  if (cacheOverride) {
+    return (0, import_node_path25.join)((0, import_node_path25.resolve)(cacheOverride), "references");
+  }
+  const vorHomeOverride = process.env.VOR_HOME?.trim();
+  const vorHome = vorHomeOverride ? (0, import_node_path25.resolve)(vorHomeOverride) : (0, import_node_path25.join)((0, import_node_os2.homedir)(), ".vor");
+  return (0, import_node_path25.join)(vorHome, "cache", "references");
+}
+function resolveReferenceCacheDir(configuredDir, workspaceDir) {
+  if (configuredDir && configuredDir.trim().length > 0) {
+    const trimmed = configuredDir.trim();
+    if ((0, import_node_path25.isAbsolute)(trimmed)) return trimmed;
+    const base = workspaceDir ?? process.cwd();
+    if (isSafeRelativePath(base, trimmed)) {
+      return (0, import_node_path25.resolve)(base, trimmed);
+    }
+    void logger.warn(
+      `Configured references.cache.dir '${configuredDir}' escapes workspace root; falling back to default cache dir.`
+    );
+  }
+  return defaultCacheDir();
+}
+var DiskReferenceCache = class {
+  constructor(cacheDir) {
+    this.cacheDir = cacheDir;
+  }
+  cacheDir;
+  entryPaths(key) {
+    const hash2 = sha256Hex(key);
+    return {
+      hash: hash2,
+      metaPath: (0, import_node_path25.join)(this.cacheDir, `${hash2}.meta.json`),
+      contentPath: (0, import_node_path25.join)(this.cacheDir, `${hash2}.content`)
+    };
+  }
+  get(key, nowMs = Date.now()) {
+    const { metaPath, contentPath } = this.entryPaths(key);
+    if (!(0, import_node_fs11.existsSync)(metaPath) || !(0, import_node_fs11.existsSync)(contentPath)) {
+      return { status: "miss" };
+    }
+    let metaRaw;
+    let content;
+    try {
+      metaRaw = (0, import_node_fs11.readFileSync)(metaPath, "utf-8");
+      content = (0, import_node_fs11.readFileSync)(contentPath, "utf-8");
+    } catch {
+      return { status: "miss" };
+    }
+    let parsedMeta;
+    try {
+      parsedMeta = JSON.parse(metaRaw);
+    } catch {
+      void logger.warn(`Corrupt reference cache metadata for '${key}'; treating as miss.`);
+      return { status: "miss" };
+    }
+    const valid = cacheMetaSchema.safeParse(parsedMeta);
+    if (!valid.success) {
+      void logger.warn(`Invalid reference cache metadata schema for '${key}'; treating as miss.`);
+      return { status: "miss" };
+    }
+    const meta3 = valid.data;
+    if (sha256Hex(content) !== meta3.content_sha256) {
+      void logger.warn(`Reference cache checksum mismatch for '${key}'; treating as miss.`);
+      return { status: "miss" };
+    }
+    const fetchedMs = Date.parse(meta3.fetched_at);
+    const ageMs = nowMs - fetchedMs;
+    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < meta3.ttl_seconds * 1e3;
+    return fresh ? { status: "hit", meta: meta3, content } : { status: "stale", meta: meta3, content };
+  }
+  set(key, meta3, content) {
+    (0, import_node_fs11.mkdirSync)(this.cacheDir, { recursive: true });
+    const { metaPath, contentPath } = this.entryPaths(key);
+    (0, import_node_fs11.writeFileSync)(contentPath, content, "utf-8");
+    (0, import_node_fs11.writeFileSync)(metaPath, JSON.stringify(meta3, null, 2) + "\n", "utf-8");
+  }
+  touch(key, updates) {
+    const { metaPath } = this.entryPaths(key);
+    if (!(0, import_node_fs11.existsSync)(metaPath)) return null;
+    try {
+      const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs11.readFileSync)(metaPath, "utf-8")));
+      if (!parsed.success) return null;
+      const merged = {
+        ...parsed.data,
+        ...updates
+      };
+      (0, import_node_fs11.writeFileSync)(metaPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+      return merged;
+    } catch {
+      return null;
+    }
+  }
+  list() {
+    if (!(0, import_node_fs11.existsSync)(this.cacheDir)) return [];
+    const entries = [];
+    for (const file2 of (0, import_node_fs11.readdirSync)(this.cacheDir)) {
+      if (!file2.endsWith(".meta.json")) continue;
+      try {
+        const parsed = cacheMetaSchema.safeParse(
+          JSON.parse((0, import_node_fs11.readFileSync)((0, import_node_path25.join)(this.cacheDir, file2), "utf-8"))
+        );
+        if (parsed.success) entries.push(parsed.data);
+      } catch {
+      }
+    }
+    return entries.sort((a2, b2) => a2.source_id.localeCompare(b2.source_id));
+  }
+  clear(idOrKey) {
+    if (!(0, import_node_fs11.existsSync)(this.cacheDir)) return 0;
+    let removed = 0;
+    for (const file2 of (0, import_node_fs11.readdirSync)(this.cacheDir)) {
+      if (!file2.endsWith(".meta.json")) continue;
+      const hash2 = file2.slice(0, -".meta.json".length);
+      const metaPath = (0, import_node_path25.join)(this.cacheDir, file2);
+      const contentPath = (0, import_node_path25.join)(this.cacheDir, `${hash2}.content`);
+      let shouldDelete = idOrKey === void 0;
+      if (!shouldDelete && idOrKey !== void 0) {
+        if (hash2 === idOrKey) {
+          shouldDelete = true;
+        } else {
+          try {
+            const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs11.readFileSync)(metaPath, "utf-8")));
+            if (parsed.success && (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)) {
+              shouldDelete = true;
+            }
+          } catch {
+          }
+        }
+      }
+      if (!shouldDelete) continue;
+      try {
+        (0, import_node_fs11.unlinkSync)(metaPath);
+        if ((0, import_node_fs11.existsSync)(contentPath)) (0, import_node_fs11.unlinkSync)(contentPath);
+        removed += 1;
+      } catch {
+      }
+    }
+    return removed;
+  }
+};
+
+// src/references/text.ts
+var ENTITY_MAP = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " "
+};
+function decodeHtmlEntities(text) {
+  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity) => {
+    if (entity.startsWith("#x") || entity.startsWith("#X")) {
+      const code = Number.parseInt(entity.slice(2), 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : full;
+    }
+    if (entity.startsWith("#")) {
+      const code = Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : full;
+    }
+    return ENTITY_MAP[entity.toLowerCase()] ?? full;
+  });
+}
+function stripTags(html) {
+  return html.replace(/<[^>]+>/g, "");
+}
+function htmlToMarkdownText(html) {
+  let out = html;
+  out = out.replace(/<(script|style|noscript|svg|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner) => {
+    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    return `
+\`\`\`
+${clean}
+\`\`\`
+`;
+  });
+  out = out.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner) => {
+    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    return clean ? `\`${clean}\`` : "";
+  });
+  out = out.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl, inner) => {
+    const hashes = "#".repeat(Number(lvl));
+    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+    return clean ? `
+${hashes} ${clean}
+` : "\n";
+  });
+  out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner) => {
+    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+    return clean ? `
+- ${clean}` : "";
+  });
+  out = out.replace(
+    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^>]*>/gi,
+    "\n"
+  );
+  out = decodeHtmlEntities(stripTags(out));
+  return out;
+}
+function isLikelyBinary(input2) {
+  if (Buffer.isBuffer(input2)) {
+    return input2.subarray(0, 8192).includes(0);
+  }
+  return input2.slice(0, 8192).includes("\0");
+}
+function normalizeDocumentText(raw, contentType) {
+  const lf = raw.replace(/\r\n?/g, "\n");
+  const isHtml = contentType !== void 0 && contentType.toLowerCase().includes("html") || /^\s*(?:<!doctype\s+html|<html\b)/i.test(lf);
+  const text = isHtml ? htmlToMarkdownText(lf) : lf;
+  return text.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function extractDocumentHeadings(markdown, maxHeadings = 8) {
+  const headings = [];
+  let inFence = false;
+  for (const line of markdown.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m2 = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
+    if (m2?.[1]) {
+      headings.push(m2[1].trim());
+      if (headings.length >= maxHeadings) break;
+    }
+  }
+  return headings;
+}
+function truncateUtf8Bytes(text, maxBytes) {
+  const totalBytes = Buffer.byteLength(text, "utf-8");
+  if (totalBytes <= maxBytes) {
+    return { content: text, truncated: false };
+  }
+  const notice2 = `
+
+...(truncated at ${maxBytes} bytes)`;
+  const budget = Math.max(0, maxBytes - Buffer.byteLength(notice2, "utf-8"));
+  const rawBuf = Buffer.from(text, "utf-8");
+  let end = Math.min(budget, rawBuf.length);
+  while (end > 0 && (rawBuf[end] & 192) === 128) {
+    end -= 1;
+  }
+  let sliced = rawBuf.subarray(0, end).toString("utf-8");
+  const lastNewline = sliced.lastIndexOf("\n");
+  if (lastNewline > sliced.length * 0.8) {
+    sliced = sliced.slice(0, lastNewline);
+  }
+  return { content: `${sliced.trimEnd()}${notice2}`, truncated: true };
+}
+
+// src/references/loader.ts
+var FETCH_TIMEOUT_MS = 15e3;
+var MAX_RAW_REMOTE_BYTES = 5 * 1024 * 1024;
+var WALK_SKIP_DIRS = /* @__PURE__ */ new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "vendor",
+  "coverage",
+  "__generated__"
+]);
+var BLOCKED_METADATA_HOSTS = /* @__PURE__ */ new Set([
+  "169.254.169.254",
+  "metadata.google.internal",
+  "metadata.goog",
+  "100.100.100.200"
+]);
+function hasGlobMeta(value) {
+  return value.includes("*") || value.includes("?") || value.includes("{");
+}
+function parseGithubSpec(raw) {
+  const cleaned = raw.startsWith("github:") ? raw.slice("github:".length) : raw;
+  const parts = cleaned.split("/");
+  if (parts.length < 3 || !parts[0] || !parts[1]) return null;
+  const owner = parts[0];
+  const repo = parts[1];
+  const rest = parts.slice(2).join("/");
+  const lastSlash = rest.lastIndexOf("/");
+  const lastAt = rest.lastIndexOf("@");
+  if (lastAt > lastSlash && lastAt < rest.length - 1) {
+    const path28 = rest.slice(0, lastAt);
+    const ref = rest.slice(lastAt + 1);
+    return path28 ? { owner, repo, path: path28, ref } : null;
+  }
+  return rest ? { owner, repo, path: rest, ref: "HEAD" } : null;
+}
+function normalizeSourceInput(entry, warnings) {
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    if (/^https?:\/\//i.test(trimmed)) {
+      return { kind: "url", url: trimmed, mode: "auto" };
+    }
+    if (trimmed.startsWith("github:")) {
+      const gh = parseGithubSpec(trimmed);
+      if (!gh) {
+        warnings.push(
+          `Invalid GitHub reference source '${trimmed}'. Expected github:owner/repo/path[@ref].`
+        );
+        return null;
+      }
+      return { kind: "github", ...gh, rawSpec: trimmed, mode: "auto" };
+    }
+    if (hasGlobMeta(trimmed)) {
+      return { kind: "repo-glob", glob: trimmed, mode: "auto" };
+    }
+    return { kind: "repo-file", path: trimmed, mode: "auto" };
+  }
+  const obj = entry;
+  const mode = obj.mode ?? "auto";
+  const common = {
+    ...obj.id !== void 0 ? { id: obj.id } : {},
+    ...obj.title !== void 0 ? { title: obj.title } : {},
+    mode,
+    ...obj.ttl_seconds !== void 0 ? { ttl_seconds: obj.ttl_seconds } : {}
+  };
+  if (obj.url) return { kind: "url", url: obj.url, ...common };
+  if (obj.github) {
+    const gh = parseGithubSpec(obj.github);
+    if (!gh) {
+      warnings.push(
+        `Invalid GitHub reference source '${obj.github}'. Expected owner/repo/path[@ref].`
+      );
+      return null;
+    }
+    return {
+      kind: "github",
+      ...gh,
+      rawSpec: `github:${gh.owner}/${gh.repo}/${gh.path}@${gh.ref}`,
+      ...common
+    };
+  }
+  if (obj.glob) return { kind: "repo-glob", glob: obj.glob, ...common };
+  if (obj.path) return { kind: "repo-file", path: obj.path, ...common };
+  warnings.push("Reference source object has none of path, glob, url, or github; skipping.");
+  return null;
+}
+function validateRemoteUrl(rawUrl) {
+  const url2 = new URL(rawUrl);
+  if (url2.protocol !== "http:" && url2.protocol !== "https:") {
+    throw new Error(`Unsupported URL scheme '${url2.protocol}'`);
+  }
+  const host = url2.hostname.toLowerCase();
+  if (BLOCKED_METADATA_HOSTS.has(host)) {
+    throw new Error(`Blocked metadata host '${host}'`);
+  }
+  return url2;
+}
+function inferTitle(explicitTitle, content, fallbackSource) {
+  if (explicitTitle && explicitTitle.trim().length > 0) return explicitTitle.trim();
+  const h1 = content.match(/^#\s+(.+?)\s*#*$/m);
+  if (h1?.[1]) return h1[1].trim();
+  try {
+    if (/^https?:\/\//i.test(fallbackSource)) {
+      const u2 = new URL(fallbackSource);
+      const last = (0, import_node_path26.basename)(u2.pathname);
+      return last && last !== "/" ? last : u2.hostname;
+    }
+  } catch {
+  }
+  return (0, import_node_path26.basename)(fallbackSource) || fallbackSource;
+}
+function enumerateWorkspaceFiles(workspaceDir) {
+  try {
+    const out = (0, import_node_child_process12.execFileSync)(
+      "git",
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      {
+        cwd: workspaceDir,
+        encoding: "utf-8",
+        maxBuffer: 32 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    return out.split("\0").map((p2) => normalizePath(p2)).filter(Boolean);
+  } catch {
+    const files = [];
+    const walk = (dir, relBase) => {
+      for (const entry of (0, import_node_fs12.readdirSync)(dir, { withFileTypes: true })) {
+        if (WALK_SKIP_DIRS.has(entry.name)) continue;
+        const abs = (0, import_node_path26.join)(dir, entry.name);
+        const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walk(abs, rel);
+        else if (entry.isFile()) files.push(normalizePath(rel));
+      }
+    };
+    walk(workspaceDir, "");
+    return files;
+  }
+}
+async function listRepoGlobFiles(pattern, input2, warnings) {
+  if (input2.workspaceDir && (0, import_node_fs12.existsSync)(input2.workspaceDir)) {
+    const files = enumerateWorkspaceFiles(input2.workspaceDir);
+    const matched = files.filter((f2) => matchesGlob(f2, pattern)).sort();
+    if (matched.length > 0) return matched;
+  }
+  if (input2.octokit?.rest?.git?.getTree && input2.owner && input2.repo && input2.ref) {
+    try {
+      const r2 = await input2.octokit.rest.git.getTree({
+        owner: input2.owner,
+        repo: input2.repo,
+        tree_sha: input2.ref,
+        recursive: "1"
+      });
+      const paths = (r2.data.tree ?? []).filter((item) => item.type === "blob" && typeof item.path === "string").map((item) => normalizePath(item.path)).filter((p2) => matchesGlob(p2, pattern)).sort();
+      return paths;
+    } catch (err) {
+      warnings.push(
+        `Failed to list repo glob '${pattern}' via Git Tree API: ${err.message}`
+      );
+    }
+  }
+  return [];
+}
+function finalizeNormalizedDoc(rawText, opts) {
+  const normalized = normalizeDocumentText(rawText, opts.contentType);
+  const { content, truncated } = truncateUtf8Bytes(normalized, opts.maxDocBytes);
+  return {
+    id: opts.id,
+    title: inferTitle(opts.explicitTitle, content, opts.source),
+    source: opts.source,
+    kind: opts.kind,
+    mode: opts.mode,
+    content,
+    byte_length: Buffer.byteLength(content, "utf-8"),
+    content_sha256: sha256Hex(content),
+    headings: extractDocumentHeadings(content),
+    truncated,
+    cache_status: opts.cacheStatus
+  };
+}
+async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
+  const baseDir = input2.workspaceDir ?? process.cwd();
+  if (!isSafeRelativePath(baseDir, repoPath)) {
+    warnings.push(`Reference path '${repoPath}' escapes workspace root; skipping.`);
+    return null;
+  }
+  const normPath = normalizePath(repoPath);
+  const cacheKey = `repo:${input2.owner ?? "local"}/${input2.repo ?? "local"}:${normPath}`;
+  const nowMs = input2.nowMs ?? Date.now();
+  const ttl = metaOpts.ttl_seconds ?? input2.config.cache.ttl_seconds;
+  let diskFingerprint;
+  let diskContent = null;
+  if (input2.workspaceDir) {
+    const abs = (0, import_node_path26.resolve)(input2.workspaceDir, normPath);
+    if ((0, import_node_fs12.existsSync)(abs)) {
+      try {
+        const st2 = (0, import_node_fs12.statSync)(abs);
+        if (st2.isFile()) {
+          diskFingerprint = `${st2.mtimeMs}:${st2.size}`;
+          if (cache && !input2.forceRefresh) {
+            const cached2 = cache.get(cacheKey, nowMs);
+            if (cached2.status === "hit" && cached2.meta.source_fingerprint === diskFingerprint) {
+              return {
+                id: metaOpts.id ?? normPath,
+                title: metaOpts.title ?? cached2.meta.title,
+                source: normPath,
+                kind: "repo",
+                mode: metaOpts.mode,
+                content: cached2.content,
+                byte_length: cached2.meta.byte_length,
+                content_sha256: cached2.meta.content_sha256,
+                headings: cached2.meta.headings,
+                truncated: false,
+                cache_status: "hit"
+              };
+            }
+          }
+          const buf = (0, import_node_fs12.readFileSync)(abs);
+          if (isLikelyBinary(buf)) {
+            warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
+            return null;
+          }
+          diskContent = buf.toString("utf-8");
+        }
+      } catch {
+      }
+    }
+  }
+  let rawText = null;
+  if (input2.fileReader && input2.owner && input2.repo && input2.ref) {
+    try {
+      rawText = await input2.fileReader.read({
+        owner: input2.owner,
+        repo: input2.repo,
+        path: normPath,
+        ref: input2.ref
+      });
+    } catch {
+      rawText = null;
+    }
+  }
+  if (rawText === null) rawText = diskContent;
+  if (rawText === null) {
+    warnings.push(`Reference file '${normPath}' was not found; skipping.`);
+    return null;
+  }
+  if (isLikelyBinary(rawText)) {
+    warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
+    return null;
+  }
+  const fingerprint = diskFingerprint ?? sha256Hex(rawText);
+  if (cache && !input2.forceRefresh) {
+    const cached2 = cache.get(cacheKey, nowMs);
+    if (cached2.status === "hit" && cached2.meta.source_fingerprint === fingerprint) {
+      return {
+        id: metaOpts.id ?? normPath,
+        title: metaOpts.title ?? cached2.meta.title,
+        source: normPath,
+        kind: "repo",
+        mode: metaOpts.mode,
+        content: cached2.content,
+        byte_length: cached2.meta.byte_length,
+        content_sha256: cached2.meta.content_sha256,
+        headings: cached2.meta.headings,
+        truncated: false,
+        cache_status: "hit"
+      };
+    }
+  }
+  const doc = finalizeNormalizedDoc(rawText, {
+    id: metaOpts.id ?? normPath,
+    ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
+    source: normPath,
+    kind: "repo",
+    mode: metaOpts.mode,
+    maxDocBytes: input2.config.max_doc_bytes,
+    cacheStatus: cache ? "miss" : "uncached"
+  });
+  if (cache) {
+    cache.set(
+      cacheKey,
+      {
+        version: 1,
+        key: cacheKey,
+        source_id: doc.id,
+        title: doc.title,
+        kind: "repo",
+        content_sha256: doc.content_sha256,
+        source_fingerprint: fingerprint,
+        fetched_at: new Date(nowMs).toISOString(),
+        ttl_seconds: ttl,
+        byte_length: doc.byte_length,
+        headings: doc.headings
+      },
+      doc.content
+    );
+  }
+  return doc;
+}
+async function loadRemoteUrl(src, input2, cache, warnings) {
+  let url2;
+  try {
+    url2 = validateRemoteUrl(src.url);
+  } catch (err) {
+    warnings.push(`Rejected reference URL '${src.url}': ${err.message}`);
+    return null;
+  }
+  const defaultId = `${url2.host}${url2.pathname === "/" ? "" : url2.pathname}`;
+  const docId = src.id ?? defaultId;
+  const cacheKey = `url:${url2.toString()}`;
+  const nowMs = input2.nowMs ?? Date.now();
+  const ttl = src.ttl_seconds ?? input2.config.cache.ttl_seconds;
+  let staleMeta;
+  let staleContent;
+  if (cache) {
+    const lookup = cache.get(cacheKey, nowMs);
+    if (lookup.status === "hit" && !input2.forceRefresh) {
+      return {
+        id: docId,
+        title: src.title ?? lookup.meta.title,
+        source: src.url,
+        kind: "url",
+        mode: src.mode,
+        content: lookup.content,
+        byte_length: lookup.meta.byte_length,
+        content_sha256: lookup.meta.content_sha256,
+        headings: lookup.meta.headings,
+        truncated: false,
+        cache_status: "hit"
+      };
+    }
+    if (lookup.status === "hit" || lookup.status === "stale") {
+      staleMeta = lookup.meta;
+      staleContent = lookup.content;
+    }
+  }
+  const fetchFn = input2.fetchImpl ?? globalThis.fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const headers = {
+      Accept: "text/markdown, text/plain, text/html, */*;q=0.5",
+      "User-Agent": "driches-vor/reference-loader"
+    };
+    if (!input2.forceRefresh && staleMeta) {
+      if (staleMeta.etag) headers["If-None-Match"] = staleMeta.etag;
+      if (staleMeta.last_modified) headers["If-Modified-Since"] = staleMeta.last_modified;
+    }
+    const res = await fetchFn(url2.toString(), {
+      headers,
+      signal: controller.signal
+    });
+    if (res.status === 304 && staleMeta && staleContent !== void 0) {
+      const nextEtag = res.headers.get("etag") ?? staleMeta.etag;
+      const nextLastMod = res.headers.get("last-modified") ?? staleMeta.last_modified;
+      cache?.touch(cacheKey, {
+        fetched_at: new Date(nowMs).toISOString(),
+        ttl_seconds: ttl,
+        ...nextEtag !== void 0 ? { etag: nextEtag } : {},
+        ...nextLastMod !== void 0 ? { last_modified: nextLastMod } : {}
+      });
+      return {
+        id: docId,
+        title: src.title ?? staleMeta.title,
+        source: src.url,
+        kind: "url",
+        mode: src.mode,
+        content: staleContent,
+        byte_length: staleMeta.byte_length,
+        content_sha256: staleMeta.content_sha256,
+        headings: staleMeta.headings,
+        truncated: false,
+        cache_status: "revalidated"
+      };
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (isLikelyBinary(buf)) {
+      warnings.push(`Reference URL '${src.url}' returned binary content; skipping.`);
+      return null;
+    }
+    const cappedRaw = buf.length > MAX_RAW_REMOTE_BYTES ? buf.subarray(0, MAX_RAW_REMOTE_BYTES).toString("utf-8") : buf.toString("utf-8");
+    const contentType = res.headers.get("content-type") ?? void 0;
+    const doc = finalizeNormalizedDoc(cappedRaw, {
+      id: docId,
+      ...src.title !== void 0 ? { explicitTitle: src.title } : {},
+      source: src.url,
+      kind: "url",
+      mode: src.mode,
+      maxDocBytes: input2.config.max_doc_bytes,
+      ...contentType !== void 0 ? { contentType } : {},
+      cacheStatus: cache ? "miss" : "uncached"
+    });
+    if (cache) {
+      const etag = res.headers.get("etag") ?? void 0;
+      const lastModified = res.headers.get("last-modified") ?? void 0;
+      cache.set(
+        cacheKey,
+        {
+          version: 1,
+          key: cacheKey,
+          source_id: doc.id,
+          title: doc.title,
+          kind: "url",
+          content_sha256: doc.content_sha256,
+          ...etag ? { etag } : {},
+          ...lastModified ? { last_modified: lastModified } : {},
+          fetched_at: new Date(nowMs).toISOString(),
+          ttl_seconds: ttl,
+          byte_length: doc.byte_length,
+          headings: doc.headings
+        },
+        doc.content
+      );
+    }
+    return doc;
+  } catch (err) {
+    if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
+      warnings.push(
+        `Failed to fetch '${src.url}' (${err.message}); using stale cached copy.`
+      );
+      return {
+        id: docId,
+        title: src.title ?? staleMeta.title,
+        source: src.url,
+        kind: "url",
+        mode: src.mode,
+        content: staleContent,
+        byte_length: staleMeta.byte_length,
+        content_sha256: staleMeta.content_sha256,
+        headings: staleMeta.headings,
+        truncated: false,
+        cache_status: "stale-fallback"
+      };
+    }
+    warnings.push(`Failed to fetch reference URL '${src.url}': ${err.message}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cache, warnings) {
+  const normPath = normalizePath(filePath);
+  const sourceLabel = `github:${owner}/${repo}/${normPath}@${ref}`;
+  const docId = metaOpts.id ?? `github:${owner}/${repo}/${normPath}`;
+  const cacheKey = `github:${owner}/${repo}@${ref}:${normPath}`;
+  const nowMs = input2.nowMs ?? Date.now();
+  const ttl = metaOpts.ttl_seconds ?? input2.config.cache.ttl_seconds;
+  let staleMeta;
+  let staleContent;
+  if (cache) {
+    const lookup = cache.get(cacheKey, nowMs);
+    if (lookup.status === "hit" && !input2.forceRefresh) {
+      return {
+        id: docId,
+        title: metaOpts.title ?? lookup.meta.title,
+        source: sourceLabel,
+        kind: "github",
+        mode: metaOpts.mode,
+        content: lookup.content,
+        byte_length: lookup.meta.byte_length,
+        content_sha256: lookup.meta.content_sha256,
+        headings: lookup.meta.headings,
+        truncated: false,
+        cache_status: "hit"
+      };
+    }
+    if (lookup.status === "hit" || lookup.status === "stale") {
+      staleMeta = lookup.meta;
+      staleContent = lookup.content;
+    }
+  }
+  if (!input2.octokit?.rest?.repos?.getContent) {
+    if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
+      warnings.push(`No GitHub client available for '${sourceLabel}'; using cached copy.`);
+      return {
+        id: docId,
+        title: metaOpts.title ?? staleMeta.title,
+        source: sourceLabel,
+        kind: "github",
+        mode: metaOpts.mode,
+        content: staleContent,
+        byte_length: staleMeta.byte_length,
+        content_sha256: staleMeta.content_sha256,
+        headings: staleMeta.headings,
+        truncated: false,
+        cache_status: "stale-fallback"
+      };
+    }
+    warnings.push(`Cannot fetch '${sourceLabel}' without an authenticated GitHub client.`);
+    return null;
+  }
+  try {
+    const res = await input2.octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path: normPath,
+      ref,
+      ...!input2.forceRefresh && staleMeta?.etag ? { headers: { "If-None-Match": staleMeta.etag } } : {}
+    });
+    if (Array.isArray(res.data) || res.data.type !== "file") {
+      warnings.push(`GitHub reference '${sourceLabel}' is not a regular file; skipping.`);
+      return null;
+    }
+    const buf = Buffer.from(res.data.content, res.data.encoding);
+    if (isLikelyBinary(buf)) {
+      warnings.push(`GitHub reference '${sourceLabel}' appears binary; skipping.`);
+      return null;
+    }
+    const rawText = buf.toString("utf-8");
+    const doc = finalizeNormalizedDoc(rawText, {
+      id: docId,
+      ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
+      source: sourceLabel,
+      kind: "github",
+      mode: metaOpts.mode,
+      maxDocBytes: input2.config.max_doc_bytes,
+      cacheStatus: cache ? "miss" : "uncached"
+    });
+    if (cache) {
+      const etag = res.headers?.etag;
+      cache.set(
+        cacheKey,
+        {
+          version: 1,
+          key: cacheKey,
+          source_id: doc.id,
+          title: doc.title,
+          kind: "github",
+          content_sha256: doc.content_sha256,
+          ...etag ? { etag } : {},
+          source_fingerprint: res.data.sha,
+          fetched_at: new Date(nowMs).toISOString(),
+          ttl_seconds: ttl,
+          byte_length: doc.byte_length,
+          headings: doc.headings
+        },
+        doc.content
+      );
+    }
+    return doc;
+  } catch (err) {
+    const status = err.status;
+    if (status === 304 && staleMeta && staleContent !== void 0) {
+      cache?.touch(cacheKey, {
+        fetched_at: new Date(nowMs).toISOString(),
+        ttl_seconds: ttl
+      });
+      return {
+        id: docId,
+        title: metaOpts.title ?? staleMeta.title,
+        source: sourceLabel,
+        kind: "github",
+        mode: metaOpts.mode,
+        content: staleContent,
+        byte_length: staleMeta.byte_length,
+        content_sha256: staleMeta.content_sha256,
+        headings: staleMeta.headings,
+        truncated: false,
+        cache_status: "revalidated"
+      };
+    }
+    if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
+      warnings.push(
+        `Failed to fetch '${sourceLabel}' (${err.message}); using stale cached copy.`
+      );
+      return {
+        id: docId,
+        title: metaOpts.title ?? staleMeta.title,
+        source: sourceLabel,
+        kind: "github",
+        mode: metaOpts.mode,
+        content: staleContent,
+        byte_length: staleMeta.byte_length,
+        content_sha256: staleMeta.content_sha256,
+        headings: staleMeta.headings,
+        truncated: false,
+        cache_status: "stale-fallback"
+      };
+    }
+    warnings.push(`Failed to fetch '${sourceLabel}': ${err.message}`);
+    return null;
+  }
+}
+async function loadGithubSource(src, input2, cache, warnings) {
+  if (!hasGlobMeta(src.path)) {
+    const single = await loadGithubFile(
+      src.owner,
+      src.repo,
+      src.path,
+      src.ref,
+      {
+        ...src.id !== void 0 ? { id: src.id } : {},
+        ...src.title !== void 0 ? { title: src.title } : {},
+        mode: src.mode,
+        ...src.ttl_seconds !== void 0 ? { ttl_seconds: src.ttl_seconds } : {}
+      },
+      input2,
+      cache,
+      warnings
+    );
+    return single ? [single] : [];
+  }
+  if (!input2.octokit?.rest?.git?.getTree) {
+    warnings.push(
+      `Cannot expand GitHub glob '${src.rawSpec}' without an authenticated GitHub client.`
+    );
+    return [];
+  }
+  try {
+    const treeRes = await input2.octokit.rest.git.getTree({
+      owner: src.owner,
+      repo: src.repo,
+      tree_sha: src.ref,
+      recursive: "1"
+    });
+    const matched = (treeRes.data.tree ?? []).filter((item) => item.type === "blob" && typeof item.path === "string").map((item) => normalizePath(item.path)).filter((p2) => matchesGlob(p2, src.path)).sort();
+    const out = [];
+    for (const p2 of matched) {
+      if (out.length >= input2.config.max_docs) break;
+      const doc = await loadGithubFile(
+        src.owner,
+        src.repo,
+        p2,
+        src.ref,
+        {
+          mode: src.mode,
+          ...src.ttl_seconds !== void 0 ? { ttl_seconds: src.ttl_seconds } : {}
+        },
+        input2,
+        cache,
+        warnings
+      );
+      if (doc) out.push(doc);
+    }
+    return out;
+  } catch (err) {
+    warnings.push(`Failed to expand GitHub glob '${src.rawSpec}': ${err.message}`);
+    return [];
+  }
+}
+function deduplicateIds(docs) {
+  const seen = /* @__PURE__ */ new Map();
+  return docs.map((doc) => {
+    const count = seen.get(doc.id) ?? 0;
+    seen.set(doc.id, count + 1);
+    if (count === 0) return doc;
+    return { ...doc, id: `${doc.id}-${count + 1}` };
+  });
+}
+function allocatePlacements(rawDocs, maxInlineBytes, warnings) {
+  let inlineBytes = 0;
+  const placements = new Array(rawDocs.length).fill("on_demand");
+  for (let i2 = 0; i2 < rawDocs.length; i2++) {
+    const d2 = rawDocs[i2];
+    if (d2.mode !== "inline") continue;
+    if (inlineBytes + d2.byte_length <= maxInlineBytes) {
+      placements[i2] = "inline";
+      inlineBytes += d2.byte_length;
+    } else {
+      warnings.push(
+        `Reference '${d2.id}' (${d2.byte_length} bytes) exceeds remaining inline budget (${maxInlineBytes - inlineBytes} bytes); serving on-demand via read_reference_doc.`
+      );
+    }
+  }
+  for (let i2 = 0; i2 < rawDocs.length; i2++) {
+    const d2 = rawDocs[i2];
+    if (d2.mode !== "auto") continue;
+    if (inlineBytes + d2.byte_length <= maxInlineBytes) {
+      placements[i2] = "inline";
+      inlineBytes += d2.byte_length;
+    }
+  }
+  return rawDocs.map((d2, i2) => ({
+    id: d2.id,
+    title: d2.title,
+    source: d2.source,
+    kind: d2.kind,
+    placement: placements[i2],
+    content: d2.content,
+    byte_length: d2.byte_length,
+    content_sha256: d2.content_sha256,
+    headings: d2.headings,
+    truncated: d2.truncated,
+    cache_status: d2.cache_status
+  }));
+}
+async function loadReferences(input2) {
+  const cacheDir = resolveReferenceCacheDir(input2.config.cache.dir, input2.workspaceDir);
+  const cache = input2.config.cache.enabled ? new DiskReferenceCache(cacheDir) : null;
+  const warnings = [];
+  const rawDocs = [];
+  if (!input2.config.enabled || input2.config.sources.length === 0) {
+    return {
+      docs: [],
+      inline_docs: [],
+      on_demand_docs: [],
+      total_inline_bytes: 0,
+      total_bytes: 0,
+      corpus_digest: sha256Hex("empty"),
+      cache_dir: cacheDir,
+      cache_stats: { hits: 0, revalidated: 0, misses: 0, stale_fallbacks: 0, uncached: 0 },
+      warnings: []
+    };
+  }
+  let capHit = false;
+  for (const entry of input2.config.sources) {
+    if (rawDocs.length >= input2.config.max_docs) {
+      capHit = true;
+      break;
+    }
+    const src = normalizeSourceInput(entry, warnings);
+    if (!src) continue;
+    if (src.kind === "repo-file") {
+      const doc = await loadRepoFile(
+        src.path,
+        {
+          ...src.id !== void 0 ? { id: src.id } : {},
+          ...src.title !== void 0 ? { title: src.title } : {},
+          mode: src.mode,
+          ...src.ttl_seconds !== void 0 ? { ttl_seconds: src.ttl_seconds } : {}
+        },
+        input2,
+        cache,
+        warnings
+      );
+      if (doc) rawDocs.push(doc);
+    } else if (src.kind === "repo-glob") {
+      const matched = await listRepoGlobFiles(src.glob, input2, warnings);
+      if (matched.length === 0) {
+        warnings.push(`Reference glob '${src.glob}' matched 0 files.`);
+      }
+      for (const path28 of matched) {
+        if (rawDocs.length >= input2.config.max_docs) {
+          capHit = true;
+          break;
+        }
+        const doc = await loadRepoFile(
+          path28,
+          {
+            mode: src.mode,
+            ...src.ttl_seconds !== void 0 ? { ttl_seconds: src.ttl_seconds } : {}
+          },
+          input2,
+          cache,
+          warnings
+        );
+        if (doc) rawDocs.push(doc);
+      }
+    } else if (src.kind === "url") {
+      const doc = await loadRemoteUrl(src, input2, cache, warnings);
+      if (doc) rawDocs.push(doc);
+    } else if (src.kind === "github") {
+      const ghDocs = await loadGithubSource(src, input2, cache, warnings);
+      for (const d2 of ghDocs) {
+        if (rawDocs.length >= input2.config.max_docs) {
+          capHit = true;
+          break;
+        }
+        rawDocs.push(d2);
+      }
+    }
+  }
+  if (capHit) {
+    warnings.push(
+      `Reference docs reached max_docs=${input2.config.max_docs}; remaining files skipped.`
+    );
+  }
+  const uniqueDocs = deduplicateIds(rawDocs);
+  const docs = allocatePlacements(uniqueDocs, input2.config.max_inline_bytes, warnings);
+  const inline_docs = docs.filter((d2) => d2.placement === "inline");
+  const on_demand_docs = docs.filter((d2) => d2.placement === "on_demand");
+  const total_inline_bytes = inline_docs.reduce((s2, d2) => s2 + d2.byte_length, 0);
+  const total_bytes = docs.reduce((s2, d2) => s2 + d2.byte_length, 0);
+  const cache_stats = { hits: 0, revalidated: 0, misses: 0, stale_fallbacks: 0, uncached: 0 };
+  for (const d2 of docs) {
+    if (d2.cache_status === "hit") cache_stats.hits += 1;
+    else if (d2.cache_status === "revalidated") cache_stats.revalidated += 1;
+    else if (d2.cache_status === "miss") cache_stats.misses += 1;
+    else if (d2.cache_status === "stale-fallback") cache_stats.stale_fallbacks += 1;
+    else cache_stats.uncached += 1;
+  }
+  const digestInput = [...docs].sort((a2, b2) => a2.id.localeCompare(b2.id)).map((d2) => `${d2.id}:${d2.placement}:${d2.content_sha256}`).join("\n");
+  const corpus_digest = sha256Hex(digestInput || "empty");
+  return {
+    docs,
+    inline_docs,
+    on_demand_docs,
+    total_inline_bytes,
+    total_bytes,
+    corpus_digest,
+    cache_dir: cacheDir,
+    cache_stats,
+    warnings
+  };
+}
+
 // src/scanners/runner.ts
 var DEFAULT_PER_SCANNER_TIMEOUT_MS = 6e4;
 function resolveOptions2(opts) {
@@ -87597,8 +91117,9 @@ var SCANNER_CONFIG_KEY = {
   "image-ocr": "image_ocr"
 };
 function scannerMinSeverity(id, cfg) {
+  if (id === "architecture") return void 0;
   const key = SCANNER_CONFIG_KEY[id];
-  return cfg.scanners[key].min_severity;
+  return cfg.security.scanners[key].min_severity;
 }
 function filterScannerFindingsForPrompt(findings, config2, changedFiles) {
   const changedFilesMap = new Map(changedFiles.map((f2) => [f2.path, f2]));
@@ -87606,7 +91127,7 @@ function filterScannerFindingsForPrompt(findings, config2, changedFiles) {
     if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[config2.severity.floor]) {
       return false;
     }
-    const scannerFloor = scannerMinSeverity(finding.scanner, config2.security);
+    const scannerFloor = scannerMinSeverity(finding.scanner, config2);
     if (scannerFloor !== void 0 && SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]) {
       return false;
     }
@@ -87678,6 +91199,32 @@ async function runOrchestrator(input2) {
   await logger.info(
     `Config: model=${config2.model}, provider=${resolvedProvider}, max_turns=${config2.max_turns}, severity_floor=${config2.severity.floor}, sticky=${config2.review.sticky}, event=${config2.review.event}`
   );
+  const effectiveArchConfig = await resolveEffectiveArchitectureConfig(config2.architecture, {
+    fileReader,
+    owner: input2.owner,
+    repo: input2.repo,
+    ref: prContext.metadata.head_sha,
+    workspaceDir: input2.workspace_dir
+  });
+  const archSpec = effectiveArchConfig.enabled ? resolveArchitectureSpec(effectiveArchConfig) : void 0;
+  let referenceCorpus;
+  if (config2.references.enabled && config2.references.sources.length > 0) {
+    referenceCorpus = await loadReferences({
+      config: config2.references,
+      owner: input2.owner,
+      repo: input2.repo,
+      ref: prContext.metadata.head_sha,
+      workspaceDir: input2.workspace_dir,
+      fileReader,
+      octokit
+    });
+    for (const w2 of referenceCorpus.warnings) {
+      await logger.warn(`References: ${w2}`);
+    }
+    await logger.info(
+      `Loaded ${referenceCorpus.docs.length} reference doc(s) (${referenceCorpus.inline_docs.length} inline / ${referenceCorpus.total_inline_bytes} bytes, ${referenceCorpus.on_demand_docs.length} on-demand, cache hit=${referenceCorpus.cache_stats.hits} revalidated=${referenceCorpus.cache_stats.revalidated} miss=${referenceCorpus.cache_stats.misses} stale=${referenceCorpus.cache_stats.stale_fallbacks}, digest=${referenceCorpus.corpus_digest.slice(0, 12)})`
+    );
+  }
   const contextFiles = await loadRepoContextFiles(
     fileReader,
     input2.owner,
@@ -87688,7 +91235,9 @@ async function runOrchestrator(input2) {
   const systemPrompt = buildSystemPrompt({
     config: config2,
     repoName: `${input2.owner}/${input2.repo}`,
-    contextFiles
+    contextFiles,
+    ...archSpec ? { architecture: archSpec } : {},
+    ...referenceCorpus ? { references: referenceCorpus } : {}
   });
   const embeddedContextFiles = new Set(
     selectEmbeddedContextFiles(contextFiles, config2.context.max_context_bytes).map((e2) => e2.file)
@@ -87775,6 +91324,9 @@ ${base}` : base;
   });
   const aggregator = new ReviewAggregator();
   const scanners = buildEnabledScanners(config2.security);
+  if (archSpec && archSpec.deterministic_enforcement) {
+    scanners.push(createArchitectureScanner(archSpec));
+  }
   const orchestratorAbort = new AbortController();
   const scannerDeps = {
     octokit,
@@ -87796,6 +91348,11 @@ ${base}` : base;
     config: config2.security,
     signal: orchestratorAbort.signal
   };
+  const effectiveOpenAI = referenceCorpus && referenceCorpus.docs.length > 0 && config2.references.prompt_cache.enabled && config2.references.prompt_cache.auto_openai_cache_key && !config2.providers.openai.prompt_cache_key ? {
+    ...config2.providers.openai,
+    prompt_cache_key: `vor:${input2.owner}/${input2.repo}:refs-${referenceCorpus.corpus_digest.slice(0, 12)}`
+  } : config2.providers.openai;
+  const effectiveAnthropic = config2.references.enabled && config2.references.prompt_cache.enabled && config2.references.prompt_cache.anthropic_ttl === "1h" ? { prompt_cache_ttl: "1h" } : void 0;
   const makeAgentPromise = (finalUserPrompt) => agentScope.prContext.files.length === 0 ? Promise.resolve({
     ended: "summary_posted",
     turns: 0,
@@ -87815,7 +91372,8 @@ ${base}` : base;
       config: config2,
       workspaceDir: input2.workspace_dir,
       runContext: createRunContext(),
-      embeddedContextFiles
+      embeddedContextFiles,
+      ...referenceCorpus ? { references: referenceCorpus } : {}
     },
     systemPrompt,
     userPrompt: finalUserPrompt,
@@ -87824,7 +91382,8 @@ ${base}` : base;
     maxInputTokens: config2.budget.max_input_tokens,
     maxOutputTokens: config2.budget.max_output_tokens,
     apiKey,
-    openai: config2.providers.openai,
+    openai: effectiveOpenAI,
+    ...effectiveAnthropic ? { anthropic: effectiveAnthropic } : {},
     // Always pass the resolved provider — same string we already computed
     // above. Skips one redundant inferProviderFromModel() call inside the
     // runner and pins routing even for model ids that match no known prefix
@@ -87893,7 +91452,7 @@ ${base}` : base;
   let addedScannerComments = 0;
   const binaryFindings = [];
   for (const finding of scanRunResult.findings) {
-    const scannerFloor = scannerMinSeverity(finding.scanner, config2.security);
+    const scannerFloor = scannerMinSeverity(finding.scanner, config2);
     if (scannerFloor !== void 0 && SEVERITY_RANK[finding.severity] < SEVERITY_RANK[scannerFloor]) {
       await logger.debug(
         `Skipping ${finding.scanner} finding (severity=${finding.severity} below scanner min_severity=${scannerFloor})`
@@ -88042,7 +91601,7 @@ async function loadConfig(input2, fileReader, headSha) {
     );
   }
   try {
-    const localPath = (0, import_node_path22.resolve)(input2.workspace_dir, input2.config_path);
+    const localPath = (0, import_node_path27.resolve)(input2.workspace_dir, input2.config_path);
     const content = await (0, import_promises.readFile)(localPath, "utf-8");
     return loadConfigFromString(content);
   } catch {

@@ -9,6 +9,7 @@ import type { WorkerClient } from '../agent/worker.js';
 import type { ReviewAggregator } from '../output/aggregator.js';
 import type { ReviewConfig } from '../config/types.js';
 import type { OcrEngine } from '../ocr/recognize.js';
+import type { LoadedReferenceCorpus } from '../references/loader.js';
 import type { VisionClient } from '../vision/describe-image.js';
 
 export interface ToolDeps {
@@ -52,6 +53,12 @@ export interface ToolDeps {
    * provider supports it; absent means OCR-only.
    */
   visionClient?: VisionClient;
+  /**
+   * Pre-loaded reference documentation & standards corpus. Present only when
+   * `references.enabled` is true and at least one document loaded; powers the
+   * `read_reference_doc` tool for on-demand access without extra I/O.
+   */
+  references?: LoadedReferenceCorpus;
   /**
    * Run-level abort signal (the agent's AbortController). Lets long tool work —
    * notably `describe_image_at_ref`'s OCR — stop when the run is aborted instead
