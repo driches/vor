@@ -1550,21 +1550,33 @@ export function resolveImport(
         };
       }
       if (imp.specifier.startsWith('super::') || imp.specifier.startsWith('self::')) {
-        let dir = posix.dirname(normSource);
+        // In Rust, `foo.rs` defines module `foo`, whereas `foo/mod.rs`, `lib.rs`,
+        // and `main.rs` correspond directly to their containing directory.
+        // `self::` starts at that logical module path and each `super::`
+        // climbs one logical module level.
+        const baseName = posix.basename(normSource);
+        const isDirModule =
+          baseName === 'mod.rs' || baseName === 'lib.rs' || baseName === 'main.rs';
+        let modDir = isDirModule ? posix.dirname(normSource) : normSource.replace(/\.rs$/, '');
         let rest = imp.specifier;
         if (rest.startsWith('self::')) {
           rest = rest.slice('self::'.length);
         }
         while (rest.startsWith('super::')) {
           rest = rest.slice('super::'.length);
-          dir = posix.dirname(dir);
+          modDir = posix.dirname(modDir);
         }
         const rel = rest.replace(/::/g, '/');
-        const joined = normalizePath(dir === '.' ? rel : posix.join(dir, rel));
+        const joined = normalizePath(modDir === '.' ? rel : posix.join(modDir, rel));
         const rsFile = `${joined}.rs`;
+        const rsMod = `${joined}/mod.rs`;
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : joined,
+          resolvedPath: existsRepoFile(rsFile, ctx)
+            ? rsFile
+            : existsRepoFile(rsMod, ctx)
+              ? rsMod
+              : joined,
         };
       }
       const crateName = imp.specifier.split('::')[0] ?? imp.specifier;

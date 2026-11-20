@@ -415,8 +415,8 @@ interface RawLoadedDoc {
   cache_status: ReferenceCacheStatus;
 }
 
-function finalizeNormalizedDoc(
-  rawText: string,
+function materializeNormalizedDoc(
+  normalized: string,
   opts: {
     id: string;
     explicitTitle?: string;
@@ -424,11 +424,9 @@ function finalizeNormalizedDoc(
     kind: 'repo' | 'url' | 'github';
     mode: ReferenceMode;
     maxDocBytes: number;
-    contentType?: string;
     cacheStatus: ReferenceCacheStatus;
   },
 ): RawLoadedDoc {
-  const normalized = normalizeDocumentText(rawText, opts.contentType);
   const { content, truncated } = truncateUtf8Bytes(normalized, opts.maxDocBytes);
   return {
     id: opts.id,
@@ -443,6 +441,45 @@ function finalizeNormalizedDoc(
     truncated,
     cache_status: opts.cacheStatus,
   };
+}
+
+function writeNormalizedCacheEntry(
+  cache: DiskReferenceCache,
+  cacheKey: string,
+  normalized: string,
+  meta: {
+    id: string;
+    explicitTitle?: string;
+    source: string;
+    kind: 'repo' | 'url' | 'github';
+    nowMs: number;
+    ttlSeconds: number;
+    etag?: string;
+    lastModified?: string;
+    sourceFingerprint?: string;
+  },
+): void {
+  // Persist the full untruncated normalized document so later loads can
+  // change `max_doc_bytes` and re-apply truncation cleanly on cache hits.
+  cache.set(
+    cacheKey,
+    {
+      version: 1,
+      key: cacheKey,
+      source_id: meta.id,
+      title: inferTitle(meta.explicitTitle, normalized, meta.source),
+      kind: meta.kind,
+      content_sha256: sha256Hex(normalized),
+      ...(meta.etag ? { etag: meta.etag } : {}),
+      ...(meta.lastModified ? { last_modified: meta.lastModified } : {}),
+      ...(meta.sourceFingerprint ? { source_fingerprint: meta.sourceFingerprint } : {}),
+      fetched_at: new Date(meta.nowMs).toISOString(),
+      ttl_seconds: meta.ttlSeconds,
+      byte_length: Buffer.byteLength(normalized, 'utf-8'),
+      headings: extractDocumentHeadings(normalized),
+    },
+    normalized,
+  );
 }
 
 type SafeWorkspaceFileResult =
@@ -486,20 +523,17 @@ function buildRepoCacheHit(
   docId: string,
   normPath: string,
   metaOpts: { title?: string; mode: ReferenceMode },
+  maxDocBytes: number,
 ): RawLoadedDoc {
-  return {
+  return materializeNormalizedDoc(cached.content, {
     id: docId,
-    title: metaOpts.title ?? cached.meta.title,
+    explicitTitle: metaOpts.title ?? cached.meta.title,
     source: normPath,
     kind: 'repo',
     mode: metaOpts.mode,
-    content: cached.content,
-    byte_length: cached.meta.byte_length,
-    content_sha256: cached.meta.content_sha256,
-    headings: cached.meta.headings,
-    truncated: false,
-    cache_status: 'hit',
-  };
+    maxDocBytes,
+    cacheStatus: 'hit',
+  });
 }
 
 async function loadRepoFile(
@@ -564,7 +598,7 @@ async function loadRepoFile(
         const diskMatch =
           Boolean(diskFingerprint) && fp.startsWith('disk:') && fp === diskFingerprint;
         if (refMatch || diskMatch) {
-          return buildRepoCacheHit(cached, docId, normPath, metaOpts);
+          return buildRepoCacheHit(cached, docId, normPath, metaOpts, input.config.max_doc_bytes);
         }
       }
     }
@@ -587,7 +621,19 @@ async function loadRepoFile(
         return null;
       }
       const fingerprint = `ref:${input.ref}:${sha256Hex(remoteText)}`;
-      const doc = finalizeNormalizedDoc(remoteText, {
+      const normalized = normalizeDocumentText(remoteText);
+      if (cache) {
+        writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+          id: docId,
+          ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+          source: normPath,
+          kind: 'repo',
+          nowMs,
+          ttlSeconds: ttl,
+          sourceFingerprint: fingerprint,
+        });
+      }
+      return materializeNormalizedDoc(normalized, {
         id: docId,
         ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
         source: normPath,
@@ -596,31 +642,11 @@ async function loadRepoFile(
         maxDocBytes: input.config.max_doc_bytes,
         cacheStatus: cache ? 'miss' : 'uncached',
       });
-      if (cache) {
-        cache.set(
-          cacheKey,
-          {
-            version: 1,
-            key: cacheKey,
-            source_id: doc.id,
-            title: doc.title,
-            kind: 'repo',
-            content_sha256: doc.content_sha256,
-            source_fingerprint: fingerprint,
-            fetched_at: new Date(nowMs).toISOString(),
-            ttl_seconds: ttl,
-            byte_length: doc.byte_length,
-            headings: doc.headings,
-          },
-          doc.content,
-        );
-      }
-      return doc;
     }
   } else if (cache && !input.forceRefresh && diskFingerprint) {
     const cached = cache.get(cacheKey, nowMs);
     if (cached.status === 'hit' && cached.meta.source_fingerprint === diskFingerprint) {
-      return buildRepoCacheHit(cached, docId, normPath, metaOpts);
+      return buildRepoCacheHit(cached, docId, normPath, metaOpts, input.config.max_doc_bytes);
     }
   }
 
@@ -644,7 +670,19 @@ async function loadRepoFile(
   }
 
   const fingerprint = diskFingerprint ?? `sha:${sha256Hex(diskContent)}`;
-  const doc = finalizeNormalizedDoc(diskContent, {
+  const normalized = normalizeDocumentText(diskContent);
+  if (cache) {
+    writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+      id: docId,
+      ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+      source: normPath,
+      kind: 'repo',
+      nowMs,
+      ttlSeconds: ttl,
+      sourceFingerprint: fingerprint,
+    });
+  }
+  return materializeNormalizedDoc(normalized, {
     id: docId,
     ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
     source: normPath,
@@ -653,31 +691,13 @@ async function loadRepoFile(
     maxDocBytes: input.config.max_doc_bytes,
     cacheStatus: cache ? 'miss' : 'uncached',
   });
-
-  if (cache) {
-    cache.set(
-      cacheKey,
-      {
-        version: 1,
-        key: cacheKey,
-        source_id: doc.id,
-        title: doc.title,
-        kind: 'repo',
-        content_sha256: doc.content_sha256,
-        source_fingerprint: fingerprint,
-        fetched_at: new Date(nowMs).toISOString(),
-        ttl_seconds: ttl,
-        byte_length: doc.byte_length,
-        headings: doc.headings,
-      },
-      doc.content,
-    );
-  }
-  return doc;
 }
 
 async function readResponseWithByteLimit(res: Response, maxBytes: number): Promise<Buffer> {
   if (!res.body) {
+    // Some minimal fetch polyfills and streamless responses omit `res.body`, so
+    // no ReadableStream exists to cancel; buffer the response once and slice
+    // strictly to `maxBytes`.
     const buf = Buffer.from(await res.arrayBuffer());
     return buf.length > maxBytes ? buf.subarray(0, maxBytes) : buf;
   }
@@ -771,19 +791,15 @@ async function loadRemoteUrl(
   if (cache) {
     const lookup = cache.get(cacheKey, nowMs);
     if (lookup.status === 'hit' && !input.forceRefresh) {
-      return {
+      return materializeNormalizedDoc(lookup.content, {
         id: docId,
-        title: src.title ?? lookup.meta.title,
+        explicitTitle: src.title ?? lookup.meta.title,
         source: src.url,
         kind: 'url',
         mode: src.mode,
-        content: lookup.content,
-        byte_length: lookup.meta.byte_length,
-        content_sha256: lookup.meta.content_sha256,
-        headings: lookup.meta.headings,
-        truncated: false,
-        cache_status: 'hit',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'hit',
+      });
     }
     if (lookup.status === 'hit' || lookup.status === 'stale') {
       staleMeta = lookup.meta;
@@ -824,19 +840,15 @@ async function loadRemoteUrl(
         ...(nextEtag !== undefined ? { etag: nextEtag } : {}),
         ...(nextLastMod !== undefined ? { last_modified: nextLastMod } : {}),
       });
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: src.title ?? staleMeta.title,
+        explicitTitle: src.title ?? staleMeta.title,
         source: src.url,
         kind: 'url',
         mode: src.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: 'revalidated',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'revalidated',
+      });
     }
 
     if (!res.ok) {
@@ -850,58 +862,45 @@ async function loadRemoteUrl(
     }
     const cappedRaw = buf.toString('utf-8');
     const contentType = res.headers.get('content-type') ?? undefined;
-    const doc = finalizeNormalizedDoc(cappedRaw, {
+    const normalized = normalizeDocumentText(cappedRaw, contentType);
+
+    if (cache) {
+      const etag = res.headers.get('etag') ?? undefined;
+      const lastModified = res.headers.get('last-modified') ?? undefined;
+      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+        id: docId,
+        ...(src.title !== undefined ? { explicitTitle: src.title } : {}),
+        source: src.url,
+        kind: 'url',
+        nowMs,
+        ttlSeconds: ttl,
+        ...(etag ? { etag } : {}),
+        ...(lastModified ? { lastModified } : {}),
+      });
+    }
+    return materializeNormalizedDoc(normalized, {
       id: docId,
       ...(src.title !== undefined ? { explicitTitle: src.title } : {}),
       source: src.url,
       kind: 'url',
       mode: src.mode,
       maxDocBytes: input.config.max_doc_bytes,
-      ...(contentType !== undefined ? { contentType } : {}),
       cacheStatus: cache ? 'miss' : 'uncached',
     });
-
-    if (cache) {
-      const etag = res.headers.get('etag') ?? undefined;
-      const lastModified = res.headers.get('last-modified') ?? undefined;
-      cache.set(
-        cacheKey,
-        {
-          version: 1,
-          key: cacheKey,
-          source_id: doc.id,
-          title: doc.title,
-          kind: 'url',
-          content_sha256: doc.content_sha256,
-          ...(etag ? { etag } : {}),
-          ...(lastModified ? { last_modified: lastModified } : {}),
-          fetched_at: new Date(nowMs).toISOString(),
-          ttl_seconds: ttl,
-          byte_length: doc.byte_length,
-          headings: doc.headings,
-        },
-        doc.content,
-      );
-    }
-    return doc;
   } catch (err) {
     if (staleMeta && staleContent !== undefined && input.config.cache.stale_on_error) {
       warnings.push(
         `Failed to fetch '${src.url}' (${(err as Error).message}); using stale cached copy.`,
       );
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: src.title ?? staleMeta.title,
+        explicitTitle: src.title ?? staleMeta.title,
         source: src.url,
         kind: 'url',
         mode: src.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: 'stale-fallback',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'stale-fallback',
+      });
     }
     warnings.push(`Failed to fetch reference URL '${src.url}': ${(err as Error).message}`);
     return null;
@@ -932,19 +931,15 @@ async function loadGithubFile(
   if (cache) {
     const lookup = cache.get(cacheKey, nowMs);
     if (lookup.status === 'hit' && !input.forceRefresh) {
-      return {
+      return materializeNormalizedDoc(lookup.content, {
         id: docId,
-        title: metaOpts.title ?? lookup.meta.title,
+        explicitTitle: metaOpts.title ?? lookup.meta.title,
         source: sourceLabel,
         kind: 'github',
         mode: metaOpts.mode,
-        content: lookup.content,
-        byte_length: lookup.meta.byte_length,
-        content_sha256: lookup.meta.content_sha256,
-        headings: lookup.meta.headings,
-        truncated: false,
-        cache_status: 'hit',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'hit',
+      });
     }
     if (lookup.status === 'hit' || lookup.status === 'stale') {
       staleMeta = lookup.meta;
@@ -955,19 +950,15 @@ async function loadGithubFile(
   if (!input.octokit?.rest?.repos?.getContent) {
     if (staleMeta && staleContent !== undefined && input.config.cache.stale_on_error) {
       warnings.push(`No GitHub client available for '${sourceLabel}'; using cached copy.`);
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: 'github',
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: 'stale-fallback',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'stale-fallback',
+      });
     }
     warnings.push(`Cannot fetch '${sourceLabel}' without an authenticated GitHub client.`);
     return null;
@@ -993,7 +984,25 @@ async function loadGithubFile(
       return null;
     }
     const rawText = buf.toString('utf-8');
-    const doc = finalizeNormalizedDoc(rawText, {
+    const normalized = normalizeDocumentText(rawText);
+
+    if (cache) {
+      // Octokit's `repos.getContent` union return type omits `etag` on its
+      // typed response headers map even though Octokit populates `headers.etag`;
+      // safely fall back to `undefined` (no conditional request) if absent.
+      const etag = (res as { headers?: Record<string, string | undefined> }).headers?.etag;
+      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+        id: docId,
+        ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+        source: sourceLabel,
+        kind: 'github',
+        nowMs,
+        ttlSeconds: ttl,
+        ...(etag ? { etag } : {}),
+        sourceFingerprint: res.data.sha,
+      });
+    }
+    return materializeNormalizedDoc(normalized, {
       id: docId,
       ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
       source: sourceLabel,
@@ -1002,29 +1011,6 @@ async function loadGithubFile(
       maxDocBytes: input.config.max_doc_bytes,
       cacheStatus: cache ? 'miss' : 'uncached',
     });
-
-    if (cache) {
-      const etag = (res as { headers?: Record<string, string | undefined> }).headers?.etag;
-      cache.set(
-        cacheKey,
-        {
-          version: 1,
-          key: cacheKey,
-          source_id: doc.id,
-          title: doc.title,
-          kind: 'github',
-          content_sha256: doc.content_sha256,
-          ...(etag ? { etag } : {}),
-          source_fingerprint: res.data.sha,
-          fetched_at: new Date(nowMs).toISOString(),
-          ttl_seconds: ttl,
-          byte_length: doc.byte_length,
-          headings: doc.headings,
-        },
-        doc.content,
-      );
-    }
-    return doc;
   } catch (err) {
     const status = (err as { status?: number }).status;
     if (status === 304 && staleMeta && staleContent !== undefined) {
@@ -1032,38 +1018,30 @@ async function loadGithubFile(
         fetched_at: new Date(nowMs).toISOString(),
         ttl_seconds: ttl,
       });
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: 'github',
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: 'revalidated',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'revalidated',
+      });
     }
 
     if (staleMeta && staleContent !== undefined && input.config.cache.stale_on_error) {
       warnings.push(
         `Failed to fetch '${sourceLabel}' (${(err as Error).message}); using stale cached copy.`,
       );
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: 'github',
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: 'stale-fallback',
-      };
+        maxDocBytes: input.config.max_doc_bytes,
+        cacheStatus: 'stale-fallback',
+      });
     }
 
     warnings.push(`Failed to fetch '${sourceLabel}': ${(err as Error).message}`);

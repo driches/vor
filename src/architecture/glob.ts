@@ -14,7 +14,16 @@ export interface ContextMatch {
   relativePath: string;
 }
 
+const MAX_REGEX_CACHE = 512;
 const regexCache = new Map<string, RegExp>();
+
+function setBounded<V>(cache: Map<string, V>, key: string, value: V): void {
+  if (!cache.has(key) && cache.size >= MAX_REGEX_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
 
 /** Normalize path separators, strip leading `./` or `/` and redundant slashes. */
 export function normalizePath(filePath: string): string {
@@ -80,7 +89,7 @@ export function globToRegExp(pattern: string): RegExp {
   if (cached) return cached;
 
   const re = new RegExp(`^${compileGlobBody(norm)}$`);
-  regexCache.set(norm, re);
+  setBounded(regexCache, norm, re);
   return re;
 }
 
@@ -130,7 +139,7 @@ function buildContextRegex(pattern: string): RegExp | null {
   const segments = norm.split('/').filter(Boolean);
   const starIdx = segments.indexOf('*');
   if (starIdx === -1) {
-    contextRegexCache.set(norm, null);
+    setBounded(contextRegexCache, norm, null);
     return null;
   }
 
@@ -151,7 +160,7 @@ function buildContextRegex(pattern: string): RegExp | null {
     suffixSegments.length > 0 ? `/${suffixSegments.map((s) => compileGlobBody(s)).join('/')}` : '';
 
   const re = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
-  contextRegexCache.set(norm, re);
+  setBounded(contextRegexCache, norm, re);
   return re;
 }
 

@@ -288,4 +288,20 @@ describe('extractImports & resolveImport across languages', () => {
     const resolvedDotted = resolveImports(dotted.imports, 'src/domain/order.py', { knownFiles });
     expect(resolvedDotted[0]?.resolvedPath).toBe('src/infrastructure/repository.py');
   });
+
+  it('resolves Rust super:: and self:: from the logical module path', () => {
+    const fileSrc = ['use super::super::infrastructure::Repo;', 'use self::sub::Helper;'].join(
+      '\n',
+    );
+    const parsedFile = extractImports('src/domain/order.rs', fileSrc);
+    expect(
+      parsedFile.imports.map((i) => resolveImport(i, 'src/domain/order.rs', {}).resolvedPath),
+    ).toEqual(['src/infrastructure/Repo', 'src/domain/order/sub/Helper']);
+
+    const modSrc = 'use super::infrastructure::Repo;\n';
+    const parsedMod = extractImports('src/domain/mod.rs', modSrc);
+    expect(resolveImport(parsedMod.imports[0]!, 'src/domain/mod.rs', {}).resolvedPath).toBe(
+      'src/infrastructure/Repo',
+    );
+  });
 });

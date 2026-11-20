@@ -447,4 +447,60 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('re-applies max_doc_bytes on cache hits without serving stale truncation', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-cap-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-cap-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      const longBody = `# Big Standard\n${'word '.repeat(600)}\n`;
+      writeFileSync(join(ws, 'docs/big.md'), longBody);
+
+      const rSmall = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          max_doc_bytes: 100,
+          sources: ['docs/big.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+      });
+      expect(rSmall.docs[0]?.truncated).toBe(true);
+      expect(rSmall.docs[0]!.byte_length).toBeLessThanOrEqual(100);
+
+      // Raising max_doc_bytes hits cache while surfacing the full untruncated doc.
+      const rLarge = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          max_doc_bytes: 10_000,
+          sources: ['docs/big.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+      });
+      expect(rLarge.cache_stats.hits).toBe(1);
+      expect(rLarge.docs[0]?.truncated).toBe(false);
+      expect(rLarge.docs[0]!.byte_length).toBeGreaterThan(2000);
+
+      // Lowering max_doc_bytes again enforces the new smaller cap on cache hit.
+      const rTiny = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          max_doc_bytes: 50,
+          sources: ['docs/big.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+      });
+      expect(rTiny.cache_stats.hits).toBe(1);
+      expect(rTiny.docs[0]?.truncated).toBe(true);
+      expect(rTiny.docs[0]!.byte_length).toBeLessThanOrEqual(50);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
 });

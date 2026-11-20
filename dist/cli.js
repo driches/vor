@@ -76641,7 +76641,15 @@ function resolveWorkspaceArchitectureConfig(opts) {
 var import_yaml3 = __toESM(require_dist(), 1);
 
 // src/architecture/glob.ts
+var MAX_REGEX_CACHE = 512;
 var regexCache = /* @__PURE__ */ new Map();
+function setBounded(cache, key, value) {
+  if (!cache.has(key) && cache.size >= MAX_REGEX_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== void 0) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
 function normalizePath(filePath) {
   return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
 }
@@ -76691,7 +76699,7 @@ function globToRegExp(pattern) {
   const cached2 = regexCache.get(norm);
   if (cached2) return cached2;
   const re2 = new RegExp(`^${compileGlobBody(norm)}$`);
-  regexCache.set(norm, re2);
+  setBounded(regexCache, norm, re2);
   return re2;
 }
 function matchesGlob(filePath, pattern) {
@@ -76732,7 +76740,7 @@ function buildContextRegex(pattern) {
   const segments = norm.split("/").filter(Boolean);
   const starIdx = segments.indexOf("*");
   if (starIdx === -1) {
-    contextRegexCache.set(norm, null);
+    setBounded(contextRegexCache, norm, null);
     return null;
   }
   const prefixSegments = segments.slice(0, starIdx);
@@ -76745,7 +76753,7 @@ function buildContextRegex(pattern) {
   const prefixBody = compileSegmentPrefix(prefixSegments);
   const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
   const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
-  contextRegexCache.set(norm, re2);
+  setBounded(contextRegexCache, norm, re2);
   return re2;
 }
 function extractContext(filePath, pattern) {
@@ -78691,21 +78699,24 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         };
       }
       if (imp.specifier.startsWith("super::") || imp.specifier.startsWith("self::")) {
-        let dir = import_node_path2.posix.dirname(normSource);
+        const baseName = import_node_path2.posix.basename(normSource);
+        const isDirModule = baseName === "mod.rs" || baseName === "lib.rs" || baseName === "main.rs";
+        let modDir = isDirModule ? import_node_path2.posix.dirname(normSource) : normSource.replace(/\.rs$/, "");
         let rest = imp.specifier;
         if (rest.startsWith("self::")) {
           rest = rest.slice("self::".length);
         }
         while (rest.startsWith("super::")) {
           rest = rest.slice("super::".length);
-          dir = import_node_path2.posix.dirname(dir);
+          modDir = import_node_path2.posix.dirname(modDir);
         }
         const rel = rest.replace(/::/g, "/");
-        const joined = normalizePath(dir === "." ? rel : import_node_path2.posix.join(dir, rel));
+        const joined = normalizePath(modDir === "." ? rel : import_node_path2.posix.join(modDir, rel));
         const rsFile = `${joined}.rs`;
+        const rsMod = `${joined}/mod.rs`;
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : joined
+          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : existsRepoFile(rsMod, ctx) ? rsMod : joined
         };
       }
       const crateName = imp.specifier.split("::")[0] ?? imp.specifier;
@@ -107062,27 +107073,69 @@ async function readMetadataFile(deps, path28) {
     return null;
   }
 }
+async function hydrateTsConfigFromHead(deps, headRaw) {
+  const preloaded = /* @__PURE__ */ new Map();
+  const queue = [
+    { raw: headRaw, dir: "", depth: 0 }
+  ];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item.depth >= 2) continue;
+    const extMatch = /"extends"\s*:\s*"([^"]+)"/.exec(item.raw);
+    const extPath = extMatch?.[1];
+    if (!extPath || !extPath.startsWith("./") && !extPath.startsWith("../")) continue;
+    const joined = normalizePath(item.dir ? import_node_path28.posix.join(item.dir, extPath) : extPath);
+    if (!joined || preloaded.has(joined)) continue;
+    let extRaw = await readMetadataFile(deps, joined);
+    if (extRaw === null && deps.workspaceDir) {
+      try {
+        extRaw = (0, import_node_fs14.readFileSync)((0, import_node_path28.resolve)(deps.workspaceDir, joined), "utf-8");
+      } catch {
+        extRaw = null;
+      }
+    }
+    preloaded.set(joined, extRaw);
+    if (extRaw) {
+      queue.push({ raw: extRaw, dir: import_node_path28.posix.dirname(joined), depth: item.depth + 1 });
+    }
+  }
+  return parseTsConfigContent(headRaw, (relPath) => {
+    const norm = normalizePath(relPath);
+    if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+    if (deps.workspaceDir) {
+      try {
+        return (0, import_node_fs14.readFileSync)((0, import_node_path28.resolve)(deps.workspaceDir, norm), "utf-8");
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+}
 async function hydrateResolveContext(deps, languagesPresent) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
-  if (!ctx.tsconfig && (languagesPresent.has("typescript") || languagesPresent.has("javascript"))) {
+  if (languagesPresent.has("typescript") || languagesPresent.has("javascript")) {
     const raw = await readMetadataFile(deps, "tsconfig.json");
-    if (raw) {
-      const parsed = parseTsConfigContent(raw);
+    if (raw !== null) {
+      const parsed = await hydrateTsConfigFromHead(deps, raw);
       if (parsed) ctx.tsconfig = parsed;
+      else delete ctx.tsconfig;
     }
   }
-  if (!ctx.goModule && languagesPresent.has("go")) {
+  if (languagesPresent.has("go")) {
     const raw = await readMetadataFile(deps, "go.mod");
-    if (raw) {
+    if (raw !== null) {
       const goModule = parseGoModModule(raw);
       if (goModule) ctx.goModule = goModule;
+      else delete ctx.goModule;
     }
   }
-  if (!ctx.dartPackage && languagesPresent.has("dart")) {
+  if (languagesPresent.has("dart")) {
     const raw = await readMetadataFile(deps, "pubspec.yaml");
-    if (raw) {
+    if (raw !== null) {
       const dartPkg = parsePubspecName(raw);
       if (dartPkg) ctx.dartPackage = dartPkg;
+      else delete ctx.dartPackage;
     }
   }
   return ctx;
@@ -107694,8 +107747,7 @@ async function listRepoGlobFiles(pattern, input2, warnings) {
   }
   return [];
 }
-function finalizeNormalizedDoc(rawText, opts) {
-  const normalized = normalizeDocumentText(rawText, opts.contentType);
+function materializeNormalizedDoc(normalized, opts) {
   const { content, truncated } = truncateUtf8Bytes(normalized, opts.maxDocBytes);
   return {
     id: opts.id,
@@ -107710,6 +107762,27 @@ function finalizeNormalizedDoc(rawText, opts) {
     truncated,
     cache_status: opts.cacheStatus
   };
+}
+function writeNormalizedCacheEntry(cache, cacheKey, normalized, meta3) {
+  cache.set(
+    cacheKey,
+    {
+      version: 1,
+      key: cacheKey,
+      source_id: meta3.id,
+      title: inferTitle(meta3.explicitTitle, normalized, meta3.source),
+      kind: meta3.kind,
+      content_sha256: sha256Hex(normalized),
+      ...meta3.etag ? { etag: meta3.etag } : {},
+      ...meta3.lastModified ? { last_modified: meta3.lastModified } : {},
+      ...meta3.sourceFingerprint ? { source_fingerprint: meta3.sourceFingerprint } : {},
+      fetched_at: new Date(meta3.nowMs).toISOString(),
+      ttl_seconds: meta3.ttlSeconds,
+      byte_length: Buffer.byteLength(normalized, "utf-8"),
+      headings: extractDocumentHeadings(normalized)
+    },
+    normalized
+  );
 }
 function resolveSafeWorkspaceFile(workspaceDir, relPath) {
   if (!isSafeRelativePath(workspaceDir, relPath)) {
@@ -107735,20 +107808,16 @@ function resolveSafeWorkspaceFile(workspaceDir, relPath) {
   }
   return { status: "ok", realPath: realTarget };
 }
-function buildRepoCacheHit(cached2, docId, normPath, metaOpts) {
-  return {
+function buildRepoCacheHit(cached2, docId, normPath, metaOpts, maxDocBytes) {
+  return materializeNormalizedDoc(cached2.content, {
     id: docId,
-    title: metaOpts.title ?? cached2.meta.title,
+    explicitTitle: metaOpts.title ?? cached2.meta.title,
     source: normPath,
     kind: "repo",
     mode: metaOpts.mode,
-    content: cached2.content,
-    byte_length: cached2.meta.byte_length,
-    content_sha256: cached2.meta.content_sha256,
-    headings: cached2.meta.headings,
-    truncated: false,
-    cache_status: "hit"
-  };
+    maxDocBytes,
+    cacheStatus: "hit"
+  });
 }
 async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   const baseDir = input2.workspaceDir ?? process.cwd();
@@ -107796,7 +107865,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         const refMatch = fp.startsWith(`ref:${input2.ref}:`);
         const diskMatch = Boolean(diskFingerprint) && fp.startsWith("disk:") && fp === diskFingerprint;
         if (refMatch || diskMatch) {
-          return buildRepoCacheHit(cached2, docId, normPath, metaOpts);
+          return buildRepoCacheHit(cached2, docId, normPath, metaOpts, input2.config.max_doc_bytes);
         }
       }
     }
@@ -107817,7 +107886,19 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         return null;
       }
       const fingerprint2 = `ref:${input2.ref}:${sha256Hex(remoteText)}`;
-      const doc2 = finalizeNormalizedDoc(remoteText, {
+      const normalized2 = normalizeDocumentText(remoteText);
+      if (cache) {
+        writeNormalizedCacheEntry(cache, cacheKey, normalized2, {
+          id: docId,
+          ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
+          source: normPath,
+          kind: "repo",
+          nowMs,
+          ttlSeconds: ttl,
+          sourceFingerprint: fingerprint2
+        });
+      }
+      return materializeNormalizedDoc(normalized2, {
         id: docId,
         ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
         source: normPath,
@@ -107826,31 +107907,11 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         maxDocBytes: input2.config.max_doc_bytes,
         cacheStatus: cache ? "miss" : "uncached"
       });
-      if (cache) {
-        cache.set(
-          cacheKey,
-          {
-            version: 1,
-            key: cacheKey,
-            source_id: doc2.id,
-            title: doc2.title,
-            kind: "repo",
-            content_sha256: doc2.content_sha256,
-            source_fingerprint: fingerprint2,
-            fetched_at: new Date(nowMs).toISOString(),
-            ttl_seconds: ttl,
-            byte_length: doc2.byte_length,
-            headings: doc2.headings
-          },
-          doc2.content
-        );
-      }
-      return doc2;
     }
   } else if (cache && !input2.forceRefresh && diskFingerprint) {
     const cached2 = cache.get(cacheKey, nowMs);
     if (cached2.status === "hit" && cached2.meta.source_fingerprint === diskFingerprint) {
-      return buildRepoCacheHit(cached2, docId, normPath, metaOpts);
+      return buildRepoCacheHit(cached2, docId, normPath, metaOpts, input2.config.max_doc_bytes);
     }
   }
   let diskContent = null;
@@ -107871,7 +107932,19 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
     return null;
   }
   const fingerprint = diskFingerprint ?? `sha:${sha256Hex(diskContent)}`;
-  const doc = finalizeNormalizedDoc(diskContent, {
+  const normalized = normalizeDocumentText(diskContent);
+  if (cache) {
+    writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+      id: docId,
+      ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
+      source: normPath,
+      kind: "repo",
+      nowMs,
+      ttlSeconds: ttl,
+      sourceFingerprint: fingerprint
+    });
+  }
+  return materializeNormalizedDoc(normalized, {
     id: docId,
     ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
     source: normPath,
@@ -107880,26 +107953,6 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
     maxDocBytes: input2.config.max_doc_bytes,
     cacheStatus: cache ? "miss" : "uncached"
   });
-  if (cache) {
-    cache.set(
-      cacheKey,
-      {
-        version: 1,
-        key: cacheKey,
-        source_id: doc.id,
-        title: doc.title,
-        kind: "repo",
-        content_sha256: doc.content_sha256,
-        source_fingerprint: fingerprint,
-        fetched_at: new Date(nowMs).toISOString(),
-        ttl_seconds: ttl,
-        byte_length: doc.byte_length,
-        headings: doc.headings
-      },
-      doc.content
-    );
-  }
-  return doc;
 }
 async function readResponseWithByteLimit(res, maxBytes) {
   if (!res.body) {
@@ -107976,19 +108029,15 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
   if (cache) {
     const lookup = cache.get(cacheKey, nowMs);
     if (lookup.status === "hit" && !input2.forceRefresh) {
-      return {
+      return materializeNormalizedDoc(lookup.content, {
         id: docId,
-        title: src.title ?? lookup.meta.title,
+        explicitTitle: src.title ?? lookup.meta.title,
         source: src.url,
         kind: "url",
         mode: src.mode,
-        content: lookup.content,
-        byte_length: lookup.meta.byte_length,
-        content_sha256: lookup.meta.content_sha256,
-        headings: lookup.meta.headings,
-        truncated: false,
-        cache_status: "hit"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "hit"
+      });
     }
     if (lookup.status === "hit" || lookup.status === "stale") {
       staleMeta = lookup.meta;
@@ -108025,19 +108074,15 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
         ...nextEtag !== void 0 ? { etag: nextEtag } : {},
         ...nextLastMod !== void 0 ? { last_modified: nextLastMod } : {}
       });
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: src.title ?? staleMeta.title,
+        explicitTitle: src.title ?? staleMeta.title,
         source: src.url,
         kind: "url",
         mode: src.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: "revalidated"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "revalidated"
+      });
     }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -108049,57 +108094,44 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
     }
     const cappedRaw = buf.toString("utf-8");
     const contentType = res.headers.get("content-type") ?? void 0;
-    const doc = finalizeNormalizedDoc(cappedRaw, {
+    const normalized = normalizeDocumentText(cappedRaw, contentType);
+    if (cache) {
+      const etag = res.headers.get("etag") ?? void 0;
+      const lastModified = res.headers.get("last-modified") ?? void 0;
+      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+        id: docId,
+        ...src.title !== void 0 ? { explicitTitle: src.title } : {},
+        source: src.url,
+        kind: "url",
+        nowMs,
+        ttlSeconds: ttl,
+        ...etag ? { etag } : {},
+        ...lastModified ? { lastModified } : {}
+      });
+    }
+    return materializeNormalizedDoc(normalized, {
       id: docId,
       ...src.title !== void 0 ? { explicitTitle: src.title } : {},
       source: src.url,
       kind: "url",
       mode: src.mode,
       maxDocBytes: input2.config.max_doc_bytes,
-      ...contentType !== void 0 ? { contentType } : {},
       cacheStatus: cache ? "miss" : "uncached"
     });
-    if (cache) {
-      const etag = res.headers.get("etag") ?? void 0;
-      const lastModified = res.headers.get("last-modified") ?? void 0;
-      cache.set(
-        cacheKey,
-        {
-          version: 1,
-          key: cacheKey,
-          source_id: doc.id,
-          title: doc.title,
-          kind: "url",
-          content_sha256: doc.content_sha256,
-          ...etag ? { etag } : {},
-          ...lastModified ? { last_modified: lastModified } : {},
-          fetched_at: new Date(nowMs).toISOString(),
-          ttl_seconds: ttl,
-          byte_length: doc.byte_length,
-          headings: doc.headings
-        },
-        doc.content
-      );
-    }
-    return doc;
   } catch (err) {
     if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
       warnings.push(
         `Failed to fetch '${src.url}' (${err.message}); using stale cached copy.`
       );
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: src.title ?? staleMeta.title,
+        explicitTitle: src.title ?? staleMeta.title,
         source: src.url,
         kind: "url",
         mode: src.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: "stale-fallback"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "stale-fallback"
+      });
     }
     warnings.push(`Failed to fetch reference URL '${src.url}': ${err.message}`);
     return null;
@@ -108119,19 +108151,15 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
   if (cache) {
     const lookup = cache.get(cacheKey, nowMs);
     if (lookup.status === "hit" && !input2.forceRefresh) {
-      return {
+      return materializeNormalizedDoc(lookup.content, {
         id: docId,
-        title: metaOpts.title ?? lookup.meta.title,
+        explicitTitle: metaOpts.title ?? lookup.meta.title,
         source: sourceLabel,
         kind: "github",
         mode: metaOpts.mode,
-        content: lookup.content,
-        byte_length: lookup.meta.byte_length,
-        content_sha256: lookup.meta.content_sha256,
-        headings: lookup.meta.headings,
-        truncated: false,
-        cache_status: "hit"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "hit"
+      });
     }
     if (lookup.status === "hit" || lookup.status === "stale") {
       staleMeta = lookup.meta;
@@ -108141,19 +108169,15 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
   if (!input2.octokit?.rest?.repos?.getContent) {
     if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
       warnings.push(`No GitHub client available for '${sourceLabel}'; using cached copy.`);
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: "github",
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: "stale-fallback"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "stale-fallback"
+      });
     }
     warnings.push(`Cannot fetch '${sourceLabel}' without an authenticated GitHub client.`);
     return null;
@@ -108176,7 +108200,21 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
       return null;
     }
     const rawText = buf.toString("utf-8");
-    const doc = finalizeNormalizedDoc(rawText, {
+    const normalized = normalizeDocumentText(rawText);
+    if (cache) {
+      const etag = res.headers?.etag;
+      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
+        id: docId,
+        ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
+        source: sourceLabel,
+        kind: "github",
+        nowMs,
+        ttlSeconds: ttl,
+        ...etag ? { etag } : {},
+        sourceFingerprint: res.data.sha
+      });
+    }
+    return materializeNormalizedDoc(normalized, {
       id: docId,
       ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
       source: sourceLabel,
@@ -108185,28 +108223,6 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
       maxDocBytes: input2.config.max_doc_bytes,
       cacheStatus: cache ? "miss" : "uncached"
     });
-    if (cache) {
-      const etag = res.headers?.etag;
-      cache.set(
-        cacheKey,
-        {
-          version: 1,
-          key: cacheKey,
-          source_id: doc.id,
-          title: doc.title,
-          kind: "github",
-          content_sha256: doc.content_sha256,
-          ...etag ? { etag } : {},
-          source_fingerprint: res.data.sha,
-          fetched_at: new Date(nowMs).toISOString(),
-          ttl_seconds: ttl,
-          byte_length: doc.byte_length,
-          headings: doc.headings
-        },
-        doc.content
-      );
-    }
-    return doc;
   } catch (err) {
     const status2 = err.status;
     if (status2 === 304 && staleMeta && staleContent !== void 0) {
@@ -108214,37 +108230,29 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
         fetched_at: new Date(nowMs).toISOString(),
         ttl_seconds: ttl
       });
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: "github",
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: "revalidated"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "revalidated"
+      });
     }
     if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
       warnings.push(
         `Failed to fetch '${sourceLabel}' (${err.message}); using stale cached copy.`
       );
-      return {
+      return materializeNormalizedDoc(staleContent, {
         id: docId,
-        title: metaOpts.title ?? staleMeta.title,
+        explicitTitle: metaOpts.title ?? staleMeta.title,
         source: sourceLabel,
         kind: "github",
         mode: metaOpts.mode,
-        content: staleContent,
-        byte_length: staleMeta.byte_length,
-        content_sha256: staleMeta.content_sha256,
-        headings: staleMeta.headings,
-        truncated: false,
-        cache_status: "stale-fallback"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: "stale-fallback"
+      });
     }
     warnings.push(`Failed to fetch '${sourceLabel}': ${err.message}`);
     return null;

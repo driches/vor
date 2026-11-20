@@ -11,9 +11,9 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
 import { evaluateFileArchitecture } from '../architecture/evaluator.js';
-import { isTestFile, matchesAnyGlob } from '../architecture/glob.js';
+import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.js';
 import {
   detectArchLanguage,
   loadWorkspaceResolveContext,
@@ -94,33 +94,84 @@ async function readMetadataFile(deps: ScannerDeps, path: string): Promise<string
   }
 }
 
+async function hydrateTsConfigFromHead(
+  deps: ScannerDeps,
+  headRaw: string,
+): Promise<ReturnType<typeof parseTsConfigContent>> {
+  const preloaded = new Map<string, string | null>();
+
+  // Pre-fetch up to two relative `extends` hops from PR HEAD (with local
+  // workspace fallback) so synchronous `parseTsConfigContent` resolves aliases
+  // from the reviewed commit rather than an older checkout.
+  const queue: Array<{ raw: string; dir: string; depth: number }> = [
+    { raw: headRaw, dir: '', depth: 0 },
+  ];
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    if (item.depth >= 2) continue;
+    const extMatch = /"extends"\s*:\s*"([^"]+)"/.exec(item.raw);
+    const extPath = extMatch?.[1];
+    if (!extPath || (!extPath.startsWith('./') && !extPath.startsWith('../'))) continue;
+    const joined = normalizePath(item.dir ? posix.join(item.dir, extPath) : extPath);
+    if (!joined || preloaded.has(joined)) continue;
+    let extRaw = await readMetadataFile(deps, joined);
+    if (extRaw === null && deps.workspaceDir) {
+      try {
+        extRaw = readFileSync(resolve(deps.workspaceDir, joined), 'utf-8');
+      } catch {
+        extRaw = null; // extended tsconfig missing both remotely and locally
+      }
+    }
+    preloaded.set(joined, extRaw);
+    if (extRaw) {
+      queue.push({ raw: extRaw, dir: posix.dirname(joined), depth: item.depth + 1 });
+    }
+  }
+
+  return parseTsConfigContent(headRaw, (relPath) => {
+    const norm = normalizePath(relPath);
+    if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+    if (deps.workspaceDir) {
+      try {
+        return readFileSync(resolve(deps.workspaceDir, norm), 'utf-8');
+      } catch {
+        return null; // optional extended tsconfig missing on disk
+      }
+    }
+    return null;
+  });
+}
+
 async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
 ): Promise<WorkspaceResolveContext> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
 
-  if (!ctx.tsconfig && (languagesPresent.has('typescript') || languagesPresent.has('javascript'))) {
+  if (languagesPresent.has('typescript') || languagesPresent.has('javascript')) {
     const raw = await readMetadataFile(deps, 'tsconfig.json');
-    if (raw) {
-      const parsed = parseTsConfigContent(raw);
+    if (raw !== null) {
+      const parsed = await hydrateTsConfigFromHead(deps, raw);
       if (parsed) ctx.tsconfig = parsed;
+      else delete ctx.tsconfig;
     }
   }
 
-  if (!ctx.goModule && languagesPresent.has('go')) {
+  if (languagesPresent.has('go')) {
     const raw = await readMetadataFile(deps, 'go.mod');
-    if (raw) {
+    if (raw !== null) {
       const goModule = parseGoModModule(raw);
       if (goModule) ctx.goModule = goModule;
+      else delete ctx.goModule;
     }
   }
 
-  if (!ctx.dartPackage && languagesPresent.has('dart')) {
+  if (languagesPresent.has('dart')) {
     const raw = await readMetadataFile(deps, 'pubspec.yaml');
-    if (raw) {
+    if (raw !== null) {
       const dartPkg = parsePubspecName(raw);
       if (dartPkg) ctx.dartPackage = dartPkg;
+      else delete ctx.dartPackage;
     }
   }
 

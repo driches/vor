@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import { resolveArchitectureSpec } from '../architecture/presets.js';
 import type { ChangedFile } from '../types.js';
@@ -106,5 +109,42 @@ entries:
 
     const result = await scanner.scan(deps);
     expect(result.findings).toEqual([]);
+  });
+
+  it('prefers PR HEAD tsconfig.json over stale workspace checkout tsconfig.json', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-head-meta-'));
+    try {
+      // Old checkout lacks the `@infra/*` path alias.
+      writeFileSync(
+        join(ws, 'tsconfig.json'),
+        '{"compilerOptions":{"baseUrl":".","paths":{"@domain/*":["src/domain/*"]}}}',
+      );
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+      const scanner = createArchitectureScanner(spec);
+      const filePath = 'src/domain/order.ts';
+      const content = "import { Repo } from '@infra/pg';\nexport const r = Repo;\n";
+      const changed = makeChangedFile(filePath, {
+        1: "import { Repo } from '@infra/pg';",
+      });
+      const headTsConfig =
+        '{"compilerOptions":{"baseUrl":".","paths":{"@infra/*":["src/infrastructure/*"]}}}';
+
+      const deps = makeDeps([changed], {
+        [filePath]: content,
+        'tsconfig.json': headTsConfig,
+      });
+      deps.workspaceDir = ws;
+
+      const result = await scanner.scan(deps);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });
