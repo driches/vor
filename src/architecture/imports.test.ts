@@ -223,4 +223,36 @@ describe('extractImports & resolveImport across languages', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('ignores imports inside string and template literals while keeping template interpolations and Rust lifetimes', () => {
+    const jsSrc = [
+      'const example = `',
+      '  import express from "express";',
+      "  const q = require('fastify');",
+      '`;',
+      'const quoted = "import prisma from \'prisma\';";',
+      "const real = `ok ${require('pg')}`;",
+    ].join('\n');
+    const jsImports = extractImports('src/domain/gen.ts', jsSrc).imports;
+    expect(jsImports.map((i) => [i.specifier, i.line])).toEqual([['pg', 6]]);
+
+    const goSrc = [
+      'package domain',
+      'const tmpl = `',
+      'import "net/http"',
+      '`',
+      'import "context"',
+    ].join('\n');
+    const goImports = extractImports('internal/domain/gen.go', goSrc).imports;
+    expect(goImports.map((i) => i.specifier)).toEqual(['context']);
+
+    const rustSrc = [
+      "fn hold<'a>(s: &'a str) -> &'a str { s }",
+      'const EXAMPLE: &str = "use crate::adapters::db;";',
+      'const RAW: &str = r#"use reqwest::Client;"#;',
+      'use crate::ports::Repo;',
+    ].join('\n');
+    const rustImports = extractImports('src/domain/item.rs', rustSrc).imports;
+    expect(rustImports.map((i) => i.specifier)).toEqual(['crate::ports::Repo']);
+  });
 });

@@ -90,37 +90,157 @@ export function detectArchLanguage(filePath: string): ArchLanguage | null {
   return EXT_TO_LANG[ext] ?? null;
 }
 
+export interface StringSpan {
+  start: number;
+  end: number;
+}
+
+export interface CLikeScanOptions {
+  /** Treat JS/TS `` `...${...}...` `` interpolations as code rather than string content. */
+  templateInterpolation?: boolean;
+  /** Treat `` `...` `` as raw strings without backslash escapes (Go). */
+  rawBackticks?: boolean;
+  /** Recognize `"""..."""` (and `'''...'''`) multi-line strings (Dart, Java, Kotlin, C#). */
+  tripleQuotes?: boolean;
+  /** Distinguish Rust `'a` lifetimes from `'x'` / `'\n'` char literals. */
+  rustLifetimes?: boolean;
+  /** Recognize Rust raw strings `r"..."` / `r#"..."#`. */
+  rustRawStrings?: boolean;
+}
+
+function isIdentChar(ch: string | undefined): boolean {
+  return ch !== undefined && /[A-Za-z0-9_$]/.test(ch);
+}
+
+function findRustCharLiteralEnd(chars: readonly string[], openQuote: number): number {
+  const n = chars.length;
+  const next = chars[openQuote + 1];
+  if (next === undefined || next === '\n' || next === '\r' || next === "'") return -1;
+  if (next !== '\\') {
+    return chars[openQuote + 2] === "'" ? openQuote + 2 : -1;
+  }
+  let j = openQuote + 1;
+  const limit = Math.min(n, openQuote + 15);
+  while (j < limit) {
+    const ch = chars[j]!;
+    if (ch === '\n' || ch === '\r') return -1;
+    if (ch === '\\') {
+      j += 2;
+      continue;
+    }
+    if (ch === "'") return j;
+    if (/\s/.test(ch)) return -1;
+    j += 1;
+  }
+  return -1;
+}
+
+type ActiveString =
+  | { kind: 'quote'; quote: "'" | '"' | '`'; spanStart: number }
+  | { kind: 'raw_backtick'; spanStart: number }
+  | { kind: 'triple'; quote: '"' | "'"; spanStart: number }
+  | { kind: 'rust_raw'; hashes: number; spanStart: number };
+
 /**
- * Strip `//` line comments and `/* ... *\/` block comments while preserving
- * string literals and replacing comment characters with spaces (keeping `\n`
- * intact so 1-based line numbers never shift).
+ * Strip `//` line comments and `/* ... *\/` block comments (preserving `\n` so
+ * line numbers never shift) and record sorted `[start, end]` spans of string
+ * literals so regex-based import extraction skips example/template strings.
  */
-export function stripCLikeComments(src: string): string {
+export function scanCLikeSource(
+  src: string,
+  opts: CLikeScanOptions = {},
+): { cleaned: string; stringSpans: StringSpan[] } {
   const chars = src.split('');
   const n = chars.length;
+  const stringSpans: StringSpan[] = [];
+  const templateBraceDepths: number[] = [];
+  let active: ActiveString | null = null;
   let i = 0;
-  let quote: string | null = null;
 
   while (i < n) {
     const ch = chars[i]!;
-    if (quote !== null) {
+
+    if (active !== null) {
+      if (active.kind === 'raw_backtick') {
+        if (ch === '`') {
+          stringSpans.push({ start: active.spanStart, end: i });
+          active = null;
+        }
+        i += 1;
+        continue;
+      }
+
+      if (active.kind === 'rust_raw') {
+        if (ch === '"') {
+          let matchedHashes = 0;
+          while (matchedHashes < active.hashes && chars[i + 1 + matchedHashes] === '#') {
+            matchedHashes += 1;
+          }
+          if (matchedHashes === active.hashes) {
+            const end = i + active.hashes;
+            stringSpans.push({ start: active.spanStart, end });
+            active = null;
+            i = end + 1;
+            continue;
+          }
+        }
+        i += 1;
+        continue;
+      }
+
+      if (active.kind === 'triple') {
+        if (ch === '\\') {
+          i += chars[i + 1] === '\r' && chars[i + 2] === '\n' ? 3 : 2;
+          continue;
+        }
+        if (ch === active.quote && chars[i + 1] === active.quote && chars[i + 2] === active.quote) {
+          const end = i + 2;
+          stringSpans.push({ start: active.spanStart, end });
+          active = null;
+          i = end + 1;
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+
+      // active.kind === 'quote'
       if (ch === '\\') {
+        i += chars[i + 1] === '\r' && chars[i + 2] === '\n' ? 3 : 2;
+        continue;
+      }
+      if (
+        opts.templateInterpolation &&
+        active.quote === '`' &&
+        ch === '$' &&
+        chars[i + 1] === '{'
+      ) {
+        stringSpans.push({ start: active.spanStart, end: i + 1 });
+        templateBraceDepths.push(0);
+        active = null;
         i += 2;
         continue;
       }
-      if (ch === quote) {
-        quote = null;
+      if (ch === active.quote) {
+        stringSpans.push({ start: active.spanStart, end: i });
+        active = null;
+        i += 1;
+        continue;
+      }
+      // Single- and double-quoted strings do not span raw newlines; closing on
+      // newline prevents an odd quote (e.g. inside a JS regex literal) from
+      // swallowing the rest of the file.
+      if (active.quote !== '`' && ch === '\n') {
+        stringSpans.push({ start: active.spanStart, end: i });
+        active = null;
+        i += 1;
+        continue;
       }
       i += 1;
       continue;
     }
 
-    if (ch === "'" || ch === '"' || ch === '`') {
-      quote = ch;
-      i += 1;
-      continue;
-    }
-
+    // Outside strings: handle comments first.
     if (ch === '/' && chars[i + 1] === '/') {
       chars[i] = ' ';
       chars[i + 1] = ' ';
@@ -149,10 +269,110 @@ export function stripCLikeComments(src: string): string {
       continue;
     }
 
+    // Track JS/TS `${ ... }` interpolation braces back into template literal.
+    if (opts.templateInterpolation && templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === '}') {
+        const top = templateBraceDepths[templateBraceDepths.length - 1]!;
+        if (top === 0) {
+          templateBraceDepths.pop();
+          active = { kind: 'quote', quote: '`', spanStart: i };
+        } else {
+          templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
+        }
+        i += 1;
+        continue;
+      }
+    }
+
+    // Rust raw strings: `r"..."`, `r#"..."#`, `br#"..."#`, `cr#"..."#`.
+    if (
+      opts.rustRawStrings &&
+      ch === 'r' &&
+      (!isIdentChar(chars[i - 1]) ||
+        ((chars[i - 1] === 'b' || chars[i - 1] === 'c') && !isIdentChar(chars[i - 2])))
+    ) {
+      let hashes = 0;
+      while (chars[i + 1 + hashes] === '#') hashes += 1;
+      if (chars[i + 1 + hashes] === '"') {
+        const quotePos = i + 1 + hashes;
+        active = { kind: 'rust_raw', hashes, spanStart: quotePos };
+        i = quotePos + 1;
+        continue;
+      }
+    }
+
+    if (
+      opts.tripleQuotes &&
+      (ch === '"' || ch === "'") &&
+      chars[i + 1] === ch &&
+      chars[i + 2] === ch
+    ) {
+      active = { kind: 'triple', quote: ch, spanStart: i };
+      i += 3;
+      continue;
+    }
+
+    if (ch === "'" && opts.rustLifetimes) {
+      const charEnd = findRustCharLiteralEnd(chars, i);
+      if (charEnd !== -1) {
+        stringSpans.push({ start: i, end: charEnd });
+        i = charEnd + 1;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '`') {
+      active = opts.rawBackticks
+        ? { kind: 'raw_backtick', spanStart: i }
+        : { kind: 'quote', quote: '`', spanStart: i };
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      active = { kind: 'quote', quote: ch, spanStart: i };
+      i += 1;
+      continue;
+    }
+
     i += 1;
   }
 
-  return chars.join('');
+  return { cleaned: chars.join(''), stringSpans };
+}
+
+/** Binary search checking whether `offset` falls strictly inside a string literal. */
+function isInsideStringSpan(offset: number, spans: readonly StringSpan[]): boolean {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const span = spans[mid]!;
+    if (offset <= span.start) {
+      hi = mid - 1;
+    } else if (offset >= span.end) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Strip `//` line comments and `/* ... *\/` block comments while preserving
+ * string literals and replacing comment characters with spaces (keeping `\n`
+ * intact so 1-based line numbers never shift).
+ */
+export function stripCLikeComments(src: string): string {
+  return scanCLikeSource(src).cleaned;
 }
 
 /**
@@ -266,7 +486,7 @@ function extractJsTsImports(
   content: string,
   language: 'typescript' | 'javascript',
 ): ExtractedImport[] {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { templateInterpolation: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -286,32 +506,40 @@ function extractJsTsImports(
   const esFrom =
     /\b(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"]+)\1/g;
   for (const m of cleaned.matchAll(esFrom)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[2]!;
-    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
 
   // Side-effect import 'spec'
   const sideEffect = /\bimport\s+(['"])([^'"]+)\1/g;
   for (const m of cleaned.matchAll(sideEffect)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[2]!;
-    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
 
   // CommonJS require('spec')
   const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
   for (const m of cleaned.matchAll(req)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[2]!;
-    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
 
   // Dynamic import('spec')
   const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
   for (const m of cleaned.matchAll(dyn)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[2]!;
-    const specOffset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
 
@@ -363,7 +591,7 @@ function extractPythonImports(content: string): ExtractedImport[] {
 }
 
 function extractGoImports(content: string): ExtractedImport[] {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { rawBackticks: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -381,8 +609,10 @@ function extractGoImports(content: string): ExtractedImport[] {
 
   const blockRe = /\bimport\s*\(([^)]*)\)/g;
   for (const m of cleaned.matchAll(blockRe)) {
+    const mIdx = m.index ?? 0;
+    if (isInsideStringSpan(mIdx, stringSpans)) continue;
     const block = m[1]!;
-    const blockStart = (m.index ?? 0) + m[0].indexOf(block);
+    const blockStart = mIdx + m[0].indexOf(block);
     const itemRe = /^[ \t]*(?:[A-Za-z_]\w*|\.)?[ \t]*(?:"([^"]+)"|`([^`]+)`)/gm;
     for (const im of block.matchAll(itemRe)) {
       const spec = (im[1] ?? im[2])!;
@@ -393,8 +623,10 @@ function extractGoImports(content: string): ExtractedImport[] {
 
   const singleRe = /^[ \t]*import[ \t]+(?:(?:[A-Za-z_]\w*|\.)[ \t]+)?(?:"([^"]+)"|`([^`]+)`)/gm;
   for (const m of cleaned.matchAll(singleRe)) {
+    const mIdx = m.index ?? 0;
+    if (isInsideStringSpan(mIdx, stringSpans)) continue;
     const spec = (m[1] ?? m[2])!;
-    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const offset = mIdx + m[0].indexOf(spec);
     addSpec(spec, offset);
   }
 
@@ -402,15 +634,17 @@ function extractGoImports(content: string): ExtractedImport[] {
 }
 
 function extractDartImports(content: string): ExtractedImport[] {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
 
   const re = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
   for (const m of cleaned.matchAll(re)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[2]!;
-    const offset = (m.index ?? 0) + m[0].lastIndexOf(spec);
+    const offset = idx + m[0].lastIndexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -486,7 +720,10 @@ function expandRustUseTree(tree: string, baseOffset: number, prefix = ''): RustL
 }
 
 function extractRustImports(content: string): ExtractedImport[] {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    rustLifetimes: true,
+    rustRawStrings: true,
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -500,8 +737,10 @@ function extractRustImports(content: string): ExtractedImport[] {
 
   const useRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/g;
   for (const m of cleaned.matchAll(useRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const expr = m[1]!;
-    const exprOffset = (m.index ?? 0) + m[0].indexOf(expr);
+    const exprOffset = idx + m[0].indexOf(expr);
     for (const leaf of expandRustUseTree(expr, exprOffset)) {
       const line = lineAtOffset(starts, leaf.offset);
       out.push({
@@ -516,8 +755,10 @@ function extractRustImports(content: string): ExtractedImport[] {
 
   const externRe = /\bextern\s+crate\s+([A-Za-z_]\w*)(?:\s+as\s+[A-Za-z_]\w*)?\s*;/g;
   for (const m of cleaned.matchAll(externRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m[1]!;
-    const offset = (m.index ?? 0) + m[0].indexOf(name);
+    const offset = idx + m[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: name,
@@ -530,8 +771,10 @@ function extractRustImports(content: string): ExtractedImport[] {
 
   const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
   for (const m of cleaned.matchAll(modRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m[1]!;
-    const offset = (m.index ?? 0) + m[0].indexOf(name);
+    const offset = idx + m[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: `mod:${name}`,
@@ -549,19 +792,26 @@ function extractJavaKotlinImports(
   content: string,
   language: 'java' | 'kotlin',
 ): { imports: ExtractedImport[]; meta: FileImportMeta } {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
 
-  const pkgMatch = cleaned.match(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/m);
-  const declaredPackage = pkgMatch?.[1];
+  let declaredPackage: string | undefined;
+  for (const m of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
+    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
+      declaredPackage = m[1];
+      break;
+    }
+  }
 
   const importRe =
     /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
   for (const m of cleaned.matchAll(importRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[1]!;
-    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const offset = idx + m[0].indexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -582,20 +832,27 @@ function extractCSharpImports(content: string): {
   imports: ExtractedImport[];
   meta: FileImportMeta;
 } {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
 
-  const nsMatch = cleaned.match(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/m);
-  const declaredPackage = nsMatch?.[1];
+  let declaredPackage: string | undefined;
+  for (const m of cleaned.matchAll(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm)) {
+    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
+      declaredPackage = m[1];
+      break;
+    }
+  }
 
   const usingRe =
     /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
   for (const m of cleaned.matchAll(usingRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[1]!;
     if (spec === 'var') continue;
-    const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    const offset = idx + m[0].indexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,

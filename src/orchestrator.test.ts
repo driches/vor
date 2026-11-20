@@ -2367,6 +2367,44 @@ describe('runOrchestrator — architecture enforcement', () => {
     expect(out.kept_comments[0]?.severity).toBe('critical');
     expect(out.kept_comments[0]?.source?.kind).toBe('scanner');
   });
+
+  it('suppresses both scanner and system prompt when external architecture.file sets enabled: false', async () => {
+    const domDiff = [
+      'diff --git a/src/domain/order.ts b/src/domain/order.ts',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      '--- /dev/null',
+      '+++ b/src/domain/order.ts',
+      '@@ -0,0 +1,2 @@',
+      "+import { pgRepo } from '../adapters/out/pg_repo';",
+      '+export const x = pgRepo;',
+    ].join('\n');
+    octokitState.diff = `${domDiff}\n`;
+    octokitState.filesApi = [{ filename: 'src/domain/order.ts', changes: 2, patch: domDiff }];
+    octokitState.contents.set(
+      'src/domain/order.ts',
+      "import { pgRepo } from '../adapters/out/pg_repo';\nexport const x = pgRepo;\n",
+    );
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: false',
+        'architecture:',
+        '  enabled: true',
+        '  preset: hexagonal',
+        '  file: .vor/architecture.yml',
+      ].join('\n'),
+    );
+    octokitState.contents.set('.vor/architecture.yml', 'enabled: false\n');
+
+    scriptSummaryOnly();
+
+    const out = await runOrchestrator(baseInput());
+    expect(out.kept_comments).toEqual([]);
+    const sysPrompt = JSON.stringify(anthropicCreateCalls[0]?.system ?? '');
+    expect(sysPrompt).not.toContain('### Software architecture standards');
+  });
 });
 
 describe('runOrchestrator — reference documentation & two-layer caching', () => {

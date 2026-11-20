@@ -324,7 +324,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     config,
     repoName: `${input.owner}/${input.repo}`,
     contextFiles,
-    ...(archSpec ? { architecture: archSpec } : {}),
+    architecture: archSpec ?? null,
     ...(referenceCorpus ? { references: referenceCorpus } : {}),
   });
   // Same selection buildSystemPrompt just made. The agent's context tool uses

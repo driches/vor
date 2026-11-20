@@ -78070,7 +78070,7 @@ function buildSystemPrompt(input2) {
   if (input2.config.security.enabled && input2.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
-  const archSpec = input2.architecture ?? (input2.config.architecture.enabled ? resolveArchitectureSpec(input2.config.architecture) : void 0);
+  const archSpec = input2.architecture !== void 0 ? input2.architecture : input2.config.architecture.enabled ? resolveArchitectureSpec(input2.config.architecture) : null;
   if (archSpec) {
     const archSection = renderArchitecturePrompt(archSpec);
     if (archSection) sections.push(archSection);
@@ -88508,26 +88508,104 @@ function detectArchLanguage(filePath) {
   const ext = name.slice(dot + 1).toLowerCase();
   return EXT_TO_LANG[ext] ?? null;
 }
-function stripCLikeComments(src) {
+function isIdentChar(ch) {
+  return ch !== void 0 && /[A-Za-z0-9_$]/.test(ch);
+}
+function findRustCharLiteralEnd(chars, openQuote) {
+  const n2 = chars.length;
+  const next = chars[openQuote + 1];
+  if (next === void 0 || next === "\n" || next === "\r" || next === "'") return -1;
+  if (next !== "\\") {
+    return chars[openQuote + 2] === "'" ? openQuote + 2 : -1;
+  }
+  let j2 = openQuote + 1;
+  const limit2 = Math.min(n2, openQuote + 15);
+  while (j2 < limit2) {
+    const ch = chars[j2];
+    if (ch === "\n" || ch === "\r") return -1;
+    if (ch === "\\") {
+      j2 += 2;
+      continue;
+    }
+    if (ch === "'") return j2;
+    if (/\s/.test(ch)) return -1;
+    j2 += 1;
+  }
+  return -1;
+}
+function scanCLikeSource(src, opts = {}) {
   const chars = src.split("");
   const n2 = chars.length;
+  const stringSpans = [];
+  const templateBraceDepths = [];
+  let active = null;
   let i2 = 0;
-  let quote = null;
   while (i2 < n2) {
     const ch = chars[i2];
-    if (quote !== null) {
+    if (active !== null) {
+      if (active.kind === "raw_backtick") {
+        if (ch === "`") {
+          stringSpans.push({ start: active.spanStart, end: i2 });
+          active = null;
+        }
+        i2 += 1;
+        continue;
+      }
+      if (active.kind === "rust_raw") {
+        if (ch === '"') {
+          let matchedHashes = 0;
+          while (matchedHashes < active.hashes && chars[i2 + 1 + matchedHashes] === "#") {
+            matchedHashes += 1;
+          }
+          if (matchedHashes === active.hashes) {
+            const end = i2 + active.hashes;
+            stringSpans.push({ start: active.spanStart, end });
+            active = null;
+            i2 = end + 1;
+            continue;
+          }
+        }
+        i2 += 1;
+        continue;
+      }
+      if (active.kind === "triple") {
+        if (ch === "\\") {
+          i2 += chars[i2 + 1] === "\r" && chars[i2 + 2] === "\n" ? 3 : 2;
+          continue;
+        }
+        if (ch === active.quote && chars[i2 + 1] === active.quote && chars[i2 + 2] === active.quote) {
+          const end = i2 + 2;
+          stringSpans.push({ start: active.spanStart, end });
+          active = null;
+          i2 = end + 1;
+          continue;
+        }
+        i2 += 1;
+        continue;
+      }
       if (ch === "\\") {
+        i2 += chars[i2 + 1] === "\r" && chars[i2 + 2] === "\n" ? 3 : 2;
+        continue;
+      }
+      if (opts.templateInterpolation && active.quote === "`" && ch === "$" && chars[i2 + 1] === "{") {
+        stringSpans.push({ start: active.spanStart, end: i2 + 1 });
+        templateBraceDepths.push(0);
+        active = null;
         i2 += 2;
         continue;
       }
-      if (ch === quote) {
-        quote = null;
+      if (ch === active.quote) {
+        stringSpans.push({ start: active.spanStart, end: i2 });
+        active = null;
+        i2 += 1;
+        continue;
       }
-      i2 += 1;
-      continue;
-    }
-    if (ch === "'" || ch === '"' || ch === "`") {
-      quote = ch;
+      if (active.quote !== "`" && ch === "\n") {
+        stringSpans.push({ start: active.spanStart, end: i2 });
+        active = null;
+        i2 += 1;
+        continue;
+      }
       i2 += 1;
       continue;
     }
@@ -88557,9 +88635,81 @@ function stripCLikeComments(src) {
       }
       continue;
     }
+    if (opts.templateInterpolation && templateBraceDepths.length > 0) {
+      if (ch === "{") {
+        templateBraceDepths[templateBraceDepths.length - 1] += 1;
+        i2 += 1;
+        continue;
+      }
+      if (ch === "}") {
+        const top = templateBraceDepths[templateBraceDepths.length - 1];
+        if (top === 0) {
+          templateBraceDepths.pop();
+          active = { kind: "quote", quote: "`", spanStart: i2 };
+        } else {
+          templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
+        }
+        i2 += 1;
+        continue;
+      }
+    }
+    if (opts.rustRawStrings && ch === "r" && (!isIdentChar(chars[i2 - 1]) || (chars[i2 - 1] === "b" || chars[i2 - 1] === "c") && !isIdentChar(chars[i2 - 2]))) {
+      let hashes = 0;
+      while (chars[i2 + 1 + hashes] === "#") hashes += 1;
+      if (chars[i2 + 1 + hashes] === '"') {
+        const quotePos = i2 + 1 + hashes;
+        active = { kind: "rust_raw", hashes, spanStart: quotePos };
+        i2 = quotePos + 1;
+        continue;
+      }
+    }
+    if (opts.tripleQuotes && (ch === '"' || ch === "'") && chars[i2 + 1] === ch && chars[i2 + 2] === ch) {
+      active = { kind: "triple", quote: ch, spanStart: i2 };
+      i2 += 3;
+      continue;
+    }
+    if (ch === "'" && opts.rustLifetimes) {
+      const charEnd = findRustCharLiteralEnd(chars, i2);
+      if (charEnd !== -1) {
+        stringSpans.push({ start: i2, end: charEnd });
+        i2 = charEnd + 1;
+        continue;
+      }
+      i2 += 1;
+      continue;
+    }
+    if (ch === "`") {
+      active = opts.rawBackticks ? { kind: "raw_backtick", spanStart: i2 } : { kind: "quote", quote: "`", spanStart: i2 };
+      i2 += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      active = { kind: "quote", quote: ch, spanStart: i2 };
+      i2 += 1;
+      continue;
+    }
     i2 += 1;
   }
-  return chars.join("");
+  return { cleaned: chars.join(""), stringSpans };
+}
+function isInsideStringSpan(offset, spans) {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    const span = spans[mid];
+    if (offset <= span.start) {
+      hi = mid - 1;
+    } else if (offset >= span.end) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+function stripCLikeComments(src) {
+  return scanCLikeSource(src).cleaned;
 }
 function stripPythonCommentsAndDocstrings(src) {
   const chars = src.split("");
@@ -88654,7 +88804,7 @@ function dedupExtracted(items) {
   return out;
 }
 function extractJsTsImports(content, language) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { templateInterpolation: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -88670,26 +88820,34 @@ function extractJsTsImports(content, language) {
   };
   const esFrom = /\b(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"]+)\1/g;
   for (const m2 of cleaned.matchAll(esFrom)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[2];
-    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   const sideEffect = /\bimport\s+(['"])([^'"]+)\1/g;
   for (const m2 of cleaned.matchAll(sideEffect)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[2];
-    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
   for (const m2 of cleaned.matchAll(req)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[2];
-    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
   for (const m2 of cleaned.matchAll(dyn)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[2];
-    const specOffset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   return dedupExtracted(out);
@@ -88732,7 +88890,7 @@ function extractPythonImports(content) {
   return dedupExtracted(out);
 }
 function extractGoImports(content) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { rawBackticks: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -88748,8 +88906,10 @@ function extractGoImports(content) {
   };
   const blockRe = /\bimport\s*\(([^)]*)\)/g;
   for (const m2 of cleaned.matchAll(blockRe)) {
+    const mIdx = m2.index ?? 0;
+    if (isInsideStringSpan(mIdx, stringSpans)) continue;
     const block = m2[1];
-    const blockStart = (m2.index ?? 0) + m2[0].indexOf(block);
+    const blockStart = mIdx + m2[0].indexOf(block);
     const itemRe = /^[ \t]*(?:[A-Za-z_]\w*|\.)?[ \t]*(?:"([^"]+)"|`([^`]+)`)/gm;
     for (const im of block.matchAll(itemRe)) {
       const spec = im[1] ?? im[2];
@@ -88759,21 +88919,25 @@ function extractGoImports(content) {
   }
   const singleRe = /^[ \t]*import[ \t]+(?:(?:[A-Za-z_]\w*|\.)[ \t]+)?(?:"([^"]+)"|`([^`]+)`)/gm;
   for (const m2 of cleaned.matchAll(singleRe)) {
+    const mIdx = m2.index ?? 0;
+    if (isInsideStringSpan(mIdx, stringSpans)) continue;
     const spec = m2[1] ?? m2[2];
-    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const offset = mIdx + m2[0].indexOf(spec);
     addSpec(spec, offset);
   }
   return dedupExtracted(out);
 }
 function extractDartImports(content) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
   const re2 = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
   for (const m2 of cleaned.matchAll(re2)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[2];
-    const offset = (m2.index ?? 0) + m2[0].lastIndexOf(spec);
+    const offset = idx + m2[0].lastIndexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -88832,7 +88996,10 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
   return leaves;
 }
 function extractRustImports(content) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    rustLifetimes: true,
+    rustRawStrings: true
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -88844,8 +89011,10 @@ function extractRustImports(content) {
   };
   const useRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/g;
   for (const m2 of cleaned.matchAll(useRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const expr = m2[1];
-    const exprOffset = (m2.index ?? 0) + m2[0].indexOf(expr);
+    const exprOffset = idx + m2[0].indexOf(expr);
     for (const leaf of expandRustUseTree(expr, exprOffset)) {
       const line = lineAtOffset(starts, leaf.offset);
       out.push({
@@ -88859,8 +89028,10 @@ function extractRustImports(content) {
   }
   const externRe = /\bextern\s+crate\s+([A-Za-z_]\w*)(?:\s+as\s+[A-Za-z_]\w*)?\s*;/g;
   for (const m2 of cleaned.matchAll(externRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m2[1];
-    const offset = (m2.index ?? 0) + m2[0].indexOf(name);
+    const offset = idx + m2[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: name,
@@ -88872,8 +89043,10 @@ function extractRustImports(content) {
   }
   const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
   for (const m2 of cleaned.matchAll(modRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m2[1];
-    const offset = (m2.index ?? 0) + m2[0].indexOf(name);
+    const offset = idx + m2[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: `mod:${name}`,
@@ -88886,16 +89059,23 @@ function extractRustImports(content) {
   return dedupExtracted(out);
 }
 function extractJavaKotlinImports(content, language) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
-  const pkgMatch = cleaned.match(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/m);
-  const declaredPackage = pkgMatch?.[1];
+  let declaredPackage;
+  for (const m2 of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
+    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
+      declaredPackage = m2[1];
+      break;
+    }
+  }
   const importRe = /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
   for (const m2 of cleaned.matchAll(importRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[1];
-    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const offset = idx + m2[0].indexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -88911,17 +89091,24 @@ function extractJavaKotlinImports(content, language) {
   };
 }
 function extractCSharpImports(content) {
-  const cleaned = stripCLikeComments(content);
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
-  const nsMatch = cleaned.match(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/m);
-  const declaredPackage = nsMatch?.[1];
+  let declaredPackage;
+  for (const m2 of cleaned.matchAll(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm)) {
+    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
+      declaredPackage = m2[1];
+      break;
+    }
+  }
   const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
   for (const m2 of cleaned.matchAll(usingRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[1];
     if (spec === "var") continue;
-    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    const offset = idx + m2[0].indexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -90187,6 +90374,8 @@ function truncateUtf8Bytes(text, maxBytes) {
 
 // src/references/loader.ts
 var FETCH_TIMEOUT_MS = 15e3;
+var MAX_REDIRECTS = 5;
+var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
 var MAX_RAW_REMOTE_BYTES = 5 * 1024 * 1024;
 var WALK_SKIP_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -90199,6 +90388,7 @@ var WALK_SKIP_DIRS = /* @__PURE__ */ new Set([
 ]);
 var BLOCKED_METADATA_HOSTS = /* @__PURE__ */ new Set([
   "169.254.169.254",
+  "169.254.170.2",
   "metadata.google.internal",
   "metadata.goog",
   "100.100.100.200"
@@ -90273,14 +90463,66 @@ function normalizeSourceInput(entry, warnings) {
   warnings.push("Reference source object has none of path, glob, url, or github; skipping.");
   return null;
 }
+function isBlockedIpv4(ip) {
+  const parts = ip.split(".");
+  if (parts.length !== 4 || parts.some((p2) => !/^\d{1,3}$/.test(p2))) return false;
+  const nums = parts.map(Number);
+  const a2 = nums[0];
+  const b2 = nums[1];
+  if (nums.some((n2) => n2 < 0 || n2 > 255)) return false;
+  if (a2 === 0) return true;
+  if (a2 === 10) return true;
+  if (a2 === 100 && b2 >= 64 && b2 <= 127) return true;
+  if (a2 === 127) return true;
+  if (a2 === 169 && b2 === 254) return true;
+  if (a2 === 172 && b2 >= 16 && b2 <= 31) return true;
+  if (a2 === 192 && b2 === 168) return true;
+  if (a2 >= 224) return true;
+  return false;
+}
+function isPrivateOrLoopbackHost(rawHostname) {
+  const trimmed = rawHostname.toLowerCase().replace(/\.$/, "");
+  const unbracketed = trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
+  const host = unbracketed.split("%")[0] ?? unbracketed;
+  if (BLOCKED_METADATA_HOSTS.has(host)) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (isBlockedIpv4(host)) return true;
+  if (host.includes(":")) {
+    if (host === "::" || host === "::1" || host === "0:0:0:0:0:0:0:0" || host === "0:0:0:0:0:0:0:1") {
+      return true;
+    }
+    const mappedMatch = /^(?:0:0:0:0:0:ffff|::ffff):(.+)$/.exec(host);
+    if (mappedMatch?.[1]) {
+      const tail = mappedMatch[1];
+      if (isBlockedIpv4(tail)) return true;
+      const hexPair = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+      if (hexPair) {
+        const hi = Number.parseInt(hexPair[1], 16);
+        const lo = Number.parseInt(hexPair[2], 16);
+        const dotted = `${hi >> 8 & 255}.${hi & 255}.${lo >> 8 & 255}.${lo & 255}`;
+        if (isBlockedIpv4(dotted)) return true;
+      }
+    }
+    const firstHextet = host.split(":")[0] ?? "";
+    if (firstHextet) {
+      const val = Number.parseInt(firstHextet, 16);
+      if (!Number.isNaN(val)) {
+        if ((val & 65472) === 65152) return true;
+        if ((val & 65024) === 64512) return true;
+        if ((val & 65280) === 65280) return true;
+      }
+    }
+  }
+  return false;
+}
 function validateRemoteUrl(rawUrl) {
   const url2 = new URL(rawUrl);
   if (url2.protocol !== "http:" && url2.protocol !== "https:") {
     throw new Error(`Unsupported URL scheme '${url2.protocol}'`);
   }
   const host = url2.hostname.toLowerCase();
-  if (BLOCKED_METADATA_HOSTS.has(host)) {
-    throw new Error(`Blocked metadata host '${host}'`);
+  if (isPrivateOrLoopbackHost(host)) {
+    throw new Error(`Blocked host '${host}'`);
   }
   return url2;
 }
@@ -90340,6 +90582,11 @@ async function listRepoGlobFiles(pattern, input2, warnings) {
         tree_sha: input2.ref,
         recursive: "1"
       });
+      if (r2.data.truncated) {
+        warnings.push(
+          `GitHub tree for '${pattern}' at ${input2.ref} was truncated (repo too large); glob may miss files.`
+        );
+      }
       const paths = (r2.data.tree ?? []).filter((item) => item.type === "blob" && typeof item.path === "string").map((item) => normalizePath(item.path)).filter((p2) => matchesGlob(p2, pattern)).sort();
       return paths;
     } catch (err) {
@@ -90367,6 +90614,45 @@ function finalizeNormalizedDoc(rawText, opts) {
     cache_status: opts.cacheStatus
   };
 }
+function resolveSafeWorkspaceFile(workspaceDir, relPath) {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    return { status: "escape" };
+  }
+  const abs = (0, import_node_path26.resolve)(workspaceDir, relPath);
+  try {
+    (0, import_node_fs12.lstatSync)(abs);
+  } catch {
+    return { status: "missing" };
+  }
+  let realRoot;
+  let realTarget;
+  try {
+    realRoot = (0, import_node_fs12.realpathSync)(workspaceDir);
+    realTarget = (0, import_node_fs12.realpathSync)(abs);
+  } catch {
+    return { status: "broken_symlink" };
+  }
+  const rel = (0, import_node_path26.relative)(realRoot, realTarget);
+  if (rel === "" || rel.startsWith("..") || (0, import_node_path26.isAbsolute)(rel)) {
+    return { status: "escape" };
+  }
+  return { status: "ok", realPath: realTarget };
+}
+function buildRepoCacheHit(cached2, docId, normPath, metaOpts) {
+  return {
+    id: docId,
+    title: metaOpts.title ?? cached2.meta.title,
+    source: normPath,
+    kind: "repo",
+    mode: metaOpts.mode,
+    content: cached2.content,
+    byte_length: cached2.meta.byte_length,
+    content_sha256: cached2.meta.content_sha256,
+    headings: cached2.meta.headings,
+    truncated: false,
+    cache_status: "hit"
+  };
+}
 async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   const baseDir = input2.workspaceDir ?? process.cwd();
   if (!isSafeRelativePath(baseDir, repoPath)) {
@@ -90374,90 +90660,122 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
     return null;
   }
   const normPath = normalizePath(repoPath);
-  const cacheKey = `repo:${input2.owner ?? "local"}/${input2.repo ?? "local"}:${normPath}`;
+  const hasRemoteRef = Boolean(input2.fileReader && input2.owner && input2.repo && input2.ref);
+  const repoSlug = `${input2.owner ?? "local"}/${input2.repo ?? "local"}`;
+  const cacheKey = hasRemoteRef ? `repo:${repoSlug}:${normPath}@${input2.ref}` : `repo:${repoSlug}:${normPath}`;
   const nowMs = input2.nowMs ?? Date.now();
   const ttl = metaOpts.ttl_seconds ?? input2.config.cache.ttl_seconds;
+  const docId = metaOpts.id ?? normPath;
+  let diskPath = null;
   let diskFingerprint;
-  let diskContent = null;
   if (input2.workspaceDir) {
-    const abs = (0, import_node_path26.resolve)(input2.workspaceDir, normPath);
-    if ((0, import_node_fs12.existsSync)(abs)) {
+    const resolvedFile = resolveSafeWorkspaceFile(input2.workspaceDir, normPath);
+    if (resolvedFile.status === "escape") {
+      warnings.push(
+        `Reference path '${normPath}' resolves outside workspace root via symlink; skipping.`
+      );
+      return null;
+    }
+    if (resolvedFile.status === "broken_symlink") {
+      warnings.push(`Reference path '${normPath}' is a broken symlink; skipping.`);
+      return null;
+    }
+    if (resolvedFile.status === "ok") {
       try {
-        const st2 = (0, import_node_fs12.statSync)(abs);
+        const st2 = (0, import_node_fs12.statSync)(resolvedFile.realPath);
         if (st2.isFile()) {
-          diskFingerprint = `${st2.mtimeMs}:${st2.size}`;
-          if (cache && !input2.forceRefresh) {
-            const cached2 = cache.get(cacheKey, nowMs);
-            if (cached2.status === "hit" && cached2.meta.source_fingerprint === diskFingerprint) {
-              return {
-                id: metaOpts.id ?? normPath,
-                title: metaOpts.title ?? cached2.meta.title,
-                source: normPath,
-                kind: "repo",
-                mode: metaOpts.mode,
-                content: cached2.content,
-                byte_length: cached2.meta.byte_length,
-                content_sha256: cached2.meta.content_sha256,
-                headings: cached2.meta.headings,
-                truncated: false,
-                cache_status: "hit"
-              };
-            }
-          }
-          const buf = (0, import_node_fs12.readFileSync)(abs);
-          if (isLikelyBinary(buf)) {
-            warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
-            return null;
-          }
-          diskContent = buf.toString("utf-8");
+          diskPath = resolvedFile.realPath;
+          diskFingerprint = `disk:${st2.mtimeMs}:${st2.size}`;
         }
       } catch {
       }
     }
   }
-  let rawText = null;
-  if (input2.fileReader && input2.owner && input2.repo && input2.ref) {
+  if (hasRemoteRef) {
+    if (cache && !input2.forceRefresh) {
+      const cached2 = cache.get(cacheKey, nowMs);
+      if (cached2.status === "hit") {
+        const fp = cached2.meta.source_fingerprint ?? "";
+        const refMatch = fp.startsWith(`ref:${input2.ref}:`);
+        const diskMatch = Boolean(diskFingerprint) && fp.startsWith("disk:") && fp === diskFingerprint;
+        if (refMatch || diskMatch) {
+          return buildRepoCacheHit(cached2, docId, normPath, metaOpts);
+        }
+      }
+    }
+    let remoteText = null;
     try {
-      rawText = await input2.fileReader.read({
+      remoteText = await input2.fileReader.read({
         owner: input2.owner,
         repo: input2.repo,
         path: normPath,
         ref: input2.ref
       });
     } catch {
-      rawText = null;
+      remoteText = null;
     }
-  }
-  if (rawText === null) rawText = diskContent;
-  if (rawText === null) {
-    warnings.push(`Reference file '${normPath}' was not found; skipping.`);
-    return null;
-  }
-  if (isLikelyBinary(rawText)) {
-    warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
-    return null;
-  }
-  const fingerprint = diskFingerprint ?? sha256Hex(rawText);
-  if (cache && !input2.forceRefresh) {
-    const cached2 = cache.get(cacheKey, nowMs);
-    if (cached2.status === "hit" && cached2.meta.source_fingerprint === fingerprint) {
-      return {
-        id: metaOpts.id ?? normPath,
-        title: metaOpts.title ?? cached2.meta.title,
+    if (remoteText !== null) {
+      if (isLikelyBinary(remoteText)) {
+        warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
+        return null;
+      }
+      const fingerprint2 = `ref:${input2.ref}:${sha256Hex(remoteText)}`;
+      const doc2 = finalizeNormalizedDoc(remoteText, {
+        id: docId,
+        ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
         source: normPath,
         kind: "repo",
         mode: metaOpts.mode,
-        content: cached2.content,
-        byte_length: cached2.meta.byte_length,
-        content_sha256: cached2.meta.content_sha256,
-        headings: cached2.meta.headings,
-        truncated: false,
-        cache_status: "hit"
-      };
+        maxDocBytes: input2.config.max_doc_bytes,
+        cacheStatus: cache ? "miss" : "uncached"
+      });
+      if (cache) {
+        cache.set(
+          cacheKey,
+          {
+            version: 1,
+            key: cacheKey,
+            source_id: doc2.id,
+            title: doc2.title,
+            kind: "repo",
+            content_sha256: doc2.content_sha256,
+            source_fingerprint: fingerprint2,
+            fetched_at: new Date(nowMs).toISOString(),
+            ttl_seconds: ttl,
+            byte_length: doc2.byte_length,
+            headings: doc2.headings
+          },
+          doc2.content
+        );
+      }
+      return doc2;
+    }
+  } else if (cache && !input2.forceRefresh && diskFingerprint) {
+    const cached2 = cache.get(cacheKey, nowMs);
+    if (cached2.status === "hit" && cached2.meta.source_fingerprint === diskFingerprint) {
+      return buildRepoCacheHit(cached2, docId, normPath, metaOpts);
     }
   }
-  const doc = finalizeNormalizedDoc(rawText, {
-    id: metaOpts.id ?? normPath,
+  let diskContent = null;
+  if (diskPath) {
+    try {
+      const buf = (0, import_node_fs12.readFileSync)(diskPath);
+      if (isLikelyBinary(buf)) {
+        warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
+        return null;
+      }
+      diskContent = buf.toString("utf-8");
+    } catch {
+      diskContent = null;
+    }
+  }
+  if (diskContent === null) {
+    warnings.push(`Reference file '${normPath}' was not found; skipping.`);
+    return null;
+  }
+  const fingerprint = diskFingerprint ?? `sha:${sha256Hex(diskContent)}`;
+  const doc = finalizeNormalizedDoc(diskContent, {
+    id: docId,
     ...metaOpts.title !== void 0 ? { explicitTitle: metaOpts.title } : {},
     source: normPath,
     kind: "repo",
@@ -90485,6 +90803,63 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
     );
   }
   return doc;
+}
+async function readResponseWithByteLimit(res, maxBytes) {
+  if (!res.body) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length > maxBytes ? buf.subarray(0, maxBytes) : buf;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      const remaining = maxBytes - total;
+      if (value.byteLength >= remaining) {
+        chunks.push(value.subarray(0, remaining));
+        total += remaining;
+        await reader.cancel();
+        break;
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+async function fetchWithValidatedRedirects(fetchFn, initialUrl, baseHeaders, conditionalHeaders, signal) {
+  let currentUrl = initialUrl;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    const sameOrigin = currentUrl.origin === initialUrl.origin;
+    const reqHeaders = {
+      ...baseHeaders,
+      ...sameOrigin ? conditionalHeaders : {}
+    };
+    const res = await fetchFn(currentUrl.toString(), {
+      headers: reqHeaders,
+      redirect: "manual",
+      signal
+    });
+    if (REDIRECT_STATUSES.has(res.status)) {
+      const location = res.headers.get("location");
+      void res.body?.cancel?.();
+      if (!location) {
+        throw new Error(`Redirect (${res.status}) missing Location header`);
+      }
+      if (redirects === MAX_REDIRECTS) {
+        throw new Error(`Exceeded maximum redirect limit (${MAX_REDIRECTS})`);
+      }
+      const nextRaw = new URL(location, currentUrl).toString();
+      currentUrl = validateRemoteUrl(nextRaw);
+      continue;
+    }
+    return res;
+  }
+  throw new Error(`Exceeded maximum redirect limit (${MAX_REDIRECTS})`);
 }
 async function loadRemoteUrl(src, input2, cache, warnings) {
   let url2;
@@ -90527,18 +90902,23 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const headers = {
+    const baseHeaders = {
       Accept: "text/markdown, text/plain, text/html, */*;q=0.5",
       "User-Agent": "driches-vor/reference-loader"
     };
+    const conditionalHeaders = {};
     if (!input2.forceRefresh && staleMeta) {
-      if (staleMeta.etag) headers["If-None-Match"] = staleMeta.etag;
-      if (staleMeta.last_modified) headers["If-Modified-Since"] = staleMeta.last_modified;
+      if (staleMeta.etag) conditionalHeaders["If-None-Match"] = staleMeta.etag;
+      if (staleMeta.last_modified)
+        conditionalHeaders["If-Modified-Since"] = staleMeta.last_modified;
     }
-    const res = await fetchFn(url2.toString(), {
-      headers,
-      signal: controller.signal
-    });
+    const res = await fetchWithValidatedRedirects(
+      fetchFn,
+      url2,
+      baseHeaders,
+      conditionalHeaders,
+      controller.signal
+    );
     if (res.status === 304 && staleMeta && staleContent !== void 0) {
       const nextEtag = res.headers.get("etag") ?? staleMeta.etag;
       const nextLastMod = res.headers.get("last-modified") ?? staleMeta.last_modified;
@@ -90565,12 +90945,12 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await readResponseWithByteLimit(res, MAX_RAW_REMOTE_BYTES);
     if (isLikelyBinary(buf)) {
       warnings.push(`Reference URL '${src.url}' returned binary content; skipping.`);
       return null;
     }
-    const cappedRaw = buf.length > MAX_RAW_REMOTE_BYTES ? buf.subarray(0, MAX_RAW_REMOTE_BYTES).toString("utf-8") : buf.toString("utf-8");
+    const cappedRaw = buf.toString("utf-8");
     const contentType = res.headers.get("content-type") ?? void 0;
     const doc = finalizeNormalizedDoc(cappedRaw, {
       id: docId,
@@ -90805,6 +91185,11 @@ async function loadGithubSource(src, input2, cache, warnings) {
       tree_sha: src.ref,
       recursive: "1"
     });
+    if (treeRes.data.truncated) {
+      warnings.push(
+        `GitHub tree for '${src.rawSpec}' was truncated (repo too large); glob may miss files.`
+      );
+    }
     const matched = (treeRes.data.tree ?? []).filter((item) => item.type === "blob" && typeof item.path === "string").map((item) => normalizePath(item.path)).filter((p2) => matchesGlob(p2, src.path)).sort();
     const out = [];
     for (const p2 of matched) {
@@ -91236,7 +91621,7 @@ async function runOrchestrator(input2) {
     config: config2,
     repoName: `${input2.owner}/${input2.repo}`,
     contextFiles,
-    ...archSpec ? { architecture: archSpec } : {},
+    architecture: archSpec ?? null,
     ...referenceCorpus ? { references: referenceCorpus } : {}
   });
   const embeddedContextFiles = new Set(

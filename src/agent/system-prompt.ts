@@ -23,8 +23,12 @@ export interface BuildSystemPromptInput {
   config: ReviewConfig;
   repoName: string;
   contextFiles: RepoContextEntry[];
-  /** Optional pre-resolved architecture spec (including external `.vor/architecture.yml`). */
-  architecture?: ResolvedArchitectureSpec;
+  /**
+   * Optional pre-resolved architecture spec (including external `.vor/architecture.yml`).
+   * Pass `null` when resolved and explicitly disabled (e.g., external `enabled: false`)
+   * so the fallback below does not re-enable from inline `.vor.yml`.
+   */
+  architecture?: ResolvedArchitectureSpec | null;
   /** Optional pre-loaded reference docs & standards corpus. */
   references?: LoadedReferenceCorpus;
 }
@@ -47,10 +51,11 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
   }
 
   const archSpec =
-    input.architecture ??
-    (input.config.architecture.enabled
-      ? resolveArchitectureSpec(input.config.architecture)
-      : undefined);
+    input.architecture !== undefined
+      ? input.architecture
+      : input.config.architecture.enabled
+        ? resolveArchitectureSpec(input.config.architecture)
+        : null;
   if (archSpec) {
     const archSection = renderArchitecturePrompt(archSpec);
     if (archSection) sections.push(archSection);

@@ -176,6 +176,22 @@ describe('buildSystemPrompt', () => {
       contextFiles: [],
     });
     expect(llmOff).not.toContain('Software architecture standards');
+
+    // Explicit `architecture: null` (external config disabled) overrides inline enabled: true.
+    const externalDisabled = buildSystemPrompt({
+      config: {
+        ...DEFAULT_CONFIG,
+        architecture: {
+          ...DEFAULT_CONFIG.architecture,
+          enabled: true,
+          preset: 'hexagonal',
+        },
+      },
+      repoName: 'r',
+      contextFiles: [],
+      architecture: null,
+    });
+    expect(externalDisabled).not.toContain('Software architecture standards');
   });
 
   it('includes reference documentation & standards section when references corpus is provided', () => {
