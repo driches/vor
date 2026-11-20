@@ -40,6 +40,10 @@ export interface FileImportMeta {
   declaredPackage?: string;
 }
 
+/**
+ * Parsed `tsconfig.json` resolution settings, with `baseUrl` and `paths` targets
+ * rebased into repository-root-relative POSIX paths.
+ */
 export interface TsConfigPaths {
   baseUrl?: string;
   paths: Record<string, string[]>;
@@ -1013,10 +1017,36 @@ function stripJsonc(text: string): string {
   return chars.join('');
 }
 
+function rebaseFromDir(baseDir: string, rel: string): string {
+  const cleaned = rel.replace(/\\/g, '/');
+  const joined =
+    baseDir && baseDir !== '.' ? posix.join(baseDir, cleaned) : posix.normalize(cleaned);
+  const norm = normalizePath(joined);
+  return norm === '' ? '.' : norm;
+}
+
+/** Extract relative `./` or `../` `extends` entries from a JSONC tsconfig string. */
+export function extractTsConfigExtends(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonc(raw));
+  } catch {
+    return []; // malformed tsconfig shouldn't abort architecture scanning
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+  const ext = (parsed as { extends?: unknown }).extends;
+  const entries = typeof ext === 'string' ? [ext] : Array.isArray(ext) ? ext : [];
+  return entries.filter(
+    (item): item is string =>
+      typeof item === 'string' && (item.startsWith('./') || item.startsWith('../')),
+  );
+}
+
 export function parseTsConfigContent(
   raw: string,
   readRelative?: (relPath: string) => string | null,
   depth = 0,
+  configDir = '',
 ): TsConfigPaths | undefined {
   if (depth > 2) return undefined;
   let parsed: unknown;
@@ -1032,25 +1062,54 @@ export function parseTsConfigContent(
   };
 
   let base: TsConfigPaths = { paths: {} };
-  if (
-    typeof obj.extends === 'string' &&
-    (obj.extends.startsWith('./') || obj.extends.startsWith('../')) &&
-    readRelative
-  ) {
-    const extRaw = readRelative(obj.extends);
-    if (extRaw) {
-      const parent = parseTsConfigContent(extRaw, readRelative, depth + 1);
-      if (parent) base = parent;
+  if (readRelative) {
+    const extEntries =
+      typeof obj.extends === 'string'
+        ? [obj.extends]
+        : Array.isArray(obj.extends)
+          ? obj.extends
+          : [];
+    for (const ext of extEntries) {
+      if (typeof ext !== 'string' || (!ext.startsWith('./') && !ext.startsWith('../'))) {
+        continue;
+      }
+      const extTarget = rebaseFromDir(configDir, ext);
+      if (extTarget === '..' || extTarget.startsWith('../')) continue;
+      let resolvedExtPath = extTarget;
+      let extRaw = readRelative(resolvedExtPath);
+      if (extRaw === null && !resolvedExtPath.endsWith('.json')) {
+        resolvedExtPath = `${extTarget}.json`;
+        extRaw = readRelative(resolvedExtPath);
+      }
+      if (extRaw) {
+        const rawParentDir = posix.dirname(resolvedExtPath);
+        const parentDir = rawParentDir === '.' ? '' : rawParentDir;
+        const parent = parseTsConfigContent(extRaw, readRelative, depth + 1, parentDir);
+        if (parent) {
+          base = {
+            ...(parent.baseUrl !== undefined
+              ? { baseUrl: parent.baseUrl }
+              : base.baseUrl !== undefined
+                ? { baseUrl: base.baseUrl }
+                : {}),
+            paths: { ...base.paths, ...parent.paths },
+          };
+        }
+      }
     }
   }
 
   const co = obj.compilerOptions;
-  const baseUrl = typeof co?.baseUrl === 'string' ? normalizePath(co.baseUrl) : base.baseUrl;
+  const baseUrl =
+    typeof co?.baseUrl === 'string' ? rebaseFromDir(configDir, co.baseUrl) : base.baseUrl;
+  const pathsBase = baseUrl ?? configDir;
   const paths: Record<string, string[]> = { ...base.paths };
   if (co?.paths && typeof co.paths === 'object') {
     for (const [k, v] of Object.entries(co.paths)) {
       if (Array.isArray(v)) {
-        paths[k] = v.filter((item): item is string => typeof item === 'string');
+        paths[k] = v
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => rebaseFromDir(pathsBase, item));
       }
     }
   }
@@ -1184,13 +1243,11 @@ function matchTsConfigAlias(
   tsconfig: TsConfigPaths,
   ctx: WorkspaceResolveContext,
 ): string | undefined {
-  const basePrefix = tsconfig.baseUrl && tsconfig.baseUrl !== '.' ? `${tsconfig.baseUrl}/` : '';
-
   for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
     const starIdx = pattern.indexOf('*');
     if (starIdx === -1) {
       if (specifier === pattern && targets[0]) {
-        const joined = normalizePath(posix.join(basePrefix, targets[0]));
+        const joined = normalizePath(targets[0]);
         return resolveTsJsCandidate(joined, ctx);
       }
       continue;
@@ -1201,19 +1258,20 @@ function matchTsConfigAlias(
       const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
       for (const target of targets) {
         const replaced = target.replace('*', wildcard);
-        const joined = normalizePath(posix.join(basePrefix, replaced));
+        const joined = normalizePath(replaced);
         const resolved = resolveTsJsCandidate(joined, ctx);
         if (existsRepoFile(resolved, ctx) || targets.length === 1) {
           return resolved;
         }
       }
       if (targets[0]) {
-        return normalizePath(posix.join(basePrefix, targets[0].replace('*', wildcard)));
+        return normalizePath(targets[0].replace('*', wildcard));
       }
     }
   }
 
   if (tsconfig.baseUrl) {
+    const basePrefix = tsconfig.baseUrl !== '.' ? `${tsconfig.baseUrl}/` : '';
     const joined = normalizePath(posix.join(basePrefix, specifier));
     const resolved = resolveTsJsCandidate(joined, ctx);
     if (existsRepoFile(resolved, ctx)) return resolved;

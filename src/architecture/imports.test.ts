@@ -304,4 +304,71 @@ describe('extractImports & resolveImport across languages', () => {
       'src/infrastructure/Repo',
     );
   });
+
+  it('rebases inherited tsconfig baseUrl, paths, and nested extends relative to their defining directory', () => {
+    const files: Record<string, string> = {
+      'config/base.json': JSON.stringify({
+        extends: './common/shared.json',
+        compilerOptions: {
+          baseUrl: '..',
+          paths: {
+            '@infra/*': ['src/infrastructure/*'],
+          },
+        },
+      }),
+      'config/common/shared.json': JSON.stringify({
+        compilerOptions: {
+          paths: {
+            '@domain/*': ['../../src/domain/*'],
+          },
+        },
+      }),
+    };
+    const rootRaw = JSON.stringify({
+      extends: './config/base.json',
+    });
+
+    const parsed = parseTsConfigContent(rootRaw, (rel) => files[rel] ?? null);
+    expect(parsed?.baseUrl).toBe('.');
+    expect(parsed?.paths).toEqual({
+      '@domain/*': ['src/domain/*'],
+      '@infra/*': ['src/infrastructure/*'],
+    });
+
+    const knownFiles = new Set(['src/infrastructure/repo.ts', 'src/domain/order.ts']);
+    const ctx = { tsconfig: parsed, knownFiles };
+    const { imports } = extractImports(
+      'src/domain/service.ts',
+      ["import { Repo } from '@infra/repo';", "import { Order } from '@domain/order';"].join('\n'),
+    );
+    expect(resolveImport(imports[0]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
+      'src/infrastructure/repo.ts',
+    );
+    expect(resolveImport(imports[1]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
+      'src/domain/order.ts',
+    );
+
+    // Single config with non-root baseUrl + paths must not double-prefix baseUrl at match time.
+    const subBase = parseTsConfigContent(
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: 'src',
+          paths: {
+            '@app/*': ['app/*'],
+          },
+        },
+      }),
+    );
+    expect(subBase?.paths['@app/*']).toEqual(['src/app/*']);
+    const { imports: subImports } = extractImports(
+      'src/domain/service.ts',
+      "import { UseCase } from '@app/create';",
+    );
+    expect(
+      resolveImport(subImports[0]!, 'src/domain/service.ts', {
+        tsconfig: subBase,
+        knownFiles: new Set(['src/app/create.ts']),
+      }).resolvedPath,
+    ).toBe('src/app/create.ts');
+  });
 });

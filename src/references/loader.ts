@@ -12,8 +12,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { lookup as dnsLookup } from 'node:dns/promises';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import * as http from 'node:http';
+import * as https from 'node:https';
+import { isIP, type LookupFunction } from 'node:net';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import type { Readable, Transform } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import type { Octokit } from '@octokit/rest';
 import { matchesGlob, normalizePath } from '../architecture/glob.js';
 import { isSafeRelativePath } from '../architecture/loader.js';
@@ -71,6 +77,22 @@ export interface LoadedReferenceCorpus {
   warnings: string[];
 }
 
+export interface ResolvedAddress {
+  address: string;
+  family: 4 | 6;
+}
+
+export type DnsLookupFn = (hostname: string) => Promise<ResolvedAddress[]>;
+
+export interface HttpFetchResponse {
+  status: number;
+  statusText: string;
+  ok: boolean;
+  headers: Headers;
+  body: ReadableStream<Uint8Array> | null;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}
+
 export interface LoadReferencesInput {
   config: ReferencesConfig;
   owner?: string;
@@ -80,6 +102,7 @@ export interface LoadReferencesInput {
   fileReader?: FileReader;
   octokit?: Octokit;
   fetchImpl?: typeof fetch;
+  lookupImpl?: DnsLookupFn;
   forceRefresh?: boolean;
   nowMs?: number;
 }
@@ -159,12 +182,16 @@ function parseGithubSpec(raw: string): {
   const owner = parts[0];
   const repo = parts[1];
   const rest = parts.slice(2).join('/');
-  const lastSlash = rest.lastIndexOf('/');
   const lastAt = rest.lastIndexOf('@');
-  if (lastAt > lastSlash && lastAt < rest.length - 1) {
+  // Treat `@` as a ref delimiter unless it starts a path segment (e.g. `packages/@scope/foo.md`)
+  // or produces an empty path or ref.
+  if (lastAt > 0 && rest[lastAt - 1] !== '/' && lastAt < rest.length - 1) {
     const path = rest.slice(0, lastAt);
     const ref = rest.slice(lastAt + 1);
-    return path ? { owner, repo, path, ref } : null;
+    if (path && ref && !ref.startsWith('/')) {
+      return { owner, repo, path, ref };
+    }
+    return null;
   }
   return rest ? { owner, repo, path: rest, ref: 'HEAD' } : null;
 }
@@ -227,28 +254,74 @@ function normalizeSourceInput(
   return null;
 }
 
-function isBlockedIpv4(ip: string): boolean {
+function parseIpv4Octets(ip: string): [number, number, number, number] | null {
   const parts = ip.split('.');
-  if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p))) return false;
+  if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p))) return null;
   const nums = parts.map(Number);
-  const a = nums[0]!;
-  const b = nums[1]!;
-  if (nums.some((n) => n < 0 || n > 255)) return false;
+  if (nums.some((n) => n < 0 || n > 255)) return null;
+  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!];
+}
+
+function isBlockedIpv4(ip: string): boolean {
+  const octets = parseIpv4Octets(ip);
+  if (!octets) return false;
+  const [a, b, c] = octets;
   if (a === 0) return true; // 0.0.0.0/8 ("this network")
   if (a === 10) return true; // 10.0.0.0/8 (RFC 1918)
   if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 (CGNAT)
   if (a === 127) return true; // 127.0.0.0/8 (loopback)
   if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local & cloud metadata)
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 (RFC 1918)
+  if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 (IETF protocol assignments)
   if (a === 192 && b === 168) return true; // 192.168.0.0/16 (RFC 1918)
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 (benchmarking)
   if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
   return false;
 }
 
+function parseIpv6GroupSide(raw: string, allowTrailingIpv4: boolean): number[] | null {
+  if (!raw) return [];
+  const tokens = raw.split(':');
+  const out: number[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (!tok) return null;
+    if (tok.includes('.')) {
+      if (!allowTrailingIpv4 || i !== tokens.length - 1) return null;
+      const octets = parseIpv4Octets(tok);
+      if (!octets) return null;
+      out.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+    } else {
+      if (!/^[0-9a-f]{1,4}$/i.test(tok)) return null;
+      out.push(Number.parseInt(tok, 16));
+    }
+  }
+  return out;
+}
+
+function parseIpv6Hextets(addr: string): number[] | null {
+  const halves = addr.split('::');
+  if (halves.length > 2) return null;
+  if (halves.length === 1) {
+    const hextets = parseIpv6GroupSide(halves[0]!, true);
+    return hextets && hextets.length === 8 ? hextets : null;
+  }
+  const left = parseIpv6GroupSide(halves[0]!, false);
+  const right = parseIpv6GroupSide(halves[1]!, true);
+  if (!left || !right) return null;
+  const missing = 8 - (left.length + right.length);
+  if (missing < 1) return null;
+  return [...left, ...new Array<number>(missing).fill(0), ...right];
+}
+
+function stripIpv6Brackets(rawHostname: string): string {
+  const lower = rawHostname.toLowerCase();
+  return lower.startsWith('[') && lower.endsWith(']') ? lower.slice(1, -1) : lower;
+}
+
 function isPrivateOrLoopbackHost(rawHostname: string): boolean {
   const trimmed = rawHostname.toLowerCase().replace(/\.$/, '');
-  const unbracketed =
-    trimmed.startsWith('[') && trimmed.endsWith(']') ? trimmed.slice(1, -1) : trimmed;
+  const unbracketed = stripIpv6Brackets(trimmed);
   // Strip IPv6 zone identifier (e.g. `fe80::1%eth0` / `fe80::1%25eth0`).
   const host = unbracketed.split('%')[0] ?? unbracketed;
 
@@ -257,40 +330,42 @@ function isPrivateOrLoopbackHost(rawHostname: string): boolean {
   if (isBlockedIpv4(host)) return true;
 
   if (host.includes(':')) {
+    const h = parseIpv6Hextets(host);
+    if (!h) return true; // Fail closed on unparseable IPv6 literals.
+
+    const allZeroFirst6 =
+      h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0;
+    const allZeroFirst7 = allZeroFirst6 && h[6] === 0;
+    if (allZeroFirst7 && (h[7] === 0 || h[7] === 1)) {
+      return true; // Unspecified (::) and loopback (::1)
+    }
+
+    const embeddedV4 = `${(h[6]! >> 8) & 0xff}.${h[6]! & 0xff}.${(h[7]! >> 8) & 0xff}.${h[7]! & 0xff}`;
+    const isIpv4Mapped =
+      h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0xffff;
+    const isIpv4Translated =
+      h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0xffff && h[5] === 0;
+    const isIpv4Compatible = allZeroFirst6;
+    const isNat64WellKnown =
+      h[0] === 0x0064 && h[1] === 0xff9b && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0;
+
     if (
-      host === '::' ||
-      host === '::1' ||
-      host === '0:0:0:0:0:0:0:0' ||
-      host === '0:0:0:0:0:0:0:1'
+      (isIpv4Mapped || isIpv4Translated || isIpv4Compatible || isNat64WellKnown) &&
+      isBlockedIpv4(embeddedV4)
     ) {
       return true;
     }
 
-    // Node's URL parser normalizes `::ffff:169.254.169.254` to `::ffff:a9fe:a9fe`,
-    // so check both dotted and hex-pair forms of IPv4-mapped IPv6 addresses.
-    const mappedMatch = /^(?:0:0:0:0:0:ffff|::ffff):(.+)$/.exec(host);
-    if (mappedMatch?.[1]) {
-      const tail = mappedMatch[1];
-      if (isBlockedIpv4(tail)) return true;
-      const hexPair = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
-      if (hexPair) {
-        const hi = Number.parseInt(hexPair[1]!, 16);
-        const lo = Number.parseInt(hexPair[2]!, 16);
-        const dotted = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
-        if (isBlockedIpv4(dotted)) return true;
-      }
-    }
+    // NAT64 local-use (64:ff9b:1::/48) and discard-only (100::/64)
+    if (h[0] === 0x0064 && h[1] === 0xff9b && h[2] === 0x0001) return true;
+    if (h[0] === 0x0100 && h[1] === 0 && h[2] === 0 && h[3] === 0) return true;
 
-    const firstHextet = host.split(':')[0] ?? '';
-    if (firstHextet) {
-      const val = Number.parseInt(firstHextet, 16);
-      if (!Number.isNaN(val)) {
-        // fe80::/10 (link-local), fc00::/7 (unique local), ff00::/8 (multicast)
-        if ((val & 0xffc0) === 0xfe80) return true;
-        if ((val & 0xfe00) === 0xfc00) return true;
-        if ((val & 0xff00) === 0xff00) return true;
-      }
-    }
+    const h0 = h[0]!;
+    // fe80::/10 (link-local), fec0::/10 (deprecated site-local), fc00::/7 (unique local), ff00::/8 (multicast)
+    if ((h0 & 0xffc0) === 0xfe80) return true;
+    if ((h0 & 0xffc0) === 0xfec0) return true;
+    if ((h0 & 0xfe00) === 0xfc00) return true;
+    if ((h0 & 0xff00) === 0xff00) return true;
   }
 
   return false;
@@ -306,6 +381,38 @@ function validateRemoteUrl(rawUrl: string): URL {
     throw new Error(`Blocked host '${host}'`);
   }
   return url;
+}
+
+async function defaultDnsLookup(hostname: string): Promise<ResolvedAddress[]> {
+  const entries = await dnsLookup(hostname, { all: true });
+  return entries.map((e) => ({
+    address: e.address,
+    family: e.family === 6 ? 6 : 4,
+  }));
+}
+
+async function resolveAndValidateHost(url: URL, lookupFn: DnsLookupFn): Promise<ResolvedAddress[]> {
+  const rawHost = stripIpv6Brackets(url.hostname);
+  const ipVer = isIP(rawHost);
+  if (ipVer === 4 || ipVer === 6) {
+    if (isPrivateOrLoopbackHost(rawHost)) {
+      throw new Error(`Blocked host '${rawHost}'`);
+    }
+    return [{ address: rawHost, family: ipVer }];
+  }
+
+  const records = await lookupFn(rawHost);
+  if (!records || records.length === 0) {
+    throw new Error(`DNS lookup returned no addresses for '${rawHost}'`);
+  }
+  for (const rec of records) {
+    if (isPrivateOrLoopbackHost(rec.address)) {
+      throw new Error(
+        `Blocked host '${rawHost}' (resolved to restricted address '${rec.address}')`,
+      );
+    }
+  }
+  return records;
 }
 
 function inferTitle(
@@ -693,8 +800,12 @@ async function loadRepoFile(
   });
 }
 
-async function readResponseWithByteLimit(res: Response, maxBytes: number): Promise<Buffer> {
+async function readResponseWithByteLimit(
+  res: HttpFetchResponse,
+  maxBytes: number,
+): Promise<Buffer> {
   if (!res.body) {
+    if (!res.arrayBuffer) return Buffer.alloc(0);
     // Some minimal fetch polyfills and streamless responses omit `res.body`, so
     // no ReadableStream exists to cancel; buffer the response once and slice
     // strictly to `maxBytes`.
@@ -729,13 +840,193 @@ async function readResponseWithByteLimit(res: Response, maxBytes: number): Promi
   return Buffer.concat(chunks, total);
 }
 
+/**
+ * Perform a GET request pinned to pre-validated IP addresses via a custom socket
+ * `lookup`, preventing DNS rebinding between validation and TCP/TLS connect.
+ */
+export function pinnedNodeFetch(
+  url: URL,
+  addresses: readonly ResolvedAddress[],
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<HttpFetchResponse> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('Aborted'));
+  }
+
+  const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+    process.nextTick(() => {
+      if (options?.all) {
+        callback(
+          null,
+          addresses.map((a) => ({ address: a.address, family: a.family })),
+        );
+        return;
+      }
+      const picked =
+        (options?.family ? addresses.find((a) => a.family === options.family) : undefined) ??
+        addresses[0]!;
+      callback(null, picked.address, picked.family);
+    });
+  };
+
+  const isHttps = url.protocol === 'https:';
+  const rawHost = stripIpv6Brackets(url.hostname);
+  const reqHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() !== 'host') reqHeaders[k] = v;
+  }
+  reqHeaders.Host = url.host;
+  reqHeaders['Accept-Encoding'] = 'identity';
+
+  const baseOpts: http.RequestOptions = {
+    protocol: url.protocol,
+    hostname: rawHost,
+    port: url.port ? Number(url.port) : isHttps ? 443 : 80,
+    path: `${url.pathname}${url.search}`,
+    method: 'GET',
+    headers: reqHeaders,
+    agent: false,
+    signal,
+    lookup: pinnedLookup,
+  };
+
+  return new Promise<HttpFetchResponse>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    let onStreamError: ((err: Error) => void) | null = null;
+
+    const req = isHttps
+      ? https.request({
+          ...baseOpts,
+          ...(isIP(rawHost) === 0 ? { servername: rawHost } : {}),
+        })
+      : http.request(baseOpts);
+
+    req.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        rejectPromise(err);
+      } else {
+        onStreamError?.(err);
+      }
+    });
+
+    req.on('response', (incoming) => {
+      settled = true;
+      const status = incoming.statusCode ?? 0;
+      const statusText = incoming.statusMessage ?? '';
+      const ok = status >= 200 && status < 300;
+
+      const resHeaders = new Headers();
+      for (const [k, v] of Object.entries(incoming.headers)) {
+        if (v === undefined) continue;
+        if (Array.isArray(v)) {
+          for (const item of v) resHeaders.append(k, item);
+        } else {
+          resHeaders.set(k, v);
+        }
+      }
+
+      if (REDIRECT_STATUSES.has(status) || status === 204 || status === 304) {
+        incoming.destroy();
+        resolvePromise({ status, statusText, ok, headers: resHeaders, body: null });
+        return;
+      }
+
+      const encoding = (incoming.headers['content-encoding'] ?? '').trim().toLowerCase();
+      let stream: Readable = incoming;
+      let decompressor: Transform | null = null;
+      if (encoding === 'gzip' || encoding === 'x-gzip') {
+        decompressor = createGunzip();
+        stream = incoming.pipe(decompressor);
+      } else if (encoding === 'deflate') {
+        decompressor = createInflate();
+        stream = incoming.pipe(decompressor);
+      } else if (encoding === 'br') {
+        decompressor = createBrotliDecompress();
+        stream = incoming.pipe(decompressor);
+      }
+
+      let closedOrErrored = false;
+      let removeAbortListener: () => void = () => {};
+
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const teardown = () => {
+            removeAbortListener();
+            decompressor?.destroy();
+            incoming.destroy();
+            req.destroy();
+          };
+          const fail = (err: Error) => {
+            if (closedOrErrored) return;
+            closedOrErrored = true;
+            teardown();
+            try {
+              controller.error(err);
+            } catch {
+              // controller already settled
+            }
+          };
+          onStreamError = fail;
+          const onAbort = () => {
+            fail(signal.reason instanceof Error ? signal.reason : new Error('Aborted'));
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+          removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+
+          if (decompressor) incoming.on('error', fail);
+          stream.on('error', fail);
+          stream.on('data', (chunk: Buffer) => {
+            if (closedOrErrored) return;
+            controller.enqueue(new Uint8Array(chunk));
+            if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+              stream.pause();
+            }
+          });
+          stream.on('end', () => {
+            if (closedOrErrored) return;
+            closedOrErrored = true;
+            removeAbortListener();
+            try {
+              controller.close();
+            } catch {
+              // controller already settled
+            }
+          });
+          incoming.on('aborted', () => {
+            if (!closedOrErrored) {
+              fail(new Error('Response aborted before completion'));
+            }
+          });
+        },
+        pull() {
+          stream.resume();
+        },
+        cancel() {
+          if (closedOrErrored) return;
+          closedOrErrored = true;
+          removeAbortListener();
+          decompressor?.destroy();
+          incoming.destroy();
+          req.destroy();
+        },
+      });
+
+      resolvePromise({ status, statusText, ok, headers: resHeaders, body });
+    });
+
+    req.end();
+  });
+}
+
 async function fetchWithValidatedRedirects(
-  fetchFn: typeof fetch,
+  transport: { fetchImpl?: typeof fetch; lookupImpl?: DnsLookupFn },
   initialUrl: URL,
   baseHeaders: Record<string, string>,
   conditionalHeaders: Record<string, string>,
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<HttpFetchResponse> {
   let currentUrl = initialUrl;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
     const sameOrigin = currentUrl.origin === initialUrl.origin;
@@ -743,11 +1034,23 @@ async function fetchWithValidatedRedirects(
       ...baseHeaders,
       ...(sameOrigin ? conditionalHeaders : {}),
     };
-    const res = await fetchFn(currentUrl.toString(), {
-      headers: reqHeaders,
-      redirect: 'manual',
-      signal,
-    });
+    let res: HttpFetchResponse;
+    if (transport.fetchImpl === undefined) {
+      const addresses = await resolveAndValidateHost(
+        currentUrl,
+        transport.lookupImpl ?? defaultDnsLookup,
+      );
+      res = await pinnedNodeFetch(currentUrl, addresses, reqHeaders, signal);
+    } else {
+      if (transport.lookupImpl !== undefined) {
+        await resolveAndValidateHost(currentUrl, transport.lookupImpl);
+      }
+      res = await transport.fetchImpl(currentUrl.toString(), {
+        headers: reqHeaders,
+        redirect: 'manual',
+        signal,
+      });
+    }
     if (REDIRECT_STATUSES.has(res.status)) {
       const location = res.headers.get('location');
       void res.body?.cancel?.();
@@ -807,7 +1110,6 @@ async function loadRemoteUrl(
     }
   }
 
-  const fetchFn = input.fetchImpl ?? globalThis.fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -824,7 +1126,10 @@ async function loadRemoteUrl(
     }
 
     const res = await fetchWithValidatedRedirects(
-      fetchFn,
+      {
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+        ...(input.lookupImpl ? { lookupImpl: input.lookupImpl } : {}),
+      },
       url,
       baseHeaders,
       conditionalHeaders,
@@ -832,6 +1137,7 @@ async function loadRemoteUrl(
     );
 
     if (res.status === 304 && staleMeta && staleContent !== undefined) {
+      void res.body?.cancel?.();
       const nextEtag = res.headers.get('etag') ?? staleMeta.etag;
       const nextLastMod = res.headers.get('last-modified') ?? staleMeta.last_modified;
       cache?.touch(cacheKey, {
@@ -852,6 +1158,7 @@ async function loadRemoteUrl(
     }
 
     if (!res.ok) {
+      void res.body?.cancel?.();
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
 

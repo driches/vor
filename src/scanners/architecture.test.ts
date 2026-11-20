@@ -147,4 +147,36 @@ entries:
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('hydrates and rebases extended tsconfig baseUrl and paths from PR HEAD', async () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const scanner = createArchitectureScanner(spec);
+    const filePath = 'src/domain/order.ts';
+    const content = "import { Repo } from '@infra/pg';\nexport const r = Repo;\n";
+    const changed = makeChangedFile(filePath, {
+      1: "import { Repo } from '@infra/pg';",
+    });
+
+    const deps = makeDeps([changed], {
+      [filePath]: content,
+      'tsconfig.json': JSON.stringify({ extends: './config/base.json' }),
+      'config/base.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: '..',
+          paths: {
+            '@infra/*': ['src/infrastructure/*'],
+          },
+        },
+      }),
+    });
+
+    const result = await scanner.scan(deps);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+  });
 });

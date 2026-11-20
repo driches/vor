@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import type { FileReader } from '../github/file-reader.js';
-import { loadReferences } from './loader.js';
+import { loadReferences, pinnedNodeFetch } from './loader.js';
 
 describe('loadReferences', () => {
   it('loads repo globs, caches on disk, and splits inline vs on-demand on budget overflow', async () => {
@@ -501,6 +503,220 @@ describe('loadReferences', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses GitHub refs containing slashes for both string and object sources while preserving scoped paths', async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-gh-slash-'));
+    try {
+      const getContent = vi.fn(async ({ path, ref }: { path: string; ref: string }) => ({
+        data: {
+          type: 'file',
+          sha: `${ref}:${path}`,
+          content: Buffer.from(`# Doc\nFrom ${path} @ ${ref}\n`, 'utf-8').toString('base64'),
+          encoding: 'base64',
+        },
+      }));
+      // Narrow Octokit mock provides only `rest.repos.getContent` exercised by `loadGithubFile`.
+      const octokit = {
+        rest: { repos: { getContent } },
+      } as unknown as NonNullable<Parameters<typeof loadReferences>[0]['octokit']>;
+
+      const res = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: [
+            'github:acme/standards/docs/style.md@feature/new-rules',
+            { github: 'acme/standards/docs/arch.md@release/v2.0', id: 'arch-obj' },
+            'github:acme/standards/packages/@scope/README.md',
+          ],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        octokit,
+      });
+
+      expect(res.warnings).toEqual([]);
+      expect(res.docs).toHaveLength(3);
+      expect(getContent).toHaveBeenNthCalledWith(1, {
+        owner: 'acme',
+        repo: 'standards',
+        path: 'docs/style.md',
+        ref: 'feature/new-rules',
+      });
+      expect(getContent).toHaveBeenNthCalledWith(2, {
+        owner: 'acme',
+        repo: 'standards',
+        path: 'docs/arch.md',
+        ref: 'release/v2.0',
+      });
+      expect(getContent).toHaveBeenNthCalledWith(3, {
+        owner: 'acme',
+        repo: 'standards',
+        path: 'packages/@scope/README.md',
+        ref: 'HEAD',
+      });
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks DNS resolutions to private/metadata IPs on initial URLs and redirect hops', async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-dns-ssrf-'));
+    try {
+      // No `fetchImpl` is injected for the direct private DNS check, verifying live transport
+      // rejects before opening any socket when DNS returns restricted or mixed addresses.
+      const lookupImpl = vi.fn(async (host: string) => {
+        if (host === 'rebind-loopback.example') {
+          return [{ address: '127.0.0.1', family: 4 as const }];
+        }
+        if (host === 'rebind-meta.example') {
+          return [{ address: '::ffff:169.254.169.254', family: 6 as const }];
+        }
+        if (host === 'rebind-nat64.example') {
+          return [{ address: '64:ff9b::169.254.169.254', family: 6 as const }];
+        }
+        if (host === 'mixed-dual.example') {
+          return [
+            { address: '93.184.216.34', family: 4 as const },
+            { address: '10.0.0.5', family: 4 as const },
+          ];
+        }
+        if (host === 'pub-start.example') {
+          return [{ address: '93.184.216.34', family: 4 as const }];
+        }
+        if (host === 'priv-hop.example') {
+          return [{ address: '10.0.0.2', family: 4 as const }];
+        }
+        return [{ address: '93.184.216.34', family: 4 as const }];
+      });
+
+      const directBlocked = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: [
+            'https://rebind-loopback.example/a.md',
+            'https://rebind-meta.example/b.md',
+            'https://rebind-nat64.example/c.md',
+            'https://mixed-dual.example/d.md',
+          ],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        lookupImpl,
+      });
+
+      expect(directBlocked.docs).toEqual([]);
+      expect(directBlocked.warnings).toHaveLength(4);
+      expect(directBlocked.warnings.every((w) => w.includes('Blocked host'))).toBe(true);
+
+      const seenTargets: string[] = [];
+      const redirectFetch = vi.fn(async (target: string | URL | Request) => {
+        const u = String(target);
+        seenTargets.push(u);
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://priv-hop.example/internal.md' },
+        });
+      });
+
+      const redirBlocked = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['https://pub-start.example/start.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        lookupImpl,
+        // Narrow fetch stub mirrors Web `fetch` signature to observe redirect target requests.
+        fetchImpl: redirectFetch as unknown as typeof fetch,
+      });
+
+      expect(seenTargets).toEqual(['https://pub-start.example/start.md']);
+      expect(redirBlocked.docs).toEqual([]);
+      expect(redirBlocked.warnings.some((w) => w.includes('Blocked host'))).toBe(true);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('pins HTTP socket connection to validated address and handles text, gzip, 304, and 302 responses', async () => {
+    let seenHostHeader = '';
+    const server = createServer((req, res) => {
+      seenHostHeader = req.headers.host ?? '';
+      if (req.url === '/std.md') {
+        res.writeHead(200, { 'content-type': 'text/markdown', etag: '"v1"' });
+        res.end('# Pinned\nHello pinned world.\n');
+        return;
+      }
+      if (req.url === '/gzip.md') {
+        res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' });
+        res.end(gzipSync(Buffer.from('compressed-ok', 'utf-8')));
+        return;
+      }
+      if (req.url === '/not-mod') {
+        res.writeHead(304, { etag: '"v2"' });
+        res.end();
+        return;
+      }
+      res.writeHead(302, { location: '/std.md' });
+      res.end();
+    });
+
+    await new Promise<void>((resolvePromise) => {
+      server.listen(0, '127.0.0.1', () => resolvePromise());
+    });
+
+    try {
+      const addr = server.address();
+      if (!addr || typeof addr === 'string') {
+        throw new Error('Expected TCP server address');
+      }
+      const controller = new AbortController();
+      const pinned = [{ address: '127.0.0.1', family: 4 as const }];
+
+      const okRes = await pinnedNodeFetch(
+        new URL(`http://pinned.example.test:${addr.port}/std.md`),
+        pinned,
+        { 'User-Agent': 'vor-test' },
+        controller.signal,
+      );
+      expect(okRes.status).toBe(200);
+      expect(okRes.ok).toBe(true);
+      expect(okRes.headers.get('etag')).toBe('"v1"');
+      expect(seenHostHeader).toBe(`pinned.example.test:${addr.port}`);
+      expect(await new Response(okRes.body).text()).toBe('# Pinned\nHello pinned world.\n');
+
+      const gzRes = await pinnedNodeFetch(
+        new URL(`http://pinned.example.test:${addr.port}/gzip.md`),
+        pinned,
+        {},
+        controller.signal,
+      );
+      expect(await new Response(gzRes.body).text()).toBe('compressed-ok');
+
+      const notModRes = await pinnedNodeFetch(
+        new URL(`http://pinned.example.test:${addr.port}/not-mod`),
+        pinned,
+        {},
+        controller.signal,
+      );
+      expect(notModRes.status).toBe(304);
+      expect(notModRes.body).toBeNull();
+
+      const redirRes = await pinnedNodeFetch(
+        new URL(`http://pinned.example.test:${addr.port}/redir`),
+        pinned,
+        {},
+        controller.signal,
+      );
+      expect(redirRes.status).toBe(302);
+      expect(redirRes.headers.get('location')).toBe('/std.md');
+      expect(redirRes.body).toBeNull();
+    } finally {
+      await new Promise<void>((resolvePromise) => {
+        server.close(() => resolvePromise());
+      });
     }
   });
 });

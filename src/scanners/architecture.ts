@@ -16,6 +16,7 @@ import { evaluateFileArchitecture } from '../architecture/evaluator.js';
 import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.js';
 import {
   detectArchLanguage,
+  extractTsConfigExtends,
   loadWorkspaceResolveContext,
   parseGoModModule,
   parsePubspecName,
@@ -109,22 +110,39 @@ async function hydrateTsConfigFromHead(
   while (queue.length > 0) {
     const item = queue.shift()!;
     if (item.depth >= 2) continue;
-    const extMatch = /"extends"\s*:\s*"([^"]+)"/.exec(item.raw);
-    const extPath = extMatch?.[1];
-    if (!extPath || (!extPath.startsWith('./') && !extPath.startsWith('../'))) continue;
-    const joined = normalizePath(item.dir ? posix.join(item.dir, extPath) : extPath);
-    if (!joined || preloaded.has(joined)) continue;
-    let extRaw = await readMetadataFile(deps, joined);
-    if (extRaw === null && deps.workspaceDir) {
-      try {
-        extRaw = readFileSync(resolve(deps.workspaceDir, joined), 'utf-8');
-      } catch {
-        extRaw = null; // extended tsconfig missing both remotely and locally
+    for (const extPath of extractTsConfigExtends(item.raw)) {
+      const joined = normalizePath(
+        item.dir && item.dir !== '.' ? posix.join(item.dir, extPath) : extPath,
+      );
+      if (!joined || joined === '..' || joined.startsWith('../') || preloaded.has(joined)) {
+        continue;
       }
-    }
-    preloaded.set(joined, extRaw);
-    if (extRaw) {
-      queue.push({ raw: extRaw, dir: posix.dirname(joined), depth: item.depth + 1 });
+      const candidates = joined.endsWith('.json') ? [joined] : [joined, `${joined}.json`];
+      let foundRaw: string | null = null;
+      let foundPath = joined;
+      for (const candidate of candidates) {
+        let rawCandidate = preloaded.get(candidate) ?? null;
+        if (!preloaded.has(candidate)) {
+          rawCandidate = await readMetadataFile(deps, candidate);
+          if (rawCandidate === null && deps.workspaceDir) {
+            try {
+              rawCandidate = readFileSync(resolve(deps.workspaceDir, candidate), 'utf-8');
+            } catch {
+              rawCandidate = null; // extended tsconfig missing both remotely and locally
+            }
+          }
+          preloaded.set(candidate, rawCandidate);
+        }
+        if (rawCandidate !== null) {
+          foundRaw = rawCandidate;
+          foundPath = candidate;
+          break;
+        }
+      }
+      if (foundRaw) {
+        const nextDir = posix.dirname(foundPath);
+        queue.push({ raw: foundRaw, dir: nextDir === '.' ? '' : nextDir, depth: item.depth + 1 });
+      }
     }
   }
 
