@@ -231,13 +231,12 @@ export async function runRepoArchitectureCheck(
     });
 
     for (const v of fileViolations) {
-      const ignoreMatch = ignoreList.matches(violationToIgnoreProbe(v));
+      const probe = violationToIgnoreProbe(v);
+      const ignoreMatch = ignoreList.matches(probe);
       if (ignoreMatch.ignored) {
         suppressedByIgnore += 1;
         if (ignoreMatch.expired) {
-          void logger.notice(
-            expiredIgnoreNotice('architecture', violationToIgnoreProbe(v), ignoreMatch),
-          );
+          void logger.notice(expiredIgnoreNotice('architecture', probe, ignoreMatch));
         }
         continue;
       }

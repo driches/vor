@@ -78459,30 +78459,51 @@ function resolveTsJsCandidate(basePath, ctx) {
   return norm;
 }
 function matchTsConfigAlias(specifier, tsconfig, ctx) {
+  let best;
   for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
+    if (targets.length === 0) continue;
     const starIdx = pattern.indexOf("*");
     if (starIdx === -1) {
-      if (specifier === pattern && targets[0]) {
-        const joined = normalizePath(targets[0]);
-        return resolveTsJsCandidate(joined, ctx);
+      if (specifier === pattern) {
+        best = {
+          exact: true,
+          prefixLen: pattern.length,
+          suffixLen: 0,
+          wildcard: "",
+          targets
+        };
+        break;
       }
       continue;
     }
+    if (pattern.indexOf("*", starIdx + 1) !== -1) continue;
     const prefix = pattern.slice(0, starIdx);
     const suffix = pattern.slice(starIdx + 1);
-    if (specifier.startsWith(prefix) && specifier.endsWith(suffix)) {
-      const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
-      for (const target of targets) {
-        const replaced = target.replace("*", wildcard);
-        const joined = normalizePath(replaced);
-        const resolved = resolveTsJsCandidate(joined, ctx);
-        if (existsRepoFile(resolved, ctx) || targets.length === 1) {
-          return resolved;
-        }
+    if (specifier.length >= prefix.length + suffix.length && specifier.startsWith(prefix) && specifier.endsWith(suffix)) {
+      if (!best || prefix.length > best.prefixLen || prefix.length === best.prefixLen && suffix.length > best.suffixLen) {
+        best = {
+          exact: false,
+          prefixLen: prefix.length,
+          suffixLen: suffix.length,
+          wildcard: specifier.slice(prefix.length, specifier.length - suffix.length),
+          targets
+        };
       }
-      if (targets[0]) {
-        return normalizePath(targets[0].replace("*", wildcard));
+    }
+  }
+  if (best) {
+    let firstSubstituted;
+    for (const target of best.targets) {
+      const substituted = best.exact ? target : target.replace("*", best.wildcard);
+      firstSubstituted ??= substituted;
+      const joined = normalizePath(substituted);
+      const resolved = resolveTsJsCandidate(joined, ctx);
+      if (existsRepoFile(resolved, ctx) || best.targets.length === 1) {
+        return resolved;
       }
+    }
+    if (firstSubstituted !== void 0) {
+      return normalizePath(firstSubstituted);
     }
   }
   if (tsconfig.baseUrl) {
@@ -79149,13 +79170,12 @@ async function runRepoArchitectureCheck(opts) {
       resolveCtx
     });
     for (const v2 of fileViolations) {
-      const ignoreMatch = ignoreList.matches(violationToIgnoreProbe(v2));
+      const probe = violationToIgnoreProbe(v2);
+      const ignoreMatch = ignoreList.matches(probe);
       if (ignoreMatch.ignored) {
         suppressedByIgnore += 1;
         if (ignoreMatch.expired) {
-          void logger.notice(
-            expiredIgnoreNotice("architecture", violationToIgnoreProbe(v2), ignoreMatch)
-          );
+          void logger.notice(expiredIgnoreNotice("architecture", probe, ignoreMatch));
         }
         continue;
       }

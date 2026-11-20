@@ -371,4 +371,47 @@ describe('extractImports & resolveImport across languages', () => {
       }).resolvedPath,
     ).toBe('src/app/create.ts');
   });
+
+  it('selects exact match and longest-prefix tsconfig path alias regardless of declaration order', () => {
+    const tsconfig = parseTsConfigContent(
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@app/*': ['src/shared/*'],
+            '@app/infra/*': ['src/infrastructure/*'],
+            '@app/infra/special': ['src/adapters/special.ts'],
+            'a*a': ['src/overlapping/*'],
+          },
+        },
+      }),
+    );
+    const knownFiles = new Set([
+      'src/shared/utils/fmt.ts',
+      'src/infrastructure/repo.ts',
+      'src/adapters/special.ts',
+    ]);
+    const ctx = { tsconfig, knownFiles };
+    const { imports } = extractImports(
+      'src/domain/service.ts',
+      [
+        "import { Repo } from '@app/infra/repo';",
+        "import { Special } from '@app/infra/special';",
+        "import { fmt } from '@app/utils/fmt';",
+        "import { short } from 'a';",
+      ].join('\n'),
+    );
+
+    expect(resolveImport(imports[0]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
+      'src/infrastructure/repo.ts',
+    );
+    expect(resolveImport(imports[1]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
+      'src/adapters/special.ts',
+    );
+    expect(resolveImport(imports[2]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
+      'src/shared/utils/fmt.ts',
+    );
+    expect(resolveImport(imports[3]!, 'src/domain/service.ts', ctx).resolvedPath).toBeUndefined();
+    expect(resolveImport(imports[3]!, 'src/domain/service.ts', ctx).packageName).toBe('a');
+  });
 });
