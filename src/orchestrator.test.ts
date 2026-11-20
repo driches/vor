@@ -2230,3 +2230,50 @@ describe('runOrchestrator — image-ocr binary findings route to the summary', (
     expect(call.body).toContain('OCR confidence 90%');
   });
 });
+
+// -----------------------------------------------------------------
+// Repo context is sent once. AGENTS.md / CLAUDE.md are embedded in the system
+// prompt; when the agent then calls read_repo_context_file (the prompt tells
+// it to), the tool must not hand back a second copy that sits in the message
+// history for the rest of the run.
+// -----------------------------------------------------------------
+
+describe('runOrchestrator — repo context is not sent twice', () => {
+  it('answers read_repo_context_file with a pointer for files the system prompt carries', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+    octokitState.contents.set('.vor.yml', ['security:', '  enabled: false'].join('\n'));
+    const agentsMd = 'UNIQUE-AGENTS-MARKER: prefer early returns.';
+    octokitState.contents.set('AGENTS.md', agentsMd);
+    octokitState.contents.set('package.json', '{"name":"UNIQUE-PKG-MARKER"}');
+
+    agentScript.push({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_ctx',
+          name: 'read_repo_context_file',
+          input: { files: ['AGENTS.md', 'package.json'] },
+        },
+      ],
+      stop_reason: 'tool_use',
+    });
+    scriptSummaryOnly();
+    await runOrchestrator(baseInput());
+
+    expect(anthropicCreateCalls).toHaveLength(2);
+    const second = anthropicCreateCalls[1] as {
+      system: Array<{ text: string }>;
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    // Embedded once, in the system prompt.
+    expect(second.system[0]!.text).toContain(agentsMd);
+    // The tool result (in the message history) points at it instead of
+    // repeating it, and still returns files the system prompt does not have.
+    const history = JSON.stringify(second.messages);
+    expect(history).not.toContain('UNIQUE-AGENTS-MARKER');
+    expect(history).toContain('in_system_prompt');
+    expect(history).toContain('UNIQUE-PKG-MARKER');
+  });
+});

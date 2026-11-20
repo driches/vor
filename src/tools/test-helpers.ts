@@ -17,6 +17,7 @@ export interface FakeDepsInput {
   config?: Partial<ReviewConfig>;
   fileReader?: Partial<FileReader>;
   workspaceDir?: string;
+  embeddedContextFiles?: ReadonlySet<string>;
 }
 
 export function buildFakeDeps(input: FakeDepsInput = {}): ToolDeps {
@@ -64,6 +65,9 @@ export function buildFakeDeps(input: FakeDepsInput = {}): ToolDeps {
     config,
     workspaceDir: input.workspaceDir ?? process.cwd(),
     runContext: createRunContext(),
+    ...(input.embeddedContextFiles !== undefined
+      ? { embeddedContextFiles: input.embeddedContextFiles }
+      : {}),
   };
 }
 
