@@ -10,6 +10,7 @@ import {
   parsePubspecName,
   parseTsConfigContent,
   resolveImport,
+  resolveImports,
   stripCLikeComments,
   stripPythonCommentsAndDocstrings,
 } from './imports.js';
@@ -254,5 +255,37 @@ describe('extractImports & resolveImport across languages', () => {
     ].join('\n');
     const rustImports = extractImports('src/domain/item.rs', rustSrc).imports;
     expect(rustImports.map((i) => i.specifier)).toEqual(['crate::ports::Repo']);
+  });
+
+  it('resolves submodules named in Python from-import lists and relative from-imports', () => {
+    const single = extractImports('src/domain/order.py', 'from src import infrastructure');
+    const resolvedSingle = resolveImports(single.imports, 'src/domain/order.py', {});
+    expect(resolvedSingle[0]?.resolvedPath).toBe('src/infrastructure');
+
+    const multi = extractImports(
+      'src/domain/order.py',
+      ['from src import (', '  infrastructure,', '  adapters as adm,', ')'].join('\n'),
+    );
+    const knownFiles = new Set([
+      'src/infrastructure/__init__.py',
+      'src/infrastructure/repository.py',
+      'src/adapters/db.py',
+    ]);
+    const resolvedMulti = resolveImports(multi.imports, 'src/domain/order.py', { knownFiles });
+    expect(resolvedMulti.map((r) => [r.resolvedPath, r.line])).toEqual([
+      ['src/infrastructure/__init__.py', 2],
+      ['src/adapters', 3],
+    ]);
+
+    const rel = extractImports('src/domain/order.py', 'from .. import infrastructure');
+    const resolvedRel = resolveImports(rel.imports, 'src/domain/order.py', { knownFiles });
+    expect(resolvedRel[0]?.resolvedPath).toBe('src/infrastructure/__init__.py');
+
+    const dotted = extractImports(
+      'src/domain/order.py',
+      'from src.infrastructure import repository',
+    );
+    const resolvedDotted = resolveImports(dotted.imports, 'src/domain/order.py', { knownFiles });
+    expect(resolvedDotted[0]?.resolvedPath).toBe('src/infrastructure/repository.py');
   });
 });

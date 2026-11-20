@@ -10,12 +10,14 @@
 
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
+import type { Octokit } from '@octokit/rest';
 import { z } from 'zod';
 import { resolveWorkspaceArchitectureConfig } from '../architecture/loader.js';
 import { resolveArchitectureSpec } from '../architecture/presets.js';
 import { runRepoArchitectureCheck } from '../architecture/repo-scan.js';
 import { loadConfigFromString } from '../config/loader.js';
 import { architecturePresetSchema } from '../config/schema.js';
+import { createOctokit } from '../github/client.js';
 import { loadReferences } from '../references/loader.js';
 import {
   listReferenceCatalog,
@@ -36,6 +38,8 @@ export interface VorToolDeps {
   saveRun: typeof defaultSaveRun;
   listRuns: typeof defaultListRuns;
   getRun: typeof defaultGetRun;
+  /** Optional GitHub client for `github:` reference loading. Defaults to GITHUB_TOKEN if set. */
+  octokit?: Octokit;
   /** Working directory the tools operate on. Defaults to process.cwd(). */
   workspace?: string;
 }
@@ -129,6 +133,12 @@ export function createHandlers(deps: VorToolDeps) {
     return loadConfigFromString(raw);
   };
 
+  const resolveOctokit = (): Octokit | undefined => {
+    if (deps.octokit) return deps.octokit;
+    const token = process.env.GITHUB_TOKEN?.trim();
+    return token ? createOctokit({ auth: token }) : undefined;
+  };
+
   return {
     review_local_changes: async (args: ReviewArgs): Promise<ToolResult> => {
       try {
@@ -203,9 +213,11 @@ export function createHandlers(deps: VorToolDeps) {
               'Reference documentation is not enabled in .vor.yml (`references.enabled: true`).',
           });
         }
+        const octokit = resolveOctokit();
         const corpus = await loadReferences({
           config: cfg.references,
           workspaceDir: workspace,
+          ...(octokit ? { octokit } : {}),
           forceRefresh: Boolean(args.refresh),
         });
         return ok({
@@ -231,9 +243,11 @@ export function createHandlers(deps: VorToolDeps) {
             'Reference documentation is not enabled in .vor.yml (`references.enabled: true`).',
           );
         }
+        const octokit = resolveOctokit();
         const corpus = await loadReferences({
           config: cfg.references,
           workspaceDir: workspace,
+          ...(octokit ? { octokit } : {}),
         });
         if (args.id) {
           const slice = readReferenceSlice(corpus, {

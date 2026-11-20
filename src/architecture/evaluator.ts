@@ -21,12 +21,7 @@ import {
   normalizePath,
   type ContextMatch,
 } from './glob.js';
-import {
-  extractImports,
-  resolveImport,
-  type ResolvedImport,
-  type WorkspaceResolveContext,
-} from './imports.js';
+import { extractImports, resolveImports, type WorkspaceResolveContext } from './imports.js';
 import type { ResolvedArchitectureSpec } from './presets.js';
 
 export interface ArchViolation {
@@ -140,8 +135,11 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
   const { imports, meta } = extractImports(normFile, input.content);
   if (imports.length === 0) return [];
 
-  const filtered = input.onlyLines ? imports.filter((i) => input.onlyLines!.has(i.line)) : imports;
-  if (filtered.length === 0) return [];
+  const resolvedImports = resolveImports(imports, normFile, input.resolveCtx, meta);
+  const filteredResolved = input.onlyLines
+    ? resolvedImports.filter((r) => input.onlyLines!.has(r.line))
+    : resolvedImports;
+  if (filteredResolved.length === 0) return [];
 
   const sourceLayer = classifyLayer(normFile, input.spec);
   const sourceCtx: ContextMatch | null = input.spec.contexts
@@ -161,8 +159,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
     });
   };
 
-  for (const imp of filtered) {
-    const resolved: ResolvedImport = resolveImport(imp, normFile, input.resolveCtx, meta);
+  for (const resolved of filteredResolved) {
     const targetLayer = resolved.resolvedPath
       ? classifyLayer(resolved.resolvedPath, input.spec)
       : null;
@@ -199,6 +196,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
     }
 
     // 2. Layer forbidden external packages
+    let matchedForbiddenPackage = false;
     if (
       !resolved.resolvedPath &&
       resolved.packageName &&
@@ -208,6 +206,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
         matchesPackagePattern(resolved.packageName!, resolved.specifier, p),
       );
       if (matchedPattern) {
+        matchedForbiddenPackage = true;
         pushViolation({
           rule_id: `arch:forbidden-package:${sourceLayer.name}`,
           file_path: normFile,
@@ -225,8 +224,11 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
       }
     }
 
-    // 3. Layer package allowlist (when explicitly configured)
+    // 3. Layer package allowlist (when explicitly configured); skipped when
+    // forbid_packages already flagged this import so one import does not emit
+    // two separate findings.
     if (
+      !matchedForbiddenPackage &&
       !resolved.resolvedPath &&
       resolved.packageName &&
       sourceLayer?.def.allow_packages !== undefined

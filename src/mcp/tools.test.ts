@@ -223,4 +223,44 @@ describe('MCP tool handlers', () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it('passes octokit through list_references and read_reference for github: sources', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-mcp-gh-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-mcp-ghcache-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    writeFileSync(
+      join(repo, '.vor.yml'),
+      `references:\n  enabled: true\n  sources:\n    - github:acme/standards/docs/ddd.md@main\n  cache:\n    dir: "${cacheDir}"\n`,
+    );
+
+    const getContent = vi.fn(async () => ({
+      data: {
+        type: 'file',
+        sha: 'blob1',
+        content: Buffer.from('# Org DDD\nUse aggregates.\n', 'utf-8').toString('base64'),
+        encoding: 'base64',
+      },
+    }));
+    const octokit = { rest: { repos: { getContent } } } as unknown as VorToolDeps['octokit'];
+
+    try {
+      const h = createHandlers(deps({ workspace: repo, ...(octokit ? { octokit } : {}) }));
+      const listed = parse(await h.list_references({})) as {
+        docs: Array<{ id: string; kind: string }>;
+      };
+      expect(listed.docs).toHaveLength(1);
+      expect(listed.docs[0]).toMatchObject({
+        id: 'github:acme/standards/docs/ddd.md',
+        kind: 'github',
+      });
+
+      const read = parse(await h.read_reference({ id: 'github:acme/standards/docs/ddd.md' })) as {
+        content: string;
+      };
+      expect(read.content).toContain('Use aggregates.');
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });

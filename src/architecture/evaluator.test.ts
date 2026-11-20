@@ -148,4 +148,54 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     expect(domainViolations[0]?.rule_id).toBe('arch:rule:no-node-fs-in-domain');
     expect(domainViolations[0]?.severity).toBe('critical');
   });
+
+  it('skips allow_packages when forbid_packages already flagged the same import', () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'custom',
+      layers: {
+        domain: {
+          paths: ['src/domain/**'],
+          forbid_packages: ['express'],
+          allow_packages: ['zod'],
+        },
+      },
+    });
+
+    const content = [
+      "import express from 'express';",
+      "import _ from 'lodash';",
+      "import { z } from 'zod';",
+    ].join('\n');
+
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.ts',
+      content,
+      spec,
+      resolveCtx: {},
+    });
+    expect(violations.map((v) => [v.line, v.rule_id])).toEqual([
+      [1, 'arch:forbidden-package:domain'],
+      [2, 'arch:disallowed-package:domain'],
+    ]);
+  });
+
+  it('flags Python `from src import infrastructure` under the ddd preset', () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.py',
+      content: 'from src import infrastructure\n',
+      spec,
+      resolveCtx: {},
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+  });
 });

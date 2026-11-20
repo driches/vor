@@ -398,4 +398,53 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('expands repo reference globs against PR HEAD via git.getTree even when workspaceDir has a partial subset', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-glob-head-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-glob-head-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs/adr'), { recursive: true });
+      writeFileSync(join(ws, 'docs/adr/001.md'), '# ADR 001\nBase doc.\n');
+
+      const getTree = vi.fn(async () => ({
+        data: {
+          truncated: false,
+          tree: [
+            { type: 'blob', path: 'docs/adr/001.md' },
+            { type: 'blob', path: 'docs/adr/002.md' },
+          ],
+        },
+      }));
+      const octokit = { rest: { git: { getTree } } } as unknown as NonNullable<
+        Parameters<typeof loadReferences>[0]['octokit']
+      >;
+      const fileReader = {
+        read: vi.fn(async ({ path }: { path: string }) =>
+          path === 'docs/adr/002.md' ? '# ADR 002\nAdded in PR HEAD.\n' : '# ADR 001\nBase doc.\n',
+        ),
+      } as unknown as FileReader;
+
+      const res = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['docs/adr/**/*.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+        owner: 'acme',
+        repo: 'svc',
+        ref: 'head-sha',
+        fileReader,
+        octokit,
+      });
+
+      expect(getTree).toHaveBeenCalledTimes(1);
+      expect(res.docs.map((d) => d.id)).toEqual(['docs/adr/001.md', 'docs/adr/002.md']);
+      expect(res.docs[1]?.content).toContain('Added in PR HEAD.');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
 });

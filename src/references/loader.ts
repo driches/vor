@@ -366,12 +366,6 @@ async function listRepoGlobFiles(
   input: LoadReferencesInput,
   warnings: string[],
 ): Promise<string[]> {
-  if (input.workspaceDir && existsSync(input.workspaceDir)) {
-    const files = enumerateWorkspaceFiles(input.workspaceDir);
-    const matched = files.filter((f) => matchesGlob(f, pattern)).sort();
-    if (matched.length > 0) return matched;
-  }
-
   if (input.octokit?.rest?.git?.getTree && input.owner && input.repo && input.ref) {
     try {
       const r = await input.octokit.rest.git.getTree({
@@ -396,6 +390,12 @@ async function listRepoGlobFiles(
         `Failed to list repo glob '${pattern}' via Git Tree API: ${(err as Error).message}`,
       );
     }
+  }
+
+  if (input.workspaceDir && existsSync(input.workspaceDir)) {
+    const files = enumerateWorkspaceFiles(input.workspaceDir);
+    const matched = files.filter((f) => matchesGlob(f, pattern)).sort();
+    if (matched.length > 0) return matched;
   }
 
   return [];

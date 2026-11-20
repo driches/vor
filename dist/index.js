@@ -88852,22 +88852,86 @@ function extractJsTsImports(content, language) {
   }
   return dedupExtracted(out);
 }
+function parsePythonImportNames(cleaned, clauseStart, clauseEnd, starts) {
+  const names = [];
+  let segStart = clauseStart;
+  const pushSegment = (rawStart, rawEnd) => {
+    const raw = cleaned.slice(rawStart, rawEnd).replace(/\\\r?\n/g, " ");
+    const leadWs = raw.length - raw.trimStart().length;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed === "*") return;
+    const m2 = /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/.exec(trimmed);
+    if (!m2?.[1]) return;
+    const identOffset = rawStart + leadWs;
+    names.push({ name: m2[1], line: lineAtOffset(starts, identOffset) });
+  };
+  for (let i2 = clauseStart; i2 < clauseEnd; i2++) {
+    if (cleaned[i2] === ",") {
+      pushSegment(segStart, i2);
+      segStart = i2 + 1;
+    }
+  }
+  pushSegment(segStart, clauseEnd);
+  return names;
+}
+function findPythonImportClauseBounds(cleaned, afterImportOffset) {
+  const n2 = cleaned.length;
+  let pos = afterImportOffset;
+  while (pos < n2 && (cleaned[pos] === " " || cleaned[pos] === "	")) pos += 1;
+  if (cleaned[pos] === "(") {
+    const close = cleaned.indexOf(")", pos + 1);
+    return { start: pos + 1, end: close === -1 ? n2 : close };
+  }
+  let end = pos;
+  while (end < n2) {
+    const ch = cleaned[end];
+    if (ch === ";" || ch === "\n") break;
+    if (ch === "\\") {
+      if (cleaned[end + 1] === "\n") {
+        end += 2;
+        continue;
+      }
+      if (cleaned[end + 1] === "\r" && cleaned[end + 2] === "\n") {
+        end += 3;
+        continue;
+      }
+    }
+    end += 1;
+  }
+  return { start: pos, end };
+}
 function extractPythonImports(content) {
   const cleaned = stripPythonCommentsAndDocstrings(content);
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
-  const fromRe = /^[ \t]*from\s+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)\s+import\b/gm;
+  const fromRe = /^[ \t]*from[ \t]+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)[ \t]+import\b/gm;
   for (const m2 of cleaned.matchAll(fromRe)) {
     const spec = m2[1];
     const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
-    const line = lineAtOffset(starts, offset);
+    const baseLine = lineAtOffset(starts, offset);
+    const clause = findPythonImportClauseBounds(cleaned, (m2.index ?? 0) + m2[0].length);
+    const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts);
+    if (/^\.+$/.test(spec) && importedNames.length > 0) {
+      for (const item of importedNames) {
+        const subSpec = `${spec}${item.name}`;
+        out.push({
+          specifier: subSpec,
+          line: item.line,
+          snippet: makeSnippet(rawLines, item.line),
+          language: "python",
+          kindHint: "relative"
+        });
+      }
+      continue;
+    }
     out.push({
       specifier: spec,
-      line,
-      snippet: makeSnippet(rawLines, line),
+      line: baseLine,
+      snippet: makeSnippet(rawLines, baseLine),
       language: "python",
-      kindHint: spec.startsWith(".") ? "relative" : "ambiguous"
+      kindHint: spec.startsWith(".") ? "relative" : "ambiguous",
+      ...importedNames.length > 0 ? { importedNames } : {}
     });
   }
   const importRe = /^[ \t]*import\s+([^\n;#]+)/gm;
@@ -89368,6 +89432,148 @@ var KNOWN_EXTERNAL_JVM_PREFIXES = [
   "org.slf4j.",
   "com.fasterxml."
 ];
+function resolveRelativePythonSpec(specifier, normSource, ctx) {
+  const dotMatch = specifier.match(/^(\.+)(.*)$/);
+  const dots = dotMatch?.[1]?.length ?? 1;
+  const remainder = (dotMatch?.[2] ?? "").replace(/^\./, "").replace(/\./g, "/");
+  let dir = import_node_path22.posix.dirname(normSource);
+  for (let i2 = 1; i2 < dots; i2++) {
+    dir = import_node_path22.posix.dirname(dir);
+  }
+  const joined = normalizePath(
+    dir === "." ? remainder : remainder ? import_node_path22.posix.join(dir, remainder) : dir
+  );
+  const pyFile = `${joined}.py`;
+  const pyInit = `${joined}/__init__.py`;
+  if (existsRepoFile(pyFile, ctx)) return { resolvedPath: pyFile, matchedRepo: true };
+  if (existsRepoFile(pyInit, ctx)) return { resolvedPath: pyInit, matchedRepo: true };
+  if (existsRepoPrefix(joined, ctx)) return { resolvedPath: joined, matchedRepo: true };
+  return { resolvedPath: joined, matchedRepo: false };
+}
+function resolveAbsolutePythonSpec(specifier, normSource, ctx) {
+  const modPath = specifier.replace(/\./g, "/");
+  const candidates = [
+    `${modPath}.py`,
+    `${modPath}/__init__.py`,
+    `src/${modPath}.py`,
+    `src/${modPath}/__init__.py`
+  ];
+  for (const c2 of candidates) {
+    if (existsRepoFile(c2, ctx)) return { resolvedPath: c2, matchedRepo: true };
+  }
+  if (existsRepoPrefix(modPath, ctx)) {
+    return { resolvedPath: modPath, matchedRepo: true };
+  }
+  if (existsRepoPrefix(`src/${modPath}`, ctx)) {
+    return { resolvedPath: `src/${modPath}`, matchedRepo: true };
+  }
+  const sourceSegs = normSource.split("/").filter(Boolean);
+  const firstImportSeg = modPath.split("/")[0];
+  if (firstImportSeg) {
+    if (sourceSegs[0] === firstImportSeg) {
+      return { resolvedPath: modPath, matchedRepo: false };
+    }
+    if (sourceSegs[0] === "src" && sourceSegs[1] === firstImportSeg) {
+      return { resolvedPath: `src/${modPath}`, matchedRepo: false };
+    }
+  }
+  return { packageName: firstImportSeg ?? specifier, matchedRepo: false };
+}
+function resolveSinglePythonSpec(specifier, normSource, line, snippet, ctx) {
+  if (specifier.startsWith(".")) {
+    const rel = resolveRelativePythonSpec(specifier, normSource, ctx);
+    return {
+      specifier,
+      line,
+      snippet,
+      language: "python",
+      resolvedPath: rel.resolvedPath
+    };
+  }
+  const abs = resolveAbsolutePythonSpec(specifier, normSource, ctx);
+  return {
+    specifier,
+    line,
+    snippet,
+    language: "python",
+    ...abs.resolvedPath !== void 0 ? { resolvedPath: abs.resolvedPath } : {},
+    ...abs.packageName !== void 0 ? { packageName: abs.packageName } : {}
+  };
+}
+function resolvePythonSubmodules(imp, normSource, ctx) {
+  if (!imp.importedNames || imp.importedNames.length === 0) {
+    return [resolveSinglePythonSpec(imp.specifier, normSource, imp.line, imp.snippet, ctx)];
+  }
+  const hasRepoTree = Boolean(ctx.workspaceDir || ctx.knownFiles);
+  const sourceSegs = normSource.split("/").filter(Boolean);
+  const matchedSubs = [];
+  let hasNonSubmodule = false;
+  for (const item of imp.importedNames) {
+    const subSpec = imp.specifier.endsWith(".") ? `${imp.specifier}${item.name}` : `${imp.specifier}.${item.name}`;
+    if (subSpec.startsWith(".")) {
+      const rel = resolveRelativePythonSpec(subSpec, normSource, ctx);
+      if (rel.matchedRepo) {
+        matchedSubs.push({
+          specifier: subSpec,
+          line: item.line,
+          snippet: imp.snippet,
+          language: "python",
+          resolvedPath: rel.resolvedPath
+        });
+        continue;
+      }
+      hasNonSubmodule = true;
+      continue;
+    }
+    const abs = resolveAbsolutePythonSpec(subSpec, normSource, ctx);
+    if (abs.matchedRepo && abs.resolvedPath) {
+      matchedSubs.push({
+        specifier: subSpec,
+        line: item.line,
+        snippet: imp.snippet,
+        language: "python",
+        resolvedPath: abs.resolvedPath
+      });
+      continue;
+    }
+    if (!hasRepoTree && !imp.specifier.includes(".") && /^[a-z][a-z0-9_]*$/.test(item.name) && abs.resolvedPath) {
+      const matchesOwnRoot = sourceSegs[0] === imp.specifier || sourceSegs[0] === "src" && sourceSegs[1] === imp.specifier;
+      if (matchesOwnRoot) {
+        matchedSubs.push({
+          specifier: subSpec,
+          line: item.line,
+          snippet: imp.snippet,
+          language: "python",
+          resolvedPath: abs.resolvedPath
+        });
+        continue;
+      }
+    }
+    hasNonSubmodule = true;
+  }
+  if (matchedSubs.length === 0) {
+    return [resolveSinglePythonSpec(imp.specifier, normSource, imp.line, imp.snippet, ctx)];
+  }
+  if (hasNonSubmodule) {
+    return [
+      ...matchedSubs,
+      resolveSinglePythonSpec(imp.specifier, normSource, imp.line, imp.snippet, ctx)
+    ];
+  }
+  return matchedSubs;
+}
+function resolveImports(imports, sourceFilePath, ctx, fileMeta = {}) {
+  const normSource = normalizePath(sourceFilePath);
+  const out = [];
+  for (const imp of imports) {
+    if (imp.language === "python") {
+      out.push(...resolvePythonSubmodules(imp, normSource, ctx));
+    } else {
+      out.push(resolveImport(imp, sourceFilePath, ctx, fileMeta));
+    }
+  }
+  return out;
+}
 function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
   const base = {
     specifier: imp.specifier,
@@ -89420,49 +89626,7 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       return { ...base, resolvedPath: joinRelativePosix(normSource, imp.specifier) };
     }
     case "python": {
-      if (imp.specifier.startsWith(".")) {
-        const dotMatch = imp.specifier.match(/^(\.+)(.*)$/);
-        const dots = dotMatch?.[1]?.length ?? 1;
-        const remainder = (dotMatch?.[2] ?? "").replace(/^\./, "").replace(/\./g, "/");
-        let dir = import_node_path22.posix.dirname(normSource);
-        for (let i2 = 1; i2 < dots; i2++) {
-          dir = import_node_path22.posix.dirname(dir);
-        }
-        const joined = normalizePath(
-          dir === "." ? remainder : remainder ? import_node_path22.posix.join(dir, remainder) : dir
-        );
-        const pyFile = `${joined}.py`;
-        const pyInit = `${joined}/__init__.py`;
-        const resolved = existsRepoFile(pyFile, ctx) ? pyFile : existsRepoFile(pyInit, ctx) ? pyInit : joined;
-        return { ...base, resolvedPath: resolved };
-      }
-      const modPath = imp.specifier.replace(/\./g, "/");
-      const candidates = [
-        `${modPath}.py`,
-        `${modPath}/__init__.py`,
-        `src/${modPath}.py`,
-        `src/${modPath}/__init__.py`
-      ];
-      for (const c2 of candidates) {
-        if (existsRepoFile(c2, ctx)) return { ...base, resolvedPath: c2 };
-      }
-      if (existsRepoPrefix(modPath, ctx)) {
-        return { ...base, resolvedPath: modPath };
-      }
-      if (existsRepoPrefix(`src/${modPath}`, ctx)) {
-        return { ...base, resolvedPath: `src/${modPath}` };
-      }
-      const sourceSegs = normSource.split("/").filter(Boolean);
-      const firstImportSeg = modPath.split("/")[0];
-      if (firstImportSeg) {
-        if (sourceSegs[0] === firstImportSeg) {
-          return { ...base, resolvedPath: modPath };
-        }
-        if (sourceSegs[0] === "src" && sourceSegs[1] === firstImportSeg) {
-          return { ...base, resolvedPath: `src/${modPath}` };
-        }
-      }
-      return { ...base, packageName: firstImportSeg ?? imp.specifier };
+      return resolvePythonSubmodules(imp, normSource, ctx)[0];
     }
     case "rust": {
       if (imp.specifier.startsWith("mod:")) {
@@ -89610,8 +89774,9 @@ function evaluateFileArchitecture(input2) {
   if (matchesAnyGlob(normFile, input2.spec.exclude)) return [];
   const { imports, meta: meta3 } = extractImports(normFile, input2.content);
   if (imports.length === 0) return [];
-  const filtered = input2.onlyLines ? imports.filter((i2) => input2.onlyLines.has(i2.line)) : imports;
-  if (filtered.length === 0) return [];
+  const resolvedImports = resolveImports(imports, normFile, input2.resolveCtx, meta3);
+  const filteredResolved = input2.onlyLines ? resolvedImports.filter((r2) => input2.onlyLines.has(r2.line)) : resolvedImports;
+  if (filteredResolved.length === 0) return [];
   const sourceLayer = classifyLayer(normFile, input2.spec);
   const sourceCtx = input2.spec.contexts ? extractContext(normFile, input2.spec.contexts.pattern) : null;
   const violations = [];
@@ -89625,8 +89790,7 @@ function evaluateFileArchitecture(input2) {
       fingerprint: fingerprintOf7(v2.rule_id, normFile, v2.specifier, occ)
     });
   };
-  for (const imp of filtered) {
-    const resolved = resolveImport(imp, normFile, input2.resolveCtx, meta3);
+  for (const resolved of filteredResolved) {
     const targetLayer = resolved.resolvedPath ? classifyLayer(resolved.resolvedPath, input2.spec) : null;
     if (sourceLayer && targetLayer && sourceLayer.name !== targetLayer.name) {
       const forbiddenExplicit = sourceLayer.def.cannot_import?.includes(targetLayer.name) ?? false;
@@ -89648,11 +89812,13 @@ function evaluateFileArchitecture(input2) {
         });
       }
     }
+    let matchedForbiddenPackage = false;
     if (!resolved.resolvedPath && resolved.packageName && sourceLayer?.def.forbid_packages?.length) {
       const matchedPattern = sourceLayer.def.forbid_packages.find(
         (p2) => matchesPackagePattern(resolved.packageName, resolved.specifier, p2)
       );
       if (matchedPattern) {
+        matchedForbiddenPackage = true;
         pushViolation({
           rule_id: `arch:forbidden-package:${sourceLayer.name}`,
           file_path: normFile,
@@ -89666,7 +89832,7 @@ function evaluateFileArchitecture(input2) {
         });
       }
     }
-    if (!resolved.resolvedPath && resolved.packageName && sourceLayer?.def.allow_packages !== void 0) {
+    if (!matchedForbiddenPackage && !resolved.resolvedPath && resolved.packageName && sourceLayer?.def.allow_packages !== void 0) {
       const allowed = sourceLayer.def.allow_packages.some(
         (p2) => matchesPackagePattern(resolved.packageName, resolved.specifier, p2)
       );
@@ -90569,11 +90735,6 @@ function enumerateWorkspaceFiles(workspaceDir) {
   }
 }
 async function listRepoGlobFiles(pattern, input2, warnings) {
-  if (input2.workspaceDir && (0, import_node_fs12.existsSync)(input2.workspaceDir)) {
-    const files = enumerateWorkspaceFiles(input2.workspaceDir);
-    const matched = files.filter((f2) => matchesGlob(f2, pattern)).sort();
-    if (matched.length > 0) return matched;
-  }
   if (input2.octokit?.rest?.git?.getTree && input2.owner && input2.repo && input2.ref) {
     try {
       const r2 = await input2.octokit.rest.git.getTree({
@@ -90594,6 +90755,11 @@ async function listRepoGlobFiles(pattern, input2, warnings) {
         `Failed to list repo glob '${pattern}' via Git Tree API: ${err.message}`
       );
     }
+  }
+  if (input2.workspaceDir && (0, import_node_fs12.existsSync)(input2.workspaceDir)) {
+    const files = enumerateWorkspaceFiles(input2.workspaceDir);
+    const matched = files.filter((f2) => matchesGlob(f2, pattern)).sort();
+    if (matched.length > 0) return matched;
   }
   return [];
 }

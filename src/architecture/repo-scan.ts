@@ -26,7 +26,7 @@ import {
   detectArchLanguage,
   extractImports,
   loadWorkspaceResolveContext,
-  resolveImport,
+  resolveImports,
   type ArchLanguage,
 } from './imports.js';
 import { DEFAULT_BASELINE_FILE, isSafeRelativePath, loadArchBaseline } from './loader.js';
@@ -337,8 +337,12 @@ export function explainFileArchitecture(
     resolveCtx,
   });
 
-  const explainedImports: ExplainedImport[] = imports.map((imp) => {
-    const resolved = resolveImport(imp, relPath, resolveCtx, meta);
+  const explainedImports: ExplainedImport[] = resolveImports(
+    imports,
+    relPath,
+    resolveCtx,
+    meta,
+  ).map((resolved) => {
     const targetLayer = resolved.resolvedPath
       ? (classifyLayer(resolved.resolvedPath, spec)?.name ?? null)
       : null;
@@ -347,11 +351,11 @@ export function explainFileArchitecture(
         ? (extractContext(resolved.resolvedPath, spec.contexts.pattern)?.context ?? null)
         : null;
     const lineViolations = allViolations.filter(
-      (v) => v.line === imp.line && v.specifier === imp.specifier,
+      (v) => v.line === resolved.line && v.specifier === resolved.specifier,
     );
     return {
-      line: imp.line,
-      specifier: imp.specifier,
+      line: resolved.line,
+      specifier: resolved.specifier,
       ...(resolved.resolvedPath ? { resolved_path: resolved.resolvedPath } : {}),
       ...(resolved.packageName ? { package_name: resolved.packageName } : {}),
       target_layer: targetLayer,
