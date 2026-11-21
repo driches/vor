@@ -16,11 +16,14 @@ import { evaluateFileArchitecture } from '../architecture/evaluator.js';
 import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.js';
 import {
   detectArchLanguage,
+  extractImports,
   extractTsConfigExtends,
+  listTsConfigAliasCandidates,
   loadWorkspaceResolveContext,
   parseGoModModule,
   parsePubspecName,
   parseTsConfigContent,
+  resolveImport,
   type ArchLanguage,
   type WorkspaceResolveContext,
 } from '../architecture/imports.js';
@@ -162,11 +165,104 @@ async function hydrateTsConfigFromHead(
   });
 }
 
+async function fetchHeadTreeFiles(deps: ScannerDeps): Promise<Set<string> | null> {
+  if (typeof deps.octokit?.rest?.git?.getTree !== 'function' || deps.signal.aborted) {
+    return null;
+  }
+  try {
+    const res = await deps.octokit.rest.git.getTree({
+      owner: deps.owner,
+      repo: deps.repo,
+      tree_sha: deps.head_sha,
+      recursive: '1',
+      request: { signal: deps.signal },
+    });
+    if (res.data.truncated) return null;
+    const files = new Set<string>();
+    for (const entry of res.data.tree) {
+      if (entry.type === 'blob' && entry.path) {
+        const norm = normalizePath(entry.path);
+        if (norm) files.add(norm);
+      }
+    }
+    return files;
+  } catch {
+    return null; // fall back to checkout / fileReader candidate probing
+  }
+}
+
+async function probeHeadAliasTargets(
+  deps: ScannerDeps,
+  filePath: string,
+  content: string,
+  onlyLines: ReadonlySet<number>,
+  resolveCtx: WorkspaceResolveContext,
+  probeCache: Map<string, boolean>,
+  probeBudget: { remaining: number },
+): Promise<void> {
+  if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
+  const lang = detectArchLanguage(filePath);
+  if (lang !== 'typescript' && lang !== 'javascript') return;
+
+  const { imports } = extractImports(filePath, content);
+  const relevant = imports.filter(
+    (imp) =>
+      onlyLines.has(imp.line) &&
+      !imp.specifier.startsWith('./') &&
+      !imp.specifier.startsWith('../') &&
+      !imp.specifier.startsWith('node:'),
+  );
+  if (relevant.length === 0) return;
+
+  const mutableExtra = resolveCtx.extraFiles ? new Set(resolveCtx.extraFiles) : new Set<string>();
+  let extraUpdated = false;
+
+  for (const imp of relevant) {
+    if (resolveImport(imp, filePath, resolveCtx).resolvedPath) continue;
+    const candidates = listTsConfigAliasCandidates(imp.specifier, resolveCtx.tsconfig);
+    for (const candidate of candidates) {
+      if (deps.signal.aborted) break;
+      let exists = probeCache.get(candidate);
+      if (exists === undefined) {
+        if (probeBudget.remaining <= 0) break;
+        probeBudget.remaining -= 1;
+        try {
+          const hit = await deps.fileReader.read({
+            owner: deps.owner,
+            repo: deps.repo,
+            path: candidate,
+            ref: deps.head_sha,
+          });
+          exists = hit !== null;
+        } catch {
+          exists = false; // treat transient probe error as absent
+        }
+        probeCache.set(candidate, exists);
+      }
+      if (exists) {
+        mutableExtra.add(candidate);
+        resolveCtx.extraFiles = mutableExtra;
+        extraUpdated = true;
+        break;
+      }
+    }
+    if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+  }
+
+  if (extraUpdated) {
+    resolveCtx.extraFiles = mutableExtra;
+  }
+}
+
 async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
 ): Promise<WorkspaceResolveContext> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
+  const headTree = await fetchHeadTreeFiles(deps);
+  if (headTree) {
+    ctx.knownFiles = headTree;
+  }
   const prFiles = deps.changedFiles
     .filter((f) => f.status !== 'removed')
     .map((f) => normalizePath(f.path));
@@ -251,6 +347,8 @@ export function createArchitectureScanner(
       }
 
       const resolveCtx = await hydrateResolveContext(deps, languagesPresent);
+      const probeCache = new Map<string, boolean>();
+      const probeBudget = { remaining: 64 };
       const findings: ScanFinding[] = [];
       const errors: ScanError[] = [];
       let filesExamined = 0;
@@ -260,6 +358,16 @@ export function createArchitectureScanner(
         try {
           const content = await readHeadFileContent(deps, file);
           filesExamined += 1;
+
+          await probeHeadAliasTargets(
+            deps,
+            file.path,
+            content,
+            file.added_lines,
+            resolveCtx,
+            probeCache,
+            probeBudget,
+          );
 
           const violations = evaluateFileArchitecture({
             filePath: file.path,

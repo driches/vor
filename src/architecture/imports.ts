@@ -1596,60 +1596,71 @@ function existsRepoPrefix(prefixDir: string, ctx: WorkspaceResolveContext): bool
   }
 }
 
-function resolveTsJsCandidate(basePath: string, ctx: WorkspaceResolveContext): string {
+function expandTsJsCandidatePaths(basePath: string): string[] {
   const norm = normalizePath(basePath);
-  const candidates: string[] = [norm];
+  if (!norm) return [];
 
   // ESM TS conventions import `.js` / `.mjs` / `.cjs` while the file on disk is `.ts*`.
   if (norm.endsWith('.js')) {
     const stem = norm.slice(0, -3);
-    candidates.push(`${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`);
-  } else if (norm.endsWith('.jsx')) {
+    return [norm, `${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`];
+  }
+  if (norm.endsWith('.jsx')) {
     const stem = norm.slice(0, -4);
-    candidates.push(`${stem}.tsx`, `${stem}.ts`, `${stem}.d.ts`);
-  } else if (norm.endsWith('.mjs')) {
-    candidates.push(`${norm.slice(0, -4)}.mts`, `${norm.slice(0, -4)}.d.mts`);
-  } else if (norm.endsWith('.cjs')) {
-    candidates.push(`${norm.slice(0, -4)}.cts`, `${norm.slice(0, -4)}.d.cts`);
-  } else {
-    candidates.push(
-      `${norm}.ts`,
-      `${norm}.tsx`,
-      `${norm}.mts`,
-      `${norm}.cts`,
-      `${norm}.d.ts`,
-      `${norm}.js`,
-      `${norm}.jsx`,
-      `${norm}.mjs`,
-      `${norm}.cjs`,
-      `${norm}/index.ts`,
-      `${norm}/index.tsx`,
-      `${norm}/index.d.ts`,
-      `${norm}/index.js`,
-      `${norm}/index.jsx`,
-    );
+    return [norm, `${stem}.tsx`, `${stem}.ts`, `${stem}.d.ts`];
+  }
+  if (norm.endsWith('.mjs')) {
+    const stem = norm.slice(0, -4);
+    return [norm, `${stem}.mts`, `${stem}.d.mts`];
+  }
+  if (norm.endsWith('.cjs')) {
+    const stem = norm.slice(0, -4);
+    return [norm, `${stem}.cts`, `${stem}.d.cts`];
   }
 
+  const suffixCandidates = [
+    `${norm}.ts`,
+    `${norm}.tsx`,
+    `${norm}.mts`,
+    `${norm}.cts`,
+    `${norm}.d.ts`,
+    `${norm}.js`,
+    `${norm}.jsx`,
+    `${norm}.mjs`,
+    `${norm}.cjs`,
+    `${norm}/index.ts`,
+    `${norm}/index.tsx`,
+    `${norm}/index.d.ts`,
+    `${norm}/index.js`,
+    `${norm}/index.jsx`,
+  ];
+  // Put `.ts*`/`.js*`/index candidates before the extensionless path when no extension is present
+  // so remote file probes check real file paths first.
+  return /\.[^/]+$/.test(norm) ? [norm, ...suffixCandidates] : [...suffixCandidates, norm];
+}
+
+function resolveTsJsCandidate(basePath: string, ctx: WorkspaceResolveContext): string {
+  const norm = normalizePath(basePath);
+  const candidates = expandTsJsCandidatePaths(norm);
   for (const c of candidates) {
     if (existsRepoFile(c, ctx)) return c;
   }
   return norm;
 }
 
-function matchTsConfigAlias(
+interface BestTsConfigPathMatch {
+  exact: boolean;
+  prefixLen: number;
+  suffixLen: number;
+  wildcard: string;
+  targets: string[];
+}
+
+function findBestTsConfigPathMatch(
   specifier: string,
   tsconfig: TsConfigPaths,
-  ctx: WorkspaceResolveContext,
-): string | undefined {
-  let best:
-    | {
-        exact: boolean;
-        prefixLen: number;
-        suffixLen: number;
-        wildcard: string;
-        targets: string[];
-      }
-    | undefined;
+): BestTsConfigPathMatch | undefined {
+  let best: BestTsConfigPathMatch | undefined;
 
   for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
     if (targets.length === 0) continue;
@@ -1690,6 +1701,46 @@ function matchTsConfigAlias(
       }
     }
   }
+
+  return best;
+}
+
+/**
+ * List candidate repo-relative file paths for a non-relative JS/TS specifier
+ * under the parsed `tsconfig.paths` and `tsconfig.baseUrl` configuration.
+ */
+export function listTsConfigAliasCandidates(specifier: string, tsconfig: TsConfigPaths): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const pushAll = (basePath: string): void => {
+    for (const candidate of expandTsJsCandidatePaths(basePath)) {
+      if (!seen.has(candidate)) {
+        seen.add(candidate);
+        out.push(candidate);
+      }
+    }
+  };
+
+  const best = findBestTsConfigPathMatch(specifier, tsconfig);
+  if (best) {
+    for (const target of best.targets) {
+      const substituted = best.exact ? target : target.replace('*', best.wildcard);
+      pushAll(substituted);
+    }
+  }
+  if (tsconfig.baseUrl) {
+    const basePrefix = tsconfig.baseUrl !== '.' ? `${tsconfig.baseUrl}/` : '';
+    pushAll(posix.join(basePrefix, specifier));
+  }
+  return out;
+}
+
+function matchTsConfigAlias(
+  specifier: string,
+  tsconfig: TsConfigPaths,
+  ctx: WorkspaceResolveContext,
+): string | undefined {
+  const best = findBestTsConfigPathMatch(specifier, tsconfig);
 
   if (best) {
     const hasRepoTree = Boolean(ctx.knownFiles || ctx.workspaceDir);

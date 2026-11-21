@@ -89747,43 +89747,52 @@ function existsRepoPrefix(prefixDir, ctx) {
     return false;
   }
 }
-function resolveTsJsCandidate(basePath, ctx) {
+function expandTsJsCandidatePaths(basePath) {
   const norm = normalizePath(basePath);
-  const candidates = [norm];
+  if (!norm) return [];
   if (norm.endsWith(".js")) {
     const stem = norm.slice(0, -3);
-    candidates.push(`${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`);
-  } else if (norm.endsWith(".jsx")) {
-    const stem = norm.slice(0, -4);
-    candidates.push(`${stem}.tsx`, `${stem}.ts`, `${stem}.d.ts`);
-  } else if (norm.endsWith(".mjs")) {
-    candidates.push(`${norm.slice(0, -4)}.mts`, `${norm.slice(0, -4)}.d.mts`);
-  } else if (norm.endsWith(".cjs")) {
-    candidates.push(`${norm.slice(0, -4)}.cts`, `${norm.slice(0, -4)}.d.cts`);
-  } else {
-    candidates.push(
-      `${norm}.ts`,
-      `${norm}.tsx`,
-      `${norm}.mts`,
-      `${norm}.cts`,
-      `${norm}.d.ts`,
-      `${norm}.js`,
-      `${norm}.jsx`,
-      `${norm}.mjs`,
-      `${norm}.cjs`,
-      `${norm}/index.ts`,
-      `${norm}/index.tsx`,
-      `${norm}/index.d.ts`,
-      `${norm}/index.js`,
-      `${norm}/index.jsx`
-    );
+    return [norm, `${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`];
   }
+  if (norm.endsWith(".jsx")) {
+    const stem = norm.slice(0, -4);
+    return [norm, `${stem}.tsx`, `${stem}.ts`, `${stem}.d.ts`];
+  }
+  if (norm.endsWith(".mjs")) {
+    const stem = norm.slice(0, -4);
+    return [norm, `${stem}.mts`, `${stem}.d.mts`];
+  }
+  if (norm.endsWith(".cjs")) {
+    const stem = norm.slice(0, -4);
+    return [norm, `${stem}.cts`, `${stem}.d.cts`];
+  }
+  const suffixCandidates = [
+    `${norm}.ts`,
+    `${norm}.tsx`,
+    `${norm}.mts`,
+    `${norm}.cts`,
+    `${norm}.d.ts`,
+    `${norm}.js`,
+    `${norm}.jsx`,
+    `${norm}.mjs`,
+    `${norm}.cjs`,
+    `${norm}/index.ts`,
+    `${norm}/index.tsx`,
+    `${norm}/index.d.ts`,
+    `${norm}/index.js`,
+    `${norm}/index.jsx`
+  ];
+  return /\.[^/]+$/.test(norm) ? [norm, ...suffixCandidates] : [...suffixCandidates, norm];
+}
+function resolveTsJsCandidate(basePath, ctx) {
+  const norm = normalizePath(basePath);
+  const candidates = expandTsJsCandidatePaths(norm);
   for (const c2 of candidates) {
     if (existsRepoFile(c2, ctx)) return c2;
   }
   return norm;
 }
-function matchTsConfigAlias(specifier, tsconfig, ctx) {
+function findBestTsConfigPathMatch(specifier, tsconfig) {
   let best;
   for (const [pattern, targets] of Object.entries(tsconfig.paths)) {
     if (targets.length === 0) continue;
@@ -89816,6 +89825,34 @@ function matchTsConfigAlias(specifier, tsconfig, ctx) {
       }
     }
   }
+  return best;
+}
+function listTsConfigAliasCandidates(specifier, tsconfig) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  const pushAll = (basePath) => {
+    for (const candidate of expandTsJsCandidatePaths(basePath)) {
+      if (!seen.has(candidate)) {
+        seen.add(candidate);
+        out.push(candidate);
+      }
+    }
+  };
+  const best = findBestTsConfigPathMatch(specifier, tsconfig);
+  if (best) {
+    for (const target of best.targets) {
+      const substituted = best.exact ? target : target.replace("*", best.wildcard);
+      pushAll(substituted);
+    }
+  }
+  if (tsconfig.baseUrl) {
+    const basePrefix = tsconfig.baseUrl !== "." ? `${tsconfig.baseUrl}/` : "";
+    pushAll(import_node_path22.posix.join(basePrefix, specifier));
+  }
+  return out;
+}
+function matchTsConfigAlias(specifier, tsconfig, ctx) {
+  const best = findBestTsConfigPathMatch(specifier, tsconfig);
   if (best) {
     const hasRepoTree = Boolean(ctx.knownFiles || ctx.workspaceDir);
     let firstSubstituted;
@@ -90510,8 +90547,83 @@ async function hydrateTsConfigFromHead(deps, headRaw) {
     return null;
   });
 }
+async function fetchHeadTreeFiles(deps) {
+  if (typeof deps.octokit?.rest?.git?.getTree !== "function" || deps.signal.aborted) {
+    return null;
+  }
+  try {
+    const res = await deps.octokit.rest.git.getTree({
+      owner: deps.owner,
+      repo: deps.repo,
+      tree_sha: deps.head_sha,
+      recursive: "1",
+      request: { signal: deps.signal }
+    });
+    if (res.data.truncated) return null;
+    const files = /* @__PURE__ */ new Set();
+    for (const entry of res.data.tree) {
+      if (entry.type === "blob" && entry.path) {
+        const norm = normalizePath(entry.path);
+        if (norm) files.add(norm);
+      }
+    }
+    return files;
+  } catch {
+    return null;
+  }
+}
+async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolveCtx, probeCache, probeBudget) {
+  if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
+  const lang = detectArchLanguage(filePath);
+  if (lang !== "typescript" && lang !== "javascript") return;
+  const { imports } = extractImports(filePath, content);
+  const relevant = imports.filter(
+    (imp) => onlyLines.has(imp.line) && !imp.specifier.startsWith("./") && !imp.specifier.startsWith("../") && !imp.specifier.startsWith("node:")
+  );
+  if (relevant.length === 0) return;
+  const mutableExtra = resolveCtx.extraFiles ? new Set(resolveCtx.extraFiles) : /* @__PURE__ */ new Set();
+  let extraUpdated = false;
+  for (const imp of relevant) {
+    if (resolveImport(imp, filePath, resolveCtx).resolvedPath) continue;
+    const candidates = listTsConfigAliasCandidates(imp.specifier, resolveCtx.tsconfig);
+    for (const candidate of candidates) {
+      if (deps.signal.aborted) break;
+      let exists2 = probeCache.get(candidate);
+      if (exists2 === void 0) {
+        if (probeBudget.remaining <= 0) break;
+        probeBudget.remaining -= 1;
+        try {
+          const hit = await deps.fileReader.read({
+            owner: deps.owner,
+            repo: deps.repo,
+            path: candidate,
+            ref: deps.head_sha
+          });
+          exists2 = hit !== null;
+        } catch {
+          exists2 = false;
+        }
+        probeCache.set(candidate, exists2);
+      }
+      if (exists2) {
+        mutableExtra.add(candidate);
+        resolveCtx.extraFiles = mutableExtra;
+        extraUpdated = true;
+        break;
+      }
+    }
+    if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+  }
+  if (extraUpdated) {
+    resolveCtx.extraFiles = mutableExtra;
+  }
+}
 async function hydrateResolveContext(deps, languagesPresent) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
+  const headTree = await fetchHeadTreeFiles(deps);
+  if (headTree) {
+    ctx.knownFiles = headTree;
+  }
   const prFiles = deps.changedFiles.filter((f2) => f2.status !== "removed").map((f2) => normalizePath(f2.path));
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
@@ -90575,6 +90687,8 @@ function createArchitectureScanner(spec, options = {}) {
         if (lang) languagesPresent.add(lang);
       }
       const resolveCtx = await hydrateResolveContext(deps, languagesPresent);
+      const probeCache = /* @__PURE__ */ new Map();
+      const probeBudget = { remaining: 64 };
       const findings = [];
       const errors = [];
       let filesExamined = 0;
@@ -90583,6 +90697,15 @@ function createArchitectureScanner(spec, options = {}) {
         try {
           const content = await readHeadFileContent(deps, file2);
           filesExamined += 1;
+          await probeHeadAliasTargets(
+            deps,
+            file2.path,
+            content,
+            file2.added_lines,
+            resolveCtx,
+            probeCache,
+            probeBudget
+          );
           const violations = evaluateFileArchitecture({
             filePath: file2.path,
             content,

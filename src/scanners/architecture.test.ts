@@ -181,4 +181,72 @@ entries:
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
   });
+
+  it('resolves tsconfig alias targets existing only at PR HEAD via HEAD tree or fileReader fallback', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-stale-checkout-'));
+    try {
+      // Stale checkout has tsconfig.json defining `@infra/*`, but lacks unchanged `src/infrastructure/repo.ts`.
+      writeFileSync(
+        join(ws, 'tsconfig.json'),
+        '{"compilerOptions":{"baseUrl":".","paths":{"@infra/*":["src/infrastructure/*"]}}}',
+      );
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+      const scanner = createArchitectureScanner(spec);
+      const domainFile = 'src/domain/order.ts';
+      const domainContent = [
+        "import { Repo } from '@infra/repo';",
+        "import { MissingPkg } from '@infra/missing';",
+        'export const r = [Repo, MissingPkg];',
+      ].join('\n');
+      const changed = makeChangedFile(domainFile, {
+        1: "import { Repo } from '@infra/repo';",
+        2: "import { MissingPkg } from '@infra/missing';",
+      });
+
+      // Case 1: octokit.rest.git.getTree supplies the PR HEAD tree (no need to read unchanged repo.ts).
+      const treeDeps = makeDeps([changed], {
+        [domainFile]: domainContent,
+      });
+      treeDeps.workspaceDir = ws;
+      treeDeps.octokit = {
+        rest: {
+          git: {
+            getTree: vi.fn(async () => ({
+              data: {
+                truncated: false,
+                tree: [
+                  { type: 'blob', path: domainFile },
+                  { type: 'blob', path: 'src/infrastructure/repo.ts' },
+                ],
+              },
+            })),
+          },
+        },
+      } as unknown as ScannerDeps['octokit'];
+
+      const treeResult = await scanner.scan(treeDeps);
+      expect(treeResult.findings).toHaveLength(1);
+      expect(treeResult.findings[0]?.line).toBe(1);
+      expect(treeResult.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+
+      // Case 2: git.getTree is unavailable/truncated; probeHeadAliasTargets checks fileReader at HEAD.
+      const fallbackDeps = makeDeps([changed], {
+        [domainFile]: domainContent,
+        'src/infrastructure/repo.ts': 'export const Repo = 1;\n',
+      });
+      fallbackDeps.workspaceDir = ws;
+
+      const fallbackResult = await scanner.scan(fallbackDeps);
+      expect(fallbackResult.findings).toHaveLength(1);
+      expect(fallbackResult.findings[0]?.line).toBe(1);
+      expect(fallbackResult.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
