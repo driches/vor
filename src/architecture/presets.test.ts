@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
+import { mergeArchitectureConfig, parseExternalArchitectureYamlStrict } from './loader.js';
 import { generateStarterYaml, listPresets, resolveArchitectureSpec } from './presets.js';
 
 describe('resolveArchitectureSpec', () => {
@@ -83,5 +84,25 @@ describe('listPresets & generateStarterYaml', () => {
       const yaml = generateStarterYaml(p.id, { root: 'src' });
       expect(yaml).toContain(`preset: ${p.id}`);
     }
+  });
+
+  it('preserves complete preset layer paths in generated starter YAML', () => {
+    const direct = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'hexagonal',
+      root: 'src',
+    });
+    const parsed = parseExternalArchitectureYamlStrict(
+      generateStarterYaml('hexagonal', { root: 'src' }),
+    );
+    const loaded = resolveArchitectureSpec(
+      mergeArchitectureConfig({ ...DEFAULT_CONFIG.architecture, enabled: true }, parsed),
+    );
+
+    expect(loaded.layers.application?.paths).toEqual(direct.layers.application?.paths);
+    expect(loaded.layers.adapters_out?.paths).toEqual(direct.layers.adapters_out?.paths);
+    expect(loaded.layers.application?.paths).toContain('src/use_cases/**');
+    expect(loaded.layers.adapters_out?.paths).toContain('src/infrastructure/**');
   });
 });

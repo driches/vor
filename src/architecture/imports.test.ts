@@ -414,4 +414,59 @@ describe('extractImports & resolveImport across languages', () => {
     expect(resolveImport(imports[3]!, 'src/domain/service.ts', ctx).resolvedPath).toBeUndefined();
     expect(resolveImport(imports[3]!, 'src/domain/service.ts', ctx).packageName).toBe('a');
   });
+
+  it('replaces inherited tsconfig paths when a child defines compilerOptions.paths', () => {
+    const baseRaw = JSON.stringify({
+      compilerOptions: {
+        baseUrl: '.',
+        paths: {
+          '@infra/*': ['src/infrastructure/*'],
+        },
+      },
+    });
+    const knownFiles = new Set(['src/infrastructure/repo.ts', 'src/shared/util.ts']);
+
+    const childWithPaths = parseTsConfigContent(
+      JSON.stringify({
+        extends: './base.json',
+        compilerOptions: {
+          paths: {
+            '@shared/*': ['src/shared/*'],
+          },
+        },
+      }),
+      (rel) => (rel === 'base.json' ? baseRaw : null),
+    );
+    const { imports: childImports } = extractImports(
+      'src/domain/service.ts',
+      ["import { Repo } from '@infra/repo';", "import { u } from '@shared/util';"].join('\n'),
+    );
+    const resInfra = resolveImport(childImports[0]!, 'src/domain/service.ts', {
+      tsconfig: childWithPaths,
+      knownFiles,
+    });
+    const resShared = resolveImport(childImports[1]!, 'src/domain/service.ts', {
+      tsconfig: childWithPaths,
+      knownFiles,
+    });
+    expect(resInfra.resolvedPath).toBeUndefined();
+    expect(resInfra.packageName).toBe('@infra/repo');
+    expect(resShared.resolvedPath).toBe('src/shared/util.ts');
+
+    const childEmptyPaths = parseTsConfigContent(
+      JSON.stringify({
+        extends: './base.json',
+        compilerOptions: {
+          paths: {},
+        },
+      }),
+      (rel) => (rel === 'base.json' ? baseRaw : null),
+    );
+    const resEmpty = resolveImport(childImports[0]!, 'src/domain/service.ts', {
+      tsconfig: childEmptyPaths,
+      knownFiles,
+    });
+    expect(resEmpty.resolvedPath).toBeUndefined();
+    expect(resEmpty.packageName).toBe('@infra/repo');
+  });
 });

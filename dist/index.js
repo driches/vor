@@ -89274,7 +89274,7 @@ function extractTsConfigExtends(raw) {
     (item) => typeof item === "string" && (item.startsWith("./") || item.startsWith("../"))
   );
 }
-function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
+function parseTsConfigInternal(raw, readRelative, depth = 0, configDir = "") {
   if (depth > 2) return void 0;
   let parsed;
   try {
@@ -89285,6 +89285,7 @@ function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
   if (!parsed || typeof parsed !== "object") return void 0;
   const obj = parsed;
   let base = { paths: {} };
+  let inheritedExplicitPaths = false;
   if (readRelative) {
     const extEntries = typeof obj.extends === "string" ? [obj.extends] : Array.isArray(obj.extends) ? obj.extends : [];
     for (const ext of extEntries) {
@@ -89302,11 +89303,12 @@ function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
       if (extRaw) {
         const rawParentDir = import_node_path22.posix.dirname(resolvedExtPath);
         const parentDir = rawParentDir === "." ? "" : rawParentDir;
-        const parent = parseTsConfigContent(extRaw, readRelative, depth + 1, parentDir);
+        const parent = parseTsConfigInternal(extRaw, readRelative, depth + 1, parentDir);
         if (parent) {
+          inheritedExplicitPaths ||= parent.hasExplicitPaths;
           base = {
-            ...parent.baseUrl !== void 0 ? { baseUrl: parent.baseUrl } : base.baseUrl !== void 0 ? { baseUrl: base.baseUrl } : {},
-            paths: { ...base.paths, ...parent.paths }
+            ...parent.config.baseUrl !== void 0 ? { baseUrl: parent.config.baseUrl } : base.baseUrl !== void 0 ? { baseUrl: base.baseUrl } : {},
+            paths: parent.hasExplicitPaths ? { ...parent.config.paths } : { ...base.paths, ...parent.config.paths }
           };
         }
       }
@@ -89315,16 +89317,31 @@ function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
   const co = obj.compilerOptions;
   const baseUrl = typeof co?.baseUrl === "string" ? rebaseFromDir(configDir, co.baseUrl) : base.baseUrl;
   const pathsBase = baseUrl ?? configDir;
-  const paths = { ...base.paths };
-  if (co?.paths && typeof co.paths === "object") {
+  const hasOwnPaths = co?.paths !== void 0 && typeof co.paths === "object" && !Array.isArray(co.paths);
+  const paths = hasOwnPaths ? {} : { ...base.paths };
+  if (hasOwnPaths) {
     for (const [k2, v2] of Object.entries(co.paths)) {
       if (Array.isArray(v2)) {
         paths[k2] = v2.filter((item) => typeof item === "string").map((item) => rebaseFromDir(pathsBase, item));
       }
     }
   }
-  if (baseUrl === void 0 && Object.keys(paths).length === 0) return void 0;
-  return { ...baseUrl !== void 0 ? { baseUrl } : {}, paths };
+  const hasExplicitPaths = hasOwnPaths || inheritedExplicitPaths;
+  if (baseUrl === void 0 && !hasExplicitPaths && Object.keys(paths).length === 0) {
+    return void 0;
+  }
+  return {
+    config: { ...baseUrl !== void 0 ? { baseUrl } : {}, paths },
+    hasExplicitPaths
+  };
+}
+function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
+  const res = parseTsConfigInternal(raw, readRelative, depth, configDir);
+  if (!res) return void 0;
+  if (res.config.baseUrl === void 0 && Object.keys(res.config.paths).length === 0) {
+    return void 0;
+  }
+  return res.config;
 }
 function parseGoModModule(raw) {
   const m2 = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
@@ -90567,18 +90584,16 @@ var DiskReferenceCache = class {
       const hash2 = file2.slice(0, -".meta.json".length);
       const metaPath = (0, import_node_path25.join)(this.cacheDir, file2);
       const contentPath = (0, import_node_path25.join)(this.cacheDir, `${hash2}.content`);
-      let shouldDelete = idOrKey === void 0;
-      if (!shouldDelete && idOrKey !== void 0) {
-        if (hash2 === idOrKey) {
-          shouldDelete = true;
-        } else {
-          try {
-            const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs11.readFileSync)(metaPath, "utf-8")));
-            if (parsed.success && (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)) {
-              shouldDelete = true;
-            }
-          } catch {
+      let shouldDelete = false;
+      if (idOrKey === void 0 || hash2 === idOrKey) {
+        shouldDelete = true;
+      } else {
+        try {
+          const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs11.readFileSync)(metaPath, "utf-8")));
+          if (parsed.success && (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)) {
+            shouldDelete = true;
           }
+        } catch {
         }
       }
       if (!shouldDelete) continue;

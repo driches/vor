@@ -600,7 +600,7 @@ export function generateStarterYaml(
   const preset = buildPreset(presetId, opts.root);
   const layerSample: Record<string, { paths: string[] }> = {};
   for (const [name, def] of Object.entries(preset.layers)) {
-    layerSample[name] = { paths: def.paths.slice(0, 2) };
+    layerSample[name] = { paths: [...def.paths] };
   }
 
   const doc: Record<string, unknown> = {

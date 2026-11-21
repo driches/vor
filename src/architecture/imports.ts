@@ -1042,12 +1042,12 @@ export function extractTsConfigExtends(raw: string): string[] {
   );
 }
 
-export function parseTsConfigContent(
+function parseTsConfigInternal(
   raw: string,
   readRelative?: (relPath: string) => string | null,
   depth = 0,
   configDir = '',
-): TsConfigPaths | undefined {
+): { config: TsConfigPaths; hasExplicitPaths: boolean } | undefined {
   if (depth > 2) return undefined;
   let parsed: unknown;
   try {
@@ -1062,6 +1062,7 @@ export function parseTsConfigContent(
   };
 
   let base: TsConfigPaths = { paths: {} };
+  let inheritedExplicitPaths = false;
   if (readRelative) {
     const extEntries =
       typeof obj.extends === 'string'
@@ -1084,15 +1085,18 @@ export function parseTsConfigContent(
       if (extRaw) {
         const rawParentDir = posix.dirname(resolvedExtPath);
         const parentDir = rawParentDir === '.' ? '' : rawParentDir;
-        const parent = parseTsConfigContent(extRaw, readRelative, depth + 1, parentDir);
+        const parent = parseTsConfigInternal(extRaw, readRelative, depth + 1, parentDir);
         if (parent) {
+          inheritedExplicitPaths ||= parent.hasExplicitPaths;
           base = {
-            ...(parent.baseUrl !== undefined
-              ? { baseUrl: parent.baseUrl }
+            ...(parent.config.baseUrl !== undefined
+              ? { baseUrl: parent.config.baseUrl }
               : base.baseUrl !== undefined
                 ? { baseUrl: base.baseUrl }
                 : {}),
-            paths: { ...base.paths, ...parent.paths },
+            paths: parent.hasExplicitPaths
+              ? { ...parent.config.paths }
+              : { ...base.paths, ...parent.config.paths },
           };
         }
       }
@@ -1103,9 +1107,12 @@ export function parseTsConfigContent(
   const baseUrl =
     typeof co?.baseUrl === 'string' ? rebaseFromDir(configDir, co.baseUrl) : base.baseUrl;
   const pathsBase = baseUrl ?? configDir;
-  const paths: Record<string, string[]> = { ...base.paths };
-  if (co?.paths && typeof co.paths === 'object') {
-    for (const [k, v] of Object.entries(co.paths)) {
+  const hasOwnPaths =
+    co?.paths !== undefined && typeof co.paths === 'object' && !Array.isArray(co.paths);
+  // In TypeScript, defining `compilerOptions.paths` (even `{}`) replaces any inherited map.
+  const paths: Record<string, string[]> = hasOwnPaths ? {} : { ...base.paths };
+  if (hasOwnPaths) {
+    for (const [k, v] of Object.entries(co.paths as Record<string, unknown>)) {
       if (Array.isArray(v)) {
         paths[k] = v
           .filter((item): item is string => typeof item === 'string')
@@ -1114,8 +1121,28 @@ export function parseTsConfigContent(
     }
   }
 
-  if (baseUrl === undefined && Object.keys(paths).length === 0) return undefined;
-  return { ...(baseUrl !== undefined ? { baseUrl } : {}), paths };
+  const hasExplicitPaths = hasOwnPaths || inheritedExplicitPaths;
+  if (baseUrl === undefined && !hasExplicitPaths && Object.keys(paths).length === 0) {
+    return undefined;
+  }
+  return {
+    config: { ...(baseUrl !== undefined ? { baseUrl } : {}), paths },
+    hasExplicitPaths,
+  };
+}
+
+export function parseTsConfigContent(
+  raw: string,
+  readRelative?: (relPath: string) => string | null,
+  depth = 0,
+  configDir = '',
+): TsConfigPaths | undefined {
+  const res = parseTsConfigInternal(raw, readRelative, depth, configDir);
+  if (!res) return undefined;
+  if (res.config.baseUrl === undefined && Object.keys(res.config.paths).length === 0) {
+    return undefined;
+  }
+  return res.config;
 }
 
 export function parseGoModModule(raw: string): string | undefined {

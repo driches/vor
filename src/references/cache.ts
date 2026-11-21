@@ -225,22 +225,20 @@ export class DiskReferenceCache {
       const metaPath = join(this.cacheDir, file);
       const contentPath = join(this.cacheDir, `${hash}.content`);
 
-      let shouldDelete = idOrKey === undefined;
-      if (!shouldDelete && idOrKey !== undefined) {
-        if (hash === idOrKey) {
-          shouldDelete = true;
-        } else {
-          try {
-            const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileSync(metaPath, 'utf-8')));
-            if (
-              parsed.success &&
-              (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)
-            ) {
-              shouldDelete = true;
-            }
-          } catch {
-            // Corrupt file matched by idOrKey check: ignore.
+      let shouldDelete = false;
+      if (idOrKey === undefined || hash === idOrKey) {
+        shouldDelete = true;
+      } else {
+        try {
+          const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileSync(metaPath, 'utf-8')));
+          if (
+            parsed.success &&
+            (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)
+          ) {
+            shouldDelete = true;
           }
+        } catch {
+          // Corrupt file matched by idOrKey check: ignore.
         }
       }
 
