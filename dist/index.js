@@ -90048,13 +90048,13 @@ function extractCSharpImports(content) {
   const rawLines = content.split("\n");
   const out = [];
   const declaredPackage = findCSharpNamespaceFromCleaned(cleaned, stringSpans);
-  const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
+  const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?(?:global\s*::\s*)?([A-Za-z_][\w.]*)\s*;/gm;
   for (const m2 of cleaned.matchAll(usingRe)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m2[1];
     if (spec === "var") continue;
-    const offset = idx + m2[0].indexOf(spec);
+    const offset = idx + m2[0].lastIndexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -93458,7 +93458,14 @@ async function runOrchestrator(input2) {
     repo: input2.repo,
     ref: prContext.metadata.head_sha,
     workspaceDir: input2.workspace_dir,
-    ...rawConfig.architecture ? { rawInline: rawConfig.architecture } : {}
+    ...rawConfig.architecture ? {
+      rawInline: {
+        severity: rawConfig.architecture.severity,
+        llm_enforcement: rawConfig.architecture.llm_enforcement,
+        deterministic_enforcement: rawConfig.architecture.deterministic_enforcement,
+        ignore_tests: rawConfig.architecture.ignore_tests
+      }
+    } : {}
   });
   const archSpec = effectiveArchConfig.enabled ? resolveArchitectureSpec(effectiveArchConfig) : void 0;
   let referenceCorpus;

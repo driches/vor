@@ -75,5 +75,15 @@ describe('readReferenceSlice', () => {
     if (!defaulted.ok) return;
     expect(defaulted.truncated).toBe(true);
     expect(defaulted.returned_range).toEqual([1, 400]);
+
+    const largeLine = 'c'.repeat(10_000);
+    const byteCapped = readReferenceSlice(
+      makeSingleDocCorpus(`${largeLine}\n${largeLine}\n${largeLine}`),
+      { id: 'oversized', start_line: 1, end_line: 3 },
+    );
+    expect(byteCapped.ok).toBe(true);
+    if (!byteCapped.ok) return;
+    expect(byteCapped.truncated).toBe(true);
+    expect(byteCapped.returned_range).toEqual([1, 2]);
   });
 });

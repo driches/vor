@@ -979,4 +979,37 @@ describe('extractImports & resolveImport across languages', () => {
       extractImports('src/main/java/com/acme/A.java', javaSrc).imports.map((i) => i.specifier),
     ).toEqual(['com.acme.Real']);
   });
+
+  it('extracts and resolves global::-qualified C# using directives', () => {
+    const csSrc = [
+      'namespace Acme.Domain;',
+      'using global::Acme.infrastructure;',
+      'global using global::Acme.Infrastructure.Events;',
+      'using static global::Acme.Infrastructure.Repo;',
+      'using InfraAlias = global::Acme.Infrastructure.Repo;',
+    ].join('\n');
+
+    const parsed = extractImports('src/domain/Order.cs', csSrc);
+    expect(parsed.imports.map((i) => [i.specifier, i.line])).toEqual([
+      ['Acme.infrastructure', 2],
+      ['Acme.Infrastructure.Events', 3],
+      ['Acme.Infrastructure.Repo', 4],
+      ['Acme.Infrastructure.Repo', 5],
+    ]);
+
+    const resolved = resolveImports(
+      parsed.imports,
+      'src/domain/Order.cs',
+      {
+        knownFiles: new Set(['src/domain/Order.cs', 'src/infrastructure/Repo.cs']),
+        csharpNamespaces: new Map([
+          ['Acme.infrastructure', 'src/infrastructure'],
+          ['Acme.Infrastructure.Repo', 'src/infrastructure'],
+        ]),
+      },
+      parsed.meta,
+    );
+    expect(resolved[0]?.resolvedPath).toBe('src/infrastructure');
+    expect(resolved[2]?.resolvedPath).toBe('src/infrastructure');
+  });
 });

@@ -1656,13 +1656,13 @@ function extractCSharpImports(content: string): {
   const declaredPackage = findCSharpNamespaceFromCleaned(cleaned, stringSpans);
 
   const usingRe =
-    /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
+    /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?(?:global\s*::\s*)?([A-Za-z_][\w.]*)\s*;/gm;
   for (const m of cleaned.matchAll(usingRe)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     const spec = m[1]!;
     if (spec === 'var') continue;
-    const offset = idx + m[0].indexOf(spec);
+    const offset = idx + m[0].lastIndexOf(spec);
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,

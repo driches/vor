@@ -35,7 +35,10 @@ import { dedupKeptScannerComments } from './scanners/dedup.js';
 import { IgnoreList } from './scanners/ignore-list.js';
 import { buildEnabledScanners } from './scanners/registry.js';
 import { createArchitectureScanner } from './scanners/architecture.js';
-import { resolveEffectiveArchitectureConfig } from './architecture/loader.js';
+import {
+  resolveEffectiveArchitectureConfig,
+  type RawInlineArchitectureHints,
+} from './architecture/loader.js';
 import { resolveArchitectureSpec } from './architecture/presets.js';
 import { loadReferences, type LoadedReferenceCorpus } from './references/loader.js';
 import { runScanners } from './scanners/runner.js';
@@ -285,7 +288,16 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     repo: input.repo,
     ref: prContext.metadata.head_sha,
     workspaceDir: input.workspace_dir,
-    ...(rawConfig.architecture ? { rawInline: rawConfig.architecture } : {}),
+    ...(rawConfig.architecture
+      ? {
+          rawInline: {
+            severity: rawConfig.architecture.severity,
+            llm_enforcement: rawConfig.architecture.llm_enforcement,
+            deterministic_enforcement: rawConfig.architecture.deterministic_enforcement,
+            ignore_tests: rawConfig.architecture.ignore_tests,
+          } satisfies RawInlineArchitectureHints,
+        }
+      : {}),
   });
   const archSpec = effectiveArchConfig.enabled
     ? resolveArchitectureSpec(effectiveArchConfig)

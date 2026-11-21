@@ -147,6 +147,7 @@ export function createHandlers(deps: VorToolDeps) {
     config: ReferencesConfig,
     forceRefresh = false,
   ): Promise<LoadedReferenceCorpus> => {
+    // ReferencesConfig is Zod-normalized with deterministic keys, and JSON.stringify compares values rather than object identity.
     const key = `${workspace}\0${JSON.stringify(config)}`;
     const now = Date.now();
     if (

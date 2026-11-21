@@ -218,7 +218,7 @@ function collapseNamespaceTargets(files: readonly string[]): string | undefined 
 
 function scanPartitionedRepoFiles(
   workspaceDir: string,
-  repoFiles: readonly string[],
+  repoFiles: Iterable<string>,
   extRe: RegExp,
   onFile: (normRelPath: string, content: string, isTest: boolean) => void,
 ): void {
@@ -254,7 +254,7 @@ function scanPartitionedRepoFiles(
 
 function buildCSharpNamespaceIndex(
   workspaceDir: string,
-  repoFiles: readonly string[],
+  repoFiles: Iterable<string>,
 ): Map<string, string> {
   const prodByNs = new Map<string, string[]>();
   const testByNs = new Map<string, string[]>();
@@ -286,7 +286,7 @@ function buildCSharpNamespaceIndex(
 
 function buildKotlinSymbolIndex(
   workspaceDir: string,
-  repoFiles: readonly string[],
+  repoFiles: Iterable<string>,
 ): Map<string, string> {
   const index = new Map<string, string>();
   scanPartitionedRepoFiles(workspaceDir, repoFiles, /\.(?:kt|kts)$/i, (normPath, content) => {
@@ -486,9 +486,9 @@ export function explainFileArchitecture(
   const resolvedKnownFiles = knownFiles ?? new Set(enumerateRepoFiles(workspaceDir));
   const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles: resolvedKnownFiles });
   if (language === 'csharp') {
-    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(workspaceDir, [...resolvedKnownFiles]);
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(workspaceDir, resolvedKnownFiles);
   } else if (language === 'kotlin') {
-    resolveCtx.kotlinSymbols = buildKotlinSymbolIndex(workspaceDir, [...resolvedKnownFiles]);
+    resolveCtx.kotlinSymbols = buildKotlinSymbolIndex(workspaceDir, resolvedKnownFiles);
   }
   let content: string;
   try {
