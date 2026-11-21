@@ -172,7 +172,7 @@ describe('extractImports & resolveImport across languages', () => {
     expect(resolved[0]?.resolvedPath).toBe('src/adapters/out/pg_repo');
     expect(resolved[1]?.resolvedPath).toBe('src/adapters/in/http_handler');
     expect(resolved[2]?.packageName).toBe('sqlx');
-    expect(resolved[3]?.resolvedPath).toBe('src/domain/helper.rs');
+    expect(resolved[3]?.resolvedPath).toBe('src/domain/order/helper.rs');
   });
 
   it('extracts and resolves Java/Kotlin and C# imports and package/namespace roots', () => {
@@ -356,6 +356,51 @@ describe('extractImports & resolveImport across languages', () => {
     expect(
       resolveImport(parsedNested.imports[0]!, 'crates/nested/src/app.rs', ctx).resolvedPath,
     ).toBe('crates/nested/src/lib.rs');
+  });
+
+  it('resolves Rust mod declarations beneath non-dir module files rather than sibling paths', () => {
+    const knownFiles = new Set([
+      'src/infrastructure.rs',
+      'src/domain.rs',
+      'src/domain/infrastructure.rs',
+      'src/domain/nested/mod.rs',
+    ]);
+    const ctx = { knownFiles };
+
+    const fromDomainFile = extractImports('src/domain.rs', 'mod infrastructure;\nmod nested;\n');
+    expect(
+      resolveImports(fromDomainFile.imports, 'src/domain.rs', ctx).map((r) => r.resolvedPath),
+    ).toEqual(['src/domain/infrastructure.rs', 'src/domain/nested/mod.rs']);
+
+    const fromDomainMod = extractImports('src/domain/mod.rs', 'mod infrastructure;\n');
+    expect(resolveImport(fromDomainMod.imports[0]!, 'src/domain/mod.rs', ctx).resolvedPath).toBe(
+      'src/domain/infrastructure.rs',
+    );
+
+    const fromLib = extractImports('src/lib.rs', 'mod domain;\nmod infrastructure;\n');
+    expect(resolveImports(fromLib.imports, 'src/lib.rs', ctx).map((r) => r.resolvedPath)).toEqual([
+      'src/domain.rs',
+      'src/infrastructure.rs',
+    ]);
+  });
+
+  it('ignores JS/TS import syntax inside regex literals while preserving division and JSX', () => {
+    const src = [
+      'const pattern = /import express from "express"/;',
+      "const fn = () => { return /require('pg')/; };",
+      "const escaped = /foo\\/bar import 'fastify' [a/b]/gi;",
+      "if (ok) /import 'prisma'/.test(s);",
+      "const ratio = a / b; import { ok } from './ok'; const r2 = (c + d) / e;",
+      "const el = <div><span>a</span>{require('pg')}<span>b</span></div>;",
+      "const el2 = <Icon prop={1} /> && require('zod') && <Other prop={2} />;",
+    ].join('\n');
+
+    const imports = extractImports('src/component.tsx', src).imports;
+    expect(imports.map((i) => [i.specifier, i.line])).toEqual([
+      ['./ok', 5],
+      ['pg', 6],
+      ['zod', 7],
+    ]);
   });
 
   it('rebases inherited tsconfig baseUrl, paths, and nested extends relative to their defining directory', () => {

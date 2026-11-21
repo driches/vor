@@ -101,4 +101,10 @@ describe('isLikelyBinary & truncateUtf8Bytes', () => {
     expect(Buffer.byteLength(res.content, 'utf-8')).toBeLessThanOrEqual(90);
     expect(res.content).toContain('(truncated at 90 bytes)');
   });
+
+  it('never exceeds maxBytes when budget is zero or smaller than the truncation notice', () => {
+    expect(truncateUtf8Bytes('a'.repeat(50), 10)).toEqual({ content: '', truncated: true });
+    expect(truncateUtf8Bytes('abc', 0)).toEqual({ content: '', truncated: true });
+    expect(truncateUtf8Bytes('', 0)).toEqual({ content: '', truncated: false });
+  });
 });

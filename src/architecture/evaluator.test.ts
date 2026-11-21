@@ -198,4 +198,37 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     expect(violations).toHaveLength(1);
     expect(violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
   });
+
+  it('treats an empty can_import allowlist as forbidding all cross-layer imports while allowing intra-layer imports', () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'custom',
+      layers: {
+        domain: {
+          paths: ['src/domain/**'],
+          can_import: [],
+        },
+        adapters: {
+          paths: ['src/adapters/**'],
+        },
+      },
+    });
+
+    const content = [
+      "import { Money } from './money';",
+      "import { Repo } from '../adapters/repo';",
+    ].join('\n');
+
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.ts',
+      content,
+      spec,
+      resolveCtx: {},
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.line).toBe(2);
+    expect(violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters');
+    expect(violations[0]?.description).toContain('`can_import: []`');
+  });
 });

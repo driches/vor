@@ -236,13 +236,22 @@ export function truncateUtf8Bytes(
   text: string,
   maxBytes: number,
 ): { content: string; truncated: boolean } {
+  if (maxBytes <= 0) {
+    return { content: '', truncated: text.length > 0 };
+  }
   const totalBytes = Buffer.byteLength(text, 'utf-8');
   if (totalBytes <= maxBytes) {
     return { content: text, truncated: false };
   }
 
   const notice = `\n\n...(truncated at ${maxBytes} bytes)`;
-  const budget = Math.max(0, maxBytes - Buffer.byteLength(notice, 'utf-8'));
+  const noticeBytes = Buffer.byteLength(notice, 'utf-8');
+  if (noticeBytes >= maxBytes) {
+    // Budget cannot even accommodate the truncation notice; return empty so
+    // callers' `maxBytes` ceiling is never exceeded.
+    return { content: '', truncated: true };
+  }
+  const budget = maxBytes - noticeBytes;
   const rawBuf = Buffer.from(text, 'utf-8');
   // Avoid cutting inside a multi-byte UTF-8 character (continuation bytes 10xxxxxx).
   let end = Math.min(budget, rawBuf.length);

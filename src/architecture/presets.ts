@@ -117,6 +117,7 @@ export interface ResolvedArchitectureSpec {
   baseline_file?: string;
 }
 
+// Scope built-in preset patterns under an optional repo root; user-supplied custom paths bypass this helper.
 function scopeGlobsToRoot(globs: readonly string[], root?: string): string[] {
   if (!root) return [...globs];
   const cleanRoot = normalizePath(root);

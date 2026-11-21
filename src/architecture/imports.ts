@@ -106,6 +106,8 @@ export interface StringSpan {
 export interface CLikeScanOptions {
   /** Treat JS/TS `` `...${...}...` `` interpolations as code rather than string content. */
   templateInterpolation?: boolean;
+  /** Skip `/` regex literals in JS/TS so embedded `import`/`require` text is ignored. */
+  regexLiterals?: boolean;
   /** Treat `` `...` `` as raw strings without backslash escapes (Go). */
   rawBackticks?: boolean;
   /** Recognize `"""..."""` (and `'''...'''`) multi-line strings (Dart, Java, Kotlin, C#). */
@@ -143,6 +145,57 @@ function findRustCharLiteralEnd(chars: readonly string[], openQuote: number): nu
   return -1;
 }
 
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'return',
+  'throw',
+  'case',
+  'delete',
+  'void',
+  'typeof',
+  'yield',
+  'await',
+  'in',
+  'instanceof',
+  'of',
+  'new',
+  'else',
+  'do',
+  'export',
+  'default',
+]);
+
+const CONTROL_PAREN_KEYWORDS = new Set(['if', 'while', 'for', 'with']);
+
+function findJsRegexLiteralEnd(chars: readonly string[], start: number): number {
+  const n = chars.length;
+  let inCharClass = false;
+  let j = start + 1;
+  while (j < n) {
+    const ch = chars[j]!;
+    if (ch === '\n' || ch === '\r') return -1;
+    if (ch === '\\') {
+      if (j + 1 >= n || chars[j + 1] === '\n' || chars[j + 1] === '\r') return -1;
+      j += 2;
+      continue;
+    }
+    if (ch === '[') {
+      inCharClass = true;
+      j += 1;
+      continue;
+    }
+    if (ch === ']' && inCharClass) {
+      inCharClass = false;
+      j += 1;
+      continue;
+    }
+    if (ch === '/' && !inCharClass) {
+      return j;
+    }
+    j += 1;
+  }
+  return -1;
+}
+
 type ActiveString =
   | { kind: 'quote'; quote: "'" | '"' | '`'; spanStart: number }
   | { kind: 'raw_backtick'; spanStart: number }
@@ -163,6 +216,8 @@ export function scanCLikeSource(
   const stringSpans: StringSpan[] = [];
   const templateBraceDepths: number[] = [];
   let active: ActiveString | null = null;
+  let lastToken: 'expr_start' | 'expr_end' | 'control_kw' | 'dot' | 'close_brace' = 'expr_start';
+  const parenStack: boolean[] = [];
   let i = 0;
 
   while (i < n) {
@@ -173,6 +228,7 @@ export function scanCLikeSource(
         if (ch === '`') {
           stringSpans.push({ start: active.spanStart, end: i });
           active = null;
+          lastToken = 'expr_end';
         }
         i += 1;
         continue;
@@ -188,6 +244,7 @@ export function scanCLikeSource(
             const end = i + active.hashes;
             stringSpans.push({ start: active.spanStart, end });
             active = null;
+            lastToken = 'expr_end';
             i = end + 1;
             continue;
           }
@@ -205,6 +262,7 @@ export function scanCLikeSource(
           const end = i + 2;
           stringSpans.push({ start: active.spanStart, end });
           active = null;
+          lastToken = 'expr_end';
           i = end + 1;
           continue;
         }
@@ -226,12 +284,14 @@ export function scanCLikeSource(
         stringSpans.push({ start: active.spanStart, end: i + 1 });
         templateBraceDepths.push(0);
         active = null;
+        lastToken = 'expr_start';
         i += 2;
         continue;
       }
       if (ch === active.quote) {
         stringSpans.push({ start: active.spanStart, end: i });
         active = null;
+        lastToken = 'expr_end';
         i += 1;
         continue;
       }
@@ -241,6 +301,7 @@ export function scanCLikeSource(
       if (active.quote !== '`' && ch === '\n') {
         stringSpans.push({ start: active.spanStart, end: i });
         active = null;
+        lastToken = 'expr_end';
         i += 1;
         continue;
       }
@@ -271,7 +332,11 @@ export function scanCLikeSource(
           i += 2;
           break;
         }
-        if (chars[i] !== '\n') chars[i] = ' ';
+        if (chars[i] === '\n') {
+          if (lastToken === 'close_brace') lastToken = 'expr_start';
+        } else {
+          chars[i] = ' ';
+        }
         i += 1;
       }
       continue;
@@ -281,6 +346,7 @@ export function scanCLikeSource(
     if (opts.templateInterpolation && templateBraceDepths.length > 0) {
       if (ch === '{') {
         templateBraceDepths[templateBraceDepths.length - 1]! += 1;
+        lastToken = 'expr_start';
         i += 1;
         continue;
       }
@@ -291,6 +357,7 @@ export function scanCLikeSource(
           active = { kind: 'quote', quote: '`', spanStart: i };
         } else {
           templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
+          lastToken = 'close_brace';
         }
         i += 1;
         continue;
@@ -348,6 +415,100 @@ export function scanCLikeSource(
       active = { kind: 'quote', quote: ch, spanStart: i };
       i += 1;
       continue;
+    }
+
+    if (opts.regexLiterals) {
+      if (ch === '\n') {
+        if (lastToken === 'close_brace') lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\f' || ch === '\v') {
+        i += 1;
+        continue;
+      }
+      if (ch === '<' && chars[i + 1] === '/') {
+        lastToken = 'expr_end';
+        i += 2;
+        continue;
+      }
+      if (ch === '/') {
+        if (lastToken === 'expr_start') {
+          const regexEnd = findJsRegexLiteralEnd(chars, i);
+          if (regexEnd !== -1) {
+            stringSpans.push({ start: i, end: regexEnd });
+            i = regexEnd + 1;
+            while (i < n && /[A-Za-z]/.test(chars[i]!)) i += 1;
+            lastToken = 'expr_end';
+            continue;
+          }
+        }
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if ((ch === '+' || ch === '-') && chars[i + 1] === ch) {
+        lastToken = 'expr_end';
+        i += 2;
+        continue;
+      }
+      if (ch === '(') {
+        parenStack.push(lastToken === 'control_kw');
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === ')') {
+        lastToken = (parenStack.pop() ?? false) ? 'expr_start' : 'expr_end';
+        i += 1;
+        continue;
+      }
+      if (ch === ']') {
+        lastToken = 'expr_end';
+        i += 1;
+        continue;
+      }
+      if (ch === '{') {
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === '}') {
+        lastToken = 'close_brace';
+        i += 1;
+        continue;
+      }
+      if (ch === '.') {
+        lastToken = 'dot';
+        i += 1;
+        continue;
+      }
+      if (/[A-Za-z_$]/.test(ch)) {
+        let wordEnd = i + 1;
+        while (wordEnd < n && isIdentChar(chars[wordEnd])) wordEnd += 1;
+        const word = chars.slice(i, wordEnd).join('');
+        if (lastToken === 'dot') {
+          lastToken = 'expr_end';
+        } else if (CONTROL_PAREN_KEYWORDS.has(word)) {
+          lastToken = 'control_kw';
+        } else if (REGEX_PREFIX_KEYWORDS.has(word)) {
+          lastToken = 'expr_start';
+        } else {
+          lastToken = 'expr_end';
+        }
+        i = wordEnd;
+        continue;
+      }
+      if (/[0-9]/.test(ch)) {
+        lastToken = 'expr_end';
+        i += 1;
+        continue;
+      }
+      if (',;:?=!&|^~+-*%<>['.includes(ch)) {
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
     }
 
     i += 1;
@@ -494,7 +655,10 @@ function extractJsTsImports(
   content: string,
   language: 'typescript' | 'javascript',
 ): ExtractedImport[] {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { templateInterpolation: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    templateInterpolation: true,
+    regexLiterals: true,
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -1626,6 +1790,15 @@ function resolveRustModulePath(
   return normJoined;
 }
 
+function rustLogicalModuleDir(normSource: string): string {
+  // In Rust, `foo.rs` defines module `foo` (so child `mod bar;` lives at
+  // `foo/bar.rs` or `foo/bar/mod.rs`), whereas `mod.rs`, `lib.rs`, and
+  // `main.rs` correspond directly to their containing directory.
+  const baseName = posix.basename(normSource);
+  const isDirModule = baseName === 'mod.rs' || baseName === 'lib.rs' || baseName === 'main.rs';
+  return isDirModule ? posix.dirname(normSource) : normSource.replace(/\.rs$/, '');
+}
+
 /**
  * Resolve an {@link ExtractedImport} into either an internal repo-relative path
  * or an external package identifier.
@@ -1697,7 +1870,7 @@ export function resolveImport(
     case 'rust': {
       if (imp.specifier.startsWith('mod:')) {
         const modName = imp.specifier.slice(4);
-        const dir = posix.dirname(normSource);
+        const dir = rustLogicalModuleDir(normSource);
         const direct = normalizePath(dir === '.' ? `${modName}.rs` : `${dir}/${modName}.rs`);
         const nested = normalizePath(
           dir === '.' ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`,
@@ -1715,14 +1888,9 @@ export function resolveImport(
         };
       }
       if (imp.specifier.startsWith('super::') || imp.specifier.startsWith('self::')) {
-        // In Rust, `foo.rs` defines module `foo`, whereas `foo/mod.rs`, `lib.rs`,
-        // and `main.rs` correspond directly to their containing directory.
-        // `self::` starts at that logical module path and each `super::`
-        // climbs one logical module level.
-        const baseName = posix.basename(normSource);
-        const isDirModule =
-          baseName === 'mod.rs' || baseName === 'lib.rs' || baseName === 'main.rs';
-        let modDir = isDirModule ? posix.dirname(normSource) : normSource.replace(/\.rs$/, '');
+        // `self::` starts at the declaring file's logical module path and each
+        // `super::` climbs one logical module level.
+        let modDir = rustLogicalModuleDir(normSource);
         let rest = imp.specifier;
         if (rest.startsWith('self::')) {
           rest = rest.slice('self::'.length);

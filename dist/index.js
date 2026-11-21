@@ -88550,12 +88550,62 @@ function findRustCharLiteralEnd(chars, openQuote) {
   }
   return -1;
 }
+var REGEX_PREFIX_KEYWORDS = /* @__PURE__ */ new Set([
+  "return",
+  "throw",
+  "case",
+  "delete",
+  "void",
+  "typeof",
+  "yield",
+  "await",
+  "in",
+  "instanceof",
+  "of",
+  "new",
+  "else",
+  "do",
+  "export",
+  "default"
+]);
+var CONTROL_PAREN_KEYWORDS = /* @__PURE__ */ new Set(["if", "while", "for", "with"]);
+function findJsRegexLiteralEnd(chars, start) {
+  const n2 = chars.length;
+  let inCharClass = false;
+  let j2 = start + 1;
+  while (j2 < n2) {
+    const ch = chars[j2];
+    if (ch === "\n" || ch === "\r") return -1;
+    if (ch === "\\") {
+      if (j2 + 1 >= n2 || chars[j2 + 1] === "\n" || chars[j2 + 1] === "\r") return -1;
+      j2 += 2;
+      continue;
+    }
+    if (ch === "[") {
+      inCharClass = true;
+      j2 += 1;
+      continue;
+    }
+    if (ch === "]" && inCharClass) {
+      inCharClass = false;
+      j2 += 1;
+      continue;
+    }
+    if (ch === "/" && !inCharClass) {
+      return j2;
+    }
+    j2 += 1;
+  }
+  return -1;
+}
 function scanCLikeSource(src, opts = {}) {
   const chars = src.split("");
   const n2 = chars.length;
   const stringSpans = [];
   const templateBraceDepths = [];
   let active = null;
+  let lastToken = "expr_start";
+  const parenStack = [];
   let i2 = 0;
   while (i2 < n2) {
     const ch = chars[i2];
@@ -88564,6 +88614,7 @@ function scanCLikeSource(src, opts = {}) {
         if (ch === "`") {
           stringSpans.push({ start: active.spanStart, end: i2 });
           active = null;
+          lastToken = "expr_end";
         }
         i2 += 1;
         continue;
@@ -88578,6 +88629,7 @@ function scanCLikeSource(src, opts = {}) {
             const end = i2 + active.hashes;
             stringSpans.push({ start: active.spanStart, end });
             active = null;
+            lastToken = "expr_end";
             i2 = end + 1;
             continue;
           }
@@ -88594,6 +88646,7 @@ function scanCLikeSource(src, opts = {}) {
           const end = i2 + 2;
           stringSpans.push({ start: active.spanStart, end });
           active = null;
+          lastToken = "expr_end";
           i2 = end + 1;
           continue;
         }
@@ -88608,18 +88661,21 @@ function scanCLikeSource(src, opts = {}) {
         stringSpans.push({ start: active.spanStart, end: i2 + 1 });
         templateBraceDepths.push(0);
         active = null;
+        lastToken = "expr_start";
         i2 += 2;
         continue;
       }
       if (ch === active.quote) {
         stringSpans.push({ start: active.spanStart, end: i2 });
         active = null;
+        lastToken = "expr_end";
         i2 += 1;
         continue;
       }
       if (active.quote !== "`" && ch === "\n") {
         stringSpans.push({ start: active.spanStart, end: i2 });
         active = null;
+        lastToken = "expr_end";
         i2 += 1;
         continue;
       }
@@ -88647,7 +88703,11 @@ function scanCLikeSource(src, opts = {}) {
           i2 += 2;
           break;
         }
-        if (chars[i2] !== "\n") chars[i2] = " ";
+        if (chars[i2] === "\n") {
+          if (lastToken === "close_brace") lastToken = "expr_start";
+        } else {
+          chars[i2] = " ";
+        }
         i2 += 1;
       }
       continue;
@@ -88655,6 +88715,7 @@ function scanCLikeSource(src, opts = {}) {
     if (opts.templateInterpolation && templateBraceDepths.length > 0) {
       if (ch === "{") {
         templateBraceDepths[templateBraceDepths.length - 1] += 1;
+        lastToken = "expr_start";
         i2 += 1;
         continue;
       }
@@ -88665,6 +88726,7 @@ function scanCLikeSource(src, opts = {}) {
           active = { kind: "quote", quote: "`", spanStart: i2 };
         } else {
           templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
+          lastToken = "close_brace";
         }
         i2 += 1;
         continue;
@@ -88704,6 +88766,99 @@ function scanCLikeSource(src, opts = {}) {
       active = { kind: "quote", quote: ch, spanStart: i2 };
       i2 += 1;
       continue;
+    }
+    if (opts.regexLiterals) {
+      if (ch === "\n") {
+        if (lastToken === "close_brace") lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === " " || ch === "	" || ch === "\r" || ch === "\f" || ch === "\v") {
+        i2 += 1;
+        continue;
+      }
+      if (ch === "<" && chars[i2 + 1] === "/") {
+        lastToken = "expr_end";
+        i2 += 2;
+        continue;
+      }
+      if (ch === "/") {
+        if (lastToken === "expr_start") {
+          const regexEnd = findJsRegexLiteralEnd(chars, i2);
+          if (regexEnd !== -1) {
+            stringSpans.push({ start: i2, end: regexEnd });
+            i2 = regexEnd + 1;
+            while (i2 < n2 && /[A-Za-z]/.test(chars[i2])) i2 += 1;
+            lastToken = "expr_end";
+            continue;
+          }
+        }
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if ((ch === "+" || ch === "-") && chars[i2 + 1] === ch) {
+        lastToken = "expr_end";
+        i2 += 2;
+        continue;
+      }
+      if (ch === "(") {
+        parenStack.push(lastToken === "control_kw");
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === ")") {
+        lastToken = parenStack.pop() ?? false ? "expr_start" : "expr_end";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "]") {
+        lastToken = "expr_end";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "{") {
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "}") {
+        lastToken = "close_brace";
+        i2 += 1;
+        continue;
+      }
+      if (ch === ".") {
+        lastToken = "dot";
+        i2 += 1;
+        continue;
+      }
+      if (/[A-Za-z_$]/.test(ch)) {
+        let wordEnd = i2 + 1;
+        while (wordEnd < n2 && isIdentChar(chars[wordEnd])) wordEnd += 1;
+        const word = chars.slice(i2, wordEnd).join("");
+        if (lastToken === "dot") {
+          lastToken = "expr_end";
+        } else if (CONTROL_PAREN_KEYWORDS.has(word)) {
+          lastToken = "control_kw";
+        } else if (REGEX_PREFIX_KEYWORDS.has(word)) {
+          lastToken = "expr_start";
+        } else {
+          lastToken = "expr_end";
+        }
+        i2 = wordEnd;
+        continue;
+      }
+      if (/[0-9]/.test(ch)) {
+        lastToken = "expr_end";
+        i2 += 1;
+        continue;
+      }
+      if (",;:?=!&|^~+-*%<>[".includes(ch)) {
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
     }
     i2 += 1;
   }
@@ -88821,7 +88976,10 @@ function dedupExtracted(items) {
   return out;
 }
 function extractJsTsImports(content, language) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { templateInterpolation: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    templateInterpolation: true,
+    regexLiterals: true
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -89713,6 +89871,11 @@ function resolveRustModulePath(joined, crateRoot, ctx) {
   }
   return normJoined;
 }
+function rustLogicalModuleDir(normSource) {
+  const baseName = import_node_path22.posix.basename(normSource);
+  const isDirModule = baseName === "mod.rs" || baseName === "lib.rs" || baseName === "main.rs";
+  return isDirModule ? import_node_path22.posix.dirname(normSource) : normSource.replace(/\.rs$/, "");
+}
 function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
   const base = {
     specifier: imp.specifier,
@@ -89770,7 +89933,7 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
     case "rust": {
       if (imp.specifier.startsWith("mod:")) {
         const modName = imp.specifier.slice(4);
-        const dir = import_node_path22.posix.dirname(normSource);
+        const dir = rustLogicalModuleDir(normSource);
         const direct = normalizePath(dir === "." ? `${modName}.rs` : `${dir}/${modName}.rs`);
         const nested = normalizePath(
           dir === "." ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`
@@ -89788,9 +89951,7 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         };
       }
       if (imp.specifier.startsWith("super::") || imp.specifier.startsWith("self::")) {
-        const baseName = import_node_path22.posix.basename(normSource);
-        const isDirModule = baseName === "mod.rs" || baseName === "lib.rs" || baseName === "main.rs";
-        let modDir = isDirModule ? import_node_path22.posix.dirname(normSource) : normSource.replace(/\.rs$/, "");
+        let modDir = rustLogicalModuleDir(normSource);
         let rest = imp.specifier;
         if (rest.startsWith("self::")) {
           rest = rest.slice("self::".length);
@@ -89935,7 +90096,7 @@ function evaluateFileArchitecture(input2) {
       const disallowedByAllowlist = sourceLayer.def.can_import !== void 0 && !sourceLayer.def.can_import.includes(targetLayer.name);
       if (forbiddenExplicit || disallowedByAllowlist) {
         const rule_id = `arch:layer:${sourceLayer.name}-to-${targetLayer.name}`;
-        const allowedText = sourceLayer.def.can_import && sourceLayer.def.can_import.length > 0 ? ` Allowed layer dependencies for \`${sourceLayer.name}\`: ${sourceLayer.def.can_import.map((l2) => `\`${l2}\``).join(", ")}.` : "";
+        const allowedText = sourceLayer.def.can_import === void 0 ? "" : sourceLayer.def.can_import.length > 0 ? ` Allowed layer dependencies for \`${sourceLayer.name}\`: ${sourceLayer.def.can_import.map((l2) => `\`${l2}\``).join(", ")}.` : ` Layer \`${sourceLayer.name}\` cannot import any other layer (\`can_import: []\`).`;
         pushViolation({
           rule_id,
           file_path: normFile,
@@ -90824,6 +90985,9 @@ function extractDocumentHeadings(markdown, maxHeadings = 8) {
   return headings;
 }
 function truncateUtf8Bytes(text, maxBytes) {
+  if (maxBytes <= 0) {
+    return { content: "", truncated: text.length > 0 };
+  }
   const totalBytes = Buffer.byteLength(text, "utf-8");
   if (totalBytes <= maxBytes) {
     return { content: text, truncated: false };
@@ -90831,7 +90995,11 @@ function truncateUtf8Bytes(text, maxBytes) {
   const notice2 = `
 
 ...(truncated at ${maxBytes} bytes)`;
-  const budget = Math.max(0, maxBytes - Buffer.byteLength(notice2, "utf-8"));
+  const noticeBytes = Buffer.byteLength(notice2, "utf-8");
+  if (noticeBytes >= maxBytes) {
+    return { content: "", truncated: true };
+  }
+  const budget = maxBytes - noticeBytes;
   const rawBuf = Buffer.from(text, "utf-8");
   let end = Math.min(budget, rawBuf.length);
   while (end > 0 && (rawBuf[end] & 192) === 128) {

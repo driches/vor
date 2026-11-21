@@ -168,6 +168,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
     // regardless of can_import / cannot_import config).
     if (sourceLayer && targetLayer && sourceLayer.name !== targetLayer.name) {
       const forbiddenExplicit = sourceLayer.def.cannot_import?.includes(targetLayer.name) ?? false;
+      // An explicit empty allowlist (`can_import: []`) forbids all cross-layer imports.
       const disallowedByAllowlist =
         sourceLayer.def.can_import !== undefined &&
         !sourceLayer.def.can_import.includes(targetLayer.name);
@@ -175,9 +176,11 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
       if (forbiddenExplicit || disallowedByAllowlist) {
         const rule_id = `arch:layer:${sourceLayer.name}-to-${targetLayer.name}`;
         const allowedText =
-          sourceLayer.def.can_import && sourceLayer.def.can_import.length > 0
-            ? ` Allowed layer dependencies for \`${sourceLayer.name}\`: ${sourceLayer.def.can_import.map((l) => `\`${l}\``).join(', ')}.`
-            : '';
+          sourceLayer.def.can_import === undefined
+            ? ''
+            : sourceLayer.def.can_import.length > 0
+              ? ` Allowed layer dependencies for \`${sourceLayer.name}\`: ${sourceLayer.def.can_import.map((l) => `\`${l}\``).join(', ')}.`
+              : ` Layer \`${sourceLayer.name}\` cannot import any other layer (\`can_import: []\`).`;
         pushViolation({
           rule_id,
           file_path: normFile,
