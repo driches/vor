@@ -182,7 +182,8 @@ function assertRegularOrMissingFile(filePath: string): void {
 function writeFileNoFollow(filePath: string, data: string): void {
   assertRegularOrMissingFile(filePath);
   // Combine upfront lstat rejection with O_NOFOLLOW at open(2) so cache writes
-  // cannot follow symlinks even under concurrent replacement.
+  // cannot follow symlinks under concurrent replacement. O_NOFOLLOW is undefined
+  // on Windows; the upfront lstatSync check serves as the guard there.
   const noFollowFlag = constants.O_NOFOLLOW ?? 0;
   const fd = openSync(
     filePath,
@@ -203,6 +204,7 @@ function readFileNoFollow(filePath: string): string {
       `Refusing to read cache entry from symlinked or non-regular path '${filePath}'.`,
     );
   }
+  // O_NOFOLLOW is undefined on Windows; the lstatSync check above is the primary guard there.
   const noFollowFlag = constants.O_NOFOLLOW ?? 0;
   const fd = openSync(filePath, constants.O_RDONLY | noFollowFlag);
   try {

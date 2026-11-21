@@ -326,6 +326,9 @@ export async function runRepoArchitectureCheck(
     else hasScannableKotlin = true;
     if (hasScannableCSharp && hasScannableKotlin) break;
   }
+  // Build cross-file symbol indexes up front (each bounded by MAX_SYMBOL_INDEX_FILES
+  // and MAX_INDEX_FILE_BYTES) before the main MAX_SCAN_FILES evaluation pass so
+  // namespace/package imports can resolve accurately against symbol declarations.
   if (hasScannableCSharp) {
     resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(opts.workspaceDir, allRepoFiles);
   }

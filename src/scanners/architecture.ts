@@ -100,21 +100,33 @@ async function readHeadFileContent(
   return reconstructFromHeadLines(file);
 }
 
+type MetadataReadResult =
+  | { status: 'found'; content: string }
+  | { status: 'absent' }
+  | { status: 'error' };
+
 async function readMetadataFile(
   deps: ScannerDeps,
   path: string,
   counters: ScanCounters,
-): Promise<string | null> {
+  headTree: ReadonlySet<string> | null,
+  removedFiles: ReadonlySet<string>,
+): Promise<MetadataReadResult> {
+  const norm = normalizePath(path);
+  if (removedFiles.has(norm) || (headTree !== null && !headTree.has(norm))) {
+    return { status: 'absent' };
+  }
   try {
     counters.networkCalls += 1;
-    return await deps.fileReader.read({
+    const raw = await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
-      path,
+      path: norm,
       ref: deps.head_sha,
     });
+    return raw !== null ? { status: 'found', content: raw } : { status: 'absent' };
   } catch {
-    return null; // optional project metadata file
+    return { status: 'error' }; // transient error allows checkout fallback in caller
   }
 }
 
@@ -122,12 +134,15 @@ async function hydrateTsConfigFromHead(
   deps: ScannerDeps,
   headRaw: string,
   counters: ScanCounters,
+  headTree: ReadonlySet<string> | null,
+  removedFiles: ReadonlySet<string>,
 ): Promise<ReturnType<typeof parseTsConfigContent>> {
   const preloaded = new Map<string, string | null>();
 
-  // Pre-fetch up to two relative `extends` hops from PR HEAD (with local
-  // workspace fallback) so synchronous `parseTsConfigContent` resolves aliases
-  // from the reviewed commit rather than an older checkout.
+  // Pre-fetch up to two relative `extends` hops from PR HEAD (falling back to
+  // the local checkout only on transient read errors, never when HEAD confirms
+  // the extended config is absent) so synchronous `parseTsConfigContent` uses
+  // aliases from the reviewed commit rather than an older checkout.
   const queue: Array<{ raw: string; dir: string; depth: number }> = [
     { raw: headRaw, dir: '', depth: 0 },
   ];
@@ -145,14 +160,18 @@ async function hydrateTsConfigFromHead(
       let foundRaw: string | null = null;
       let foundPath = joined;
       for (const candidate of candidates) {
-        let rawCandidate = preloaded.get(candidate) ?? null;
-        if (!preloaded.has(candidate)) {
-          rawCandidate = await readMetadataFile(deps, candidate, counters);
-          if (rawCandidate === null && deps.workspaceDir) {
+        let rawCandidate: string | null = null;
+        if (preloaded.has(candidate)) {
+          rawCandidate = preloaded.get(candidate) ?? null;
+        } else {
+          const readRes = await readMetadataFile(deps, candidate, counters, headTree, removedFiles);
+          if (readRes.status === 'found') {
+            rawCandidate = readRes.content;
+          } else if (readRes.status === 'error' && deps.workspaceDir) {
             try {
               rawCandidate = readFileSync(resolve(deps.workspaceDir, candidate), 'utf-8');
             } catch {
-              rawCandidate = null; // extended tsconfig missing both remotely and locally
+              rawCandidate = null; // extended tsconfig missing locally too
             }
           }
           preloaded.set(candidate, rawCandidate);
@@ -173,6 +192,9 @@ async function hydrateTsConfigFromHead(
   return parseTsConfigContent(headRaw, (relPath) => {
     const norm = normalizePath(relPath);
     if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+    if (removedFiles.has(norm) || (headTree !== null && !headTree.has(norm))) {
+      return null;
+    }
     if (deps.workspaceDir) {
       try {
         return readFileSync(resolve(deps.workspaceDir, norm), 'utf-8');
@@ -436,37 +458,54 @@ async function hydrateResolveContext(
   if (headTree) {
     ctx.knownFiles = headTree;
   }
-  const prFiles = deps.changedFiles
-    .filter((f) => f.status !== 'removed')
-    .map((f) => normalizePath(f.path));
+  const removedFiles = new Set<string>();
+  const prFiles: string[] = [];
+  for (const f of deps.changedFiles) {
+    const norm = normalizePath(f.path);
+    if (f.status === 'removed') removedFiles.add(norm);
+    else prFiles.push(norm);
+  }
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
   }
 
   if (languagesPresent.has('typescript') || languagesPresent.has('javascript')) {
-    const raw = await readMetadataFile(deps, 'tsconfig.json', counters);
-    if (raw !== null) {
-      const parsed = await hydrateTsConfigFromHead(deps, raw, counters);
+    const res = await readMetadataFile(deps, 'tsconfig.json', counters, headTree, removedFiles);
+    if (res.status === 'found') {
+      const parsed = await hydrateTsConfigFromHead(
+        deps,
+        res.content,
+        counters,
+        headTree,
+        removedFiles,
+      );
       if (parsed) ctx.tsconfig = parsed;
       else delete ctx.tsconfig;
+    } else if (res.status === 'absent') {
+      // Clear stale checkout metadata when tsconfig.json is confirmed absent at PR HEAD.
+      delete ctx.tsconfig;
     }
   }
 
   if (languagesPresent.has('go')) {
-    const raw = await readMetadataFile(deps, 'go.mod', counters);
-    if (raw !== null) {
-      const goModule = parseGoModModule(raw);
+    const res = await readMetadataFile(deps, 'go.mod', counters, headTree, removedFiles);
+    if (res.status === 'found') {
+      const goModule = parseGoModModule(res.content);
       if (goModule) ctx.goModule = goModule;
       else delete ctx.goModule;
+    } else if (res.status === 'absent') {
+      delete ctx.goModule;
     }
   }
 
   if (languagesPresent.has('dart')) {
-    const raw = await readMetadataFile(deps, 'pubspec.yaml', counters);
-    if (raw !== null) {
-      const dartPkg = parsePubspecName(raw);
+    const res = await readMetadataFile(deps, 'pubspec.yaml', counters, headTree, removedFiles);
+    if (res.status === 'found') {
+      const dartPkg = parsePubspecName(res.content);
       if (dartPkg) ctx.dartPackage = dartPkg;
       else delete ctx.dartPackage;
+    } else if (res.status === 'absent') {
+      delete ctx.dartPackage;
     }
   }
 

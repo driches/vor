@@ -108476,20 +108476,25 @@ async function readHeadFileContent(deps, file2, counters) {
   }
   return reconstructFromHeadLines(file2);
 }
-async function readMetadataFile(deps, path28, counters) {
+async function readMetadataFile(deps, path28, counters, headTree, removedFiles) {
+  const norm = normalizePath(path28);
+  if (removedFiles.has(norm) || headTree !== null && !headTree.has(norm)) {
+    return { status: "absent" };
+  }
   try {
     counters.networkCalls += 1;
-    return await deps.fileReader.read({
+    const raw = await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
-      path: path28,
+      path: norm,
       ref: deps.head_sha
     });
+    return raw !== null ? { status: "found", content: raw } : { status: "absent" };
   } catch {
-    return null;
+    return { status: "error" };
   }
 }
-async function hydrateTsConfigFromHead(deps, headRaw, counters) {
+async function hydrateTsConfigFromHead(deps, headRaw, counters, headTree, removedFiles) {
   const preloaded = /* @__PURE__ */ new Map();
   const queue = [
     { raw: headRaw, dir: "", depth: 0 }
@@ -108508,10 +108513,14 @@ async function hydrateTsConfigFromHead(deps, headRaw, counters) {
       let foundRaw = null;
       let foundPath = joined;
       for (const candidate of candidates) {
-        let rawCandidate = preloaded.get(candidate) ?? null;
-        if (!preloaded.has(candidate)) {
-          rawCandidate = await readMetadataFile(deps, candidate, counters);
-          if (rawCandidate === null && deps.workspaceDir) {
+        let rawCandidate = null;
+        if (preloaded.has(candidate)) {
+          rawCandidate = preloaded.get(candidate) ?? null;
+        } else {
+          const readRes = await readMetadataFile(deps, candidate, counters, headTree, removedFiles);
+          if (readRes.status === "found") {
+            rawCandidate = readRes.content;
+          } else if (readRes.status === "error" && deps.workspaceDir) {
             try {
               rawCandidate = (0, import_node_fs14.readFileSync)((0, import_node_path28.resolve)(deps.workspaceDir, candidate), "utf-8");
             } catch {
@@ -108535,6 +108544,9 @@ async function hydrateTsConfigFromHead(deps, headRaw, counters) {
   return parseTsConfigContent(headRaw, (relPath) => {
     const norm = normalizePath(relPath);
     if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+    if (removedFiles.has(norm) || headTree !== null && !headTree.has(norm)) {
+      return null;
+    }
     if (deps.workspaceDir) {
       try {
         return (0, import_node_fs14.readFileSync)((0, import_node_path28.resolve)(deps.workspaceDir, norm), "utf-8");
@@ -108744,32 +108756,50 @@ async function hydrateResolveContext(deps, languagesPresent, counters) {
   if (headTree) {
     ctx.knownFiles = headTree;
   }
-  const prFiles = deps.changedFiles.filter((f2) => f2.status !== "removed").map((f2) => normalizePath(f2.path));
+  const removedFiles = /* @__PURE__ */ new Set();
+  const prFiles = [];
+  for (const f2 of deps.changedFiles) {
+    const norm = normalizePath(f2.path);
+    if (f2.status === "removed") removedFiles.add(norm);
+    else prFiles.push(norm);
+  }
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
   }
   if (languagesPresent.has("typescript") || languagesPresent.has("javascript")) {
-    const raw = await readMetadataFile(deps, "tsconfig.json", counters);
-    if (raw !== null) {
-      const parsed = await hydrateTsConfigFromHead(deps, raw, counters);
+    const res = await readMetadataFile(deps, "tsconfig.json", counters, headTree, removedFiles);
+    if (res.status === "found") {
+      const parsed = await hydrateTsConfigFromHead(
+        deps,
+        res.content,
+        counters,
+        headTree,
+        removedFiles
+      );
       if (parsed) ctx.tsconfig = parsed;
       else delete ctx.tsconfig;
+    } else if (res.status === "absent") {
+      delete ctx.tsconfig;
     }
   }
   if (languagesPresent.has("go")) {
-    const raw = await readMetadataFile(deps, "go.mod", counters);
-    if (raw !== null) {
-      const goModule = parseGoModModule(raw);
+    const res = await readMetadataFile(deps, "go.mod", counters, headTree, removedFiles);
+    if (res.status === "found") {
+      const goModule = parseGoModModule(res.content);
       if (goModule) ctx.goModule = goModule;
       else delete ctx.goModule;
+    } else if (res.status === "absent") {
+      delete ctx.goModule;
     }
   }
   if (languagesPresent.has("dart")) {
-    const raw = await readMetadataFile(deps, "pubspec.yaml", counters);
-    if (raw !== null) {
-      const dartPkg = parsePubspecName(raw);
+    const res = await readMetadataFile(deps, "pubspec.yaml", counters, headTree, removedFiles);
+    if (res.status === "found") {
+      const dartPkg = parsePubspecName(res.content);
       if (dartPkg) ctx.dartPackage = dartPkg;
       else delete ctx.dartPackage;
+    } else if (res.status === "absent") {
+      delete ctx.dartPackage;
     }
   }
   return ctx;

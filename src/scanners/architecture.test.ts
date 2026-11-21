@@ -186,10 +186,9 @@ entries:
     const ws = mkdtempSync(join(tmpdir(), 'vor-arch-stale-checkout-'));
     try {
       // Stale checkout has tsconfig.json defining `@infra/*`, but lacks unchanged `src/infrastructure/repo.ts`.
-      writeFileSync(
-        join(ws, 'tsconfig.json'),
-        '{"compilerOptions":{"baseUrl":".","paths":{"@infra/*":["src/infrastructure/*"]}}}',
-      );
+      const tsConfigJson =
+        '{"compilerOptions":{"baseUrl":".","paths":{"@infra/*":["src/infrastructure/*"]}}}';
+      writeFileSync(join(ws, 'tsconfig.json'), tsConfigJson);
       const spec = resolveArchitectureSpec({
         ...DEFAULT_CONFIG.architecture,
         enabled: true,
@@ -211,6 +210,7 @@ entries:
       // Case 1: octokit.rest.git.getTree supplies the PR HEAD tree (no need to read unchanged repo.ts).
       const treeDeps = makeDeps([changed], {
         [domainFile]: domainContent,
+        'tsconfig.json': tsConfigJson,
       });
       treeDeps.workspaceDir = ws;
       treeDeps.octokit = {
@@ -221,6 +221,7 @@ entries:
                 truncated: false,
                 tree: [
                   { type: 'blob', path: domainFile },
+                  { type: 'blob', path: 'tsconfig.json' },
                   { type: 'blob', path: 'src/infrastructure/repo.ts' },
                 ],
               },
@@ -238,6 +239,7 @@ entries:
       // Case 2: git.getTree is unavailable/truncated; probeHeadAliasTargets checks fileReader at HEAD.
       const fallbackDeps = makeDeps([changed], {
         [domainFile]: domainContent,
+        'tsconfig.json': tsConfigJson,
         'src/infrastructure/repo.ts': 'export const Repo = 1;\n',
       });
       fallbackDeps.workspaceDir = ws;
@@ -301,5 +303,113 @@ entries:
     expect(res.findings[0]?.line).toBe(3);
     expect(res.findings[0]?.rule_id).toBe('arch:context-boundary');
     expect(res.metrics.network_calls).toBeGreaterThan(0);
+  });
+
+  it('clears stale checkout tsconfig/go.mod/pubspec metadata when confirmed absent at PR HEAD, while keeping fallback on API error', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-deleted-meta-'));
+    try {
+      // Base checkout contains stale metadata files and the target infra file.
+      writeFileSync(
+        join(ws, 'tsconfig.json'),
+        '{"compilerOptions":{"baseUrl":".","paths":{"@infra/*":["src/infrastructure/*"]}}}',
+      );
+      writeFileSync(join(ws, 'go.mod'), 'module example.com/app\n\ngo 1.22\n');
+      writeFileSync(join(ws, 'pubspec.yaml'), 'name: my_app\n');
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/infrastructure/repo.ts'), 'export const Repo = 1;\n');
+      mkdirSync(join(ws, 'internal/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'internal/infrastructure/store.go'), 'package infrastructure\n');
+      mkdirSync(join(ws, 'lib/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'lib/infrastructure/db.dart'), 'class Db {}\n');
+
+      const tsDomain = 'src/domain/order.ts';
+      const tsContent = "import { Repo } from '@infra/repo';\nexport const x = Repo;\n";
+      const tsChanged = makeChangedFile(tsDomain, { 1: "import { Repo } from '@infra/repo';" });
+
+      const tsSpec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+      const tsScanner = createArchitectureScanner(tsSpec);
+
+      // Case 1a: tsconfig.json deleted in PR HEAD -> fileReader.read returns null.
+      const tsAbsentDeps = makeDeps([tsChanged], {
+        [tsDomain]: tsContent,
+      });
+      tsAbsentDeps.workspaceDir = ws;
+      const tsAbsentRes = await tsScanner.scan(tsAbsentDeps);
+      expect(tsAbsentRes.findings).toEqual([]);
+
+      // Case 1b: tsconfig.json omitted from untruncated HEAD tree -> confirmed absent without using checkout.
+      const tsTreeAbsentDeps = makeDeps([tsChanged], {
+        [tsDomain]: tsContent,
+      });
+      tsTreeAbsentDeps.workspaceDir = ws;
+      tsTreeAbsentDeps.octokit = {
+        rest: {
+          git: {
+            getTree: vi.fn(async () => ({
+              data: {
+                truncated: false,
+                tree: [
+                  { type: 'blob', path: tsDomain },
+                  { type: 'blob', path: 'src/infrastructure/repo.ts' },
+                ],
+              },
+            })),
+          },
+        },
+      } as unknown as ScannerDeps['octokit'];
+      const tsTreeAbsentRes = await tsScanner.scan(tsTreeAbsentDeps);
+      expect(tsTreeAbsentRes.findings).toEqual([]);
+
+      // Case 2: go.mod and pubspec.yaml absent at PR HEAD -> treated as external packages, not internal layers.
+      const goDomain = 'internal/domain/service.go';
+      const goContent = 'package domain\nimport "example.com/app/internal/infrastructure/store"\n';
+      const goChanged = makeChangedFile(goDomain, {
+        2: 'import "example.com/app/internal/infrastructure/store"',
+      });
+      const goSpec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'internal',
+      });
+      const goAbsentDeps = makeDeps([goChanged], { [goDomain]: goContent });
+      goAbsentDeps.workspaceDir = ws;
+      expect((await createArchitectureScanner(goSpec).scan(goAbsentDeps)).findings).toEqual([]);
+
+      const dartDomain = 'lib/domain/entity.dart';
+      const dartContent = "import 'package:my_app/infrastructure/db.dart';\n";
+      const dartChanged = makeChangedFile(dartDomain, {
+        1: "import 'package:my_app/infrastructure/db.dart';",
+      });
+      const dartSpec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'lib',
+      });
+      const dartAbsentDeps = makeDeps([dartChanged], { [dartDomain]: dartContent });
+      dartAbsentDeps.workspaceDir = ws;
+      expect((await createArchitectureScanner(dartSpec).scan(dartAbsentDeps)).findings).toEqual([]);
+
+      // Case 3: transient API error reading tsconfig.json retains checkout tsconfig fallback.
+      const tsErrorDeps = makeDeps([tsChanged], { [tsDomain]: tsContent });
+      tsErrorDeps.workspaceDir = ws;
+      tsErrorDeps.fileReader = {
+        read: vi.fn(async ({ path }: { path: string }) => {
+          if (path === 'tsconfig.json') throw new Error('503 Service Unavailable');
+          return path === tsDomain ? tsContent : null;
+        }),
+      } as unknown as ScannerDeps['fileReader'];
+      const tsErrorRes = await tsScanner.scan(tsErrorDeps);
+      expect(tsErrorRes.findings).toHaveLength(1);
+      expect(tsErrorRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });
