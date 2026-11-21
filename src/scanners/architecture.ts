@@ -23,13 +23,16 @@ import {
   extractTsConfigExtends,
   findJvmPackageDirsInTree,
   findJvmSourceRoot,
+  listAncestorDirs,
   listTsConfigAliasCandidates,
   loadWorkspaceResolveContext,
   parseGoModModule,
   parsePubspecName,
   parseTsConfigContent,
   resolveImport,
+  resolveTsConfigForFile,
   type ArchLanguage,
+  type TsConfigPaths,
   type WorkspaceResolveContext,
 } from '../architecture/imports.js';
 import type { ResolvedArchitectureSpec } from '../architecture/presets.js';
@@ -138,6 +141,7 @@ async function hydrateTsConfigFromHead(
   counters: ScanCounters,
   headTree: ReadonlySet<string> | null,
   removedFiles: ReadonlySet<string>,
+  configDir = '',
 ): Promise<ReturnType<typeof parseTsConfigContent>> {
   const preloaded = new Map<string, string | null>();
 
@@ -146,7 +150,7 @@ async function hydrateTsConfigFromHead(
   // the extended config is absent) so synchronous `parseTsConfigContent` uses
   // aliases from the reviewed commit rather than an older checkout.
   const queue: Array<{ raw: string; dir: string; depth: number }> = [
-    { raw: headRaw, dir: '', depth: 0 },
+    { raw: headRaw, dir: configDir, depth: 0 },
   ];
   while (queue.length > 0) {
     const item = queue.shift()!;
@@ -191,21 +195,26 @@ async function hydrateTsConfigFromHead(
     }
   }
 
-  return parseTsConfigContent(headRaw, (relPath) => {
-    const norm = normalizePath(relPath);
-    if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
-    if (removedFiles.has(norm) || (headTree !== null && !headTree.has(norm))) {
-      return null;
-    }
-    if (deps.workspaceDir) {
-      try {
-        return readFileSync(resolve(deps.workspaceDir, norm), 'utf-8');
-      } catch {
-        return null; // optional extended tsconfig missing on disk
+  return parseTsConfigContent(
+    headRaw,
+    (relPath) => {
+      const norm = normalizePath(relPath);
+      if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+      if (removedFiles.has(norm) || (headTree !== null && !headTree.has(norm))) {
+        return null;
       }
-    }
-    return null;
-  });
+      if (deps.workspaceDir) {
+        try {
+          return readFileSync(resolve(deps.workspaceDir, norm), 'utf-8');
+        } catch {
+          return null; // optional extended tsconfig missing on disk
+        }
+      }
+      return null;
+    },
+    0,
+    configDir,
+  );
 }
 
 async function fetchHeadTreeFiles(
@@ -248,9 +257,11 @@ async function probeHeadAliasTargets(
   probeBudget: { remaining: number },
   counters: ScanCounters,
 ): Promise<void> {
-  if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
+  if (resolveCtx.knownFiles) return;
   const lang = detectArchLanguage(filePath);
   if (lang !== 'typescript' && lang !== 'javascript') return;
+  const tsconfig = resolveTsConfigForFile(filePath, resolveCtx);
+  if (!tsconfig) return;
 
   const { imports } = extractImports(filePath, content);
   const relevant = imports.filter(
@@ -267,7 +278,7 @@ async function probeHeadAliasTargets(
 
   for (const imp of relevant) {
     if (resolveImport(imp, filePath, resolveCtx).resolvedPath) continue;
-    const candidates = listTsConfigAliasCandidates(imp.specifier, resolveCtx.tsconfig);
+    const candidates = listTsConfigAliasCandidates(imp.specifier, tsconfig);
     for (const candidate of candidates) {
       if (deps.signal.aborted) break;
       let exists = probeCache.get(candidate);
@@ -453,6 +464,7 @@ async function probeHeadKotlinSymbols(
 async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
+  applicableTsJsPaths: readonly string[],
   counters: ScanCounters,
 ): Promise<{ ctx: WorkspaceResolveContext; removedFiles: Set<string> }> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
@@ -478,21 +490,46 @@ async function hydrateResolveContext(
     ctx.extraFiles = new Set(prFiles);
   }
 
-  if (languagesPresent.has('typescript') || languagesPresent.has('javascript')) {
-    const res = await readMetadataFile(deps, 'tsconfig.json', counters, headTree, removedFiles);
-    if (res.status === 'found') {
-      const parsed = await hydrateTsConfigFromHead(
-        deps,
-        res.content,
-        counters,
-        headTree,
-        removedFiles,
-      );
-      if (parsed) ctx.tsconfig = parsed;
-      else delete ctx.tsconfig;
-    } else if (res.status === 'absent') {
-      // Clear stale checkout metadata when tsconfig.json is confirmed absent at PR HEAD.
-      delete ctx.tsconfig;
+  if (applicableTsJsPaths.length > 0) {
+    const ancestorDirs = new Set<string>(['']);
+    for (const filePath of applicableTsJsPaths) {
+      for (const dir of listAncestorDirs(filePath)) {
+        ancestorDirs.add(dir);
+      }
+    }
+
+    const byDir = new Map<string, TsConfigPaths | null>();
+    for (const dir of ancestorDirs) {
+      if (deps.signal.aborted) break;
+      const configPath = dir ? `${dir}/tsconfig.json` : 'tsconfig.json';
+      const res = await readMetadataFile(deps, configPath, counters, headTree, removedFiles);
+      if (res.status === 'found') {
+        const parsed = await hydrateTsConfigFromHead(
+          deps,
+          res.content,
+          counters,
+          headTree,
+          removedFiles,
+          dir,
+        );
+        // Preserve an existing tsconfig without `baseUrl`/`paths` as a project
+        // boundary so nested files do not inherit an unrelated root config.
+        byDir.set(dir, parsed ?? { paths: {} });
+        if (dir === '') {
+          if (parsed) ctx.tsconfig = parsed;
+          else delete ctx.tsconfig;
+        }
+      } else if (res.status === 'absent') {
+        byDir.set(dir, null);
+        if (dir === '') {
+          // Clear stale checkout metadata when tsconfig.json is confirmed absent at PR HEAD.
+          delete ctx.tsconfig;
+        }
+      }
+    }
+
+    if (byDir.size > 0) {
+      ctx.tsconfigsByDir = byDir;
     }
   }
 
@@ -762,15 +799,22 @@ export function createArchitectureScanner(
       }
 
       const languagesPresent = new Set<ArchLanguage>();
+      const applicableTsJsPaths: string[] = [];
       for (const f of applicable) {
         const lang = detectArchLanguage(f.path);
-        if (lang) languagesPresent.add(lang);
+        if (lang) {
+          languagesPresent.add(lang);
+          if (lang === 'typescript' || lang === 'javascript') {
+            applicableTsJsPaths.push(f.path);
+          }
+        }
       }
 
       const counters: ScanCounters = { networkCalls: 0, cacheHits: 0 };
       const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
         deps,
         languagesPresent,
+        applicableTsJsPaths,
         counters,
       );
       const probeCache = new Map<string, boolean>();

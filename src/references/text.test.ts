@@ -125,5 +125,10 @@ describe('isLikelyBinary & truncateUtf8Bytes', () => {
     expect(truncateUtf8Bytes('a'.repeat(50), 10)).toEqual({ content: '', truncated: true });
     expect(truncateUtf8Bytes('abc', 0)).toEqual({ content: '', truncated: true });
     expect(truncateUtf8Bytes('', 0)).toEqual({ content: '', truncated: false });
+    // maxBytes=31 leaves a 2-byte budget after the 29-byte notice, rewinding to 0 before the 4-byte scalar.
+    expect(truncateUtf8Bytes(`\u{1D11E}${'a'.repeat(40)}`, 31)).toEqual({
+      content: '',
+      truncated: true,
+    });
   });
 });

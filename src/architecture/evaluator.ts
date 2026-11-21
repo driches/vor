@@ -139,7 +139,7 @@ function fingerprintOf(
   occurrence: number,
 ): string {
   // Line-number-independent so baselines stay stable across unrelated edits.
-  return createHash('sha1')
+  return createHash('sha256')
     .update(`${rule_id}:${file_path}:${specifier}:${occurrence}`)
     .digest('hex')
     .slice(0, 12);

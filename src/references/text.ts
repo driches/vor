@@ -300,6 +300,9 @@ export function truncateUtf8Bytes(
   while (end > 0 && (rawBuf[end]! & 0b1100_0000) === 0b1000_0000) {
     end -= 1;
   }
+  if (end === 0) {
+    return { content: '', truncated: true };
+  }
   let sliced = rawBuf.subarray(0, end).toString('utf-8');
   const lastNewline = sliced.lastIndexOf('\n');
   if (lastNewline > sliced.length * 0.8) {

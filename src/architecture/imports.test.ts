@@ -1120,4 +1120,75 @@ describe('extractImports & resolveImport across languages', () => {
     expect(parsed.meta.declaredPackage).toBe('Acme.Domain');
     expect(parsed.imports.map((i) => i.specifier)).toEqual(['Acme.Real']);
   });
+
+  it('resolves package-local tsconfig.json aliases without inheriting across sibling/empty project boundaries', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-pkg-tsconfig-'));
+    try {
+      mkdirSync(join(ws, 'src/adapters'), { recursive: true });
+      mkdirSync(join(ws, 'packages/app/src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'packages/app/src/adapters'), { recursive: true });
+      mkdirSync(join(ws, 'packages/bare/src'), { recursive: true });
+      mkdirSync(join(ws, 'packages/plain/src'), { recursive: true });
+
+      writeFileSync(
+        join(ws, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: '.',
+            paths: { '@root/*': ['src/*'] },
+          },
+        }),
+      );
+      writeFileSync(join(ws, 'src/adapters/root_repo.ts'), 'export const rootRepo = 1;\n');
+      writeFileSync(
+        join(ws, 'packages/app/tsconfig.base.json'),
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: 'src',
+            paths: { '@app/*': ['*'] },
+          },
+        }),
+      );
+      writeFileSync(
+        join(ws, 'packages/app/tsconfig.json'),
+        JSON.stringify({ extends: './tsconfig.base.json' }),
+      );
+      writeFileSync(
+        join(ws, 'packages/app/src/adapters/app_repo.ts'),
+        'export const appRepo = 1;\n',
+      );
+      writeFileSync(
+        join(ws, 'packages/bare/tsconfig.json'),
+        JSON.stringify({ compilerOptions: {} }),
+      );
+
+      const ctx = loadWorkspaceResolveContext(ws);
+      const appPath = 'packages/app/src/domain/order.ts';
+      const appSrc = "import { appRepo } from '@app/adapters/app_repo';\n";
+      const [appResolved] = resolveImports(extractImports(appPath, appSrc).imports, appPath, ctx);
+      expect(appResolved?.resolvedPath).toBe('packages/app/src/adapters/app_repo.ts');
+
+      // An empty package-local tsconfig stops upward inheritance from root tsconfig.
+      const barePath = 'packages/bare/src/index.ts';
+      const bareSrc = "import { rootRepo } from '@root/adapters/root_repo';\n";
+      const [bareResolved] = resolveImports(
+        extractImports(barePath, bareSrc).imports,
+        barePath,
+        ctx,
+      );
+      expect(bareResolved?.resolvedPath).toBeUndefined();
+      expect(bareResolved?.packageName).toBe('@root/adapters');
+
+      // A package without its own tsconfig falls back to the root tsconfig.
+      const plainPath = 'packages/plain/src/index.ts';
+      const [plainResolved] = resolveImports(
+        extractImports(plainPath, bareSrc).imports,
+        plainPath,
+        ctx,
+      );
+      expect(plainResolved?.resolvedPath).toBe('src/adapters/root_repo.ts');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

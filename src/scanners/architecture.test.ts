@@ -493,4 +493,92 @@ entries:
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('hydrates and respects deleted package-local tsconfig.json in monorepo PR scans', async () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'packages/app/src',
+    });
+    const scanner = createArchitectureScanner(spec);
+    const domainPath = 'packages/app/src/domain/order.ts';
+    const domainContent =
+      "import { repo } from '@app/infrastructure/repo';\nexport const x = repo;\n";
+    const infraPath = 'packages/app/src/infrastructure/repo.ts';
+    const pkgTsConfigPath = 'packages/app/tsconfig.json';
+    const pkgTsConfigContent = JSON.stringify({
+      compilerOptions: {
+        baseUrl: '.',
+        paths: { '@app/*': ['src/*'] },
+      },
+    });
+
+    const changedDomain = makeChangedFile(domainPath, { 1: domainContent.split('\n')[0]! });
+
+    // Case 1: API-only review with no root tsconfig and no headTree -> probeHeadAliasTargets
+    // resolves @app/* via packages/app/tsconfig.json and flags the layer violation.
+    const apiDeps = makeDeps([changedDomain], {
+      [domainPath]: domainContent,
+      [pkgTsConfigPath]: pkgTsConfigContent,
+      [infraPath]: 'export const repo = 1;\n',
+    });
+    const apiRes = await scanner.scan(apiDeps);
+    expect(apiRes.findings).toHaveLength(1);
+    expect(apiRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(apiRes.findings[0]?.line).toBe(1);
+
+    // Case 1b: Same monorepo PR with Git tree inventory (headTree present).
+    apiDeps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: domainPath },
+                { type: 'blob', path: pkgTsConfigPath },
+                { type: 'blob', path: infraPath },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+    const treeRes = await scanner.scan(apiDeps);
+    expect(treeRes.findings).toHaveLength(1);
+    expect(treeRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+
+    // Case 2: PR HEAD removes packages/app/tsconfig.json while stale local checkout still has it ->
+    // confirmed deletion skips disk fallback so @app/* stays external.
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-pkg-ts-deleted-'));
+    try {
+      mkdirSync(join(ws, 'packages/app/src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, pkgTsConfigPath), pkgTsConfigContent);
+      writeFileSync(join(ws, infraPath), 'export const repo = 1;\n');
+
+      const removedTsConfig: ChangedFile = {
+        path: pkgTsConfigPath,
+        status: 'removed',
+        additions: 0,
+        deletions: 6,
+        reviewable_lines: [],
+        added_lines: new Set(),
+        language: 'json',
+        is_generated: false,
+        is_binary: false,
+        size_bytes: 90,
+        head_line_text: new Map(),
+      };
+      const staleDeps = makeDeps([changedDomain, removedTsConfig], {
+        [domainPath]: domainContent,
+      });
+      staleDeps.workspaceDir = ws;
+
+      const staleRes = await scanner.scan(staleDeps);
+      expect(staleRes.findings).toEqual([]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

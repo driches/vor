@@ -59,6 +59,12 @@ export interface WorkspaceResolveContext {
   /** Optional map of Kotlin FQN symbol -> repo-relative declaring `.kt`/`.kts` file path. */
   kotlinSymbols?: ReadonlyMap<string, string>;
   tsconfig?: TsConfigPaths;
+  /**
+   * Optional per-directory `tsconfig.json` cache (keyed by normalized POSIX dir, `''` for repo root).
+   * `null` means `tsconfig.json` is confirmed absent in that directory (for example deleted at PR
+   * HEAD), skipping local disk fallback while continuing the upward walk to ancestor configs.
+   */
+  tsconfigsByDir?: ReadonlyMap<string, TsConfigPaths | null>;
   goModule?: string;
   dartPackage?: string;
 }
@@ -2034,6 +2040,84 @@ function readOptionalFile(workspaceDir: string, relPath: string): string | null 
   }
 }
 
+const workspaceTsConfigCache = new WeakMap<
+  WorkspaceResolveContext,
+  Map<string, TsConfigPaths | null>
+>();
+
+/**
+ * List normalized ancestor directory paths from `filePath`'s parent directory
+ * up to the repository root (`''`).
+ */
+export function listAncestorDirs(filePath: string): string[] {
+  const norm = normalizePath(filePath);
+  if (!norm || norm === '.') return [''];
+  const dirs: string[] = [];
+  let dir = posix.dirname(norm);
+  while (dir && dir !== '.') {
+    dirs.push(dir);
+    const parent = posix.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  dirs.push('');
+  return dirs;
+}
+
+/**
+ * Resolve the nearest governing `tsconfig.json` (parsed and rebased to
+ * repo-root-relative paths) for `sourceFilePath`, walking upward from its
+ * parent directory to the repository root.
+ */
+export function resolveTsConfigForFile(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+): TsConfigPaths | undefined {
+  let diskCache = ctx.workspaceDir ? workspaceTsConfigCache.get(ctx) : undefined;
+  const readDiskRel = (relPath: string): string | null =>
+    ctx.workspaceDir ? readOptionalFile(ctx.workspaceDir, relPath) : null;
+
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (ctx.tsconfigsByDir?.has(dir)) {
+      const entry = ctx.tsconfigsByDir.get(dir);
+      if (entry === null) continue;
+      if (entry) return entry;
+    }
+
+    if (dir === '' && ctx.tsconfig) {
+      return ctx.tsconfig;
+    }
+
+    if (!ctx.workspaceDir) continue;
+
+    if (!diskCache) {
+      diskCache = new Map<string, TsConfigPaths | null>();
+      workspaceTsConfigCache.set(ctx, diskCache);
+    }
+
+    if (diskCache.has(dir)) {
+      const cached = diskCache.get(dir);
+      if (cached === null) continue;
+      if (cached) return cached;
+    }
+
+    const configRelPath = dir ? `${dir}/tsconfig.json` : 'tsconfig.json';
+    const raw = readOptionalFile(ctx.workspaceDir, configRelPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+
+    // Preserve a config without `baseUrl`/`paths` as a TypeScript project
+    // boundary so files inside do not fall through to an unrelated root config.
+    const parsed = parseTsConfigContent(raw, readDiskRel, 0, dir) ?? { paths: {} };
+    diskCache.set(dir, parsed);
+    return parsed;
+  }
+
+  return undefined;
+}
+
 export function loadWorkspaceResolveContext(
   workspaceDir?: string,
   opts: { knownFiles?: ReadonlySet<string> } = {},
@@ -2707,8 +2791,9 @@ export function resolveImport(
         const joined = joinRelativePosix(normSource, imp.specifier);
         return { ...base, resolvedPath: resolveTsJsCandidate(joined, ctx) };
       }
-      if (ctx.tsconfig) {
-        const aliased = matchTsConfigAlias(imp.specifier, ctx.tsconfig, ctx);
+      const tsconfig = resolveTsConfigForFile(normSource, ctx);
+      if (tsconfig) {
+        const aliased = matchTsConfigAlias(imp.specifier, tsconfig, ctx);
         if (aliased) return { ...base, resolvedPath: aliased };
       }
       return { ...base, packageName: extractNpmPackageName(imp.specifier) };

@@ -76187,6 +76187,9 @@ function truncateUtf8Bytes(text, maxBytes) {
   while (end > 0 && (rawBuf[end] & 192) === 128) {
     end -= 1;
   }
+  if (end === 0) {
+    return { content: "", truncated: true };
+  }
   let sliced = rawBuf.subarray(0, end).toString("utf-8");
   const lastNewline = sliced.lastIndexOf("\n");
   if (lastNewline > sliced.length * 0.8) {
@@ -90352,6 +90355,55 @@ function readOptionalFile(workspaceDir, relPath) {
     return null;
   }
 }
+var workspaceTsConfigCache = /* @__PURE__ */ new WeakMap();
+function listAncestorDirs(filePath) {
+  const norm = normalizePath(filePath);
+  if (!norm || norm === ".") return [""];
+  const dirs = [];
+  let dir = import_node_path22.posix.dirname(norm);
+  while (dir && dir !== ".") {
+    dirs.push(dir);
+    const parent = import_node_path22.posix.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  dirs.push("");
+  return dirs;
+}
+function resolveTsConfigForFile(sourceFilePath, ctx) {
+  let diskCache = ctx.workspaceDir ? workspaceTsConfigCache.get(ctx) : void 0;
+  const readDiskRel = (relPath) => ctx.workspaceDir ? readOptionalFile(ctx.workspaceDir, relPath) : null;
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (ctx.tsconfigsByDir?.has(dir)) {
+      const entry = ctx.tsconfigsByDir.get(dir);
+      if (entry === null) continue;
+      if (entry) return entry;
+    }
+    if (dir === "" && ctx.tsconfig) {
+      return ctx.tsconfig;
+    }
+    if (!ctx.workspaceDir) continue;
+    if (!diskCache) {
+      diskCache = /* @__PURE__ */ new Map();
+      workspaceTsConfigCache.set(ctx, diskCache);
+    }
+    if (diskCache.has(dir)) {
+      const cached2 = diskCache.get(dir);
+      if (cached2 === null) continue;
+      if (cached2) return cached2;
+    }
+    const configRelPath = dir ? `${dir}/tsconfig.json` : "tsconfig.json";
+    const raw = readOptionalFile(ctx.workspaceDir, configRelPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+    const parsed = parseTsConfigContent(raw, readDiskRel, 0, dir) ?? { paths: {} };
+    diskCache.set(dir, parsed);
+    return parsed;
+  }
+  return void 0;
+}
 function loadWorkspaceResolveContext(workspaceDir, opts = {}) {
   const ctx = {
     ...workspaceDir !== void 0 ? { workspaceDir } : {},
@@ -90863,8 +90915,9 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         const joined = joinRelativePosix(normSource, imp.specifier);
         return { ...base, resolvedPath: resolveTsJsCandidate(joined, ctx) };
       }
-      if (ctx.tsconfig) {
-        const aliased = matchTsConfigAlias(imp.specifier, ctx.tsconfig, ctx);
+      const tsconfig = resolveTsConfigForFile(normSource, ctx);
+      if (tsconfig) {
+        const aliased = matchTsConfigAlias(imp.specifier, tsconfig, ctx);
         if (aliased) return { ...base, resolvedPath: aliased };
       }
       return { ...base, packageName: extractNpmPackageName(imp.specifier) };
@@ -91072,7 +91125,7 @@ function matchesPackagePattern(packageName, rawSpecifier, pattern) {
   return packageName === p2 || rawSpecifier === p2 || rawSpecifier.startsWith(`${p2}/`);
 }
 function fingerprintOf7(rule_id, file_path, specifier, occurrence) {
-  return (0, import_node_crypto7.createHash)("sha1").update(`${rule_id}:${file_path}:${specifier}:${occurrence}`).digest("hex").slice(0, 12);
+  return (0, import_node_crypto7.createHash)("sha256").update(`${rule_id}:${file_path}:${specifier}:${occurrence}`).digest("hex").slice(0, 12);
 }
 var DEFAULT_PUBLIC_API_PATTERNS = ["index.*", "public/**", "contracts/**", "api/**"];
 function matchesAnyTarget(target, resolvedPath, targetLayer) {
@@ -91298,10 +91351,10 @@ async function readMetadataFile(deps, path28, counters, headTree, removedFiles) 
     return { status: "error" };
   }
 }
-async function hydrateTsConfigFromHead(deps, headRaw, counters, headTree, removedFiles) {
+async function hydrateTsConfigFromHead(deps, headRaw, counters, headTree, removedFiles, configDir = "") {
   const preloaded = /* @__PURE__ */ new Map();
   const queue = [
-    { raw: headRaw, dir: "", depth: 0 }
+    { raw: headRaw, dir: configDir, depth: 0 }
   ];
   while (queue.length > 0) {
     const item = queue.shift();
@@ -91345,21 +91398,26 @@ async function hydrateTsConfigFromHead(deps, headRaw, counters, headTree, remove
       }
     }
   }
-  return parseTsConfigContent(headRaw, (relPath) => {
-    const norm = normalizePath(relPath);
-    if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
-    if (removedFiles.has(norm) || headTree !== null && !headTree.has(norm)) {
-      return null;
-    }
-    if (deps.workspaceDir) {
-      try {
-        return (0, import_node_fs9.readFileSync)((0, import_node_path23.resolve)(deps.workspaceDir, norm), "utf-8");
-      } catch {
+  return parseTsConfigContent(
+    headRaw,
+    (relPath) => {
+      const norm = normalizePath(relPath);
+      if (preloaded.has(norm)) return preloaded.get(norm) ?? null;
+      if (removedFiles.has(norm) || headTree !== null && !headTree.has(norm)) {
         return null;
       }
-    }
-    return null;
-  });
+      if (deps.workspaceDir) {
+        try {
+          return (0, import_node_fs9.readFileSync)((0, import_node_path23.resolve)(deps.workspaceDir, norm), "utf-8");
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    },
+    0,
+    configDir
+  );
 }
 async function fetchHeadTreeFiles(deps, counters) {
   if (typeof deps.octokit?.rest?.git?.getTree !== "function" || deps.signal.aborted) {
@@ -91388,9 +91446,11 @@ async function fetchHeadTreeFiles(deps, counters) {
   }
 }
 async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolveCtx, probeCache, probeBudget, counters) {
-  if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
+  if (resolveCtx.knownFiles) return;
   const lang = detectArchLanguage(filePath);
   if (lang !== "typescript" && lang !== "javascript") return;
+  const tsconfig = resolveTsConfigForFile(filePath, resolveCtx);
+  if (!tsconfig) return;
   const { imports } = extractImports(filePath, content);
   const relevant = imports.filter(
     (imp) => onlyLines.has(imp.line) && !imp.specifier.startsWith("./") && !imp.specifier.startsWith("../") && !imp.specifier.startsWith("node:")
@@ -91400,7 +91460,7 @@ async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolve
   let extraUpdated = false;
   for (const imp of relevant) {
     if (resolveImport(imp, filePath, resolveCtx).resolvedPath) continue;
-    const candidates = listTsConfigAliasCandidates(imp.specifier, resolveCtx.tsconfig);
+    const candidates = listTsConfigAliasCandidates(imp.specifier, tsconfig);
     for (const candidate of candidates) {
       if (deps.signal.aborted) break;
       let exists2 = probeCache.get(candidate);
@@ -91554,7 +91614,7 @@ async function probeHeadKotlinSymbols(deps, filePath, content, onlyLines, resolv
     }
   }
 }
-async function hydrateResolveContext(deps, languagesPresent, counters) {
+async function hydrateResolveContext(deps, languagesPresent, applicableTsJsPaths, counters) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
   const headTree = await fetchHeadTreeFiles(deps, counters);
   if (headTree) {
@@ -91577,20 +91637,41 @@ async function hydrateResolveContext(deps, languagesPresent, counters) {
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
   }
-  if (languagesPresent.has("typescript") || languagesPresent.has("javascript")) {
-    const res = await readMetadataFile(deps, "tsconfig.json", counters, headTree, removedFiles);
-    if (res.status === "found") {
-      const parsed = await hydrateTsConfigFromHead(
-        deps,
-        res.content,
-        counters,
-        headTree,
-        removedFiles
-      );
-      if (parsed) ctx.tsconfig = parsed;
-      else delete ctx.tsconfig;
-    } else if (res.status === "absent") {
-      delete ctx.tsconfig;
+  if (applicableTsJsPaths.length > 0) {
+    const ancestorDirs = /* @__PURE__ */ new Set([""]);
+    for (const filePath of applicableTsJsPaths) {
+      for (const dir of listAncestorDirs(filePath)) {
+        ancestorDirs.add(dir);
+      }
+    }
+    const byDir = /* @__PURE__ */ new Map();
+    for (const dir of ancestorDirs) {
+      if (deps.signal.aborted) break;
+      const configPath = dir ? `${dir}/tsconfig.json` : "tsconfig.json";
+      const res = await readMetadataFile(deps, configPath, counters, headTree, removedFiles);
+      if (res.status === "found") {
+        const parsed = await hydrateTsConfigFromHead(
+          deps,
+          res.content,
+          counters,
+          headTree,
+          removedFiles,
+          dir
+        );
+        byDir.set(dir, parsed ?? { paths: {} });
+        if (dir === "") {
+          if (parsed) ctx.tsconfig = parsed;
+          else delete ctx.tsconfig;
+        }
+      } else if (res.status === "absent") {
+        byDir.set(dir, null);
+        if (dir === "") {
+          delete ctx.tsconfig;
+        }
+      }
+    }
+    if (byDir.size > 0) {
+      ctx.tsconfigsByDir = byDir;
     }
   }
   if (languagesPresent.has("go")) {
@@ -91812,14 +91893,21 @@ function createArchitectureScanner(spec, options = {}) {
         return emptyResult(SCANNER_ID9, Date.now() - started);
       }
       const languagesPresent = /* @__PURE__ */ new Set();
+      const applicableTsJsPaths = [];
       for (const f2 of applicable) {
         const lang = detectArchLanguage(f2.path);
-        if (lang) languagesPresent.add(lang);
+        if (lang) {
+          languagesPresent.add(lang);
+          if (lang === "typescript" || lang === "javascript") {
+            applicableTsJsPaths.push(f2.path);
+          }
+        }
       }
       const counters = { networkCalls: 0, cacheHits: 0 };
       const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
         deps,
         languagesPresent,
+        applicableTsJsPaths,
         counters
       );
       const probeCache = /* @__PURE__ */ new Map();

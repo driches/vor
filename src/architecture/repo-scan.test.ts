@@ -459,4 +459,47 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('enforces architecture rules using package-local tsconfig.json in monorepo workspaces', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-pkg-ts-'));
+    try {
+      mkdirSync(join(ws, 'packages/app/src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'packages/app/src/adapters/out'), { recursive: true });
+
+      writeFileSync(
+        join(ws, 'packages/app/tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: '.',
+            paths: { '@app/*': ['src/*'] },
+          },
+        }),
+      );
+      writeFileSync(join(ws, 'packages/app/src/adapters/out/repo.ts'), 'export const repo = 1;\n');
+      writeFileSync(
+        join(ws, 'packages/app/src/domain/order.ts'),
+        "import { repo } from '@app/adapters/out/repo';\nexport const x = repo;\n",
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'hexagonal',
+        root: 'packages/app/src',
+      });
+
+      const explained = explainFileArchitecture(ws, 'packages/app/src/domain/order.ts', spec);
+      expect(explained.imports[0]?.resolved_path).toBe('packages/app/src/adapters/out/repo.ts');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-adapters_out',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.file_path).toBe('packages/app/src/domain/order.ts');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
