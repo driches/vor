@@ -75,4 +75,28 @@ describe('renderReferencesPrompt', () => {
     expect(a).toContain('Additional reference docs (on-demand via `read_reference_doc`)');
     expect(a).toContain('| `docs/big-adr.md` | Big ADR | 4 KB | Big ADR, Context |');
   });
+
+  it('escapes pipe characters in on-demand table cells', () => {
+    const doc = {
+      id: 'api|v1',
+      title: 'API | Contracts',
+      source: 'docs/api.md',
+      kind: 'repo' as const,
+      placement: 'on_demand' as const,
+      content: '# Auth | Tokens',
+      byte_length: 1024,
+      content_sha256: sha256Hex('# Auth | Tokens'),
+      headings: ['Auth | Tokens'],
+      truncated: false,
+      cache_status: 'hit' as const,
+    };
+
+    const rendered = renderReferencesPrompt(
+      makeCorpus({
+        docs: [doc],
+        on_demand_docs: [doc],
+      }),
+    );
+    expect(rendered).toContain('| `api\\|v1` | API \\| Contracts | 1 KB | Auth \\| Tokens |');
+  });
 });

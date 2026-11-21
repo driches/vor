@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { expiredIgnoreNotice, IgnoreList } from '../scanners/ignore-list.js';
 import type { ScanFinding } from '../scanners/types.js';
@@ -214,8 +214,8 @@ function scanPartitionedRepoFiles(
       const absPath = resolve(root, relPath);
       let content: string;
       try {
-        const st = statSync(absPath);
-        if (!st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+        const st = lstatSync(absPath);
+        if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
         content = readFileSync(absPath, 'utf-8');
       } catch {
         continue; // missing, unreadable, or non-regular file
@@ -324,8 +324,8 @@ export async function runRepoArchitectureCheck(
     let content: string;
     try {
       const absPath = resolve(opts.workspaceDir, filePath);
-      const st = statSync(absPath);
-      if (!st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+      const st = lstatSync(absPath);
+      if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
       content = readFileSync(absPath, 'utf-8');
     } catch {
       continue; // deleted or unreadable symlink in dirty working tree

@@ -78306,6 +78306,9 @@ function renderArchitecturePrompt(spec) {
 }
 
 // src/references/prompt.ts
+function escapeMarkdownTableCell(value) {
+  return value.replace(/[\r\n]+/g, " ").replace(/\|/g, "\\|");
+}
 function renderReferencesPrompt(corpus) {
   if (corpus.docs.length === 0) return null;
   const lines = [
@@ -78329,7 +78332,9 @@ function renderReferencesPrompt(corpus) {
     for (const doc of corpus.on_demand_docs) {
       const sizeKb = `${Math.max(1, Math.round(doc.byte_length / 1024))} KB`;
       const sections = doc.headings.length > 0 ? doc.headings.slice(0, 4).join(", ") : "\u2014";
-      lines.push(`| \`${doc.id}\` | ${doc.title} | ${sizeKb} | ${sections} |`);
+      lines.push(
+        `| \`${escapeMarkdownTableCell(doc.id)}\` | ${escapeMarkdownTableCell(doc.title)} | ${sizeKb} | ${escapeMarkdownTableCell(sections)} |`
+      );
     }
   }
   return lines.join("\n");
@@ -89302,20 +89307,28 @@ function isInsideStringSpan(offset, spans) {
 function stripCLikeComments(src) {
   return scanCLikeSource(src).cleaned;
 }
-function stripPythonCommentsAndDocstrings(src) {
+function scanPythonSource(src) {
   const chars = src.split("");
   const n2 = chars.length;
+  const stringSpans = [];
   let i2 = 0;
   let quote = null;
+  let quoteStart = -1;
   while (i2 < n2) {
     const ch = chars[i2];
     if (quote !== null) {
       if (ch === "\\") {
+        if (chars[i2 + 1] === "\r" && chars[i2 + 2] === "\n") {
+          i2 += 3;
+          continue;
+        }
         i2 += 2;
         continue;
       }
       if (ch === quote || ch === "\n") {
+        stringSpans.push({ start: quoteStart, end: i2 });
         quote = null;
+        quoteStart = -1;
       }
       i2 += 1;
       continue;
@@ -89347,6 +89360,7 @@ function stripPythonCommentsAndDocstrings(src) {
     }
     if (ch === "'" || ch === '"') {
       quote = ch;
+      quoteStart = i2;
       i2 += 1;
       continue;
     }
@@ -89359,7 +89373,10 @@ function stripPythonCommentsAndDocstrings(src) {
     }
     i2 += 1;
   }
-  return chars.join("");
+  if (quote !== null && quoteStart >= 0) {
+    stringSpans.push({ start: quoteStart, end: n2 });
+  }
+  return { cleaned: chars.join(""), stringSpans };
 }
 function buildLineStarts(src) {
   const starts = [0];
@@ -89511,7 +89528,7 @@ function findPythonImportClauseBounds(cleaned, afterImportOffset) {
   return { start: pos, end };
 }
 function extractPythonImports(content) {
-  const cleaned = stripPythonCommentsAndDocstrings(content);
+  const { cleaned, stringSpans } = scanPythonSource(content);
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -89519,6 +89536,7 @@ function extractPythonImports(content) {
   for (const m2 of cleaned.matchAll(fromRe)) {
     const spec = m2[1];
     const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
+    if (isInsideStringSpan(offset, stringSpans)) continue;
     const baseLine = lineAtOffset(starts, offset);
     const clause = findPythonImportClauseBounds(cleaned, (m2.index ?? 0) + m2[0].length);
     const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts);
@@ -89548,6 +89566,7 @@ function extractPythonImports(content) {
   for (const m2 of cleaned.matchAll(importRe)) {
     const listText = m2[1];
     const baseOffset = (m2.index ?? 0) + m2[0].indexOf(listText);
+    if (isInsideStringSpan(baseOffset, stringSpans)) continue;
     const line = lineAtOffset(starts, baseOffset);
     for (const part of listText.split(",")) {
       const mod = part.trim().split(/\s+as\s+/)[0]?.trim();
@@ -91672,8 +91691,8 @@ async function hydrateHeadCSharpNamespaces(deps, applicableCSharpFiles, resolveC
       if (diskScanned >= MAX_CSHARP_DISK_INDEX_FILES) break;
       try {
         const abs = (0, import_node_path23.resolve)(wsRoot, relPath);
-        const st2 = (0, import_node_fs9.statSync)(abs);
-        if (!st2.isFile() || st2.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
+        const st2 = (0, import_node_fs9.lstatSync)(abs);
+        if (st2.isSymbolicLink() || !st2.isFile() || st2.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
         const content = (0, import_node_fs9.readFileSync)(abs, "utf-8");
         diskScanned += 1;
         recordCSharpContent(relPath, content);

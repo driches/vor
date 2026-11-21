@@ -10,7 +10,7 @@
  *   - Never throws; per-file failures become non-fatal `ScanError` entries.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { evaluateFileArchitecture } from '../architecture/evaluator.js';
 import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.js';
@@ -650,8 +650,8 @@ async function hydrateHeadCSharpNamespaces(
       if (diskScanned >= MAX_CSHARP_DISK_INDEX_FILES) break;
       try {
         const abs = resolve(wsRoot, relPath);
-        const st = statSync(abs);
-        if (!st.isFile() || st.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
+        const st = lstatSync(abs);
+        if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
         const content = readFileSync(abs, 'utf-8');
         diskScanned += 1;
         recordCSharpContent(relPath, content);

@@ -334,4 +334,21 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
       'arch:forbidden-package:domain',
     ]);
   });
+
+  it('does not flag Python backslash-continued string examples containing forbidden import syntax', () => {
+    const dddSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const pyContent = ['DOC = "example:\\', 'from flask import Flask', '"', ''].join('\n');
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.py',
+      content: pyContent,
+      spec: dddSpec,
+      resolveCtx: {},
+    });
+    expect(violations).toEqual([]);
+  });
 });

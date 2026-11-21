@@ -739,25 +739,29 @@ export function stripCLikeComments(src: string): string {
   return scanCLikeSource(src).cleaned;
 }
 
-/**
- * Strip Python `#` comments and triple-quoted string literals/docstrings while
- * preserving exact line numbers and single-line quoted strings.
- */
-export function stripPythonCommentsAndDocstrings(src: string): string {
+function scanPythonSource(src: string): { cleaned: string; stringSpans: StringSpan[] } {
   const chars = src.split('');
   const n = chars.length;
+  const stringSpans: StringSpan[] = [];
   let i = 0;
   let quote: "'" | '"' | null = null;
+  let quoteStart = -1;
 
   while (i < n) {
     const ch = chars[i]!;
     if (quote !== null) {
       if (ch === '\\') {
+        if (chars[i + 1] === '\r' && chars[i + 2] === '\n') {
+          i += 3;
+          continue;
+        }
         i += 2;
         continue;
       }
       if (ch === quote || ch === '\n') {
+        stringSpans.push({ start: quoteStart, end: i });
         quote = null;
+        quoteStart = -1;
       }
       i += 1;
       continue;
@@ -791,6 +795,7 @@ export function stripPythonCommentsAndDocstrings(src: string): string {
 
     if (ch === "'" || ch === '"') {
       quote = ch;
+      quoteStart = i;
       i += 1;
       continue;
     }
@@ -806,7 +811,19 @@ export function stripPythonCommentsAndDocstrings(src: string): string {
     i += 1;
   }
 
-  return chars.join('');
+  if (quote !== null && quoteStart >= 0) {
+    stringSpans.push({ start: quoteStart, end: n });
+  }
+
+  return { cleaned: chars.join(''), stringSpans };
+}
+
+/**
+ * Strip Python `#` comments and triple-quoted string literals/docstrings while
+ * preserving exact line numbers and single-line quoted strings.
+ */
+export function stripPythonCommentsAndDocstrings(src: string): string {
+  return scanPythonSource(src).cleaned;
 }
 
 function buildLineStarts(src: string): number[] {
@@ -996,7 +1013,7 @@ function findPythonImportClauseBounds(
 }
 
 function extractPythonImports(content: string): ExtractedImport[] {
-  const cleaned = stripPythonCommentsAndDocstrings(content);
+  const { cleaned, stringSpans } = scanPythonSource(content);
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -1005,6 +1022,7 @@ function extractPythonImports(content: string): ExtractedImport[] {
   for (const m of cleaned.matchAll(fromRe)) {
     const spec = m[1]!;
     const offset = (m.index ?? 0) + m[0].indexOf(spec);
+    if (isInsideStringSpan(offset, stringSpans)) continue;
     const baseLine = lineAtOffset(starts, offset);
     const clause = findPythonImportClauseBounds(cleaned, (m.index ?? 0) + m[0].length);
     const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts);
@@ -1039,6 +1057,7 @@ function extractPythonImports(content: string): ExtractedImport[] {
   for (const m of cleaned.matchAll(importRe)) {
     const listText = m[1]!;
     const baseOffset = (m.index ?? 0) + m[0].indexOf(listText);
+    if (isInsideStringSpan(baseOffset, stringSpans)) continue;
     const line = lineAtOffset(starts, baseOffset);
     for (const part of listText.split(',')) {
       const mod = part

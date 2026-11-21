@@ -1079,4 +1079,20 @@ describe('extractImports & resolveImport across languages', () => {
       }),
     ]);
   });
+
+  it('ignores Python imports inside backslash-continued single- and double-quoted strings', () => {
+    const pySrc = [
+      'EXAMPLE_LF = "line 1 \\',
+      'from flask import Flask\\',
+      'import requests"',
+      "EXAMPLE_CRLF = 'line 1 \\\r",
+      "from fastapi import FastAPI'\r",
+      'from ..infra.db import Repo',
+    ].join('\n');
+
+    const parsed = extractImports('app/domain/service.py', pySrc);
+    expect(parsed.imports).toHaveLength(1);
+    expect(parsed.imports[0]?.specifier).toBe('..infra.db');
+    expect(parsed.imports[0]?.line).toBe(6);
+  });
 });

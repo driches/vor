@@ -9,6 +9,10 @@
 
 import type { LoadedReferenceCorpus } from './loader.js';
 
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|');
+}
+
 export function renderReferencesPrompt(corpus: LoadedReferenceCorpus): string | null {
   if (corpus.docs.length === 0) return null;
 
@@ -35,7 +39,9 @@ export function renderReferencesPrompt(corpus: LoadedReferenceCorpus): string | 
     for (const doc of corpus.on_demand_docs) {
       const sizeKb = `${Math.max(1, Math.round(doc.byte_length / 1024))} KB`;
       const sections = doc.headings.length > 0 ? doc.headings.slice(0, 4).join(', ') : '—';
-      lines.push(`| \`${doc.id}\` | ${doc.title} | ${sizeKb} | ${sections} |`);
+      lines.push(
+        `| \`${escapeMarkdownTableCell(doc.id)}\` | ${escapeMarkdownTableCell(doc.title)} | ${sizeKb} | ${escapeMarkdownTableCell(sections)} |`,
+      );
     }
   }
 
