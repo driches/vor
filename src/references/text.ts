@@ -286,14 +286,33 @@ export function normalizeDocumentText(raw: string, contentType?: string): string
 
 export function extractDocumentHeadings(markdown: string, maxHeadings = 8): string[] {
   const headings: string[] = [];
-  let inFence = false;
+  let fenceChar: '`' | '~' | null = null;
+  let fenceLen = 0;
+
   for (const line of markdown.split('\n')) {
     const trimmed = line.trim();
-    if (trimmed.startsWith('```')) {
-      inFence = !inFence;
+    if (fenceChar !== null) {
+      const closeRe = fenceChar === '`' ? /^(`{3,})$/ : /^(~{3,})$/;
+      const closeMatch = closeRe.exec(trimmed);
+      if (closeMatch && closeMatch[1]!.length >= fenceLen) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
       continue;
     }
-    if (inFence) continue;
+
+    const openMatch = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+    if (openMatch) {
+      const marker = openMatch[1]!;
+      const info = openMatch[2]!;
+      // Per CommonMark, backtick fence info strings cannot contain backticks.
+      if (!(marker[0] === '`' && info.includes('`'))) {
+        fenceChar = marker[0] === '~' ? '~' : '`';
+        fenceLen = marker.length;
+        continue;
+      }
+    }
+
     const m = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
     if (m?.[1]) {
       headings.push(m[1].trim());

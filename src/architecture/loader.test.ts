@@ -296,4 +296,75 @@ describe('resolveWorkspaceArchitectureConfig', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('rejects escaping symlinks for config and external architecture files across local loaders', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ws-symlink-'));
+    const outside = mkdtempSync(join(tmpdir(), 'vor-ws-symlink-out-'));
+    try {
+      const outsideArch = join(outside, 'outside-arch.yml');
+      writeFileSync(outsideArch, 'preset: ddd\nseverity: critical\n', 'utf-8');
+      const outsideVor = join(outside, 'outside-vor.yml');
+      writeFileSync(outsideVor, 'architecture:\n  enabled: true\n  preset: ddd\n', 'utf-8');
+
+      // 1. Leaf symlink at .vor/architecture.yml for resolveEffectiveArchitectureConfig & resolveWorkspaceArchitectureConfig.
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      symlinkSync(outsideArch, join(ws, '.vor/architecture.yml'));
+
+      const effectiveLeaf = await resolveEffectiveArchitectureConfig(
+        {
+          ...DEFAULT_CONFIG.architecture,
+          enabled: true,
+          preset: 'hexagonal',
+          file: '.vor/architecture.yml',
+        },
+        { workspaceDir: ws },
+      );
+      expect(effectiveLeaf.preset).toBe('hexagonal');
+      expect(effectiveLeaf.severity).toBe('important');
+
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({
+          workspaceDir: ws,
+          archConfigPath: '.vor/architecture.yml',
+        }),
+      ).toThrowError(ConfigError);
+
+      const nonStrictDefault = resolveWorkspaceArchitectureConfig({ workspaceDir: ws });
+      expect(nonStrictDefault.architecture.enabled).toBe(false);
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({ workspaceDir: ws, strict: true }),
+      ).toThrowError(ConfigError);
+
+      // 2. Parent directory symlink (.vor -> outside) must also be rejected.
+      rmSync(join(ws, '.vor'), { recursive: true, force: true });
+      writeFileSync(join(outside, 'architecture.yml'), 'preset: ddd\n', 'utf-8');
+      symlinkSync(outside, join(ws, '.vor'));
+
+      const effectiveParent = await resolveEffectiveArchitectureConfig(
+        {
+          ...DEFAULT_CONFIG.architecture,
+          enabled: true,
+          preset: 'hexagonal',
+          file: '.vor/architecture.yml',
+        },
+        { workspaceDir: ws },
+      );
+      expect(effectiveParent.preset).toBe('hexagonal');
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({
+          workspaceDir: ws,
+          archConfigPath: '.vor/architecture.yml',
+        }),
+      ).toThrowError(ConfigError);
+
+      // 3. Escaping symlink at .vor.yml itself.
+      symlinkSync(outsideVor, join(ws, '.vor.yml'));
+      expect(() => resolveWorkspaceArchitectureConfig({ workspaceDir: ws })).toThrowError(
+        ConfigError,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });

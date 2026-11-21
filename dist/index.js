@@ -76173,14 +76173,29 @@ function normalizeDocumentText(raw, contentType) {
 }
 function extractDocumentHeadings(markdown, maxHeadings = 8) {
   const headings = [];
-  let inFence = false;
+  let fenceChar = null;
+  let fenceLen = 0;
   for (const line of markdown.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence;
+    if (fenceChar !== null) {
+      const closeRe = fenceChar === "`" ? /^(`{3,})$/ : /^(~{3,})$/;
+      const closeMatch = closeRe.exec(trimmed);
+      if (closeMatch && closeMatch[1].length >= fenceLen) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
       continue;
     }
-    if (inFence) continue;
+    const openMatch = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+    if (openMatch) {
+      const marker = openMatch[1];
+      const info2 = openMatch[2];
+      if (!(marker[0] === "`" && info2.includes("`"))) {
+        fenceChar = marker[0] === "~" ? "~" : "`";
+        fenceLen = marker.length;
+        continue;
+      }
+    }
     const m2 = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
     if (m2?.[1]) {
       headings.push(m2[1].trim());
@@ -92305,9 +92320,23 @@ async function resolveEffectiveArchitectureConfig(config2, opts = {}) {
     }
   }
   if (raw == null && opts.workspaceDir) {
+    let safePath = null;
     try {
-      raw = (0, import_node_fs10.readFileSync)((0, import_node_path24.resolve)(opts.workspaceDir, config2.file), "utf-8");
-    } catch {
+      safePath = resolveSafeWorkspaceReadPath(opts.workspaceDir, config2.file);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        void logger.warn(
+          `Architecture file path '${config2.file}' escapes workspace root (${err.message}). Using inline config.`
+        );
+        return config2;
+      }
+      throw err;
+    }
+    if (safePath) {
+      try {
+        raw = (0, import_node_fs10.readFileSync)(safePath, "utf-8");
+      } catch {
+      }
     }
   }
   if (raw == null || raw.trim().length === 0) {
@@ -92319,6 +92348,75 @@ async function resolveEffectiveArchitectureConfig(config2, opts = {}) {
   const parsed = parseExternalArchitectureYamlSafe(raw, config2.file);
   if (!parsed) return config2;
   return mergeArchitectureConfig(config2, parsed, opts.rawInline);
+}
+function resolveSafeWorkspaceWritePath(workspaceDir, relPath) {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  const lexicalRoot = (0, import_node_path24.resolve)(workspaceDir);
+  const lexicalTarget = (0, import_node_path24.resolve)(lexicalRoot, relPath);
+  let realRoot;
+  try {
+    realRoot = (0, import_node_fs10.realpathSync)(lexicalRoot);
+  } catch (err) {
+    throw new ConfigError(
+      `Workspace root '${workspaceDir}' is not accessible: ${err.message}`,
+      { cause: err }
+    );
+  }
+  const parts = (0, import_node_path24.relative)(lexicalRoot, lexicalTarget).split(import_node_path24.sep).filter(Boolean);
+  if (parts.length === 0) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  let current = lexicalRoot;
+  let lastSafeReal = realRoot;
+  for (let i2 = 0; i2 < parts.length; i2++) {
+    const isFinal = i2 === parts.length - 1;
+    current = (0, import_node_path24.join)(current, parts[i2]);
+    let st2;
+    try {
+      st2 = (0, import_node_fs10.lstatSync)(current);
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        return (0, import_node_path24.resolve)(lastSafeReal, ...parts.slice(i2));
+      }
+      throw new ConfigError(`Cannot inspect path '${relPath}': ${err.message}`, {
+        cause: err
+      });
+    }
+    let realCurrent;
+    try {
+      realCurrent = (0, import_node_fs10.realpathSync)(current);
+    } catch (err) {
+      throw new ConfigError(
+        `Path '${relPath}' contains an unresolvable symlink: ${err.message}`,
+        { cause: err }
+      );
+    }
+    const rel = (0, import_node_path24.relative)(realRoot, realCurrent);
+    if (rel.startsWith("..") || (0, import_node_path24.isAbsolute)(rel) || isFinal && (rel === "" || st2.isDirectory())) {
+      throw new ConfigError(`Path '${relPath}' resolves outside the workspace root.`);
+    }
+    lastSafeReal = realCurrent;
+  }
+  return lastSafeReal;
+}
+function resolveSafeWorkspaceReadPath(workspaceDir, relPath) {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  try {
+    (0, import_node_fs10.realpathSync)((0, import_node_path24.resolve)(workspaceDir));
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return null;
+    }
+    throw new ConfigError(
+      `Workspace root '${workspaceDir}' is not accessible: ${err.message}`,
+      { cause: err }
+    );
+  }
+  return resolveSafeWorkspaceWritePath(workspaceDir, relPath);
 }
 
 // src/references/loader.ts

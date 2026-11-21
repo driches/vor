@@ -260,10 +260,24 @@ export async function resolveEffectiveArchitectureConfig(
   }
 
   if (raw == null && opts.workspaceDir) {
+    let safePath: string | null = null;
     try {
-      raw = readFileSync(resolve(opts.workspaceDir, config.file), 'utf-8');
-    } catch {
-      // File may genuinely not exist on disk in API-only reviews; handled below.
+      safePath = resolveSafeWorkspaceReadPath(opts.workspaceDir, config.file);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        void logger.warn(
+          `Architecture file path '${config.file}' escapes workspace root (${err.message}). Using inline config.`,
+        );
+        return config;
+      }
+      throw err;
+    }
+    if (safePath) {
+      try {
+        raw = readFileSync(safePath, 'utf-8');
+      } catch {
+        // File may genuinely not exist on disk in API-only reviews; handled below.
+      }
     }
   }
 
@@ -344,6 +358,29 @@ export function resolveSafeWorkspaceWritePath(workspaceDir: string, relPath: str
 }
 
 /**
+ * Safely resolve an existing relative file path inside `workspaceDir` for reading,
+ * returning `null` if `workspaceDir` itself does not exist and throwing
+ * `ConfigError` on lexical or symlink escapes outside `workspaceDir`.
+ */
+function resolveSafeWorkspaceReadPath(workspaceDir: string, relPath: string): string | null {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  try {
+    realpathSync(resolve(workspaceDir));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw new ConfigError(
+      `Workspace root '${workspaceDir}' is not accessible: ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
+  return resolveSafeWorkspaceWritePath(workspaceDir, relPath);
+}
+
+/**
  * Load baseline fingerprints from disk. Returns an empty set when absent or
  * malformed so baseline lookup never crashes a check.
  */
@@ -416,15 +453,15 @@ export function resolveWorkspaceArchitectureConfig(
   opts: ResolveWorkspaceArchOptions,
 ): ResolvedWorkspaceArch {
   const configRel = opts.configPath ?? '.vor.yml';
-  if (!isSafeRelativePath(opts.workspaceDir, configRel)) {
-    throw new ConfigError(`Config path '${configRel}' escapes workspace root.`);
-  }
+  const safeVorPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, configRel);
 
   let rawVorYml: string | null = null;
-  try {
-    rawVorYml = readFileSync(resolve(opts.workspaceDir, configRel), 'utf-8');
-  } catch {
-    rawVorYml = null; // missing .vor.yml falls back to defaults
+  if (safeVorPath) {
+    try {
+      rawVorYml = readFileSync(safeVorPath, 'utf-8');
+    } catch {
+      rawVorYml = null; // missing .vor.yml falls back to defaults
+    }
   }
 
   const loaded =
@@ -447,22 +484,22 @@ export function resolveWorkspaceArchitectureConfig(
   const explicitFile = opts.archConfigPath ?? arch.file;
 
   if (explicitFile) {
-    if (!isSafeRelativePath(opts.workspaceDir, explicitFile)) {
-      throw new ConfigError(`Architecture config path '${explicitFile}' escapes workspace root.`);
-    }
+    const safeExtPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, explicitFile);
     let extRaw: string | null = null;
-    try {
-      extRaw = readFileSync(resolve(opts.workspaceDir, explicitFile), 'utf-8');
-    } catch (err) {
-      if (opts.strict) {
-        throw new ConfigError(
-          `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}`,
-          { cause: err },
+    if (safeExtPath) {
+      try {
+        extRaw = readFileSync(safeExtPath, 'utf-8');
+      } catch (err) {
+        if (opts.strict) {
+          throw new ConfigError(
+            `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}`,
+            { cause: err },
+          );
+        }
+        void logger.warn(
+          `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}. Using inline config.`,
         );
       }
-      void logger.warn(
-        `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}. Using inline config.`,
-      );
     }
     if (extRaw !== null) {
       const extParsed = opts.strict
@@ -478,9 +515,16 @@ export function resolveWorkspaceArchitectureConfig(
   } else if (!arch.enabled && isSafeRelativePath(opts.workspaceDir, DEFAULT_ARCH_FILE)) {
     let defaultRaw: string | null = null;
     try {
-      defaultRaw = readFileSync(resolve(opts.workspaceDir, DEFAULT_ARCH_FILE), 'utf-8');
-    } catch {
-      defaultRaw = null; // optional default .vor/architecture.yml absent
+      const safeDefaultPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, DEFAULT_ARCH_FILE);
+      if (safeDefaultPath) {
+        defaultRaw = readFileSync(safeDefaultPath, 'utf-8');
+      }
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        if (opts.strict) throw err;
+        void logger.warn(`${err.message} Ignoring default '${DEFAULT_ARCH_FILE}'.`);
+      }
+      defaultRaw = null; // optional default .vor/architecture.yml absent or unsafe
     }
     if (defaultRaw !== null && defaultRaw.trim().length > 0) {
       const extParsed = opts.strict

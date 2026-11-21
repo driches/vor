@@ -76538,9 +76538,23 @@ async function resolveEffectiveArchitectureConfig(config2, opts = {}) {
     }
   }
   if (raw == null && opts.workspaceDir) {
+    let safePath = null;
     try {
-      raw = (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(opts.workspaceDir, config2.file), "utf-8");
-    } catch {
+      safePath = resolveSafeWorkspaceReadPath(opts.workspaceDir, config2.file);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        void logger.warn(
+          `Architecture file path '${config2.file}' escapes workspace root (${err.message}). Using inline config.`
+        );
+        return config2;
+      }
+      throw err;
+    }
+    if (safePath) {
+      try {
+        raw = (0, import_node_fs.readFileSync)(safePath, "utf-8");
+      } catch {
+      }
     }
   }
   if (raw == null || raw.trim().length === 0) {
@@ -76605,6 +76619,23 @@ function resolveSafeWorkspaceWritePath(workspaceDir, relPath) {
   }
   return lastSafeReal;
 }
+function resolveSafeWorkspaceReadPath(workspaceDir, relPath) {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  try {
+    (0, import_node_fs.realpathSync)((0, import_node_path.resolve)(workspaceDir));
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return null;
+    }
+    throw new ConfigError(
+      `Workspace root '${workspaceDir}' is not accessible: ${err.message}`,
+      { cause: err }
+    );
+  }
+  return resolveSafeWorkspaceWritePath(workspaceDir, relPath);
+}
 function loadArchBaseline(workspaceDir, baselinePath) {
   let fullPath;
   try {
@@ -76644,14 +76675,14 @@ function saveArchBaseline(workspaceDir, baselinePath, fingerprints) {
 }
 function resolveWorkspaceArchitectureConfig(opts) {
   const configRel = opts.configPath ?? ".vor.yml";
-  if (!isSafeRelativePath(opts.workspaceDir, configRel)) {
-    throw new ConfigError(`Config path '${configRel}' escapes workspace root.`);
-  }
+  const safeVorPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, configRel);
   let rawVorYml = null;
-  try {
-    rawVorYml = (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(opts.workspaceDir, configRel), "utf-8");
-  } catch {
-    rawVorYml = null;
+  if (safeVorPath) {
+    try {
+      rawVorYml = (0, import_node_fs.readFileSync)(safeVorPath, "utf-8");
+    } catch {
+      rawVorYml = null;
+    }
   }
   const loaded = rawVorYml === null ? { config: DEFAULT_CONFIG, raw: {} } : opts.strict ? loadConfigStrictWithRaw(rawVorYml) : loadConfigWithRawFromString(rawVorYml);
   const reviewConfig = loaded.config;
@@ -76665,22 +76696,22 @@ function resolveWorkspaceArchitectureConfig(opts) {
   let arch2 = reviewConfig.architecture;
   const explicitFile = opts.archConfigPath ?? arch2.file;
   if (explicitFile) {
-    if (!isSafeRelativePath(opts.workspaceDir, explicitFile)) {
-      throw new ConfigError(`Architecture config path '${explicitFile}' escapes workspace root.`);
-    }
+    const safeExtPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, explicitFile);
     let extRaw = null;
-    try {
-      extRaw = (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(opts.workspaceDir, explicitFile), "utf-8");
-    } catch (err) {
-      if (opts.strict) {
-        throw new ConfigError(
-          `Architecture config file '${explicitFile}' could not be read: ${err.message}`,
-          { cause: err }
+    if (safeExtPath) {
+      try {
+        extRaw = (0, import_node_fs.readFileSync)(safeExtPath, "utf-8");
+      } catch (err) {
+        if (opts.strict) {
+          throw new ConfigError(
+            `Architecture config file '${explicitFile}' could not be read: ${err.message}`,
+            { cause: err }
+          );
+        }
+        void logger.warn(
+          `Architecture config file '${explicitFile}' could not be read: ${err.message}. Using inline config.`
         );
       }
-      void logger.warn(
-        `Architecture config file '${explicitFile}' could not be read: ${err.message}. Using inline config.`
-      );
     }
     if (extRaw !== null) {
       const extParsed = opts.strict ? parseExternalArchitectureYamlStrict(extRaw) : parseExternalArchitectureYamlSafe(extRaw, explicitFile);
@@ -76692,8 +76723,15 @@ function resolveWorkspaceArchitectureConfig(opts) {
   } else if (!arch2.enabled && isSafeRelativePath(opts.workspaceDir, DEFAULT_ARCH_FILE)) {
     let defaultRaw = null;
     try {
-      defaultRaw = (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(opts.workspaceDir, DEFAULT_ARCH_FILE), "utf-8");
-    } catch {
+      const safeDefaultPath = resolveSafeWorkspaceReadPath(opts.workspaceDir, DEFAULT_ARCH_FILE);
+      if (safeDefaultPath) {
+        defaultRaw = (0, import_node_fs.readFileSync)(safeDefaultPath, "utf-8");
+      }
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        if (opts.strict) throw err;
+        void logger.warn(`${err.message} Ignoring default '${DEFAULT_ARCH_FILE}'.`);
+      }
       defaultRaw = null;
     }
     if (defaultRaw !== null && defaultRaw.trim().length > 0) {
@@ -97326,14 +97364,29 @@ function normalizeDocumentText(raw, contentType) {
 }
 function extractDocumentHeadings(markdown, maxHeadings = 8) {
   const headings = [];
-  let inFence = false;
+  let fenceChar = null;
+  let fenceLen = 0;
   for (const line of markdown.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence;
+    if (fenceChar !== null) {
+      const closeRe = fenceChar === "`" ? /^(`{3,})$/ : /^(~{3,})$/;
+      const closeMatch = closeRe.exec(trimmed);
+      if (closeMatch && closeMatch[1].length >= fenceLen) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
       continue;
     }
-    if (inFence) continue;
+    const openMatch = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+    if (openMatch) {
+      const marker = openMatch[1];
+      const info2 = openMatch[2];
+      if (!(marker[0] === "`" && info2.includes("`"))) {
+        fenceChar = marker[0] === "~" ? "~" : "`";
+        fenceLen = marker.length;
+        continue;
+      }
+    }
     const m2 = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
     if (m2?.[1]) {
       headings.push(m2[1].trim());
