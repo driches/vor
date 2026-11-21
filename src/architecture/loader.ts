@@ -8,8 +8,8 @@
  * use the strict parser to surface schema/YAML errors loudly.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
@@ -280,15 +280,80 @@ export async function resolveEffectiveArchitectureConfig(
 }
 
 /**
+ * Resolve `relPath` under `workspaceDir` while verifying every existing ancestor
+ * and target symlink resolves inside the canonical `workspaceDir` root.
+ */
+export function resolveSafeWorkspaceWritePath(workspaceDir: string, relPath: string): string {
+  if (!isSafeRelativePath(workspaceDir, relPath)) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+  const lexicalRoot = resolve(workspaceDir);
+  const lexicalTarget = resolve(lexicalRoot, relPath);
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(lexicalRoot);
+  } catch (err) {
+    throw new ConfigError(
+      `Workspace root '${workspaceDir}' is not accessible: ${(err as Error).message}`,
+      { cause: err },
+    );
+  }
+
+  const parts = relative(lexicalRoot, lexicalTarget).split(sep).filter(Boolean);
+  if (parts.length === 0) {
+    throw new ConfigError(`Path '${relPath}' must stay inside the workspace.`);
+  }
+
+  let current = lexicalRoot;
+  let lastSafeReal = realRoot;
+  for (let i = 0; i < parts.length; i++) {
+    const isFinal = i === parts.length - 1;
+    current = join(current, parts[i]!);
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(current);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return resolve(lastSafeReal, ...parts.slice(i));
+      }
+      throw new ConfigError(`Cannot inspect path '${relPath}': ${(err as Error).message}`, {
+        cause: err,
+      });
+    }
+
+    let realCurrent: string;
+    try {
+      realCurrent = realpathSync(current);
+    } catch (err) {
+      // Dangling symlinks cannot be safely followed for reading or writing.
+      throw new ConfigError(
+        `Path '${relPath}' contains an unresolvable symlink: ${(err as Error).message}`,
+        { cause: err },
+      );
+    }
+
+    const rel = relative(realRoot, realCurrent);
+    if (rel.startsWith('..') || isAbsolute(rel) || (isFinal && (rel === '' || st.isDirectory()))) {
+      throw new ConfigError(`Path '${relPath}' resolves outside the workspace root.`);
+    }
+    lastSafeReal = realCurrent;
+  }
+
+  return lastSafeReal;
+}
+
+/**
  * Load baseline fingerprints from disk. Returns an empty set when absent or
  * malformed so baseline lookup never crashes a check.
  */
 export function loadArchBaseline(workspaceDir: string, baselinePath: string): Set<string> {
-  if (!isSafeRelativePath(workspaceDir, baselinePath)) {
-    void logger.warn(`Baseline path '${baselinePath}' escapes workspace root. Ignoring baseline.`);
+  let fullPath: string;
+  try {
+    fullPath = resolveSafeWorkspaceWritePath(workspaceDir, baselinePath);
+  } catch (err) {
+    void logger.warn(`${(err as Error).message} Ignoring baseline.`);
     return new Set();
   }
-  const fullPath = resolve(workspaceDir, baselinePath);
   let raw: string;
   try {
     raw = readFileSync(fullPath, 'utf-8');
@@ -317,10 +382,7 @@ export function saveArchBaseline(
   baselinePath: string,
   fingerprints: readonly string[],
 ): string {
-  if (!isSafeRelativePath(workspaceDir, baselinePath)) {
-    throw new ConfigError(`Baseline path '${baselinePath}' must stay inside the workspace.`);
-  }
-  const fullPath = resolve(workspaceDir, baselinePath);
+  const fullPath = resolveSafeWorkspaceWritePath(workspaceDir, baselinePath);
   mkdirSync(dirname(fullPath), { recursive: true });
   const uniqueSorted = [...new Set(fingerprints)].sort();
   const payload = { version: 1 as const, fingerprints: uniqueSorted };

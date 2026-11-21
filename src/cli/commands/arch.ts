@@ -5,11 +5,11 @@
 
 import type { Command } from 'commander';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import {
   DEFAULT_ARCH_FILE,
   DEFAULT_BASELINE_FILE,
-  isSafeRelativePath,
+  resolveSafeWorkspaceWritePath,
   resolveWorkspaceArchitectureConfig,
   saveArchBaseline,
 } from '../../architecture/loader.js';
@@ -317,12 +317,14 @@ export function registerArch(program: Command): void {
         }
 
         const ws = workspace();
-        if (!isSafeRelativePath(ws, flags.file)) {
-          status(color('red', `Refusing to write outside workspace: ${flags.file}`));
+        let target: string;
+        try {
+          target = resolveSafeWorkspaceWritePath(ws, flags.file);
+        } catch (err) {
+          status(color('red', (err as Error).message));
           process.exit(2);
         }
 
-        const target = resolve(ws, flags.file);
         if (existsSync(target) && !flags.force) {
           status(color('red', `${flags.file} already exists. Re-run with --force to overwrite.`));
           process.exit(1);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
@@ -132,6 +132,42 @@ describe('baseline persistence', () => {
       expect([...loaded]).toEqual(['aaa', 'bbb']);
     } finally {
       rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked baseline files or parent dirs that escape the workspace root', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-base-sym-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'vor-arch-base-sym-out-'));
+    try {
+      const outsideFile = join(outside, 'sentinel.json');
+      writeFileSync(outsideFile, 'keep-me-intact\n', 'utf-8');
+
+      // 1. Leaf baseline file symlink pointing outside workspace.
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      const leafLink = join(ws, '.vor/arch-baseline.json');
+      symlinkSync(outsideFile, leafLink);
+      expect(() => saveArchBaseline(ws, '.vor/arch-baseline.json', ['fp1'])).toThrowError(
+        ConfigError,
+      );
+      expect(readFileSync(outsideFile, 'utf-8')).toBe('keep-me-intact\n');
+      expect(loadArchBaseline(ws, '.vor/arch-baseline.json').size).toBe(0);
+
+      // 2. Dangling leaf symlink targeting a non-existent outside path.
+      rmSync(leafLink);
+      symlinkSync(join(outside, 'missing-target.json'), leafLink);
+      expect(() => saveArchBaseline(ws, '.vor/arch-baseline.json', ['fp1'])).toThrowError(
+        ConfigError,
+      );
+
+      // 3. Parent directory symlink pointing outside workspace.
+      rmSync(join(ws, '.vor'), { recursive: true, force: true });
+      symlinkSync(outside, join(ws, '.vor'));
+      expect(() => saveArchBaseline(ws, '.vor/arch-baseline.json', ['fp1'])).toThrowError(
+        ConfigError,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 

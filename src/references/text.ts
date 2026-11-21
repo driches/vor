@@ -12,15 +12,22 @@ const ENTITY_MAP: Record<string, string> = {
   nbsp: ' ',
 };
 
+function safeFromCodePoint(code: number, fallback: string): string {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) {
+    return fallback;
+  }
+  return String.fromCodePoint(code);
+}
+
 function decodeHtmlEntities(text: string): string {
   return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity: string) => {
     if (entity.startsWith('#x') || entity.startsWith('#X')) {
       const code = Number.parseInt(entity.slice(2), 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : full;
+      return safeFromCodePoint(code, full);
     }
     if (entity.startsWith('#')) {
       const code = Number.parseInt(entity.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : full;
+      return safeFromCodePoint(code, full);
     }
     return ENTITY_MAP[entity.toLowerCase()] ?? full;
   });

@@ -294,26 +294,33 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // Load and cache configured reference documentation & engineering standards.
   let referenceCorpus: LoadedReferenceCorpus | undefined;
   if (config.references.enabled && config.references.sources.length > 0) {
-    referenceCorpus = await loadReferences({
-      config: config.references,
-      owner: input.owner,
-      repo: input.repo,
-      ref: prContext.metadata.head_sha,
-      workspaceDir: input.workspace_dir,
-      fileReader,
-      octokit,
-    });
-    for (const w of referenceCorpus.warnings) {
-      await logger.warn(`References: ${w}`);
+    try {
+      referenceCorpus = await loadReferences({
+        config: config.references,
+        owner: input.owner,
+        repo: input.repo,
+        ref: prContext.metadata.head_sha,
+        workspaceDir: input.workspace_dir,
+        fileReader,
+        octokit,
+      });
+      for (const w of referenceCorpus.warnings) {
+        await logger.warn(`References: ${w}`);
+      }
+      await logger.info(
+        `Loaded ${referenceCorpus.docs.length} reference doc(s) ` +
+          `(${referenceCorpus.inline_docs.length} inline / ${referenceCorpus.total_inline_bytes} bytes, ` +
+          `${referenceCorpus.on_demand_docs.length} on-demand, ` +
+          `cache hit=${referenceCorpus.cache_stats.hits} revalidated=${referenceCorpus.cache_stats.revalidated} ` +
+          `miss=${referenceCorpus.cache_stats.misses} stale=${referenceCorpus.cache_stats.stale_fallbacks}, ` +
+          `digest=${referenceCorpus.corpus_digest.slice(0, 12)})`,
+      );
+    } catch (err) {
+      referenceCorpus = undefined;
+      await logger.warn(
+        `Failed to load reference documentation: ${(err as Error).message}. Continuing without references.`,
+      );
     }
-    await logger.info(
-      `Loaded ${referenceCorpus.docs.length} reference doc(s) ` +
-        `(${referenceCorpus.inline_docs.length} inline / ${referenceCorpus.total_inline_bytes} bytes, ` +
-        `${referenceCorpus.on_demand_docs.length} on-demand, ` +
-        `cache hit=${referenceCorpus.cache_stats.hits} revalidated=${referenceCorpus.cache_stats.revalidated} ` +
-        `miss=${referenceCorpus.cache_stats.misses} stale=${referenceCorpus.cache_stats.stale_fallbacks}, ` +
-        `digest=${referenceCorpus.corpus_digest.slice(0, 12)})`,
-    );
   }
 
   // Load repo context files

@@ -31,6 +31,12 @@ describe('normalizeDocumentText', () => {
     const md = '# Title\r\n\r\n\r\n\r\nBody line   \r\n';
     expect(normalizeDocumentText(md)).toBe('# Title\n\nBody line');
   });
+
+  it('preserves out-of-range numeric HTML entities without throwing RangeError', () => {
+    const html = '<p>Valid &#x2014; &#65; invalid &#x110000; and &#9999999;.</p>';
+    const text = normalizeDocumentText(html, 'text/html');
+    expect(text).toContain('Valid — A invalid &#x110000; and &#9999999;.');
+  });
 });
 
 describe('extractDocumentHeadings', () => {
