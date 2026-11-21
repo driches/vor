@@ -37,6 +37,31 @@ function stripTags(html: string): string {
   return html.replace(/<[^<>]+>/g, '');
 }
 
+const RAW_TEXT_HTML_TAGS = new Set(['script', 'style']);
+
+function readTagNameAt(lower: string, nameStart: number): number {
+  let pos = nameStart;
+  while (pos < lower.length) {
+    const ch = lower.charCodeAt(pos);
+    const isAlphaNum = (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57);
+    if (!isAlphaNum) break;
+    pos += 1;
+  }
+  return pos;
+}
+
+function isTagBoundaryChar(ch: number, allowSlash: boolean): boolean {
+  return (
+    ch === 62 /* > */ ||
+    (allowSlash && ch === 47) /* / */ ||
+    ch === 32 /* space */ ||
+    ch === 9 /* \t */ ||
+    ch === 10 /* \n */ ||
+    ch === 12 /* \f */ ||
+    ch === 13 /* \r */
+  );
+}
+
 function replaceHtmlElements(
   html: string,
   tagNames: readonly string[],
@@ -46,100 +71,117 @@ function replaceHtmlElements(
   // (e.g. U+0130 -> "i\u0307") cannot shift indices relative to `html`.
   const lower = html.replace(/[A-Z]+/g, (m) => m.toLowerCase());
   const tagSet = new Set(tagNames);
-  // Track tags confirmed to have no closing tag later in the document so
-  // repeated unclosed tags remain linear-time rather than O(N^2).
-  const noClosingTag = new Set<string>();
+  const stacks = new Map<string, Array<{ openIdx: number; openClose: number }>>();
+  const matches = new Map<
+    number,
+    { tag: string; openClose: number; closeStart: number; closeEnd: number }
+  >();
+
+  let rawOpen: { tag: string; openIdx: number; openClose: number } | null = null;
+  let scan = 0;
+
+  while (scan < lower.length) {
+    const idx = lower.indexOf('<', scan);
+    if (idx === -1) break;
+
+    if (rawOpen !== null) {
+      if (lower.charCodeAt(idx + 1) === 47 /* / */) {
+        const nameEnd = readTagNameAt(lower, idx + 2);
+        const closeTag = lower.slice(idx + 2, nameEnd);
+        const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+        if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary, false)) {
+          const endBracket = lower.indexOf('>', nameEnd);
+          if (endBracket === -1) break;
+          matches.set(rawOpen.openIdx, {
+            tag: rawOpen.tag,
+            openClose: rawOpen.openClose,
+            closeStart: idx,
+            closeEnd: endBracket + 1,
+          });
+          rawOpen = null;
+          scan = endBracket + 1;
+          continue;
+        }
+      }
+      scan = idx + 1;
+      continue;
+    }
+
+    if (lower.charCodeAt(idx + 1) === 47 /* / */) {
+      const nameEnd = readTagNameAt(lower, idx + 2);
+      if (nameEnd === idx + 2) {
+        scan = idx + 1;
+        continue;
+      }
+      const closeTag = lower.slice(idx + 2, nameEnd);
+      const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+      if (!tagSet.has(closeTag) || !isTagBoundaryChar(boundary, false)) {
+        scan = idx + 1;
+        continue;
+      }
+      const endBracket = lower.indexOf('>', nameEnd);
+      if (endBracket === -1) break;
+      const frame = stacks.get(closeTag)?.pop();
+      if (frame) {
+        matches.set(frame.openIdx, {
+          tag: closeTag,
+          openClose: frame.openClose,
+          closeStart: idx,
+          closeEnd: endBracket + 1,
+        });
+      }
+      scan = endBracket + 1;
+      continue;
+    }
+
+    const nameEnd = readTagNameAt(lower, idx + 1);
+    if (nameEnd === idx + 1) {
+      scan = idx + 1;
+      continue;
+    }
+    const openTag = lower.slice(idx + 1, nameEnd);
+    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+    if (!tagSet.has(openTag) || !isTagBoundaryChar(boundary, true)) {
+      scan = idx + 1;
+      continue;
+    }
+    const openClose = lower.indexOf('>', nameEnd);
+    if (openClose === -1) break;
+    if (html.charCodeAt(openClose - 1) === 47 /* / */) {
+      scan = openClose + 1;
+      continue;
+    }
+    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
+      rawOpen = { tag: openTag, openIdx: idx, openClose };
+      scan = openClose + 1;
+      continue;
+    }
+    let stack = stacks.get(openTag);
+    if (!stack) {
+      stack = [];
+      stacks.set(openTag, stack);
+    }
+    stack.push({ openIdx: idx, openClose });
+    scan = openClose + 1;
+  }
 
   const out: string[] = [];
   let cursor = 0;
-
-  while (cursor < html.length) {
+  while (cursor < lower.length) {
     const openIdx = lower.indexOf('<', cursor);
     if (openIdx === -1) {
       out.push(html.slice(cursor));
       break;
     }
-
-    let nameEnd = openIdx + 1;
-    while (nameEnd < lower.length) {
-      const ch = lower.charCodeAt(nameEnd);
-      const isAlphaNum = (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57);
-      if (!isAlphaNum) break;
-      nameEnd += 1;
-    }
-
-    if (nameEnd === openIdx + 1) {
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
+    const m = matches.get(openIdx);
+    if (m) {
+      out.push(html.slice(cursor, openIdx));
+      out.push(transform(m.tag, html.slice(m.openClose + 1, m.closeStart)));
+      cursor = m.closeEnd;
       continue;
     }
-
-    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
-    const isBoundary =
-      boundary === 62 /* > */ ||
-      boundary === 47 /* / */ ||
-      boundary === 32 /* space */ ||
-      boundary === 9 /* \t */ ||
-      boundary === 10 /* \n */ ||
-      boundary === 12 /* \f */ ||
-      boundary === 13; /* \r */
-
-    const tagName = lower.slice(openIdx + 1, nameEnd);
-    if (!isBoundary || !tagSet.has(tagName) || noClosingTag.has(tagName)) {
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
-      continue;
-    }
-
-    const openClose = lower.indexOf('>', nameEnd);
-    if (openClose === -1) {
-      out.push(html.slice(cursor));
-      break;
-    }
-
-    if (html.charCodeAt(openClose - 1) === 47 /* / */) {
-      out.push(html.slice(cursor, openClose + 1));
-      cursor = openClose + 1;
-      continue;
-    }
-
-    const closeNeedle = `</${tagName}`;
-    let searchFrom = openClose + 1;
-    let closeStart = -1;
-    let closeEnd = -1;
-    while (true) {
-      const idx = lower.indexOf(closeNeedle, searchFrom);
-      if (idx === -1) break;
-      const afterName = idx + closeNeedle.length;
-      const nextCh = afterName < lower.length ? lower.charCodeAt(afterName) : -1;
-      const validCloseBoundary =
-        nextCh === 62 /* > */ ||
-        nextCh === 32 /* space */ ||
-        nextCh === 9 /* \t */ ||
-        nextCh === 10 /* \n */ ||
-        nextCh === 12 /* \f */ ||
-        nextCh === 13; /* \r */
-      if (!validCloseBoundary) {
-        searchFrom = afterName;
-        continue;
-      }
-      const endBracket = lower.indexOf('>', afterName);
-      if (endBracket === -1) break;
-      closeStart = idx;
-      closeEnd = endBracket + 1;
-      break;
-    }
-
-    if (closeStart === -1) {
-      noClosingTag.add(tagName);
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
-      continue;
-    }
-
-    out.push(html.slice(cursor, openIdx));
-    out.push(transform(tagName, html.slice(openClose + 1, closeStart)));
-    cursor = closeEnd;
+    out.push(html.slice(cursor, openIdx + 1));
+    cursor = openIdx + 1;
   }
 
   return out.join('');

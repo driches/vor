@@ -26,6 +26,7 @@ import {
   detectArchLanguage,
   extractCSharpNamespace,
   extractImports,
+  extractKotlinDeclarations,
   loadWorkspaceResolveContext,
   resolveImports,
   type ArchLanguage,
@@ -184,8 +185,8 @@ function violationToIgnoreProbe(v: ArchViolation): ScanFinding {
   };
 }
 
-const MAX_CS_NAMESPACE_INDEX_FILES = 2000;
-const MAX_CS_FILE_BYTES = 512 * 1024;
+const MAX_SYMBOL_INDEX_FILES = 2000;
+const MAX_INDEX_FILE_BYTES = 512 * 1024;
 
 function commonDirPrefix(a: string, b: string): string {
   const segsA = a.split('/');
@@ -200,58 +201,73 @@ function commonDirPrefix(a: string, b: string): string {
 }
 
 function collapseNamespaceTargets(files: readonly string[]): string | undefined {
-  if (files.length === 1) return files[0];
-  let shared = files[0]!.includes('/') ? files[0]!.slice(0, files[0]!.lastIndexOf('/')) : '';
+  // Always return the directory so classifyLayer receives a consistent
+  // directory path regardless of how many files share the namespace.
+  const dir = (f: string) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
+  if (files.length === 1) return dir(files[0]!) || files[0]!;
+  let shared = dir(files[0]!);
   for (let i = 1; i < files.length; i++) {
-    const f = files[i]!;
-    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
-    shared = shared && dir ? commonDirPrefix(shared, dir) : '';
+    const d = dir(files[i]!);
+    shared = shared && d ? commonDirPrefix(shared, d) : '';
     if (!shared) return undefined;
   }
   return shared || undefined;
+}
+
+function scanPartitionedRepoFiles(
+  workspaceDir: string,
+  repoFiles: readonly string[],
+  extRe: RegExp,
+  onFile: (normRelPath: string, content: string, isTest: boolean) => void,
+): void {
+  const prodFiles: string[] = [];
+  const testFiles: string[] = [];
+  for (const f of repoFiles) {
+    if (!extRe.test(f)) continue;
+    if (isTestFile(f)) testFiles.push(f);
+    else prodFiles.push(f);
+  }
+  prodFiles.sort();
+  testFiles.sort();
+
+  const root = resolve(workspaceDir);
+  let scanned = 0;
+  for (const [isTest, list] of [[false, prodFiles] as const, [true, testFiles] as const]) {
+    for (const relPath of list) {
+      if (scanned >= MAX_SYMBOL_INDEX_FILES) return;
+      const absPath = resolve(root, relPath);
+      let content: string;
+      try {
+        const st = statSync(absPath);
+        if (!st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+        content = readFileSync(absPath, 'utf-8');
+      } catch {
+        continue; // missing, unreadable, or non-regular file
+      }
+      scanned += 1;
+      onFile(normalizePath(relPath), content, isTest);
+    }
+  }
 }
 
 function buildCSharpNamespaceIndex(
   workspaceDir: string,
   repoFiles: readonly string[],
 ): Map<string, string> {
-  const prodCs: string[] = [];
-  const testCs: string[] = [];
-  for (const f of repoFiles) {
-    if (!/\.cs$/i.test(f)) continue;
-    if (isTestFile(f)) testCs.push(f);
-    else prodCs.push(f);
-  }
-
-  const root = resolve(workspaceDir);
   const prodByNs = new Map<string, string[]>();
   const testByNs = new Map<string, string[]>();
 
-  let scanned = 0;
-  for (const [bucketMap, list] of [[prodByNs, prodCs] as const, [testByNs, testCs] as const]) {
-    for (const relPath of list) {
-      if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
-      const absPath = resolve(root, relPath);
-      let content: string;
-      try {
-        const st = statSync(absPath);
-        if (!st.isFile() || st.size > MAX_CS_FILE_BYTES) continue;
-        content = readFileSync(absPath, 'utf-8');
-      } catch {
-        continue; // missing, unreadable, or non-regular file
-      }
-      scanned += 1;
-      const ns = extractCSharpNamespace(content);
-      if (!ns) continue;
-      let bucket = bucketMap.get(ns);
-      if (!bucket) {
-        bucket = [];
-        bucketMap.set(ns, bucket);
-      }
-      bucket.push(normalizePath(relPath));
+  scanPartitionedRepoFiles(workspaceDir, repoFiles, /\.cs$/i, (normPath, content, isTest) => {
+    const ns = extractCSharpNamespace(content);
+    if (!ns) return;
+    const bucketMap = isTest ? testByNs : prodByNs;
+    let bucket = bucketMap.get(ns);
+    if (!bucket) {
+      bucket = [];
+      bucketMap.set(ns, bucket);
     }
-    if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
-  }
+    bucket.push(normPath);
+  });
 
   const index = new Map<string, string>();
   for (const [ns, files] of prodByNs) {
@@ -266,6 +282,25 @@ function buildCSharpNamespaceIndex(
   return index;
 }
 
+function buildKotlinSymbolIndex(
+  workspaceDir: string,
+  repoFiles: readonly string[],
+): Map<string, string> {
+  const index = new Map<string, string>();
+  scanPartitionedRepoFiles(workspaceDir, repoFiles, /\.(?:kt|kts)$/i, (normPath, content) => {
+    const decl = extractKotlinDeclarations(content);
+    if (!decl.packageName) return;
+    for (const sym of decl.symbols) {
+      const fqn = `${decl.packageName}.${sym}`;
+      // Sorted prodFiles run before testFiles, so production declarations win deterministically.
+      if (!index.has(fqn)) {
+        index.set(fqn, normPath);
+      }
+    }
+  });
+  return index;
+}
+
 export async function runRepoArchitectureCheck(
   opts: RepoArchCheckOptions,
 ): Promise<RepoArchCheckResult> {
@@ -276,15 +311,24 @@ export async function runRepoArchitectureCheck(
   const resolveCtx = loadWorkspaceResolveContext(opts.workspaceDir, { knownFiles });
 
   const excludePaths = opts.excludePaths ?? [];
-  const hasScannableCSharp = allRepoFiles.some(
-    (filePath) =>
-      detectArchLanguage(filePath) === 'csharp' &&
-      !matchesAnyGlob(filePath, excludePaths) &&
-      !matchesAnyGlob(filePath, opts.spec.exclude) &&
-      !(opts.spec.ignore_tests && isTestFile(filePath)),
-  );
+  let hasScannableCSharp = false;
+  let hasScannableKotlin = false;
+  for (const filePath of allRepoFiles) {
+    const lang = detectArchLanguage(filePath);
+    if (lang !== 'csharp' && lang !== 'kotlin') continue;
+    if (matchesAnyGlob(filePath, excludePaths) || matchesAnyGlob(filePath, opts.spec.exclude)) {
+      continue;
+    }
+    if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
+    if (lang === 'csharp') hasScannableCSharp = true;
+    else hasScannableKotlin = true;
+    if (hasScannableCSharp && hasScannableKotlin) break;
+  }
   if (hasScannableCSharp) {
     resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(opts.workspaceDir, allRepoFiles);
+  }
+  if (hasScannableKotlin) {
+    resolveCtx.kotlinSymbols = buildKotlinSymbolIndex(opts.workspaceDir, allRepoFiles);
   }
 
   const ignoreList = loadLocalIgnoreList(
@@ -432,6 +476,8 @@ export function explainFileArchitecture(
   const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles: resolvedKnownFiles });
   if (language === 'csharp') {
     resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(workspaceDir, [...resolvedKnownFiles]);
+  } else if (language === 'kotlin') {
+    resolveCtx.kotlinSymbols = buildKotlinSymbolIndex(workspaceDir, [...resolvedKnownFiles]);
   }
   const content = readFileSync(resolve(root, relPath), 'utf-8');
   const { imports, meta } = extractImports(relPath, content);

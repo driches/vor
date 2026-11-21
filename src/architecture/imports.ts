@@ -56,6 +56,8 @@ export interface WorkspaceResolveContext {
   extraFiles?: ReadonlySet<string>;
   /** Optional map of C# declared namespace -> repo file path or shared directory prefix. */
   csharpNamespaces?: ReadonlyMap<string, string>;
+  /** Optional map of Kotlin FQN symbol -> repo-relative declaring `.kt`/`.kts` file path. */
+  kotlinSymbols?: ReadonlyMap<string, string>;
   tsconfig?: TsConfigPaths;
   goModule?: string;
   dartPackage?: string;
@@ -1225,6 +1227,181 @@ function extractRustImports(content: string): ExtractedImport[] {
   return dedupExtracted(out);
 }
 
+function findJvmPackage(cleaned: string, stringSpans: readonly StringSpan[]): string | undefined {
+  for (const m of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
+    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
+      return m[1];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Derive the JVM source root prefix (e.g. `src/main/kotlin`) for a file path
+ * declaring `declaredPackage`, or `''` if the package starts at repo root.
+ */
+export function findJvmSourceRoot(normSource: string, declaredPackage: string | undefined): string {
+  if (!declaredPackage) return '';
+  const pkgPath = declaredPackage.replace(/\./g, '/');
+  const dir = posix.dirname(normSource);
+  if (dir === pkgPath) return '';
+  if (dir.endsWith(`/${pkgPath}`)) {
+    return dir.slice(0, dir.length - pkgPath.length - 1);
+  }
+  return '';
+}
+
+function buildKotlinTopLevelSurface(cleaned: string, stringSpans: readonly StringSpan[]): string {
+  const n = cleaned.length;
+  const out: string[] = new Array<string>(n);
+  let braceDepth = 0;
+  let parenDepth = 0;
+
+  for (let i = 0; i < n; i++) {
+    const ch = cleaned[i]!;
+    if (ch === '\n') {
+      out[i] = '\n';
+      continue;
+    }
+    if (isInsideStringSpan(i, stringSpans)) {
+      out[i] = ' ';
+      continue;
+    }
+    if (ch === '{') {
+      braceDepth += 1;
+      out[i] = ' ';
+      continue;
+    }
+    if (ch === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+      out[i] = ' ';
+      continue;
+    }
+    if (ch === '(') {
+      parenDepth += 1;
+      out[i] = ' ';
+      continue;
+    }
+    if (ch === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+      out[i] = ' ';
+      continue;
+    }
+    out[i] = braceDepth > 0 || parenDepth > 0 ? ' ' : ch;
+  }
+
+  return out.join('').replace(/^[ \t]*(?:package|import)\b[^\n]*/gm, '');
+}
+
+/**
+ * Extract the declared package and top-level Kotlin symbols (classes, interfaces,
+ * objects, typealiases, functions, properties) from Kotlin source text.
+ */
+export function extractKotlinDeclarations(content: string): {
+  packageName?: string;
+  symbols: string[];
+} {
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const packageName = findJvmPackage(cleaned, stringSpans);
+  const topLevel = buildKotlinTopLevelSurface(cleaned, stringSpans);
+  const len = topLevel.length;
+  const symbols = new Set<string>();
+
+  const declRe = /\b(class|interface|object|typealias|fun|val|var)\b/g;
+  for (const m of topLevel.matchAll(declRe)) {
+    const kwIdx = m.index ?? 0;
+    const prev = kwIdx > 0 ? topLevel[kwIdx - 1] : '';
+    if (prev === '.' || prev === ':') continue;
+
+    const kw = m[1]!;
+    let pos = kwIdx + m[0].length;
+
+    const skipWs = (): void => {
+      while (pos < len && /\s/.test(topLevel[pos]!)) pos += 1;
+    };
+    const readIdent = (): string => {
+      const start = pos;
+      if (pos >= len || !/[A-Za-z_]/.test(topLevel[pos]!)) return '';
+      pos += 1;
+      while (pos < len && /\w/.test(topLevel[pos]!)) pos += 1;
+      return topLevel.slice(start, pos);
+    };
+    const skipBalancedAngles = (): boolean => {
+      if (topLevel[pos] !== '<') return false;
+      let depth = 0;
+      while (pos < len) {
+        const ch = topLevel[pos]!;
+        if (ch === '=' || ch === ';' || ch === '\n') return false;
+        if (ch === '<') depth += 1;
+        else if (ch === '>') {
+          depth -= 1;
+          if (depth === 0) {
+            pos += 1;
+            return true;
+          }
+        }
+        pos += 1;
+      }
+      return false;
+    };
+
+    skipWs();
+
+    if (kw === 'class' || kw === 'interface' || kw === 'object' || kw === 'typealias') {
+      const ident = readIdent();
+      if (ident) symbols.add(ident);
+      continue;
+    }
+
+    // `fun interface Foo` is matched again on `interface`; skip `fun`.
+    if (kw === 'fun' && topLevel.slice(pos, pos + 9) === 'interface') {
+      const after = topLevel[pos + 9];
+      if (after === undefined || !/\w/.test(after)) continue;
+    }
+
+    if (pos < len && topLevel[pos] === '<') {
+      if (!skipBalancedAngles()) continue;
+      skipWs();
+    }
+
+    const first = readIdent();
+    if (!first) continue;
+    let recorded = first;
+    while (pos < len) {
+      skipWs();
+      if (pos < len && topLevel[pos] === '<') {
+        if (!skipBalancedAngles()) {
+          recorded = '';
+          break;
+        }
+        skipWs();
+      }
+      if (pos < len && topLevel[pos] === '?') {
+        pos += 1;
+        skipWs();
+      }
+      if (pos < len && topLevel[pos] === '.') {
+        pos += 1;
+        skipWs();
+        const nextIdent = readIdent();
+        if (!nextIdent) {
+          recorded = '';
+          break;
+        }
+        recorded = nextIdent;
+        continue;
+      }
+      break;
+    }
+    if (recorded) symbols.add(recorded);
+  }
+
+  return {
+    ...(packageName ? { packageName } : {}),
+    symbols: [...symbols],
+  };
+}
+
 function extractJavaKotlinImports(
   content: string,
   language: 'java' | 'kotlin',
@@ -1234,13 +1411,7 @@ function extractJavaKotlinImports(
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
 
-  let declaredPackage: string | undefined;
-  for (const m of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
-    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
-      declaredPackage = m[1];
-      break;
-    }
-  }
+  const declaredPackage = findJvmPackage(cleaned, stringSpans);
 
   const importRe =
     /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
@@ -2312,23 +2483,32 @@ export function resolveImport(
 
     case 'java':
     case 'kotlin': {
+      const isWildcard = imp.specifier.endsWith('.*');
       const cleanSpec = imp.specifier.replace(/\.\*$/, '');
       const specPath = cleanSpec.replace(/\./g, '/');
-      let sourceRoot = '';
-      if (fileMeta.declaredPackage) {
-        const pkgPath = fileMeta.declaredPackage.replace(/\./g, '/');
-        const dir = posix.dirname(normSource);
-        if (dir === pkgPath) sourceRoot = '';
-        else if (dir.endsWith(`/${pkgPath}`)) {
-          sourceRoot = dir.slice(0, dir.length - pkgPath.length - 1);
-        }
-      }
+      const sourceRoot = findJvmSourceRoot(normSource, fileMeta.declaredPackage);
       const prefix = sourceRoot ? `${sourceRoot}/` : '';
+
+      if (imp.language === 'kotlin' && !isWildcard && ctx.kotlinSymbols) {
+        const exact = ctx.kotlinSymbols.get(cleanSpec);
+        if (exact) return { ...base, resolvedPath: exact };
+      }
+
       const exts = imp.language === 'java' ? ['java'] : ['kt', 'kts', 'java'];
       for (const ext of exts) {
         const candidate = `${prefix}${specPath}.${ext}`;
         if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
       }
+
+      if (imp.language === 'kotlin' && !isWildcard && ctx.kotlinSymbols) {
+        let symbolPrefix = cleanSpec;
+        while (symbolPrefix.includes('.')) {
+          symbolPrefix = symbolPrefix.slice(0, symbolPrefix.lastIndexOf('.'));
+          const parentHit = ctx.kotlinSymbols.get(symbolPrefix);
+          if (parentHit) return { ...base, resolvedPath: parentHit };
+        }
+      }
+
       if (existsRepoPrefix(`${prefix}${specPath}`, ctx)) {
         return { ...base, resolvedPath: `${prefix}${specPath}` };
       }

@@ -71,6 +71,25 @@ describe('normalizeDocumentText', () => {
     const selfClosing = '<svg class="icon"/><p>Keep me</p><svg>drop</svg>';
     expect(normalizeDocumentText(selfClosing, 'text/html')).toBe('Keep me');
   });
+
+  it('handles nested and unbalanced HTML elements in linear time without dropping outer content', () => {
+    const nestedPre = '<pre><pre>inner</pre>outer</pre>';
+    const preOut = normalizeDocumentText(nestedPre, 'text/html');
+    expect(preOut).toContain('inner');
+    expect(preOut).toContain('outer');
+
+    const nestedNav = '<nav><nav>a</nav>b</nav><p>Visible</p>';
+    const navOut = normalizeDocumentText(nestedNav, 'text/html');
+    expect(navOut).toBe('Visible');
+
+    const unbalanced = '<pre><pre>only-one</pre>after';
+    const unbalancedOut = normalizeDocumentText(unbalanced, 'text/html');
+    expect(unbalancedOut).toContain('only-one');
+    expect(unbalancedOut).toContain('after');
+
+    const scriptStr = '<script>const x = "<script>";</script><p>keep</p>';
+    expect(normalizeDocumentText(scriptStr, 'text/html')).toBe('keep');
+  });
 });
 
 describe('extractDocumentHeadings', () => {

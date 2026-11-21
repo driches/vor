@@ -273,10 +273,67 @@ describe('explainFileArchitecture', () => {
       const info = explainFileArchitecture(ws, 'src/Domain/Order.cs', spec);
       expect(info.layer?.name).toBe('domain');
       expect(info.imports).toHaveLength(1);
-      expect(info.imports[0]?.resolved_path).toBe('src/Infrastructure/Repository.cs');
+      expect(info.imports[0]?.resolved_path).toBe('src/Infrastructure');
       expect(info.imports[0]?.target_layer).toBe('infrastructure');
       expect(info.imports[0]?.violations).toHaveLength(1);
       expect(info.imports[0]?.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves Kotlin symbols to declaring files for modular-monolith public API checks', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-kt-'));
+    try {
+      mkdirSync(join(ws, 'src/main/kotlin/com/acme/modules/orders'), { recursive: true });
+      mkdirSync(join(ws, 'src/main/kotlin/com/acme/modules/billing'), { recursive: true });
+      writeFileSync(
+        join(ws, 'src/main/kotlin/com/acme/modules/orders/index.kt'),
+        'package com.acme.modules.orders\nfun placeOrder(): String = "ok"\n',
+      );
+      writeFileSync(
+        join(ws, 'src/main/kotlin/com/acme/modules/orders/Internal.kt'),
+        'package com.acme.modules.orders\nfun secretHelper(): String = "secret"\n',
+      );
+      writeFileSync(
+        join(ws, 'src/main/kotlin/com/acme/modules/billing/BillingService.kt'),
+        [
+          'package com.acme.modules.billing',
+          'import com.acme.modules.orders.placeOrder',
+          'import com.acme.modules.orders.secretHelper',
+          'class BillingService',
+        ].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'modular-monolith',
+        root: 'src/main/kotlin/com/acme',
+      });
+
+      const explained = explainFileArchitecture(
+        ws,
+        'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+        spec,
+      );
+      expect(explained.context?.context).toBe('billing');
+      expect(explained.imports).toHaveLength(2);
+      expect(explained.imports[0]?.resolved_path).toBe(
+        'src/main/kotlin/com/acme/modules/orders/index.kt',
+      );
+      expect(explained.imports[0]?.violations).toEqual([]);
+      expect(explained.imports[1]?.resolved_path).toBe(
+        'src/main/kotlin/com/acme/modules/orders/Internal.kt',
+      );
+      expect(explained.imports[1]?.violations).toHaveLength(1);
+      expect(explained.imports[1]?.violations[0]?.rule_id).toBe('arch:context-boundary');
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:context-boundary');
+      expect(repoRes.violations[0]?.specifier).toBe('com.acme.modules.orders.secretHelper');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

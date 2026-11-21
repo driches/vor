@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   detectArchLanguage,
   extractImports,
+  extractKotlinDeclarations,
   loadWorkspaceResolveContext,
   parseGoModModule,
   parsePubspecName,
@@ -757,5 +758,106 @@ describe('extractImports & resolveImport across languages', () => {
       dottedParsed.meta,
     );
     expect(dottedResolved.resolvedPath).toBe('src/Acme.Infrastructure');
+  });
+
+  it('extracts top-level Kotlin declarations and resolves Kotlin symbols to declaring files', () => {
+    const kotlinEntry = [
+      'package com.acme.modules.orders',
+      'import com.acme.modules.shared.Money',
+      '',
+      '/* fun commentedOut() {} */',
+      'const val DEFAULT_CURRENCY = "USD"',
+      'typealias OrderId = String',
+      'data class Order(val id: OrderId, var status: String = "fun fakeVal() {}") {',
+      '  fun memberIgnored() {}',
+      '}',
+      'sealed interface OrderEvent',
+      'fun interface OrderValidator { fun validate(id: String): Boolean }',
+      'object OrderFactory {',
+      '  fun create(): Order = Order("1")',
+      '}',
+      'val Order.isValid: Boolean get() = true',
+      'suspend fun <T : Any> List<T>.mapOrders(fn: (T) -> Unit) {',
+      '  val localVal = 1',
+      '  fun localFun() {}',
+      '  forEach(fn)',
+      '}',
+      'fun placeOrder(id: OrderId): Order {',
+      '  return Order(id)',
+      '}',
+      'val anonObj = object : OrderValidator {',
+      '  override fun validate(id: String) = true',
+      '}',
+    ].join('\n');
+
+    const decl = extractKotlinDeclarations(kotlinEntry);
+    expect(decl.packageName).toBe('com.acme.modules.orders');
+    expect(decl.symbols.sort()).toEqual([
+      'DEFAULT_CURRENCY',
+      'Order',
+      'OrderEvent',
+      'OrderFactory',
+      'OrderId',
+      'OrderValidator',
+      'anonObj',
+      'isValid',
+      'mapOrders',
+      'placeOrder',
+    ]);
+    expect(decl.symbols).not.toContain('commentedOut');
+    expect(decl.symbols).not.toContain('memberIgnored');
+    expect(decl.symbols).not.toContain('localVal');
+    expect(decl.symbols).not.toContain('localFun');
+    expect(decl.symbols).not.toContain('id');
+    expect(decl.symbols).not.toContain('status');
+    expect(decl.symbols).not.toContain('interface');
+
+    const billingSrc = [
+      'package com.acme.modules.billing',
+      'import com.acme.modules.orders.placeOrder',
+      'import com.acme.modules.orders.OrderFactory.create',
+      'import kotlin.collections.List',
+    ].join('\n');
+    const parsed = extractImports(
+      'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+      billingSrc,
+    );
+    const ctx = {
+      knownFiles: new Set([
+        'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+        'src/main/kotlin/com/acme/modules/orders/index.kt',
+      ]),
+      kotlinSymbols: new Map([
+        ['com.acme.modules.orders.placeOrder', 'src/main/kotlin/com/acme/modules/orders/index.kt'],
+        [
+          'com.acme.modules.orders.OrderFactory',
+          'src/main/kotlin/com/acme/modules/orders/index.kt',
+        ],
+      ]),
+    };
+
+    const resolvedFn = resolveImport(
+      parsed.imports[0]!,
+      'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+      ctx,
+      parsed.meta,
+    );
+    expect(resolvedFn.resolvedPath).toBe('src/main/kotlin/com/acme/modules/orders/index.kt');
+
+    const resolvedNested = resolveImport(
+      parsed.imports[1]!,
+      'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+      ctx,
+      parsed.meta,
+    );
+    expect(resolvedNested.resolvedPath).toBe('src/main/kotlin/com/acme/modules/orders/index.kt');
+
+    const resolvedStdlib = resolveImport(
+      parsed.imports[2]!,
+      'src/main/kotlin/com/acme/modules/billing/BillingService.kt',
+      ctx,
+      parsed.meta,
+    );
+    expect(resolvedStdlib.packageName).toBe('kotlin.collections.List');
   });
 });

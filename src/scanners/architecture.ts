@@ -17,7 +17,9 @@ import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.
 import {
   detectArchLanguage,
   extractImports,
+  extractKotlinDeclarations,
   extractTsConfigExtends,
+  findJvmSourceRoot,
   listTsConfigAliasCandidates,
   loadWorkspaceResolveContext,
   parseGoModModule,
@@ -278,6 +280,143 @@ async function probeHeadAliasTargets(
   }
 }
 
+function hasKotlinSymbolMatch(symbols: ReadonlyMap<string, string>, cleanSpec: string): boolean {
+  if (symbols.has(cleanSpec)) return true;
+  let prefix = cleanSpec;
+  while (prefix.includes('.')) {
+    prefix = prefix.slice(0, prefix.lastIndexOf('.'));
+    if (symbols.has(prefix)) return true;
+  }
+  return false;
+}
+
+async function probeHeadKotlinSymbols(
+  deps: ScannerDeps,
+  filePath: string,
+  content: string,
+  onlyLines: ReadonlySet<number>,
+  resolveCtx: WorkspaceResolveContext,
+  indexedKotlinFiles: Set<string>,
+  probeBudget: { remaining: number },
+  counters: ScanCounters,
+): Promise<void> {
+  if (detectArchLanguage(filePath) !== 'kotlin') return;
+  if (probeBudget.remaining <= 0 || deps.signal.aborted) return;
+
+  const normSource = normalizePath(filePath);
+  const { imports, meta } = extractImports(normSource, content);
+  const relevant = imports.filter(
+    (imp) => onlyLines.has(imp.line) && !imp.specifier.endsWith('.*'),
+  );
+  if (relevant.length === 0) return;
+
+  const sourceRoot = findJvmSourceRoot(normSource, meta.declaredPackage);
+  const prefix = sourceRoot ? `${sourceRoot}/` : '';
+
+  const mutableSymbols = resolveCtx.kotlinSymbols
+    ? new Map(resolveCtx.kotlinSymbols)
+    : new Map<string, string>();
+  const targetDirs = new Set<string>();
+  const pendingSpecs: string[] = [];
+
+  const fileSets: Array<ReadonlySet<string>> = [];
+  if (resolveCtx.knownFiles) fileSets.push(resolveCtx.knownFiles);
+  if (resolveCtx.extraFiles) fileSets.push(resolveCtx.extraFiles);
+
+  const hasExactFile = (spec: string): boolean => {
+    const specPath = spec.replace(/\./g, '/');
+    for (const ext of ['kt', 'kts', 'java']) {
+      const candidate = `${prefix}${specPath}.${ext}`;
+      if (fileSets.some((s) => s.has(candidate))) return true;
+    }
+    return false;
+  };
+
+  for (const imp of relevant) {
+    if (hasKotlinSymbolMatch(mutableSymbols, imp.specifier)) continue;
+    if (hasExactFile(imp.specifier)) continue;
+    pendingSpecs.push(imp.specifier);
+
+    const segs = imp.specifier.split('.');
+    if (segs.length >= 2) {
+      const parentDir = normalizePath(`${prefix}${segs.slice(0, -1).join('/')}`);
+      if (parentDir) targetDirs.add(parentDir);
+    }
+    if (segs.length >= 3) {
+      const grandDir = normalizePath(`${prefix}${segs.slice(0, -2).join('/')}`);
+      if (grandDir) targetDirs.add(grandDir);
+    }
+  }
+  if (targetDirs.size === 0 || pendingSpecs.length === 0) return;
+
+  const directChildren: string[] = [];
+  const nestedChildren: string[] = [];
+  const seenCandidates = new Set<string>();
+  const addCandidate = (cand: string, isDirect: boolean): void => {
+    if (indexedKotlinFiles.has(cand) || seenCandidates.has(cand)) return;
+    seenCandidates.add(cand);
+    if (isDirect) directChildren.push(cand);
+    else nestedChildren.push(cand);
+  };
+
+  if (fileSets.length > 0) {
+    const dirList = [...targetDirs];
+    for (const set of fileSets) {
+      for (const f of set) {
+        if (!/\.(?:kt|kts)$/i.test(f)) continue;
+        for (const dir of dirList) {
+          const slash = `${dir}/`;
+          if (!f.startsWith(slash)) continue;
+          const rest = f.slice(slash.length);
+          addCandidate(f, !rest.includes('/'));
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback when `git.getTree` is absent or truncated: probe standard public entrypoint files.
+  if (!resolveCtx.knownFiles) {
+    for (const dir of targetDirs) {
+      addCandidate(`${dir}/index.kt`, true);
+      addCandidate(`${dir}/index.kts`, true);
+    }
+  }
+
+  directChildren.sort();
+  nestedChildren.sort();
+  const candidates = [...directChildren, ...nestedChildren];
+
+  for (const candidate of candidates) {
+    if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+    if (pendingSpecs.every((s) => hasKotlinSymbolMatch(mutableSymbols, s))) break;
+    indexedKotlinFiles.add(candidate);
+    probeBudget.remaining -= 1;
+    counters.networkCalls += 1;
+
+    try {
+      const hit = await deps.fileReader.read({
+        owner: deps.owner,
+        repo: deps.repo,
+        path: candidate,
+        ref: deps.head_sha,
+      });
+      if (!hit) continue;
+      const decl = extractKotlinDeclarations(hit);
+      if (!decl.packageName) continue;
+      for (const sym of decl.symbols) {
+        const fqn = `${decl.packageName}.${sym}`;
+        if (!mutableSymbols.has(fqn)) {
+          mutableSymbols.set(fqn, candidate);
+        }
+      }
+      resolveCtx.kotlinSymbols = mutableSymbols;
+    } catch {
+      continue; // treat transient probe error as absent
+    }
+  }
+}
+
 async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
@@ -374,6 +513,7 @@ export function createArchitectureScanner(
       const counters: ScanCounters = { networkCalls: 0, cacheHits: 0 };
       const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
       const probeCache = new Map<string, boolean>();
+      const indexedKotlinFiles = new Set<string>();
       const probeBudget = { remaining: 64 };
       const findings: ScanFinding[] = [];
       const errors: ScanError[] = [];
@@ -392,6 +532,16 @@ export function createArchitectureScanner(
             file.added_lines,
             resolveCtx,
             probeCache,
+            probeBudget,
+            counters,
+          );
+          await probeHeadKotlinSymbols(
+            deps,
+            file.path,
+            content,
+            file.added_lines,
+            resolveCtx,
+            indexedKotlinFiles,
             probeBudget,
             counters,
           );

@@ -154,7 +154,9 @@ export interface ArchitectureContextsConfig {
 export interface ArchitectureCustomRule {
   id: string;
   from: string | string[];
+  /** Glob/layer patterns checked against resolved internal repository paths (`resolvedPath` only). */
   forbid_imports?: string[];
+  /** Package name patterns checked when an import resolves to an external/unresolved package. */
   forbid_packages?: string[];
   severity?: Severity;
   reason: string;

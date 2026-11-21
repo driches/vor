@@ -89454,18 +89454,160 @@ function extractRustImports(content) {
   }
   return dedupExtracted(out);
 }
+function findJvmPackage(cleaned, stringSpans) {
+  for (const m2 of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
+    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
+      return m2[1];
+    }
+  }
+  return void 0;
+}
+function findJvmSourceRoot(normSource, declaredPackage) {
+  if (!declaredPackage) return "";
+  const pkgPath = declaredPackage.replace(/\./g, "/");
+  const dir = import_node_path22.posix.dirname(normSource);
+  if (dir === pkgPath) return "";
+  if (dir.endsWith(`/${pkgPath}`)) {
+    return dir.slice(0, dir.length - pkgPath.length - 1);
+  }
+  return "";
+}
+function buildKotlinTopLevelSurface(cleaned, stringSpans) {
+  const n2 = cleaned.length;
+  const out = new Array(n2);
+  let braceDepth = 0;
+  let parenDepth = 0;
+  for (let i2 = 0; i2 < n2; i2++) {
+    const ch = cleaned[i2];
+    if (ch === "\n") {
+      out[i2] = "\n";
+      continue;
+    }
+    if (isInsideStringSpan(i2, stringSpans)) {
+      out[i2] = " ";
+      continue;
+    }
+    if (ch === "{") {
+      braceDepth += 1;
+      out[i2] = " ";
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      out[i2] = " ";
+      continue;
+    }
+    if (ch === "(") {
+      parenDepth += 1;
+      out[i2] = " ";
+      continue;
+    }
+    if (ch === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      out[i2] = " ";
+      continue;
+    }
+    out[i2] = braceDepth > 0 || parenDepth > 0 ? " " : ch;
+  }
+  return out.join("").replace(/^[ \t]*(?:package|import)\b[^\n]*/gm, "");
+}
+function extractKotlinDeclarations(content) {
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const packageName = findJvmPackage(cleaned, stringSpans);
+  const topLevel = buildKotlinTopLevelSurface(cleaned, stringSpans);
+  const len = topLevel.length;
+  const symbols = /* @__PURE__ */ new Set();
+  const declRe = /\b(class|interface|object|typealias|fun|val|var)\b/g;
+  for (const m2 of topLevel.matchAll(declRe)) {
+    const kwIdx = m2.index ?? 0;
+    const prev = kwIdx > 0 ? topLevel[kwIdx - 1] : "";
+    if (prev === "." || prev === ":") continue;
+    const kw = m2[1];
+    let pos = kwIdx + m2[0].length;
+    const skipWs = () => {
+      while (pos < len && /\s/.test(topLevel[pos])) pos += 1;
+    };
+    const readIdent = () => {
+      const start = pos;
+      if (pos >= len || !/[A-Za-z_]/.test(topLevel[pos])) return "";
+      pos += 1;
+      while (pos < len && /\w/.test(topLevel[pos])) pos += 1;
+      return topLevel.slice(start, pos);
+    };
+    const skipBalancedAngles = () => {
+      if (topLevel[pos] !== "<") return false;
+      let depth = 0;
+      while (pos < len) {
+        const ch = topLevel[pos];
+        if (ch === "=" || ch === ";" || ch === "\n") return false;
+        if (ch === "<") depth += 1;
+        else if (ch === ">") {
+          depth -= 1;
+          if (depth === 0) {
+            pos += 1;
+            return true;
+          }
+        }
+        pos += 1;
+      }
+      return false;
+    };
+    skipWs();
+    if (kw === "class" || kw === "interface" || kw === "object" || kw === "typealias") {
+      const ident = readIdent();
+      if (ident) symbols.add(ident);
+      continue;
+    }
+    if (kw === "fun" && topLevel.slice(pos, pos + 9) === "interface") {
+      const after = topLevel[pos + 9];
+      if (after === void 0 || !/\w/.test(after)) continue;
+    }
+    if (pos < len && topLevel[pos] === "<") {
+      if (!skipBalancedAngles()) continue;
+      skipWs();
+    }
+    const first = readIdent();
+    if (!first) continue;
+    let recorded = first;
+    while (pos < len) {
+      skipWs();
+      if (pos < len && topLevel[pos] === "<") {
+        if (!skipBalancedAngles()) {
+          recorded = "";
+          break;
+        }
+        skipWs();
+      }
+      if (pos < len && topLevel[pos] === "?") {
+        pos += 1;
+        skipWs();
+      }
+      if (pos < len && topLevel[pos] === ".") {
+        pos += 1;
+        skipWs();
+        const nextIdent = readIdent();
+        if (!nextIdent) {
+          recorded = "";
+          break;
+        }
+        recorded = nextIdent;
+        continue;
+      }
+      break;
+    }
+    if (recorded) symbols.add(recorded);
+  }
+  return {
+    ...packageName ? { packageName } : {},
+    symbols: [...symbols]
+  };
+}
 function extractJavaKotlinImports(content, language) {
   const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
-  let declaredPackage;
-  for (const m2 of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
-    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
-      declaredPackage = m2[1];
-      break;
-    }
-  }
+  const declaredPackage = findJvmPackage(cleaned, stringSpans);
   const importRe = /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
   for (const m2 of cleaned.matchAll(importRe)) {
     const idx = m2.index ?? 0;
@@ -90289,22 +90431,27 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
     }
     case "java":
     case "kotlin": {
+      const isWildcard = imp.specifier.endsWith(".*");
       const cleanSpec = imp.specifier.replace(/\.\*$/, "");
       const specPath = cleanSpec.replace(/\./g, "/");
-      let sourceRoot = "";
-      if (fileMeta.declaredPackage) {
-        const pkgPath = fileMeta.declaredPackage.replace(/\./g, "/");
-        const dir = import_node_path22.posix.dirname(normSource);
-        if (dir === pkgPath) sourceRoot = "";
-        else if (dir.endsWith(`/${pkgPath}`)) {
-          sourceRoot = dir.slice(0, dir.length - pkgPath.length - 1);
-        }
-      }
+      const sourceRoot = findJvmSourceRoot(normSource, fileMeta.declaredPackage);
       const prefix = sourceRoot ? `${sourceRoot}/` : "";
+      if (imp.language === "kotlin" && !isWildcard && ctx.kotlinSymbols) {
+        const exact = ctx.kotlinSymbols.get(cleanSpec);
+        if (exact) return { ...base, resolvedPath: exact };
+      }
       const exts = imp.language === "java" ? ["java"] : ["kt", "kts", "java"];
       for (const ext of exts) {
         const candidate = `${prefix}${specPath}.${ext}`;
         if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
+      }
+      if (imp.language === "kotlin" && !isWildcard && ctx.kotlinSymbols) {
+        let symbolPrefix = cleanSpec;
+        while (symbolPrefix.includes(".")) {
+          symbolPrefix = symbolPrefix.slice(0, symbolPrefix.lastIndexOf("."));
+          const parentHit = ctx.kotlinSymbols.get(symbolPrefix);
+          if (parentHit) return { ...base, resolvedPath: parentHit };
+        }
       }
       if (existsRepoPrefix(`${prefix}${specPath}`, ctx)) {
         return { ...base, resolvedPath: `${prefix}${specPath}` };
@@ -90721,6 +90868,116 @@ async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolve
     resolveCtx.extraFiles = mutableExtra;
   }
 }
+function hasKotlinSymbolMatch(symbols, cleanSpec) {
+  if (symbols.has(cleanSpec)) return true;
+  let prefix = cleanSpec;
+  while (prefix.includes(".")) {
+    prefix = prefix.slice(0, prefix.lastIndexOf("."));
+    if (symbols.has(prefix)) return true;
+  }
+  return false;
+}
+async function probeHeadKotlinSymbols(deps, filePath, content, onlyLines, resolveCtx, indexedKotlinFiles, probeBudget, counters) {
+  if (detectArchLanguage(filePath) !== "kotlin") return;
+  if (probeBudget.remaining <= 0 || deps.signal.aborted) return;
+  const normSource = normalizePath(filePath);
+  const { imports, meta: meta3 } = extractImports(normSource, content);
+  const relevant = imports.filter(
+    (imp) => onlyLines.has(imp.line) && !imp.specifier.endsWith(".*")
+  );
+  if (relevant.length === 0) return;
+  const sourceRoot = findJvmSourceRoot(normSource, meta3.declaredPackage);
+  const prefix = sourceRoot ? `${sourceRoot}/` : "";
+  const mutableSymbols = resolveCtx.kotlinSymbols ? new Map(resolveCtx.kotlinSymbols) : /* @__PURE__ */ new Map();
+  const targetDirs = /* @__PURE__ */ new Set();
+  const pendingSpecs = [];
+  const fileSets = [];
+  if (resolveCtx.knownFiles) fileSets.push(resolveCtx.knownFiles);
+  if (resolveCtx.extraFiles) fileSets.push(resolveCtx.extraFiles);
+  const hasExactFile = (spec) => {
+    const specPath = spec.replace(/\./g, "/");
+    for (const ext of ["kt", "kts", "java"]) {
+      const candidate = `${prefix}${specPath}.${ext}`;
+      if (fileSets.some((s2) => s2.has(candidate))) return true;
+    }
+    return false;
+  };
+  for (const imp of relevant) {
+    if (hasKotlinSymbolMatch(mutableSymbols, imp.specifier)) continue;
+    if (hasExactFile(imp.specifier)) continue;
+    pendingSpecs.push(imp.specifier);
+    const segs = imp.specifier.split(".");
+    if (segs.length >= 2) {
+      const parentDir = normalizePath(`${prefix}${segs.slice(0, -1).join("/")}`);
+      if (parentDir) targetDirs.add(parentDir);
+    }
+    if (segs.length >= 3) {
+      const grandDir = normalizePath(`${prefix}${segs.slice(0, -2).join("/")}`);
+      if (grandDir) targetDirs.add(grandDir);
+    }
+  }
+  if (targetDirs.size === 0 || pendingSpecs.length === 0) return;
+  const directChildren = [];
+  const nestedChildren = [];
+  const seenCandidates = /* @__PURE__ */ new Set();
+  const addCandidate = (cand, isDirect) => {
+    if (indexedKotlinFiles.has(cand) || seenCandidates.has(cand)) return;
+    seenCandidates.add(cand);
+    if (isDirect) directChildren.push(cand);
+    else nestedChildren.push(cand);
+  };
+  if (fileSets.length > 0) {
+    const dirList = [...targetDirs];
+    for (const set2 of fileSets) {
+      for (const f2 of set2) {
+        if (!/\.(?:kt|kts)$/i.test(f2)) continue;
+        for (const dir of dirList) {
+          const slash = `${dir}/`;
+          if (!f2.startsWith(slash)) continue;
+          const rest = f2.slice(slash.length);
+          addCandidate(f2, !rest.includes("/"));
+          break;
+        }
+      }
+    }
+  }
+  if (!resolveCtx.knownFiles) {
+    for (const dir of targetDirs) {
+      addCandidate(`${dir}/index.kt`, true);
+      addCandidate(`${dir}/index.kts`, true);
+    }
+  }
+  directChildren.sort();
+  nestedChildren.sort();
+  const candidates = [...directChildren, ...nestedChildren];
+  for (const candidate of candidates) {
+    if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+    if (pendingSpecs.every((s2) => hasKotlinSymbolMatch(mutableSymbols, s2))) break;
+    indexedKotlinFiles.add(candidate);
+    probeBudget.remaining -= 1;
+    counters.networkCalls += 1;
+    try {
+      const hit = await deps.fileReader.read({
+        owner: deps.owner,
+        repo: deps.repo,
+        path: candidate,
+        ref: deps.head_sha
+      });
+      if (!hit) continue;
+      const decl = extractKotlinDeclarations(hit);
+      if (!decl.packageName) continue;
+      for (const sym of decl.symbols) {
+        const fqn = `${decl.packageName}.${sym}`;
+        if (!mutableSymbols.has(fqn)) {
+          mutableSymbols.set(fqn, candidate);
+        }
+      }
+      resolveCtx.kotlinSymbols = mutableSymbols;
+    } catch {
+      continue;
+    }
+  }
+}
 async function hydrateResolveContext(deps, languagesPresent, counters) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
   const headTree = await fetchHeadTreeFiles(deps, counters);
@@ -90792,6 +91049,7 @@ function createArchitectureScanner(spec, options = {}) {
       const counters = { networkCalls: 0, cacheHits: 0 };
       const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
       const probeCache = /* @__PURE__ */ new Map();
+      const indexedKotlinFiles = /* @__PURE__ */ new Set();
       const probeBudget = { remaining: 64 };
       const findings = [];
       const errors = [];
@@ -90808,6 +91066,16 @@ function createArchitectureScanner(spec, options = {}) {
             file2.added_lines,
             resolveCtx,
             probeCache,
+            probeBudget,
+            counters
+          );
+          await probeHeadKotlinSymbols(
+            deps,
+            file2.path,
+            content,
+            file2.added_lines,
+            resolveCtx,
+            indexedKotlinFiles,
             probeBudget,
             counters
           );
@@ -91260,77 +91528,125 @@ function decodeHtmlEntities(text) {
 function stripTags(html) {
   return html.replace(/<[^<>]+>/g, "");
 }
+var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style"]);
+function readTagNameAt(lower, nameStart) {
+  let pos = nameStart;
+  while (pos < lower.length) {
+    const ch = lower.charCodeAt(pos);
+    const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
+    if (!isAlphaNum) break;
+    pos += 1;
+  }
+  return pos;
+}
+function isTagBoundaryChar(ch, allowSlash) {
+  return ch === 62 || allowSlash && ch === 47 || ch === 32 || ch === 9 || ch === 10 || ch === 12 || ch === 13;
+}
 function replaceHtmlElements(html, tagNames, transform2) {
   const lower = html.replace(/[A-Z]+/g, (m2) => m2.toLowerCase());
   const tagSet = new Set(tagNames);
-  const noClosingTag = /* @__PURE__ */ new Set();
+  const stacks = /* @__PURE__ */ new Map();
+  const matches = /* @__PURE__ */ new Map();
+  let rawOpen = null;
+  let scan = 0;
+  while (scan < lower.length) {
+    const idx = lower.indexOf("<", scan);
+    if (idx === -1) break;
+    if (rawOpen !== null) {
+      if (lower.charCodeAt(idx + 1) === 47) {
+        const nameEnd2 = readTagNameAt(lower, idx + 2);
+        const closeTag = lower.slice(idx + 2, nameEnd2);
+        const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
+        if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary2, false)) {
+          const endBracket = lower.indexOf(">", nameEnd2);
+          if (endBracket === -1) break;
+          matches.set(rawOpen.openIdx, {
+            tag: rawOpen.tag,
+            openClose: rawOpen.openClose,
+            closeStart: idx,
+            closeEnd: endBracket + 1
+          });
+          rawOpen = null;
+          scan = endBracket + 1;
+          continue;
+        }
+      }
+      scan = idx + 1;
+      continue;
+    }
+    if (lower.charCodeAt(idx + 1) === 47) {
+      const nameEnd2 = readTagNameAt(lower, idx + 2);
+      if (nameEnd2 === idx + 2) {
+        scan = idx + 1;
+        continue;
+      }
+      const closeTag = lower.slice(idx + 2, nameEnd2);
+      const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
+      if (!tagSet.has(closeTag) || !isTagBoundaryChar(boundary2, false)) {
+        scan = idx + 1;
+        continue;
+      }
+      const endBracket = lower.indexOf(">", nameEnd2);
+      if (endBracket === -1) break;
+      const frame = stacks.get(closeTag)?.pop();
+      if (frame) {
+        matches.set(frame.openIdx, {
+          tag: closeTag,
+          openClose: frame.openClose,
+          closeStart: idx,
+          closeEnd: endBracket + 1
+        });
+      }
+      scan = endBracket + 1;
+      continue;
+    }
+    const nameEnd = readTagNameAt(lower, idx + 1);
+    if (nameEnd === idx + 1) {
+      scan = idx + 1;
+      continue;
+    }
+    const openTag = lower.slice(idx + 1, nameEnd);
+    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+    if (!tagSet.has(openTag) || !isTagBoundaryChar(boundary, true)) {
+      scan = idx + 1;
+      continue;
+    }
+    const openClose = lower.indexOf(">", nameEnd);
+    if (openClose === -1) break;
+    if (html.charCodeAt(openClose - 1) === 47) {
+      scan = openClose + 1;
+      continue;
+    }
+    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
+      rawOpen = { tag: openTag, openIdx: idx, openClose };
+      scan = openClose + 1;
+      continue;
+    }
+    let stack = stacks.get(openTag);
+    if (!stack) {
+      stack = [];
+      stacks.set(openTag, stack);
+    }
+    stack.push({ openIdx: idx, openClose });
+    scan = openClose + 1;
+  }
   const out = [];
   let cursor = 0;
-  while (cursor < html.length) {
+  while (cursor < lower.length) {
     const openIdx = lower.indexOf("<", cursor);
     if (openIdx === -1) {
       out.push(html.slice(cursor));
       break;
     }
-    let nameEnd = openIdx + 1;
-    while (nameEnd < lower.length) {
-      const ch = lower.charCodeAt(nameEnd);
-      const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
-      if (!isAlphaNum) break;
-      nameEnd += 1;
-    }
-    if (nameEnd === openIdx + 1) {
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
+    const m2 = matches.get(openIdx);
+    if (m2) {
+      out.push(html.slice(cursor, openIdx));
+      out.push(transform2(m2.tag, html.slice(m2.openClose + 1, m2.closeStart)));
+      cursor = m2.closeEnd;
       continue;
     }
-    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
-    const isBoundary = boundary === 62 || boundary === 47 || boundary === 32 || boundary === 9 || boundary === 10 || boundary === 12 || boundary === 13;
-    const tagName = lower.slice(openIdx + 1, nameEnd);
-    if (!isBoundary || !tagSet.has(tagName) || noClosingTag.has(tagName)) {
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
-      continue;
-    }
-    const openClose = lower.indexOf(">", nameEnd);
-    if (openClose === -1) {
-      out.push(html.slice(cursor));
-      break;
-    }
-    if (html.charCodeAt(openClose - 1) === 47) {
-      out.push(html.slice(cursor, openClose + 1));
-      cursor = openClose + 1;
-      continue;
-    }
-    const closeNeedle = `</${tagName}`;
-    let searchFrom = openClose + 1;
-    let closeStart = -1;
-    let closeEnd = -1;
-    while (true) {
-      const idx = lower.indexOf(closeNeedle, searchFrom);
-      if (idx === -1) break;
-      const afterName = idx + closeNeedle.length;
-      const nextCh = afterName < lower.length ? lower.charCodeAt(afterName) : -1;
-      const validCloseBoundary = nextCh === 62 || nextCh === 32 || nextCh === 9 || nextCh === 10 || nextCh === 12 || nextCh === 13;
-      if (!validCloseBoundary) {
-        searchFrom = afterName;
-        continue;
-      }
-      const endBracket = lower.indexOf(">", afterName);
-      if (endBracket === -1) break;
-      closeStart = idx;
-      closeEnd = endBracket + 1;
-      break;
-    }
-    if (closeStart === -1) {
-      noClosingTag.add(tagName);
-      out.push(html.slice(cursor, openIdx + 1));
-      cursor = openIdx + 1;
-      continue;
-    }
-    out.push(html.slice(cursor, openIdx));
-    out.push(transform2(tagName, html.slice(openClose + 1, closeStart)));
-    cursor = closeEnd;
+    out.push(html.slice(cursor, openIdx + 1));
+    cursor = openIdx + 1;
   }
   return out.join("");
 }

@@ -351,6 +351,8 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
       if (!matchesFrom) continue;
 
       let violated = false;
+      // Matches resolved internal repository paths only; unresolved specifiers
+      // (e.g. missing path aliases or external packages) fall through to `forbid_packages`.
       if (rule.forbid_imports?.length && resolved.resolvedPath) {
         violated = rule.forbid_imports.some((t) =>
           matchesAnyTarget(t, resolved.resolvedPath, targetLayer),

@@ -251,4 +251,55 @@ entries:
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('probes Kotlin symbol declarations on PR HEAD for modular-monolith public API checks', async () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'modular-monolith',
+      root: 'src/main/kotlin/com/acme',
+    });
+    const scanner = createArchitectureScanner(spec);
+    const billingPath = 'src/main/kotlin/com/acme/modules/billing/BillingService.kt';
+    const billingContent = [
+      'package com.acme.modules.billing',
+      'import com.acme.modules.orders.placeOrder',
+      'import com.acme.modules.orders.secretHelper',
+      'class BillingService',
+    ].join('\n');
+
+    const changed = makeChangedFile(billingPath, {
+      2: 'import com.acme.modules.orders.placeOrder',
+      3: 'import com.acme.modules.orders.secretHelper',
+    });
+    const deps = makeDeps([changed], {
+      [billingPath]: billingContent,
+      'src/main/kotlin/com/acme/modules/orders/index.kt':
+        'package com.acme.modules.orders\nfun placeOrder(): String = "ok"\n',
+      'src/main/kotlin/com/acme/modules/orders/Internal.kt':
+        'package com.acme.modules.orders\nfun secretHelper(): String = "secret"\n',
+    });
+    deps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: billingPath },
+                { type: 'blob', path: 'src/main/kotlin/com/acme/modules/orders/index.kt' },
+                { type: 'blob', path: 'src/main/kotlin/com/acme/modules/orders/Internal.kt' },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+
+    const res = await scanner.scan(deps);
+    expect(res.findings).toHaveLength(1);
+    expect(res.findings[0]?.line).toBe(3);
+    expect(res.findings[0]?.rule_id).toBe('arch:context-boundary');
+    expect(res.metrics.network_calls).toBeGreaterThan(0);
+  });
 });
