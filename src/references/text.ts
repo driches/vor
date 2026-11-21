@@ -42,28 +42,30 @@ function htmlToMarkdownText(html: string): string {
   // Remove non-content / chrome blocks before converting structural tags.
   out = out.replace(/<(script|style|noscript|svg|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
 
+  // Defer HTML entity decoding until after `stripTags` below so escaped `<...>`
+  // inside code/headings/list items (e.g. generic type parameters) isn't stripped as markup.
   // Preformatted code blocks (unwrap inner <code> if present).
   out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner: string) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    const clean = stripTags(inner).trim();
     return `\n\`\`\`\n${clean}\n\`\`\`\n`;
   });
 
   // Inline code spans.
   out = out.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner: string) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    const clean = stripTags(inner).trim();
     return clean ? `\`${clean}\`` : '';
   });
 
   // Headings h1..h6 -> Markdown #..######.
   out = out.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl: string, inner: string) => {
     const hashes = '#'.repeat(Number(lvl));
-    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, ' ').trim();
+    const clean = stripTags(inner).replace(/\s+/g, ' ').trim();
     return clean ? `\n${hashes} ${clean}\n` : '\n';
   });
 
   // List items.
   out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner: string) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, ' ').trim();
+    const clean = stripTags(inner).replace(/\s+/g, ' ').trim();
     return clean ? `\n- ${clean}` : '';
   });
 

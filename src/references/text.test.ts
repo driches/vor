@@ -37,6 +37,19 @@ describe('normalizeDocumentText', () => {
     const text = normalizeDocumentText(html, 'text/html');
     expect(text).toContain('Valid — A invalid &#x110000; and &#9999999;.');
   });
+
+  it('preserves escaped generics and markup inside code, headings, and list items', () => {
+    const html =
+      '<html><p>Use <code>Map&lt;string, User&gt;</code> and &amp;lt;tag&amp;gt;.</p>' +
+      '<pre><code>&lt;div class="x"&gt;hi&lt;/div&gt;</code></pre>' +
+      '<h2>Generic &lt;T&gt; &amp;amp; <code>Array&lt;string&gt;</code></h2>' +
+      '<ul><li>Use <code>Result&lt;T, E&gt;</code></li></ul></html>';
+    const text = normalizeDocumentText(html, 'text/html');
+    expect(text).toContain('Use `Map<string, User>` and &lt;tag&gt;.');
+    expect(text).toContain('```\n<div class="x">hi</div>\n```');
+    expect(text).toContain('## Generic <T> &amp; `Array<string>`');
+    expect(text).toContain('- Use `Result<T, E>`');
+  });
 });
 
 describe('extractDocumentHeadings', () => {

@@ -107650,7 +107650,7 @@ function htmlToMarkdownText(html) {
   let out2 = html;
   out2 = out2.replace(/<(script|style|noscript|svg|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
   out2 = out2.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    const clean = stripTags(inner).trim();
     return `
 \`\`\`
 ${clean}
@@ -107658,18 +107658,18 @@ ${clean}
 `;
   });
   out2 = out2.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).trim();
+    const clean = stripTags(inner).trim();
     return clean ? `\`${clean}\`` : "";
   });
   out2 = out2.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl, inner) => {
     const hashes = "#".repeat(Number(lvl));
-    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
     return clean ? `
 ${hashes} ${clean}
 ` : "\n";
   });
   out2 = out2.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner) => {
-    const clean = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
     return clean ? `
 - ${clean}` : "";
   });
