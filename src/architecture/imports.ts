@@ -1644,6 +1644,68 @@ export function extractCSharpNamespace(content: string): string | undefined {
   return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
 }
 
+function commonCSharpDirPrefix(a: string, b: string): string {
+  const segsA = a.split('/');
+  const segsB = b.split('/');
+  const limit = Math.min(segsA.length, segsB.length);
+  const shared: string[] = [];
+  for (let i = 0; i < limit; i++) {
+    if (segsA[i] !== segsB[i]) break;
+    shared.push(segsA[i]!);
+  }
+  return shared.join('/');
+}
+
+function collapseCSharpNamespaceTargets(files: readonly string[]): string | undefined {
+  // Always return the directory so classifyLayer receives a consistent
+  // directory path regardless of how many files share the namespace (keep the
+  // file path only when a single file sits at repository root with no dir).
+  const dir = (f: string) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
+  if (files.length === 1) return dir(files[0]!) || files[0]!;
+  let shared = dir(files[0]!);
+  for (let i = 1; i < files.length; i++) {
+    const d = dir(files[i]!);
+    shared = shared && d ? commonCSharpDirPrefix(shared, d) : '';
+    if (!shared) return undefined;
+  }
+  return shared || undefined;
+}
+
+/**
+ * Collapse a map of `repoRelPath -> declared C# namespace` into a namespace ->
+ * target directory lookup table, prioritizing production files over test files.
+ */
+export function buildCSharpNamespaceMap(
+  fileNamespaces: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const prodByNs = new Map<string, string[]>();
+  const testByNs = new Map<string, string[]>();
+
+  for (const [rawPath, ns] of fileNamespaces) {
+    const normPath = normalizePath(rawPath);
+    if (!normPath || !ns) continue;
+    const bucketMap = isTestFile(normPath) ? testByNs : prodByNs;
+    let bucket = bucketMap.get(ns);
+    if (!bucket) {
+      bucket = [];
+      bucketMap.set(ns, bucket);
+    }
+    bucket.push(normPath);
+  }
+
+  const index = new Map<string, string>();
+  for (const [ns, files] of prodByNs) {
+    const target = collapseCSharpNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  for (const [ns, files] of testByNs) {
+    if (index.has(ns)) continue;
+    const target = collapseCSharpNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  return index;
+}
+
 function extractCSharpImports(content: string): {
   imports: ExtractedImport[];
   meta: FileImportMeta;

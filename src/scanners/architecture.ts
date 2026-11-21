@@ -10,12 +10,14 @@
  *   - Never throws; per-file failures become non-fatal `ScanError` entries.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { evaluateFileArchitecture } from '../architecture/evaluator.js';
 import { isTestFile, matchesAnyGlob, normalizePath } from '../architecture/glob.js';
 import {
+  buildCSharpNamespaceMap,
   detectArchLanguage,
+  extractCSharpNamespace,
   extractImports,
   extractKotlinDeclarations,
   extractTsConfigExtends,
@@ -452,7 +454,7 @@ async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
   counters: ScanCounters,
-): Promise<WorkspaceResolveContext> {
+): Promise<{ ctx: WorkspaceResolveContext; removedFiles: Set<string> }> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
   const headTree = await fetchHeadTreeFiles(deps, counters);
   if (headTree) {
@@ -462,8 +464,15 @@ async function hydrateResolveContext(
   const prFiles: string[] = [];
   for (const f of deps.changedFiles) {
     const norm = normalizePath(f.path);
-    if (f.status === 'removed') removedFiles.add(norm);
-    else prFiles.push(norm);
+    if (f.status === 'removed') {
+      removedFiles.add(norm);
+    } else {
+      prFiles.push(norm);
+      if (f.status === 'renamed' && f.previous_path) {
+        const prevNorm = normalizePath(f.previous_path);
+        if (prevNorm && prevNorm !== norm) removedFiles.add(prevNorm);
+      }
+    }
   }
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
@@ -509,7 +518,205 @@ async function hydrateResolveContext(
     }
   }
 
-  return ctx;
+  return { ctx, removedFiles };
+}
+
+const MAX_CSHARP_DISK_INDEX_FILES = 2000;
+const MAX_CSHARP_INDEX_FILE_BYTES = 512 * 1024;
+const CSHARP_WALK_SKIP_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.vor',
+  'target',
+  'vendor',
+  '.next',
+  'out',
+  'bin',
+  'obj',
+  '.dart_tool',
+  '__pycache__',
+  '.venv',
+  'venv',
+]);
+
+function walkWorkspaceCSharpFiles(workspaceDir: string): string[] {
+  const results: string[] = [];
+  const walk = (absDir: string, relBase: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (CSHARP_WALK_SKIP_DIRS.has(entry.name)) continue;
+      const abs = resolve(absDir, entry.name);
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(abs, rel);
+      } else if (entry.isFile() && /\.cs$/i.test(entry.name)) {
+        results.push(normalizePath(rel));
+      }
+    }
+  };
+  walk(workspaceDir, '');
+  return results;
+}
+
+async function hydrateHeadCSharpNamespaces(
+  deps: ScannerDeps,
+  applicableCSharpFiles: readonly ChangedFile[],
+  resolveCtx: WorkspaceResolveContext,
+  removedFiles: ReadonlySet<string>,
+  headContentCache: Map<string, string>,
+  probeBudget: { remaining: number },
+  counters: ScanCounters,
+): Promise<void> {
+  if (applicableCSharpFiles.length === 0 || deps.signal.aborted) return;
+
+  const fileNamespaces = new Map<string, string>();
+  const indexedPaths = new Set<string>();
+  const addedSpecs = new Set<string>();
+
+  const recordCSharpContent = (normPath: string, content: string): void => {
+    indexedPaths.add(normPath);
+    const ns = extractCSharpNamespace(content);
+    if (ns) fileNamespaces.set(normPath, ns);
+  };
+
+  for (const file of applicableCSharpFiles) {
+    if (deps.signal.aborted) break;
+    const norm = normalizePath(file.path);
+    const content = headContentCache.get(norm) ?? (await readHeadFileContent(deps, file, counters));
+    headContentCache.set(norm, content);
+    indexedPaths.add(norm);
+    const { imports, meta } = extractImports(norm, content);
+    if (meta.declaredPackage) fileNamespaces.set(norm, meta.declaredPackage);
+    for (const imp of imports) {
+      if (file.added_lines.has(imp.line)) {
+        addedSpecs.add(imp.specifier);
+      }
+    }
+  }
+  if (addedSpecs.size === 0 || deps.signal.aborted) return;
+
+  // Also index other PR-changed `.cs` files (e.g. test files or files with only deletions)
+  // at PR HEAD so their namespaces override any stale workspace copies.
+  for (const file of deps.changedFiles) {
+    if (deps.signal.aborted) break;
+    if (file.status === 'removed' || file.is_binary || detectArchLanguage(file.path) !== 'csharp') {
+      continue;
+    }
+    const norm = normalizePath(file.path);
+    if (indexedPaths.has(norm)) continue;
+    const content = headContentCache.get(norm) ?? (await readHeadFileContent(deps, file, counters));
+    headContentCache.set(norm, content);
+    recordCSharpContent(norm, content);
+  }
+
+  const unchangedCandidates: string[] = [];
+  if (resolveCtx.knownFiles) {
+    for (const f of resolveCtx.knownFiles) {
+      if (!/\.cs$/i.test(f)) continue;
+      if (indexedPaths.has(f) || removedFiles.has(f)) continue;
+      unchangedCandidates.push(f);
+    }
+  } else if (deps.workspaceDir) {
+    for (const f of walkWorkspaceCSharpFiles(deps.workspaceDir)) {
+      if (indexedPaths.has(f) || removedFiles.has(f)) continue;
+      unchangedCandidates.push(f);
+    }
+  }
+
+  const prodCandidates: string[] = [];
+  const testCandidates: string[] = [];
+  for (const f of unchangedCandidates) {
+    if (isTestFile(f)) testCandidates.push(f);
+    else prodCandidates.push(f);
+  }
+  prodCandidates.sort();
+  testCandidates.sort();
+  const orderedUnchanged = [...prodCandidates, ...testCandidates];
+
+  const remoteCandidates: string[] = [];
+  if (deps.workspaceDir) {
+    const wsRoot = resolve(deps.workspaceDir);
+    let diskScanned = 0;
+    for (const relPath of orderedUnchanged) {
+      if (diskScanned >= MAX_CSHARP_DISK_INDEX_FILES) break;
+      try {
+        const abs = resolve(wsRoot, relPath);
+        const st = statSync(abs);
+        if (!st.isFile() || st.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
+        const content = readFileSync(abs, 'utf-8');
+        diskScanned += 1;
+        recordCSharpContent(relPath, content);
+      } catch {
+        remoteCandidates.push(relPath);
+      }
+    }
+  } else {
+    remoteCandidates.push(...orderedUnchanged);
+  }
+
+  if (remoteCandidates.length > 0 && probeBudget.remaining > 0 && !deps.signal.aborted) {
+    const searchTokens = new Set<string>();
+    for (const spec of addedSpecs) {
+      if (
+        spec === 'System' ||
+        spec.startsWith('System.') ||
+        spec === 'Microsoft' ||
+        spec.startsWith('Microsoft.')
+      ) {
+        continue;
+      }
+      for (const seg of spec.split('.')) {
+        if (seg.length >= 2) searchTokens.add(seg.toLowerCase());
+      }
+    }
+
+    const prioritized: string[] = [];
+    const deferred: string[] = [];
+    for (const cand of remoteCandidates) {
+      const lower = cand.toLowerCase();
+      let matched = false;
+      for (const tok of searchTokens) {
+        if (lower.includes(tok)) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) prioritized.push(cand);
+      else deferred.push(cand);
+    }
+
+    for (const cand of [...prioritized, ...deferred]) {
+      if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+      probeBudget.remaining -= 1;
+      counters.networkCalls += 1;
+      try {
+        const content = await deps.fileReader.read({
+          owner: deps.owner,
+          repo: deps.repo,
+          path: cand,
+          ref: deps.head_sha,
+        });
+        if (content !== null) {
+          recordCSharpContent(cand, content);
+        }
+      } catch {
+        continue; // treat transient probe failure as absent
+      }
+    }
+  }
+
+  if (fileNamespaces.size > 0) {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceMap(fileNamespaces);
+  }
 }
 
 function isFileApplicable(file: ChangedFile, spec: ResolvedArchitectureSpec): boolean {
@@ -559,18 +766,38 @@ export function createArchitectureScanner(
       }
 
       const counters: ScanCounters = { networkCalls: 0, cacheHits: 0 };
-      const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
+      const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
+        deps,
+        languagesPresent,
+        counters,
+      );
       const probeCache = new Map<string, boolean>();
       const indexedKotlinFiles = new Set<string>();
+      const headContentCache = new Map<string, string>();
       const probeBudget = { remaining: 64 };
       const findings: ScanFinding[] = [];
       const errors: ScanError[] = [];
       let filesExamined = 0;
 
+      if (languagesPresent.has('csharp')) {
+        const applicableCSharp = applicable.filter((f) => detectArchLanguage(f.path) === 'csharp');
+        await hydrateHeadCSharpNamespaces(
+          deps,
+          applicableCSharp,
+          resolveCtx,
+          removedFiles,
+          headContentCache,
+          probeBudget,
+          counters,
+        );
+      }
+
       for (const file of applicable) {
         if (deps.signal.aborted) break;
         try {
-          const content = await readHeadFileContent(deps, file, counters);
+          const normPath = normalizePath(file.path);
+          const content =
+            headContentCache.get(normPath) ?? (await readHeadFileContent(deps, file, counters));
           filesExamined += 1;
 
           await probeHeadAliasTargets(

@@ -23,6 +23,7 @@ import {
   type ContextMatch,
 } from './glob.js';
 import {
+  buildCSharpNamespaceMap,
   detectArchLanguage,
   extractCSharpNamespace,
   extractImports,
@@ -189,33 +190,6 @@ const MAX_SYMBOL_INDEX_FILES = 2000;
 const MAX_INDEX_FILE_BYTES = 512 * 1024;
 const MAX_SCAN_FILES = 10_000;
 
-function commonDirPrefix(a: string, b: string): string {
-  const segsA = a.split('/');
-  const segsB = b.split('/');
-  const limit = Math.min(segsA.length, segsB.length);
-  const shared: string[] = [];
-  for (let i = 0; i < limit; i++) {
-    if (segsA[i] !== segsB[i]) break;
-    shared.push(segsA[i]!);
-  }
-  return shared.join('/');
-}
-
-function collapseNamespaceTargets(files: readonly string[]): string | undefined {
-  // Always return the directory so classifyLayer receives a consistent
-  // directory path regardless of how many files share the namespace (keep the
-  // file path only when a single file sits at repository root with no dir).
-  const dir = (f: string) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
-  if (files.length === 1) return dir(files[0]!) || files[0]!;
-  let shared = dir(files[0]!);
-  for (let i = 1; i < files.length; i++) {
-    const d = dir(files[i]!);
-    shared = shared && d ? commonDirPrefix(shared, d) : '';
-    if (!shared) return undefined;
-  }
-  return shared || undefined;
-}
-
 function scanPartitionedRepoFiles(
   workspaceDir: string,
   repoFiles: Iterable<string>,
@@ -256,32 +230,12 @@ function buildCSharpNamespaceIndex(
   workspaceDir: string,
   repoFiles: Iterable<string>,
 ): Map<string, string> {
-  const prodByNs = new Map<string, string[]>();
-  const testByNs = new Map<string, string[]>();
-
-  scanPartitionedRepoFiles(workspaceDir, repoFiles, /\.cs$/i, (normPath, content, isTest) => {
+  const fileNamespaces = new Map<string, string>();
+  scanPartitionedRepoFiles(workspaceDir, repoFiles, /\.cs$/i, (normPath, content) => {
     const ns = extractCSharpNamespace(content);
-    if (!ns) return;
-    const bucketMap = isTest ? testByNs : prodByNs;
-    let bucket = bucketMap.get(ns);
-    if (!bucket) {
-      bucket = [];
-      bucketMap.set(ns, bucket);
-    }
-    bucket.push(normPath);
+    if (ns) fileNamespaces.set(normPath, ns);
   });
-
-  const index = new Map<string, string>();
-  for (const [ns, files] of prodByNs) {
-    const target = collapseNamespaceTargets(files);
-    if (target) index.set(ns, target);
-  }
-  for (const [ns, files] of testByNs) {
-    if (index.has(ns)) continue;
-    const target = collapseNamespaceTargets(files);
-    if (target) index.set(ns, target);
-  }
-  return index;
+  return buildCSharpNamespaceMap(fileNamespaces);
 }
 
 function buildKotlinSymbolIndex(

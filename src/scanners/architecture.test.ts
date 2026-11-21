@@ -412,4 +412,85 @@ entries:
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('populates C# namespace index from PR HEAD content when namespaces do not mirror directories', async () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const scanner = createArchitectureScanner(spec);
+    const domainPath = 'src/domain/Order.cs';
+    const domainContent = [
+      'using System;',
+      'using Acme.Storage;',
+      'namespace Acme.Orders;',
+      'public class Order {}',
+    ].join('\n');
+    const infraPath = 'src/infrastructure/Repo.cs';
+    const infraContent = 'namespace Acme.Storage;\npublic class Repo {}\n';
+
+    const changed = makeChangedFile(domainPath, {
+      2: 'using Acme.Storage;',
+    });
+
+    // Case 1: API-only review (empty workspaceDir) with complete HEAD inventory and readable files.
+    const apiDeps = makeDeps([changed], {
+      [domainPath]: domainContent,
+      [infraPath]: infraContent,
+    });
+    apiDeps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: domainPath },
+                { type: 'blob', path: infraPath },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+
+    const apiRes = await scanner.scan(apiDeps);
+    expect(apiRes.findings).toHaveLength(1);
+    expect(apiRes.findings[0]?.line).toBe(2);
+    expect(apiRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+
+    // Case 2: Stale local checkout where PR HEAD updates Repo.cs out of `Acme.Storage` -> no false positive.
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-cs-stale-'));
+    try {
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, infraPath), infraContent);
+
+      const movedChanged: ChangedFile = {
+        path: infraPath,
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        reviewable_lines: [[1, 2]],
+        added_lines: new Set(),
+        language: 'csharp',
+        is_generated: false,
+        is_binary: false,
+        size_bytes: 50,
+        head_line_text: new Map(),
+      };
+      const updatedInfraContent = 'namespace Acme.External;\npublic class Repo {}\n';
+      const staleDeps = makeDeps([changed, movedChanged], {
+        [domainPath]: domainContent,
+        [infraPath]: updatedInfraContent,
+      });
+      staleDeps.workspaceDir = ws;
+
+      const staleRes = await scanner.scan(staleDeps);
+      expect(staleRes.findings).toEqual([]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

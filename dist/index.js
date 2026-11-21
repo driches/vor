@@ -90042,6 +90042,58 @@ function findCSharpNamespaceFromCleaned(cleaned, stringSpans) {
   }
   return void 0;
 }
+function extractCSharpNamespace(content) {
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
+}
+function commonCSharpDirPrefix(a2, b2) {
+  const segsA = a2.split("/");
+  const segsB = b2.split("/");
+  const limit2 = Math.min(segsA.length, segsB.length);
+  const shared = [];
+  for (let i2 = 0; i2 < limit2; i2++) {
+    if (segsA[i2] !== segsB[i2]) break;
+    shared.push(segsA[i2]);
+  }
+  return shared.join("/");
+}
+function collapseCSharpNamespaceTargets(files) {
+  const dir = (f2) => f2.includes("/") ? f2.slice(0, f2.lastIndexOf("/")) : "";
+  if (files.length === 1) return dir(files[0]) || files[0];
+  let shared = dir(files[0]);
+  for (let i2 = 1; i2 < files.length; i2++) {
+    const d2 = dir(files[i2]);
+    shared = shared && d2 ? commonCSharpDirPrefix(shared, d2) : "";
+    if (!shared) return void 0;
+  }
+  return shared || void 0;
+}
+function buildCSharpNamespaceMap(fileNamespaces) {
+  const prodByNs = /* @__PURE__ */ new Map();
+  const testByNs = /* @__PURE__ */ new Map();
+  for (const [rawPath, ns] of fileNamespaces) {
+    const normPath = normalizePath(rawPath);
+    if (!normPath || !ns) continue;
+    const bucketMap = isTestFile(normPath) ? testByNs : prodByNs;
+    let bucket = bucketMap.get(ns);
+    if (!bucket) {
+      bucket = [];
+      bucketMap.set(ns, bucket);
+    }
+    bucket.push(normPath);
+  }
+  const index = /* @__PURE__ */ new Map();
+  for (const [ns, files] of prodByNs) {
+    const target = collapseCSharpNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  for (const [ns, files] of testByNs) {
+    if (index.has(ns)) continue;
+    const target = collapseCSharpNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  return index;
+}
 function extractCSharpImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
@@ -91454,8 +91506,15 @@ async function hydrateResolveContext(deps, languagesPresent, counters) {
   const prFiles = [];
   for (const f2 of deps.changedFiles) {
     const norm = normalizePath(f2.path);
-    if (f2.status === "removed") removedFiles.add(norm);
-    else prFiles.push(norm);
+    if (f2.status === "removed") {
+      removedFiles.add(norm);
+    } else {
+      prFiles.push(norm);
+      if (f2.status === "renamed" && f2.previous_path) {
+        const prevNorm = normalizePath(f2.previous_path);
+        if (prevNorm && prevNorm !== norm) removedFiles.add(prevNorm);
+      }
+    }
   }
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
@@ -91496,7 +91555,176 @@ async function hydrateResolveContext(deps, languagesPresent, counters) {
       delete ctx.dartPackage;
     }
   }
-  return ctx;
+  return { ctx, removedFiles };
+}
+var MAX_CSHARP_DISK_INDEX_FILES = 2e3;
+var MAX_CSHARP_INDEX_FILE_BYTES = 512 * 1024;
+var CSHARP_WALK_SKIP_DIRS = /* @__PURE__ */ new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".vor",
+  "target",
+  "vendor",
+  ".next",
+  "out",
+  "bin",
+  "obj",
+  ".dart_tool",
+  "__pycache__",
+  ".venv",
+  "venv"
+]);
+function walkWorkspaceCSharpFiles(workspaceDir) {
+  const results = [];
+  const walk = (absDir, relBase) => {
+    let entries;
+    try {
+      entries = (0, import_node_fs9.readdirSync)(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (CSHARP_WALK_SKIP_DIRS.has(entry.name)) continue;
+      const abs = (0, import_node_path23.resolve)(absDir, entry.name);
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(abs, rel);
+      } else if (entry.isFile() && /\.cs$/i.test(entry.name)) {
+        results.push(normalizePath(rel));
+      }
+    }
+  };
+  walk(workspaceDir, "");
+  return results;
+}
+async function hydrateHeadCSharpNamespaces(deps, applicableCSharpFiles, resolveCtx, removedFiles, headContentCache, probeBudget, counters) {
+  if (applicableCSharpFiles.length === 0 || deps.signal.aborted) return;
+  const fileNamespaces = /* @__PURE__ */ new Map();
+  const indexedPaths = /* @__PURE__ */ new Set();
+  const addedSpecs = /* @__PURE__ */ new Set();
+  const recordCSharpContent = (normPath, content) => {
+    indexedPaths.add(normPath);
+    const ns = extractCSharpNamespace(content);
+    if (ns) fileNamespaces.set(normPath, ns);
+  };
+  for (const file2 of applicableCSharpFiles) {
+    if (deps.signal.aborted) break;
+    const norm = normalizePath(file2.path);
+    const content = headContentCache.get(norm) ?? await readHeadFileContent(deps, file2, counters);
+    headContentCache.set(norm, content);
+    indexedPaths.add(norm);
+    const { imports, meta: meta3 } = extractImports(norm, content);
+    if (meta3.declaredPackage) fileNamespaces.set(norm, meta3.declaredPackage);
+    for (const imp of imports) {
+      if (file2.added_lines.has(imp.line)) {
+        addedSpecs.add(imp.specifier);
+      }
+    }
+  }
+  if (addedSpecs.size === 0 || deps.signal.aborted) return;
+  for (const file2 of deps.changedFiles) {
+    if (deps.signal.aborted) break;
+    if (file2.status === "removed" || file2.is_binary || detectArchLanguage(file2.path) !== "csharp") {
+      continue;
+    }
+    const norm = normalizePath(file2.path);
+    if (indexedPaths.has(norm)) continue;
+    const content = headContentCache.get(norm) ?? await readHeadFileContent(deps, file2, counters);
+    headContentCache.set(norm, content);
+    recordCSharpContent(norm, content);
+  }
+  const unchangedCandidates = [];
+  if (resolveCtx.knownFiles) {
+    for (const f2 of resolveCtx.knownFiles) {
+      if (!/\.cs$/i.test(f2)) continue;
+      if (indexedPaths.has(f2) || removedFiles.has(f2)) continue;
+      unchangedCandidates.push(f2);
+    }
+  } else if (deps.workspaceDir) {
+    for (const f2 of walkWorkspaceCSharpFiles(deps.workspaceDir)) {
+      if (indexedPaths.has(f2) || removedFiles.has(f2)) continue;
+      unchangedCandidates.push(f2);
+    }
+  }
+  const prodCandidates = [];
+  const testCandidates = [];
+  for (const f2 of unchangedCandidates) {
+    if (isTestFile(f2)) testCandidates.push(f2);
+    else prodCandidates.push(f2);
+  }
+  prodCandidates.sort();
+  testCandidates.sort();
+  const orderedUnchanged = [...prodCandidates, ...testCandidates];
+  const remoteCandidates = [];
+  if (deps.workspaceDir) {
+    const wsRoot = (0, import_node_path23.resolve)(deps.workspaceDir);
+    let diskScanned = 0;
+    for (const relPath of orderedUnchanged) {
+      if (diskScanned >= MAX_CSHARP_DISK_INDEX_FILES) break;
+      try {
+        const abs = (0, import_node_path23.resolve)(wsRoot, relPath);
+        const st2 = (0, import_node_fs9.statSync)(abs);
+        if (!st2.isFile() || st2.size > MAX_CSHARP_INDEX_FILE_BYTES) continue;
+        const content = (0, import_node_fs9.readFileSync)(abs, "utf-8");
+        diskScanned += 1;
+        recordCSharpContent(relPath, content);
+      } catch {
+        remoteCandidates.push(relPath);
+      }
+    }
+  } else {
+    remoteCandidates.push(...orderedUnchanged);
+  }
+  if (remoteCandidates.length > 0 && probeBudget.remaining > 0 && !deps.signal.aborted) {
+    const searchTokens = /* @__PURE__ */ new Set();
+    for (const spec of addedSpecs) {
+      if (spec === "System" || spec.startsWith("System.") || spec === "Microsoft" || spec.startsWith("Microsoft.")) {
+        continue;
+      }
+      for (const seg of spec.split(".")) {
+        if (seg.length >= 2) searchTokens.add(seg.toLowerCase());
+      }
+    }
+    const prioritized = [];
+    const deferred = [];
+    for (const cand of remoteCandidates) {
+      const lower = cand.toLowerCase();
+      let matched = false;
+      for (const tok of searchTokens) {
+        if (lower.includes(tok)) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) prioritized.push(cand);
+      else deferred.push(cand);
+    }
+    for (const cand of [...prioritized, ...deferred]) {
+      if (probeBudget.remaining <= 0 || deps.signal.aborted) break;
+      probeBudget.remaining -= 1;
+      counters.networkCalls += 1;
+      try {
+        const content = await deps.fileReader.read({
+          owner: deps.owner,
+          repo: deps.repo,
+          path: cand,
+          ref: deps.head_sha
+        });
+        if (content !== null) {
+          recordCSharpContent(cand, content);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  if (fileNamespaces.size > 0) {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceMap(fileNamespaces);
+  }
 }
 function isFileApplicable(file2, spec) {
   if (file2.status === "removed" || file2.is_binary || file2.is_generated) return false;
@@ -91531,17 +91759,35 @@ function createArchitectureScanner(spec, options = {}) {
         if (lang) languagesPresent.add(lang);
       }
       const counters = { networkCalls: 0, cacheHits: 0 };
-      const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
+      const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
+        deps,
+        languagesPresent,
+        counters
+      );
       const probeCache = /* @__PURE__ */ new Map();
       const indexedKotlinFiles = /* @__PURE__ */ new Set();
+      const headContentCache = /* @__PURE__ */ new Map();
       const probeBudget = { remaining: 64 };
       const findings = [];
       const errors = [];
       let filesExamined = 0;
+      if (languagesPresent.has("csharp")) {
+        const applicableCSharp = applicable.filter((f2) => detectArchLanguage(f2.path) === "csharp");
+        await hydrateHeadCSharpNamespaces(
+          deps,
+          applicableCSharp,
+          resolveCtx,
+          removedFiles,
+          headContentCache,
+          probeBudget,
+          counters
+        );
+      }
       for (const file2 of applicable) {
         if (deps.signal.aborted) break;
         try {
-          const content = await readHeadFileContent(deps, file2, counters);
+          const normPath = normalizePath(file2.path);
+          const content = headContentCache.get(normPath) ?? await readHeadFileContent(deps, file2, counters);
           filesExamined += 1;
           await probeHeadAliasTargets(
             deps,
