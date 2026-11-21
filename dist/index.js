@@ -76228,7 +76228,7 @@ function readReferenceSlice(corpus, opts) {
       source: doc.source,
       kind: doc.kind,
       total_lines: totalLines,
-      returned_range: [totalLines, totalLines],
+      returned_range: [start, start],
       truncated: false,
       content: ""
     };
@@ -89440,21 +89440,23 @@ function extractJsTsImports(content, language, jsx = false) {
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
-  const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+  const req = /\brequire\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*\)/g;
   for (const m2 of cleaned.matchAll(req)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
-    const spec = m2[2];
+    const spec = m2[2] ?? m2[3];
+    if (!spec) continue;
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
-  const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
+  const dyn = /\bimport\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*(?:,|\))/g;
   for (const m2 of cleaned.matchAll(dyn)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
-    const spec = m2[2];
+    const spec = m2[2] ?? m2[3];
+    if (!spec) continue;
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }

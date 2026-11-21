@@ -96,5 +96,16 @@ describe('readReferenceSlice', () => {
     expect(pastEof.truncated).toBe(false);
     expect(pastEof.returned_range).toEqual([1, 3]);
     expect(pastEof.total_lines).toBe(3);
+
+    const outOfBounds = readReferenceSlice(makeSingleDocCorpus('line 1\nline 2\nline 3'), {
+      id: 'oversized',
+      start_line: 10,
+    });
+    expect(outOfBounds.ok).toBe(true);
+    if (!outOfBounds.ok) return;
+    expect(outOfBounds.content).toBe('');
+    expect(outOfBounds.returned_range).toEqual([10, 10]);
+    expect(outOfBounds.total_lines).toBe(3);
+    expect(outOfBounds.truncated).toBe(false);
   });
 });

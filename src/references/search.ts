@@ -79,7 +79,7 @@ export function readReferenceSlice(
       source: doc.source,
       kind: doc.kind,
       total_lines: totalLines,
-      returned_range: [totalLines, totalLines],
+      returned_range: [start, start],
       truncated: false,
       content: '',
     };

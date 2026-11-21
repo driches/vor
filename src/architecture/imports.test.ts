@@ -1046,4 +1046,37 @@ describe('extractImports & resolveImport across languages', () => {
     );
     expect(direct.packageName).toBe('sqlx');
   });
+
+  it('extracts static no-substitution template literals in JS/TS require and import calls while skipping dynamic templates', () => {
+    const tsSrc = [
+      'const db = require(`pg`);',
+      'const mod = await import(`express`);',
+      'const infra = await import(`../infrastructure/db`);',
+      'const dyn = await import(`./drivers/${name}`);',
+      'const dynReq = require(`./${dir}/pg`);',
+      'const tagged = require(tag`pg`);',
+    ].join('\n');
+
+    const parsed = extractImports('src/domain/order.ts', tsSrc);
+    expect(parsed.imports.map((i) => [i.specifier, i.line])).toEqual([
+      ['pg', 1],
+      ['express', 2],
+      ['../infrastructure/db', 3],
+    ]);
+
+    const resolved = resolveImports(
+      parsed.imports,
+      'src/domain/order.ts',
+      { knownFiles: new Set(['src/domain/order.ts', 'src/infrastructure/db.ts']) },
+      parsed.meta,
+    );
+    expect(resolved).toEqual([
+      expect.objectContaining({ specifier: 'pg', packageName: 'pg' }),
+      expect.objectContaining({ specifier: 'express', packageName: 'express' }),
+      expect.objectContaining({
+        specifier: '../infrastructure/db',
+        resolvedPath: 'src/infrastructure/db.ts',
+      }),
+    ]);
+  });
 });

@@ -905,24 +905,28 @@ function extractJsTsImports(
     pushMatch(spec, specOffset);
   }
 
-  // CommonJS require('spec')
-  const req = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+  // CommonJS require('spec') / require(`spec`) without template substitutions
+  const req =
+    /\brequire\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*\)/g;
   for (const m of cleaned.matchAll(req)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
-    const spec = m[2]!;
+    const spec = m[2] ?? m[3];
+    if (!spec) continue;
     const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
 
-  // Dynamic import('spec')
-  const dyn = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*(?:,|\))/g;
+  // Dynamic import('spec') / import(`spec`) without template substitutions
+  const dyn =
+    /\bimport\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*(?:,|\))/g;
   for (const m of cleaned.matchAll(dyn)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
-    const spec = m[2]!;
+    const spec = m[2] ?? m[3];
+    if (!spec) continue;
     const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }

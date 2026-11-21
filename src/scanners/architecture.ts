@@ -723,6 +723,8 @@ function isFileApplicable(file: ChangedFile, spec: ResolvedArchitectureSpec): bo
   if (file.status === 'removed' || file.is_binary || file.is_generated) return false;
   if (detectArchLanguage(file.path) === null) return false;
   if (spec.ignore_tests && isTestFile(file.path)) return false;
+  // Intentionally check only `spec.exclude` here; global `exclude.paths` gates LLM
+  // review scope (`src/agent/pr-scope.ts`) while deterministic scanners still run on them.
   if (matchesAnyGlob(file.path, spec.exclude)) return false;
   return true;
 }

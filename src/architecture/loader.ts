@@ -228,6 +228,7 @@ export async function resolveEffectiveArchitectureConfig(
   config: ArchitectureConfig,
   opts: ResolveExternalArchOpts = {},
 ): Promise<ArchitectureConfig> {
+  // Explicit `enabled: false` in .vor.yml acts as a zero-I/O kill-switch during PR reviews.
   if (!config.enabled || !config.file) {
     return config;
   }

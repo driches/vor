@@ -314,4 +314,24 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     expect(violations).toHaveLength(1);
     expect(violations[0]?.rule_id).toBe('arch:forbidden-package:domain');
   });
+
+  it('flags static JS/TS template-literal imports and requires under domain forbid_packages', () => {
+    const dddSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.ts',
+      content: 'const db = require(`pg`);\nconst app = await import(`express`);\n',
+      spec: dddSpec,
+      resolveCtx: {},
+    });
+    expect(violations).toHaveLength(2);
+    expect(violations.map((v) => v.rule_id)).toEqual([
+      'arch:forbidden-package:domain',
+      'arch:forbidden-package:domain',
+    ]);
+  });
 });
