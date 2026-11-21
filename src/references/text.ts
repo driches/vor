@@ -169,7 +169,17 @@ function replaceHtmlElements(
       continue;
     }
     const openClose = lower.indexOf('>', nameEnd);
-    if (openClose === -1) break;
+    if (openClose === -1) {
+      if (RAW_TEXT_HTML_TAGS.has(openTag) || OPAQUE_NESTABLE_HTML_TAGS.has(openTag)) {
+        matches.set(idx, {
+          tag: openTag,
+          openClose: lower.length - 1,
+          closeStart: lower.length,
+          closeEnd: lower.length,
+        });
+      }
+      break;
+    }
     if (html.charCodeAt(openClose - 1) === 47 /* / */) {
       scan = openClose + 1;
       continue;
@@ -192,6 +202,15 @@ function replaceHtmlElements(
     }
     stack.push({ openIdx: idx, openClose });
     scan = openClose + 1;
+  }
+
+  if (rawOpen !== null) {
+    matches.set(rawOpen.openIdx, {
+      tag: rawOpen.tag,
+      openClose: rawOpen.openClose,
+      closeStart: lower.length,
+      closeEnd: lower.length,
+    });
   }
 
   const out: string[] = [];

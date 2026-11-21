@@ -35,6 +35,10 @@ export interface ExtractedImport {
   importedNames?: Array<{ name: string; line: number }>;
   /** Enclosing inline `mod <name> { ... }` scopes for Rust imports (outer to inner). */
   rustModuleScope?: string[];
+  /** Explicit `#[path = "..."]` attribute value on a Rust `mod <name>;` declaration. */
+  rustModPath?: string;
+  /** Enclosing inline `mod` `#[path = "..."]` attributes aligned with `rustModuleScope`. */
+  rustInlineModPaths?: Array<string | undefined>;
 }
 
 export interface FileImportMeta {
@@ -948,7 +952,8 @@ function dedupExtracted(items: ExtractedImport[]): ExtractedImport[] {
   const out: ExtractedImport[] = [];
   for (const item of items) {
     const scopeKey = item.rustModuleScope?.length ? `:${item.rustModuleScope.join('/')}` : '';
-    const key = `${item.line}:${item.specifier}${scopeKey}`;
+    const pathKey = item.rustModPath ? `:${item.rustModPath}` : '';
+    const key = `${item.line}:${item.specifier}${scopeKey}${pathKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);
@@ -1373,28 +1378,84 @@ interface RustInlineModuleSpan {
   name: string;
   start: number;
   end: number;
+  pathAttr?: string;
+}
+
+function parseRustStringLiteral(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).replace(/\\(.)/g, '$1');
+  }
+  const rawMatch = /^r(#*)"([\s\S]*)"\1$/.exec(trimmed);
+  return rawMatch ? rawMatch[2] : undefined;
+}
+
+function extractRustPathAttributeBefore(
+  cleaned: string,
+  stringSpans: readonly StringSpan[],
+  declStart: number,
+): string | undefined {
+  let pos = declStart;
+  while (pos > 0) {
+    while (pos > 0 && /\s/.test(cleaned[pos - 1]!)) pos -= 1;
+    if (pos === 0 || cleaned[pos - 1] !== ']') break;
+
+    let depth = 1;
+    let cur = pos - 1;
+    while (cur > 0 && depth > 0) {
+      cur -= 1;
+      const sp = findEnclosingStringSpan(cur, stringSpans);
+      if (sp) {
+        cur = sp.start;
+        continue;
+      }
+      const ch = cleaned[cur]!;
+      if (ch === ']') depth += 1;
+      else if (ch === '[') depth -= 1;
+    }
+    if (depth !== 0) break;
+
+    let hashPos = cur - 1;
+    while (hashPos >= 0 && /\s/.test(cleaned[hashPos]!)) hashPos -= 1;
+    if (hashPos < 0 || cleaned[hashPos] !== '#') break;
+
+    const attrBody = cleaned.slice(cur + 1, pos - 1);
+    const pathMatch = /^\s*path\s*=\s*([\s\S]+)$/.exec(attrBody);
+    if (pathMatch) {
+      const val = parseRustStringLiteral(pathMatch[1]!);
+      if (val !== undefined) return val;
+    }
+    pos = hashPos;
+  }
+  return undefined;
 }
 
 function extractRustInlineModuleSpans(
   cleaned: string,
   stringSpans: readonly StringSpan[],
 ): RustInlineModuleSpan[] {
-  const headerBraces = new Map<number, string>();
-  const inlineModRe = /\bmod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
+  const headerBraces = new Map<number, { name: string; pathAttr?: string }>();
+  const inlineModRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
   for (const m of matchAllOutsideStrings(cleaned, inlineModRe, stringSpans)) {
     const idx = m.index;
-    if (idx > 0) {
-      const prev = cleaned[idx - 1]!;
-      const prev2 = idx >= 2 ? cleaned.slice(idx - 2, idx) : '';
+    const pubPrefix = /^pub(?:\s*\([^)]*\))?\s+/.exec(m[0]);
+    const modKwOffset = idx + (pubPrefix ? pubPrefix[0].length : 0);
+    if (modKwOffset > 0) {
+      const prev = cleaned[modKwOffset - 1]!;
+      const prev2 = modKwOffset >= 2 ? cleaned.slice(modKwOffset - 2, modKwOffset) : '';
       if (prev === '.' || prev2 === 'r#' || prev2 === '::') continue;
     }
     const braceIdx = idx + m[0].length - 1;
-    headerBraces.set(braceIdx, m[1]!);
+    const pathAttr = extractRustPathAttributeBefore(cleaned, stringSpans, idx);
+    headerBraces.set(braceIdx, {
+      name: m[1]!,
+      ...(pathAttr ? { pathAttr } : {}),
+    });
   }
   if (headerBraces.size === 0) return [];
 
   const spans: RustInlineModuleSpan[] = [];
-  const stack: Array<{ name: string | null; start: number }> = [];
+  const stack: Array<{ name: string | null; pathAttr?: string; start: number }> = [];
   let spanIdx = 0;
 
   for (let i = 0; i < cleaned.length; i++) {
@@ -1408,11 +1469,21 @@ function extractRustInlineModuleSpans(
     }
     const ch = cleaned[i]!;
     if (ch === '{') {
-      stack.push({ name: headerBraces.get(i) ?? null, start: i });
+      const header = headerBraces.get(i);
+      stack.push({
+        name: header ? header.name : null,
+        ...(header?.pathAttr ? { pathAttr: header.pathAttr } : {}),
+        start: i,
+      });
     } else if (ch === '}' && stack.length > 0) {
       const frame = stack.pop()!;
       if (frame.name !== null) {
-        spans.push({ name: frame.name, start: frame.start, end: i });
+        spans.push({
+          name: frame.name,
+          start: frame.start,
+          end: i,
+          ...(frame.pathAttr ? { pathAttr: frame.pathAttr } : {}),
+        });
       }
     }
   }
@@ -1420,7 +1491,12 @@ function extractRustInlineModuleSpans(
   while (stack.length > 0) {
     const frame = stack.pop()!;
     if (frame.name !== null) {
-      spans.push({ name: frame.name, start: frame.start, end: cleaned.length });
+      spans.push({
+        name: frame.name,
+        start: frame.start,
+        end: cleaned.length,
+        ...(frame.pathAttr ? { pathAttr: frame.pathAttr } : {}),
+      });
     }
   }
 
@@ -1428,15 +1504,25 @@ function extractRustInlineModuleSpans(
   return spans;
 }
 
-function rustInlineScopeAt(offset: number, spans: readonly RustInlineModuleSpan[]): string[] {
-  const scope: string[] = [];
+function rustInlineScopeInfoAt(
+  offset: number,
+  spans: readonly RustInlineModuleSpan[],
+): { names: string[]; paths?: Array<string | undefined> } {
+  const names: string[] = [];
+  const rawPaths: Array<string | undefined> = [];
+  let hasAnyPath = false;
   for (const span of spans) {
     if (span.start > offset) break;
     if (offset < span.end) {
-      scope.push(span.name);
+      names.push(span.name);
+      rawPaths.push(span.pathAttr);
+      if (span.pathAttr) hasAnyPath = true;
     }
   }
-  return scope;
+  return {
+    names,
+    ...(hasAnyPath ? { paths: rawPaths } : {}),
+  };
 }
 
 function extractRustImports(content: string): ExtractedImport[] {
@@ -1472,14 +1558,14 @@ function extractRustImports(content: string): ExtractedImport[] {
       const normalizedPath = leaf.path.replace(/^::\s*/, '');
       if (!normalizedPath) continue;
       const line = lineAtOffset(starts, leaf.offset);
-      const scope = rustInlineScopeAt(leaf.offset, inlineModSpans);
+      const scopeInfo = rustInlineScopeInfoAt(leaf.offset, inlineModSpans);
       out.push({
         specifier: normalizedPath,
         line,
         snippet: makeSnippet(rawLines, line),
         language: 'rust',
         kindHint: classifyRustSpec(normalizedPath),
-        ...(scope.length > 0 ? { rustModuleScope: scope } : {}),
+        ...(scopeInfo.names.length > 0 ? { rustModuleScope: scopeInfo.names } : {}),
       });
     }
   }
@@ -1503,16 +1589,19 @@ function extractRustImports(content: string): ExtractedImport[] {
   for (const m of matchAllOutsideStrings(cleaned, modRe, stringSpans)) {
     const idx = m.index;
     const name = m[1]!;
-    const offset = idx + m[0].indexOf(name);
+    const offset = idx + m[0].lastIndexOf(name);
     const line = lineAtOffset(starts, offset);
-    const scope = rustInlineScopeAt(offset, inlineModSpans);
+    const scopeInfo = rustInlineScopeInfoAt(offset, inlineModSpans);
+    const pathAttr = extractRustPathAttributeBefore(cleaned, stringSpans, idx);
     out.push({
       specifier: `mod:${name}`,
       line,
       snippet: makeSnippet(rawLines, line),
       language: 'rust',
       kindHint: 'relative',
-      ...(scope.length > 0 ? { rustModuleScope: scope } : {}),
+      ...(pathAttr ? { rustModPath: pathAttr } : {}),
+      ...(scopeInfo.names.length > 0 ? { rustModuleScope: scopeInfo.names } : {}),
+      ...(scopeInfo.paths ? { rustInlineModPaths: scopeInfo.paths } : {}),
     });
   }
 
@@ -3114,11 +3203,40 @@ export function resolveImport(
 
       if (spec.startsWith('mod:')) {
         const modName = spec.slice(4);
+        let modFsDir = fileModDir;
+        if (imp.rustModuleScope && imp.rustModuleScope.length > 0) {
+          for (let i = 0; i < imp.rustModuleScope.length; i++) {
+            const seg = imp.rustModuleScope[i]!;
+            const inlinePath = imp.rustInlineModPaths?.[i]?.replace(/\\/g, '/').trim();
+            if (inlinePath) {
+              const attrBase = i === 0 ? posix.dirname(normSource) : modFsDir;
+              const rebased = normalizePath(
+                attrBase === '.' ? inlinePath : posix.join(attrBase, inlinePath),
+              );
+              modFsDir = rebased || '.';
+            } else {
+              modFsDir = modFsDir === '.' ? seg : posix.join(modFsDir, seg);
+            }
+          }
+        }
+
+        const explicitAttr = imp.rustModPath?.replace(/\\/g, '/').trim();
+        if (explicitAttr) {
+          const attrBase =
+            imp.rustModuleScope && imp.rustModuleScope.length > 0
+              ? modFsDir
+              : posix.dirname(normSource);
+          const resolvedExplicit = normalizePath(
+            attrBase === '.' ? explicitAttr : posix.join(attrBase, explicitAttr),
+          );
+          return { ...base, resolvedPath: resolvedExplicit };
+        }
+
         const direct = normalizePath(
-          scopedModDir === '.' ? `${modName}.rs` : `${scopedModDir}/${modName}.rs`,
+          modFsDir === '.' ? `${modName}.rs` : `${modFsDir}/${modName}.rs`,
         );
         const nested = normalizePath(
-          scopedModDir === '.' ? `${modName}/mod.rs` : `${scopedModDir}/${modName}/mod.rs`,
+          modFsDir === '.' ? `${modName}/mod.rs` : `${modFsDir}/${modName}/mod.rs`,
         );
         if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
         return { ...base, resolvedPath: direct };

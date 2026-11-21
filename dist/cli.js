@@ -78352,7 +78352,8 @@ function dedupExtracted(items) {
   const out2 = [];
   for (const item of items) {
     const scopeKey = item.rustModuleScope?.length ? `:${item.rustModuleScope.join("/")}` : "";
-    const key = `${item.line}:${item.specifier}${scopeKey}`;
+    const pathKey = item.rustModPath ? `:${item.rustModPath}` : "";
+    const key = `${item.line}:${item.specifier}${scopeKey}${pathKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out2.push(item);
@@ -78692,18 +78693,64 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
   }
   return leaves;
 }
+function parseRustStringLiteral(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
+  }
+  const rawMatch = /^r(#*)"([\s\S]*)"\1$/.exec(trimmed);
+  return rawMatch ? rawMatch[2] : void 0;
+}
+function extractRustPathAttributeBefore(cleaned, stringSpans, declStart) {
+  let pos = declStart;
+  while (pos > 0) {
+    while (pos > 0 && /\s/.test(cleaned[pos - 1])) pos -= 1;
+    if (pos === 0 || cleaned[pos - 1] !== "]") break;
+    let depth = 1;
+    let cur = pos - 1;
+    while (cur > 0 && depth > 0) {
+      cur -= 1;
+      const sp = findEnclosingStringSpan(cur, stringSpans);
+      if (sp) {
+        cur = sp.start;
+        continue;
+      }
+      const ch = cleaned[cur];
+      if (ch === "]") depth += 1;
+      else if (ch === "[") depth -= 1;
+    }
+    if (depth !== 0) break;
+    let hashPos = cur - 1;
+    while (hashPos >= 0 && /\s/.test(cleaned[hashPos])) hashPos -= 1;
+    if (hashPos < 0 || cleaned[hashPos] !== "#") break;
+    const attrBody = cleaned.slice(cur + 1, pos - 1);
+    const pathMatch = /^\s*path\s*=\s*([\s\S]+)$/.exec(attrBody);
+    if (pathMatch) {
+      const val = parseRustStringLiteral(pathMatch[1]);
+      if (val !== void 0) return val;
+    }
+    pos = hashPos;
+  }
+  return void 0;
+}
 function extractRustInlineModuleSpans(cleaned, stringSpans) {
   const headerBraces = /* @__PURE__ */ new Map();
-  const inlineModRe = /\bmod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
+  const inlineModRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
   for (const m2 of matchAllOutsideStrings(cleaned, inlineModRe, stringSpans)) {
     const idx = m2.index;
-    if (idx > 0) {
-      const prev = cleaned[idx - 1];
-      const prev2 = idx >= 2 ? cleaned.slice(idx - 2, idx) : "";
+    const pubPrefix = /^pub(?:\s*\([^)]*\))?\s+/.exec(m2[0]);
+    const modKwOffset = idx + (pubPrefix ? pubPrefix[0].length : 0);
+    if (modKwOffset > 0) {
+      const prev = cleaned[modKwOffset - 1];
+      const prev2 = modKwOffset >= 2 ? cleaned.slice(modKwOffset - 2, modKwOffset) : "";
       if (prev === "." || prev2 === "r#" || prev2 === "::") continue;
     }
     const braceIdx = idx + m2[0].length - 1;
-    headerBraces.set(braceIdx, m2[1]);
+    const pathAttr = extractRustPathAttributeBefore(cleaned, stringSpans, idx);
+    headerBraces.set(braceIdx, {
+      name: m2[1],
+      ...pathAttr ? { pathAttr } : {}
+    });
   }
   if (headerBraces.size === 0) return [];
   const spans = [];
@@ -78720,32 +78767,54 @@ function extractRustInlineModuleSpans(cleaned, stringSpans) {
     }
     const ch = cleaned[i2];
     if (ch === "{") {
-      stack.push({ name: headerBraces.get(i2) ?? null, start: i2 });
+      const header = headerBraces.get(i2);
+      stack.push({
+        name: header ? header.name : null,
+        ...header?.pathAttr ? { pathAttr: header.pathAttr } : {},
+        start: i2
+      });
     } else if (ch === "}" && stack.length > 0) {
       const frame = stack.pop();
       if (frame.name !== null) {
-        spans.push({ name: frame.name, start: frame.start, end: i2 });
+        spans.push({
+          name: frame.name,
+          start: frame.start,
+          end: i2,
+          ...frame.pathAttr ? { pathAttr: frame.pathAttr } : {}
+        });
       }
     }
   }
   while (stack.length > 0) {
     const frame = stack.pop();
     if (frame.name !== null) {
-      spans.push({ name: frame.name, start: frame.start, end: cleaned.length });
+      spans.push({
+        name: frame.name,
+        start: frame.start,
+        end: cleaned.length,
+        ...frame.pathAttr ? { pathAttr: frame.pathAttr } : {}
+      });
     }
   }
   spans.sort((a2, b2) => a2.start - b2.start);
   return spans;
 }
-function rustInlineScopeAt(offset, spans) {
-  const scope = [];
+function rustInlineScopeInfoAt(offset, spans) {
+  const names = [];
+  const rawPaths = [];
+  let hasAnyPath = false;
   for (const span of spans) {
     if (span.start > offset) break;
     if (offset < span.end) {
-      scope.push(span.name);
+      names.push(span.name);
+      rawPaths.push(span.pathAttr);
+      if (span.pathAttr) hasAnyPath = true;
     }
   }
-  return scope;
+  return {
+    names,
+    ...hasAnyPath ? { paths: rawPaths } : {}
+  };
 }
 function extractRustImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
@@ -78772,14 +78841,14 @@ function extractRustImports(content) {
       const normalizedPath = leaf.path.replace(/^::\s*/, "");
       if (!normalizedPath) continue;
       const line = lineAtOffset(starts, leaf.offset);
-      const scope = rustInlineScopeAt(leaf.offset, inlineModSpans);
+      const scopeInfo = rustInlineScopeInfoAt(leaf.offset, inlineModSpans);
       out2.push({
         specifier: normalizedPath,
         line,
         snippet: makeSnippet(rawLines, line),
         language: "rust",
         kindHint: classifyRustSpec(normalizedPath),
-        ...scope.length > 0 ? { rustModuleScope: scope } : {}
+        ...scopeInfo.names.length > 0 ? { rustModuleScope: scopeInfo.names } : {}
       });
     }
   }
@@ -78801,16 +78870,19 @@ function extractRustImports(content) {
   for (const m2 of matchAllOutsideStrings(cleaned, modRe, stringSpans)) {
     const idx = m2.index;
     const name = m2[1];
-    const offset = idx + m2[0].indexOf(name);
+    const offset = idx + m2[0].lastIndexOf(name);
     const line = lineAtOffset(starts, offset);
-    const scope = rustInlineScopeAt(offset, inlineModSpans);
+    const scopeInfo = rustInlineScopeInfoAt(offset, inlineModSpans);
+    const pathAttr = extractRustPathAttributeBefore(cleaned, stringSpans, idx);
     out2.push({
       specifier: `mod:${name}`,
       line,
       snippet: makeSnippet(rawLines, line),
       language: "rust",
       kindHint: "relative",
-      ...scope.length > 0 ? { rustModuleScope: scope } : {}
+      ...pathAttr ? { rustModPath: pathAttr } : {},
+      ...scopeInfo.names.length > 0 ? { rustModuleScope: scopeInfo.names } : {},
+      ...scopeInfo.paths ? { rustInlineModPaths: scopeInfo.paths } : {}
     });
   }
   return dedupExtracted(out2);
@@ -80021,11 +80093,35 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       const scopedModDir = imp.rustModuleScope && imp.rustModuleScope.length > 0 ? fileModDir === "." ? imp.rustModuleScope.join("/") : import_node_path2.posix.join(fileModDir, ...imp.rustModuleScope) : fileModDir;
       if (spec.startsWith("mod:")) {
         const modName = spec.slice(4);
+        let modFsDir = fileModDir;
+        if (imp.rustModuleScope && imp.rustModuleScope.length > 0) {
+          for (let i2 = 0; i2 < imp.rustModuleScope.length; i2++) {
+            const seg = imp.rustModuleScope[i2];
+            const inlinePath = imp.rustInlineModPaths?.[i2]?.replace(/\\/g, "/").trim();
+            if (inlinePath) {
+              const attrBase = i2 === 0 ? import_node_path2.posix.dirname(normSource) : modFsDir;
+              const rebased = normalizePath(
+                attrBase === "." ? inlinePath : import_node_path2.posix.join(attrBase, inlinePath)
+              );
+              modFsDir = rebased || ".";
+            } else {
+              modFsDir = modFsDir === "." ? seg : import_node_path2.posix.join(modFsDir, seg);
+            }
+          }
+        }
+        const explicitAttr = imp.rustModPath?.replace(/\\/g, "/").trim();
+        if (explicitAttr) {
+          const attrBase = imp.rustModuleScope && imp.rustModuleScope.length > 0 ? modFsDir : import_node_path2.posix.dirname(normSource);
+          const resolvedExplicit = normalizePath(
+            attrBase === "." ? explicitAttr : import_node_path2.posix.join(attrBase, explicitAttr)
+          );
+          return { ...base, resolvedPath: resolvedExplicit };
+        }
         const direct = normalizePath(
-          scopedModDir === "." ? `${modName}.rs` : `${scopedModDir}/${modName}.rs`
+          modFsDir === "." ? `${modName}.rs` : `${modFsDir}/${modName}.rs`
         );
         const nested = normalizePath(
-          scopedModDir === "." ? `${modName}/mod.rs` : `${scopedModDir}/${modName}/mod.rs`
+          modFsDir === "." ? `${modName}/mod.rs` : `${modFsDir}/${modName}/mod.rs`
         );
         if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
         return { ...base, resolvedPath: direct };
@@ -80557,15 +80653,15 @@ async function runRepoArchitectureCheck(opts) {
       const absPath = (0, import_node_path3.resolve)(opts.workspaceDir, filePath);
       const st2 = (0, import_node_fs3.lstatSync)(absPath);
       if (st2.isSymbolicLink() || !st2.isFile() || st2.size > MAX_INDEX_FILE_BYTES) continue;
+      if (filesScanned >= MAX_SCAN_FILES) {
+        void logger.warn(
+          `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`
+        );
+        break;
+      }
       content = (0, import_node_fs3.readFileSync)(absPath, "utf-8");
     } catch {
       continue;
-    }
-    if (filesScanned >= MAX_SCAN_FILES) {
-      void logger.warn(
-        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`
-      );
-      break;
     }
     filesScanned += 1;
     if (classifyLayer(filePath, opts.spec)) layersMatched += 1;
@@ -97357,7 +97453,17 @@ function replaceHtmlElements(html, tagNames, transform2) {
       continue;
     }
     const openClose = lower.indexOf(">", nameEnd);
-    if (openClose === -1) break;
+    if (openClose === -1) {
+      if (RAW_TEXT_HTML_TAGS.has(openTag) || OPAQUE_NESTABLE_HTML_TAGS.has(openTag)) {
+        matches.set(idx, {
+          tag: openTag,
+          openClose: lower.length - 1,
+          closeStart: lower.length,
+          closeEnd: lower.length
+        });
+      }
+      break;
+    }
     if (html.charCodeAt(openClose - 1) === 47) {
       scan = openClose + 1;
       continue;
@@ -97380,6 +97486,14 @@ function replaceHtmlElements(html, tagNames, transform2) {
     }
     stack.push({ openIdx: idx, openClose });
     scan = openClose + 1;
+  }
+  if (rawOpen !== null) {
+    matches.set(rawOpen.openIdx, {
+      tag: rawOpen.tag,
+      openClose: rawOpen.openClose,
+      closeStart: lower.length,
+      closeEnd: lower.length
+    });
   }
   const out2 = [];
   let cursor = 0;

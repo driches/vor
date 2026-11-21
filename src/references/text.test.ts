@@ -63,12 +63,15 @@ describe('normalizeDocumentText', () => {
   });
 
   it('handles adversarial unclosed HTML tags in linear time', () => {
-    const malicious = `${'<script>'.repeat(50_000)}<p>Safe content</p>`;
-    const start = Date.now();
-    const text = normalizeDocumentText(malicious, 'text/html');
-    const elapsedMs = Date.now() - start;
-    expect(text).toBe('Safe content');
-    expect(elapsedMs).toBeLessThan(1000);
+    const startStack = Date.now();
+    const stackMalicious = `${'<nav>'.repeat(50_000)}<p>Safe content</p>`;
+    expect(normalizeDocumentText(stackMalicious, 'text/html')).toBe('Safe content');
+    expect(Date.now() - startStack).toBeLessThan(1000);
+
+    const startRaw = Date.now();
+    const rawMalicious = `${'<script>'.repeat(50_000)}<p>Unreachable</p>`;
+    expect(normalizeDocumentText(rawMalicious, 'text/html')).toBe('');
+    expect(Date.now() - startRaw).toBeLessThan(1000);
   });
 
   it('preserves slice alignment when HTML contains expanding non-ASCII uppercase chars and self-closing chrome tags', () => {
@@ -100,6 +103,12 @@ describe('normalizeDocumentText', () => {
 
     const scriptStr = '<script>const x = "<script>";</script><p>keep</p>';
     expect(normalizeDocumentText(scriptStr, 'text/html')).toBe('keep');
+
+    // Unclosed raw/opaque tags strip trailing malicious content rather than leaking it to EOF.
+    expect(normalizeDocumentText('<p>keep</p><script>alert(1)', 'text/html')).toBe('keep');
+    expect(normalizeDocumentText('<p>keep</p><style>body{color:red}', 'text/html')).toBe('keep');
+    expect(normalizeDocumentText('<p>keep</p><svg><text>ignored', 'text/html')).toBe('keep');
+    expect(normalizeDocumentText('<p>keep</p><script src="x"', 'text/html')).toBe('keep');
   });
 });
 

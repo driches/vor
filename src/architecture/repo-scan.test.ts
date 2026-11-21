@@ -656,4 +656,38 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('catches Rust #[path = "..."] mod declarations targeting forbidden layers under DDD', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-rust-path-attr-'));
+    try {
+      mkdirSync(join(ws, 'src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/lib.rs'), 'pub mod domain;\npub mod infrastructure;\n');
+      writeFileSync(join(ws, 'src/infrastructure/repo.rs'), 'pub struct Repo;\n');
+      writeFileSync(
+        join(ws, 'src/domain/order.rs'),
+        ['#[path = "../infrastructure/repo.rs"]', 'mod repo;'].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+
+      const explained = explainFileArchitecture(ws, 'src/domain/order.rs', spec);
+      expect(explained.imports[0]?.resolved_path).toBe('src/infrastructure/repo.rs');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

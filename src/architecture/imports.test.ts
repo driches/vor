@@ -1392,4 +1392,41 @@ describe('extractImports & resolveImport across languages', () => {
       { spec: 'django', line: 7 },
     ]);
   });
+
+  it('honors explicit #[path = "..."] attributes on Rust external and inline mod declarations', () => {
+    const knownFiles = new Set([
+      'src/domain/order.rs',
+      'src/infrastructure/repo.rs',
+      'src/infrastructure/alt.rs',
+      'src/domain/order/child/custom.rs',
+    ]);
+    const ctx = { knownFiles };
+    const rsSrc = [
+      '#[path = "../infrastructure/repo.rs"]',
+      'mod repo;',
+      '#[path = "../infrastructure/alt.rs"]',
+      '#[cfg(test)]',
+      'pub(crate) mod alt;',
+      '#[path = r#"../infrastructure/repo.rs"#]',
+      'mod raw_repo;',
+      '#[path = "../infrastructure"]',
+      'mod inner {',
+      '  mod repo;',
+      '}',
+      'mod child {',
+      '  #[path = "custom.rs"]',
+      '  mod custom_mod;',
+      '}',
+    ].join('\n');
+
+    const extracted = extractImports('src/domain/order.rs', rsSrc);
+    const resolved = resolveImports(extracted.imports, 'src/domain/order.rs', ctx);
+    expect(resolved.map((r) => ({ spec: r.specifier, path: r.resolvedPath }))).toEqual([
+      { spec: 'mod:repo', path: 'src/infrastructure/repo.rs' },
+      { spec: 'mod:alt', path: 'src/infrastructure/alt.rs' },
+      { spec: 'mod:raw_repo', path: 'src/infrastructure/repo.rs' },
+      { spec: 'mod:repo', path: 'src/infrastructure/repo.rs' },
+      { spec: 'mod:custom_mod', path: 'src/domain/order/child/custom.rs' },
+    ]);
+  });
 });

@@ -320,16 +320,15 @@ export async function runRepoArchitectureCheck(
       const absPath = resolve(opts.workspaceDir, filePath);
       const st = lstatSync(absPath);
       if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+      if (filesScanned >= MAX_SCAN_FILES) {
+        void logger.warn(
+          `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
+        );
+        break;
+      }
       content = readFileSync(absPath, 'utf-8');
     } catch {
       continue; // deleted or unreadable symlink in dirty working tree
-    }
-
-    if (filesScanned >= MAX_SCAN_FILES) {
-      void logger.warn(
-        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
-      );
-      break;
     }
 
     filesScanned += 1;
