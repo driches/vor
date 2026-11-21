@@ -1299,4 +1299,40 @@ describe('extractImports & resolveImport across languages', () => {
     const parsedSemi = extractImports('app/domain/service.py', pySemi);
     expect(parsedSemi.imports.map((i) => i.specifier)).toEqual(['app.domain', 'flask']);
   });
+
+  it('tracks enclosing inline Rust mod scopes when resolving self/super and nested mod declarations', () => {
+    const knownFiles = new Set([
+      'src/domain/order.rs',
+      'src/domain/infrastructure.rs',
+      'src/domain/order/child/sub.rs',
+      'src/domain/order/child/helper.rs',
+      'src/infrastructure/mod.rs',
+    ]);
+    const ctx = { knownFiles };
+    const rsSrc = [
+      'mod child {',
+      "  const BRACE: char = '{';",
+      '  mod sub;',
+      '  use super::Order;',
+      '  use self::helper::Foo;',
+      '  use super::super::infrastructure::Repo;',
+      '  mod inner {',
+      '    use super::super::super::super::infrastructure::Repo;',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const extracted = extractImports('src/domain/order.rs', rsSrc);
+    const resolved = resolveImports(extracted.imports, 'src/domain/order.rs', ctx);
+    expect(resolved.map((r) => ({ spec: r.specifier, path: r.resolvedPath }))).toEqual([
+      { spec: 'super::Order', path: 'src/domain/order.rs' },
+      { spec: 'self::helper::Foo', path: 'src/domain/order/child/helper.rs' },
+      { spec: 'super::super::infrastructure::Repo', path: 'src/domain/infrastructure.rs' },
+      {
+        spec: 'super::super::super::super::infrastructure::Repo',
+        path: 'src/infrastructure/mod.rs',
+      },
+      { spec: 'mod:sub', path: 'src/domain/order/child/sub.rs' },
+    ]);
+  });
 });

@@ -89473,7 +89473,8 @@ function dedupExtracted(items) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const item of items) {
-    const key = `${item.line}:${item.specifier}`;
+    const scopeKey = item.rustModuleScope?.length ? `:${item.rustModuleScope.join("/")}` : "";
+    const key = `${item.line}:${item.specifier}${scopeKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);
@@ -89811,6 +89812,62 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
   }
   return leaves;
 }
+function extractRustInlineModuleSpans(cleaned, stringSpans) {
+  const headerBraces = /* @__PURE__ */ new Map();
+  const inlineModRe = /\bmod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
+  for (const m2 of cleaned.matchAll(inlineModRe)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (idx > 0) {
+      const prev = cleaned[idx - 1];
+      const prev2 = idx >= 2 ? cleaned.slice(idx - 2, idx) : "";
+      if (prev === "." || prev2 === "r#" || prev2 === "::") continue;
+    }
+    const braceIdx = idx + m2[0].length - 1;
+    headerBraces.set(braceIdx, m2[1]);
+  }
+  if (headerBraces.size === 0) return [];
+  const spans = [];
+  const stack = [];
+  let spanIdx = 0;
+  for (let i2 = 0; i2 < cleaned.length; i2++) {
+    while (spanIdx < stringSpans.length && i2 >= stringSpans[spanIdx].end) {
+      spanIdx += 1;
+    }
+    const curSpan = stringSpans[spanIdx];
+    if (curSpan && i2 > curSpan.start && i2 < curSpan.end) {
+      i2 = curSpan.end - 1;
+      continue;
+    }
+    const ch = cleaned[i2];
+    if (ch === "{") {
+      stack.push({ name: headerBraces.get(i2) ?? null, start: i2 });
+    } else if (ch === "}" && stack.length > 0) {
+      const frame = stack.pop();
+      if (frame.name !== null) {
+        spans.push({ name: frame.name, start: frame.start, end: i2 });
+      }
+    }
+  }
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    if (frame.name !== null) {
+      spans.push({ name: frame.name, start: frame.start, end: cleaned.length });
+    }
+  }
+  spans.sort((a2, b2) => a2.start - b2.start);
+  return spans;
+}
+function rustInlineScopeAt(offset, spans) {
+  const scope = [];
+  for (const span of spans) {
+    if (span.start > offset) break;
+    if (offset < span.end) {
+      scope.push(span.name);
+    }
+  }
+  return scope;
+}
 function extractRustImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     rustLifetimes: true,
@@ -89820,8 +89877,9 @@ function extractRustImports(content) {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
+  const inlineModSpans = extractRustInlineModuleSpans(cleaned, stringSpans);
   const classifyRustSpec = (spec) => {
-    if (spec.startsWith("crate::") || spec.startsWith("super::") || spec.startsWith("self::")) {
+    if (spec === "self" || spec === "super" || spec.startsWith("crate::") || spec.startsWith("super::") || spec.startsWith("self::")) {
       return "relative";
     }
     return "package";
@@ -89836,12 +89894,14 @@ function extractRustImports(content) {
       const normalizedPath = leaf.path.replace(/^::\s*/, "");
       if (!normalizedPath) continue;
       const line = lineAtOffset(starts, leaf.offset);
+      const scope = rustInlineScopeAt(leaf.offset, inlineModSpans);
       out.push({
         specifier: normalizedPath,
         line,
         snippet: makeSnippet(rawLines, line),
         language: "rust",
-        kindHint: classifyRustSpec(normalizedPath)
+        kindHint: classifyRustSpec(normalizedPath),
+        ...scope.length > 0 ? { rustModuleScope: scope } : {}
       });
     }
   }
@@ -89860,19 +89920,21 @@ function extractRustImports(content) {
       kindHint: "package"
     });
   }
-  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
+  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_]\w*)\s*;/g;
   for (const m2 of cleaned.matchAll(modRe)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m2[1];
     const offset = idx + m2[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
+    const scope = rustInlineScopeAt(offset, inlineModSpans);
     out.push({
       specifier: `mod:${name}`,
       line,
       snippet: makeSnippet(rawLines, line),
       language: "rust",
-      kindHint: "relative"
+      kindHint: "relative",
+      ...scope.length > 0 ? { rustModuleScope: scope } : {}
     });
   }
   return dedupExtracted(out);
@@ -91081,12 +91143,15 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
     }
     case "rust": {
       const spec = imp.specifier.replace(/^::\s*/, "");
+      const fileModDir = rustLogicalModuleDir(normSource);
+      const scopedModDir = imp.rustModuleScope && imp.rustModuleScope.length > 0 ? fileModDir === "." ? imp.rustModuleScope.join("/") : import_node_path22.posix.join(fileModDir, ...imp.rustModuleScope) : fileModDir;
       if (spec.startsWith("mod:")) {
         const modName = spec.slice(4);
-        const dir = rustLogicalModuleDir(normSource);
-        const direct = normalizePath(dir === "." ? `${modName}.rs` : `${dir}/${modName}.rs`);
+        const direct = normalizePath(
+          scopedModDir === "." ? `${modName}.rs` : `${scopedModDir}/${modName}.rs`
+        );
         const nested = normalizePath(
-          dir === "." ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`
+          scopedModDir === "." ? `${modName}/mod.rs` : `${scopedModDir}/${modName}/mod.rs`
         );
         if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
         return { ...base, resolvedPath: direct };
@@ -91100,18 +91165,22 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
           resolvedPath: resolveRustModulePath(joined, crateSrc, ctx)
         };
       }
-      if (spec.startsWith("super::") || spec.startsWith("self::")) {
-        let modDir = rustLogicalModuleDir(normSource);
+      if (spec === "self" || spec === "super" || spec.startsWith("super::") || spec.startsWith("self::")) {
+        let modDir = scopedModDir;
         let rest = spec;
-        if (rest.startsWith("self::")) {
+        if (rest === "self") {
+          rest = "";
+        } else if (rest.startsWith("self::")) {
           rest = rest.slice("self::".length);
         }
-        while (rest.startsWith("super::")) {
-          rest = rest.slice("super::".length);
+        while (rest === "super" || rest.startsWith("super::")) {
+          rest = rest === "super" ? "" : rest.slice("super::".length);
           modDir = import_node_path22.posix.dirname(modDir);
         }
-        const rel = rest.replace(/::/g, "/");
-        const joined = normalizePath(modDir === "." ? rel : import_node_path22.posix.join(modDir, rel));
+        const rel = rest ? rest.replace(/::/g, "/") : "";
+        const joined = normalizePath(
+          rel ? modDir === "." ? rel : import_node_path22.posix.join(modDir, rel) : modDir
+        );
         const crateSrc = findRustCrateSrc(normSource);
         return {
           ...base,
@@ -92495,9 +92564,7 @@ function isInsideRoot(candidate, root) {
   const rel = (0, import_node_path25.relative)(root, candidate);
   return rel === "" || !rel.startsWith("..") && !(0, import_node_path25.isAbsolute)(rel);
 }
-function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
-  const canonical = resolveCanonicalCachePath(absPath);
-  if (!canonical) return false;
+function isAllowedCanonicalCacheDir(canonicalPath, workspaceDir) {
   const roots = [workspaceDir ?? process.cwd(), (0, import_node_os2.tmpdir)()];
   const runnerTemp = process.env.RUNNER_TEMP?.trim();
   if (runnerTemp) roots.push(runnerTemp);
@@ -92507,7 +92574,7 @@ function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
   roots.push(vorHome ? vorHome : (0, import_node_path25.join)((0, import_node_os2.homedir)(), ".vor"));
   return roots.some((root) => {
     const canonicalRoot = resolveCanonicalCachePath(root);
-    return canonicalRoot !== null && isInsideRoot(canonical, canonicalRoot);
+    return canonicalRoot !== null && isInsideRoot(canonicalPath, canonicalRoot);
   });
 }
 function isSafeExistingCacheDir(cacheDir) {
@@ -92584,7 +92651,7 @@ function resolveReferenceCacheDir(configuredDir, workspaceDir) {
     const trimmed = configuredDir.trim();
     if ((0, import_node_path25.isAbsolute)(trimmed)) {
       const canonical = resolveCanonicalCachePath(trimmed);
-      if (canonical && isAllowedAbsoluteCacheDir(canonical, workspaceDir)) {
+      if (canonical && isAllowedCanonicalCacheDir(canonical, workspaceDir)) {
         return canonical;
       }
       void logger.warn(

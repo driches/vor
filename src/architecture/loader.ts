@@ -385,13 +385,14 @@ function resolveSafeWorkspaceReadPath(workspaceDir: string, relPath: string): st
  * malformed so baseline lookup never crashes a check.
  */
 export function loadArchBaseline(workspaceDir: string, baselinePath: string): Set<string> {
-  let fullPath: string;
+  let fullPath: string | null;
   try {
-    fullPath = resolveSafeWorkspaceWritePath(workspaceDir, baselinePath);
+    fullPath = resolveSafeWorkspaceReadPath(workspaceDir, baselinePath);
   } catch (err) {
     void logger.warn(`${(err as Error).message} Ignoring baseline.`);
     return new Set();
   }
+  if (!fullPath) return new Set();
   let raw: string;
   try {
     raw = readFileSync(fullPath, 'utf-8');

@@ -310,16 +310,17 @@ export async function runRepoArchitectureCheck(
   const allFingerprints: string[] = [];
 
   for (const filePath of allRepoFiles) {
+    if (detectArchLanguage(filePath) === null) continue;
+    if (matchesAnyGlob(filePath, excludePaths)) continue;
+    if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
+    if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
+
     if (filesScanned >= MAX_SCAN_FILES) {
       void logger.warn(
         `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
       );
       break;
     }
-    if (detectArchLanguage(filePath) === null) continue;
-    if (matchesAnyGlob(filePath, excludePaths)) continue;
-    if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
-    if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
 
     let content: string;
     try {

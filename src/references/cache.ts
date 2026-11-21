@@ -119,9 +119,7 @@ function isInsideRoot(candidate: string, root: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
-function isAllowedAbsoluteCacheDir(absPath: string, workspaceDir?: string): boolean {
-  const canonical = resolveCanonicalCachePath(absPath);
-  if (!canonical) return false;
+function isAllowedCanonicalCacheDir(canonicalPath: string, workspaceDir?: string): boolean {
   const roots = [workspaceDir ?? process.cwd(), tmpdir()];
   const runnerTemp = process.env.RUNNER_TEMP?.trim();
   if (runnerTemp) roots.push(runnerTemp);
@@ -132,7 +130,7 @@ function isAllowedAbsoluteCacheDir(absPath: string, workspaceDir?: string): bool
 
   return roots.some((root) => {
     const canonicalRoot = resolveCanonicalCachePath(root);
-    return canonicalRoot !== null && isInsideRoot(canonical, canonicalRoot);
+    return canonicalRoot !== null && isInsideRoot(canonicalPath, canonicalRoot);
   });
 }
 
@@ -227,7 +225,7 @@ export function resolveReferenceCacheDir(configuredDir?: string, workspaceDir?: 
     const trimmed = configuredDir.trim();
     if (isAbsolute(trimmed)) {
       const canonical = resolveCanonicalCachePath(trimmed);
-      if (canonical && isAllowedAbsoluteCacheDir(canonical, workspaceDir)) {
+      if (canonical && isAllowedCanonicalCacheDir(canonical, workspaceDir)) {
         return canonical;
       }
       void logger.warn(

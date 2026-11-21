@@ -362,6 +362,11 @@ describe('resolveWorkspaceArchitectureConfig', () => {
       expect(() => resolveWorkspaceArchitectureConfig({ workspaceDir: ws })).toThrowError(
         ConfigError,
       );
+
+      // 4. loadArchBaseline returns empty Set when workspaceDir itself does not exist.
+      expect(
+        loadArchBaseline(join(ws, 'nonexistent-workspace'), '.vor/arch-baseline.json').size,
+      ).toBe(0);
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

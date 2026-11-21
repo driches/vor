@@ -557,4 +557,54 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('resolves inline Rust mod scopes accurately under DDD layer checks without false positives', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-rust-mod-'));
+    try {
+      mkdirSync(join(ws, 'src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/lib.rs'), 'pub mod domain;\npub mod infrastructure;\n');
+      writeFileSync(join(ws, 'src/infrastructure/mod.rs'), 'pub struct Repo;\n');
+      writeFileSync(join(ws, 'src/domain/infrastructure.rs'), 'pub struct Repo;\n');
+      writeFileSync(
+        join(ws, 'src/domain/order.rs'),
+        [
+          'pub mod infrastructure;',
+          'mod child {',
+          '    use super::super::infrastructure::Repo;',
+          '}',
+        ].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+
+      const explainedOk = explainFileArchitecture(ws, 'src/domain/order.rs', spec);
+      const superImport = explainedOk.imports.find(
+        (i) => i.specifier === 'super::super::infrastructure::Repo',
+      );
+      expect(superImport?.resolved_path).toBe('src/domain/infrastructure.rs');
+      expect(superImport?.violations).toEqual([]);
+
+      const repoOk = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoOk.passed).toBe(true);
+      expect(repoOk.violations).toEqual([]);
+
+      writeFileSync(
+        join(ws, 'src/domain/order.rs'),
+        ['mod child {', '    use super::super::super::infrastructure::Repo;', '}'].join('\n'),
+      );
+      const explainedBad = explainFileArchitecture(ws, 'src/domain/order.rs', spec);
+      expect(explainedBad.imports[0]?.resolved_path).toBe('src/infrastructure/mod.rs');
+      expect(explainedBad.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

@@ -33,6 +33,8 @@ export interface ExtractedImport {
   kindHint: 'relative' | 'package' | 'ambiguous';
   /** Imported symbols/submodules in Python `from X import a, b` statements. */
   importedNames?: Array<{ name: string; line: number }>;
+  /** Enclosing inline `mod <name> { ... }` scopes for Rust imports (outer to inner). */
+  rustModuleScope?: string[];
 }
 
 export interface FileImportMeta {
@@ -907,7 +909,8 @@ function dedupExtracted(items: ExtractedImport[]): ExtractedImport[] {
   const seen = new Set<string>();
   const out: ExtractedImport[] = [];
   for (const item of items) {
-    const key = `${item.line}:${item.specifier}`;
+    const scopeKey = item.rustModuleScope?.length ? `:${item.rustModuleScope.join('/')}` : '';
+    const key = `${item.line}:${item.specifier}${scopeKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);
@@ -1329,6 +1332,77 @@ function expandRustUseTree(tree: string, baseOffset: number, prefix = ''): RustL
   return leaves;
 }
 
+interface RustInlineModuleSpan {
+  name: string;
+  start: number;
+  end: number;
+}
+
+function extractRustInlineModuleSpans(
+  cleaned: string,
+  stringSpans: readonly StringSpan[],
+): RustInlineModuleSpan[] {
+  const headerBraces = new Map<number, string>();
+  const inlineModRe = /\bmod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
+  for (const m of cleaned.matchAll(inlineModRe)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (idx > 0) {
+      const prev = cleaned[idx - 1]!;
+      const prev2 = idx >= 2 ? cleaned.slice(idx - 2, idx) : '';
+      if (prev === '.' || prev2 === 'r#' || prev2 === '::') continue;
+    }
+    const braceIdx = idx + m[0].length - 1;
+    headerBraces.set(braceIdx, m[1]!);
+  }
+  if (headerBraces.size === 0) return [];
+
+  const spans: RustInlineModuleSpan[] = [];
+  const stack: Array<{ name: string | null; start: number }> = [];
+  let spanIdx = 0;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    while (spanIdx < stringSpans.length && i >= stringSpans[spanIdx]!.end) {
+      spanIdx += 1;
+    }
+    const curSpan = stringSpans[spanIdx];
+    if (curSpan && i > curSpan.start && i < curSpan.end) {
+      i = curSpan.end - 1;
+      continue;
+    }
+    const ch = cleaned[i]!;
+    if (ch === '{') {
+      stack.push({ name: headerBraces.get(i) ?? null, start: i });
+    } else if (ch === '}' && stack.length > 0) {
+      const frame = stack.pop()!;
+      if (frame.name !== null) {
+        spans.push({ name: frame.name, start: frame.start, end: i });
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    if (frame.name !== null) {
+      spans.push({ name: frame.name, start: frame.start, end: cleaned.length });
+    }
+  }
+
+  spans.sort((a, b) => a.start - b.start);
+  return spans;
+}
+
+function rustInlineScopeAt(offset: number, spans: readonly RustInlineModuleSpan[]): string[] {
+  const scope: string[] = [];
+  for (const span of spans) {
+    if (span.start > offset) break;
+    if (offset < span.end) {
+      scope.push(span.name);
+    }
+  }
+  return scope;
+}
+
 function extractRustImports(content: string): ExtractedImport[] {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     rustLifetimes: true,
@@ -1338,9 +1412,16 @@ function extractRustImports(content: string): ExtractedImport[] {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
+  const inlineModSpans = extractRustInlineModuleSpans(cleaned, stringSpans);
 
   const classifyRustSpec = (spec: string): ExtractedImport['kindHint'] => {
-    if (spec.startsWith('crate::') || spec.startsWith('super::') || spec.startsWith('self::')) {
+    if (
+      spec === 'self' ||
+      spec === 'super' ||
+      spec.startsWith('crate::') ||
+      spec.startsWith('super::') ||
+      spec.startsWith('self::')
+    ) {
       return 'relative';
     }
     return 'package';
@@ -1356,12 +1437,14 @@ function extractRustImports(content: string): ExtractedImport[] {
       const normalizedPath = leaf.path.replace(/^::\s*/, '');
       if (!normalizedPath) continue;
       const line = lineAtOffset(starts, leaf.offset);
+      const scope = rustInlineScopeAt(leaf.offset, inlineModSpans);
       out.push({
         specifier: normalizedPath,
         line,
         snippet: makeSnippet(rawLines, line),
         language: 'rust',
         kindHint: classifyRustSpec(normalizedPath),
+        ...(scope.length > 0 ? { rustModuleScope: scope } : {}),
       });
     }
   }
@@ -1382,19 +1465,21 @@ function extractRustImports(content: string): ExtractedImport[] {
     });
   }
 
-  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;/g;
+  const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_]\w*)\s*;/g;
   for (const m of cleaned.matchAll(modRe)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
     const name = m[1]!;
     const offset = idx + m[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
+    const scope = rustInlineScopeAt(offset, inlineModSpans);
     out.push({
       specifier: `mod:${name}`,
       line,
       snippet: makeSnippet(rawLines, line),
       language: 'rust',
       kindHint: 'relative',
+      ...(scope.length > 0 ? { rustModuleScope: scope } : {}),
     });
   }
 
@@ -2988,12 +3073,21 @@ export function resolveImport(
 
     case 'rust': {
       const spec = imp.specifier.replace(/^::\s*/, '');
+      const fileModDir = rustLogicalModuleDir(normSource);
+      const scopedModDir =
+        imp.rustModuleScope && imp.rustModuleScope.length > 0
+          ? fileModDir === '.'
+            ? imp.rustModuleScope.join('/')
+            : posix.join(fileModDir, ...imp.rustModuleScope)
+          : fileModDir;
+
       if (spec.startsWith('mod:')) {
         const modName = spec.slice(4);
-        const dir = rustLogicalModuleDir(normSource);
-        const direct = normalizePath(dir === '.' ? `${modName}.rs` : `${dir}/${modName}.rs`);
+        const direct = normalizePath(
+          scopedModDir === '.' ? `${modName}.rs` : `${scopedModDir}/${modName}.rs`,
+        );
         const nested = normalizePath(
-          dir === '.' ? `${modName}/mod.rs` : `${dir}/${modName}/mod.rs`,
+          scopedModDir === '.' ? `${modName}/mod.rs` : `${scopedModDir}/${modName}/mod.rs`,
         );
         if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
         return { ...base, resolvedPath: direct };
@@ -3007,20 +3101,29 @@ export function resolveImport(
           resolvedPath: resolveRustModulePath(joined, crateSrc, ctx),
         };
       }
-      if (spec.startsWith('super::') || spec.startsWith('self::')) {
-        // `self::` starts at the declaring file's logical module path and each
-        // `super::` climbs one logical module level.
-        let modDir = rustLogicalModuleDir(normSource);
+      if (
+        spec === 'self' ||
+        spec === 'super' ||
+        spec.startsWith('super::') ||
+        spec.startsWith('self::')
+      ) {
+        // `self::` starts at the enclosing logical module (including inline
+        // `mod` scopes) and each `super::` climbs one logical module level.
+        let modDir = scopedModDir;
         let rest = spec;
-        if (rest.startsWith('self::')) {
+        if (rest === 'self') {
+          rest = '';
+        } else if (rest.startsWith('self::')) {
           rest = rest.slice('self::'.length);
         }
-        while (rest.startsWith('super::')) {
-          rest = rest.slice('super::'.length);
+        while (rest === 'super' || rest.startsWith('super::')) {
+          rest = rest === 'super' ? '' : rest.slice('super::'.length);
           modDir = posix.dirname(modDir);
         }
-        const rel = rest.replace(/::/g, '/');
-        const joined = normalizePath(modDir === '.' ? rel : posix.join(modDir, rel));
+        const rel = rest ? rest.replace(/::/g, '/') : '';
+        const joined = normalizePath(
+          rel ? (modDir === '.' ? rel : posix.join(modDir, rel)) : modDir,
+        );
         const crateSrc = findRustCrateSrc(normSource);
         return {
           ...base,
