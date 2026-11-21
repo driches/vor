@@ -220,7 +220,9 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
           title: `Layer '${sourceLayer.name}' cannot import '${targetLayer.name}'`,
           description:
             `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports \`${resolved.specifier}\` ` +
-            `(resolved to \`${resolved.resolvedPath}\`, layer \`${targetLayer.name}\`), which violates ` +
+            (resolved.resolvedPath
+              ? `(resolved to \`${resolved.resolvedPath}\`, layer \`${targetLayer.name}\`), which violates `
+              : `(layer \`${targetLayer.name}\`), which violates `) +
             `the configured \`${input.spec.preset}\` architecture boundaries.${allowedText}`,
           specifier: resolved.specifier,
           snippet: resolved.snippet,

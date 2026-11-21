@@ -1489,14 +1489,25 @@ async function loadGithubSource(
 }
 
 function deduplicateIds(docs: RawLoadedDoc[]): RawLoadedDoc[] {
-  const seen = new Map<string, number>();
+  // Reserve every input ID upfront so generated "-2", "-3", ... suffixes never
+  // collide with another source's explicit or derived ID (e.g. ['guide', 'guide', 'guide-2']).
+  const reserved = new Set(docs.map((doc) => doc.id));
+  const assigned = new Set<string>();
+  const nextSuffix = new Map<string, number>();
   return docs.map((doc) => {
-    const count = seen.get(doc.id) ?? 0;
-    seen.set(doc.id, count + 1);
-    if (count === 0) return doc;
-    // 1-indexed occurrence numbering: first keeps its bare id (#1), second gets
-    // "-2", third "-3", and so on.
-    return { ...doc, id: `${doc.id}-${count + 1}` };
+    if (!assigned.has(doc.id)) {
+      assigned.add(doc.id);
+      return doc;
+    }
+    let suffix = nextSuffix.get(doc.id) ?? 2;
+    let candidate = `${doc.id}-${suffix}`;
+    while (reserved.has(candidate) || assigned.has(candidate)) {
+      suffix += 1;
+      candidate = `${doc.id}-${suffix}`;
+    }
+    nextSuffix.set(doc.id, suffix + 1);
+    assigned.add(candidate);
+    return { ...doc, id: candidate };
   });
 }
 

@@ -964,4 +964,36 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('reserves configured IDs before assigning duplicate suffixes so guide/guide/guide-2 stay unique', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-id-reserve-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-id-reserve-cache-'));
+    try {
+      writeFileSync(join(ws, 'a.md'), '# Alpha\n');
+      writeFileSync(join(ws, 'b.md'), '# Beta\n');
+      writeFileSync(join(ws, 'c.md'), '# Gamma\n');
+
+      const res = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: [
+            { path: 'a.md', id: 'guide' },
+            { path: 'b.md', id: 'guide' },
+            { path: 'c.md', id: 'guide-2' },
+          ],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+      });
+
+      expect(res.docs.map((d) => d.id)).toEqual(['guide', 'guide-3', 'guide-2']);
+      expect(res.docs.find((d) => d.id === 'guide')?.content).toContain('# Alpha');
+      expect(res.docs.find((d) => d.id === 'guide-3')?.content).toContain('# Beta');
+      expect(res.docs.find((d) => d.id === 'guide-2')?.content).toContain('# Gamma');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
 });

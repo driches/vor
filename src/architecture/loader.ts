@@ -449,18 +449,31 @@ export function resolveWorkspaceArchitectureConfig(
     if (!isSafeRelativePath(opts.workspaceDir, explicitFile)) {
       throw new ConfigError(`Architecture config path '${explicitFile}' escapes workspace root.`);
     }
-    let extRaw: string;
+    let extRaw: string | null = null;
     try {
       extRaw = readFileSync(resolve(opts.workspaceDir, explicitFile), 'utf-8');
     } catch (err) {
-      throw new ConfigError(
-        `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}`,
-        { cause: err },
+      if (opts.strict) {
+        throw new ConfigError(
+          `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}`,
+          { cause: err },
+        );
+      }
+      void logger.warn(
+        `Architecture config file '${explicitFile}' could not be read: ${(err as Error).message}. Using inline config.`,
       );
     }
-    const extParsed = parseExternalArchitectureYamlStrict(extRaw);
-    const baseArch = opts.archConfigPath ? { ...arch, enabled: extParsed.enabled !== false } : arch;
-    arch = mergeArchitectureConfig(baseArch, extParsed, rawInline);
+    if (extRaw !== null) {
+      const extParsed = opts.strict
+        ? parseExternalArchitectureYamlStrict(extRaw)
+        : parseExternalArchitectureYamlSafe(extRaw, explicitFile);
+      if (extParsed) {
+        const baseArch = opts.archConfigPath
+          ? { ...arch, enabled: extParsed.enabled !== false }
+          : arch;
+        arch = mergeArchitectureConfig(baseArch, extParsed, rawInline);
+      }
+    }
   } else if (!arch.enabled && isSafeRelativePath(opts.workspaceDir, DEFAULT_ARCH_FILE)) {
     let defaultRaw: string | null = null;
     try {
@@ -469,12 +482,16 @@ export function resolveWorkspaceArchitectureConfig(
       defaultRaw = null; // optional default .vor/architecture.yml absent
     }
     if (defaultRaw !== null && defaultRaw.trim().length > 0) {
-      const extParsed = parseExternalArchitectureYamlStrict(defaultRaw);
-      arch = mergeArchitectureConfig(
-        { ...arch, enabled: extParsed.enabled !== false },
-        extParsed,
-        rawInline,
-      );
+      const extParsed = opts.strict
+        ? parseExternalArchitectureYamlStrict(defaultRaw)
+        : parseExternalArchitectureYamlSafe(defaultRaw, DEFAULT_ARCH_FILE);
+      if (extParsed) {
+        arch = mergeArchitectureConfig(
+          { ...arch, enabled: extParsed.enabled !== false },
+          extParsed,
+          rawInline,
+        );
+      }
     }
   }
 

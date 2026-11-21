@@ -142,6 +142,9 @@ export function createHandlers(deps: VorToolDeps) {
     return token ? createOctokit({ auth: token }) : undefined;
   };
 
+  // Intentionally scoped to this `createHandlers` instance rather than a module
+  // global so separate MCP servers and test workspaces do not share cached
+  // corpus state; the MCP server creates handlers once per server lifecycle.
   let cachedCorpus: { key: string; loadedAt: number; corpus: LoadedReferenceCorpus } | null = null;
   const getReferenceCorpus = async (
     config: ReferencesConfig,

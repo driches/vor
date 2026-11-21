@@ -236,4 +236,64 @@ describe('resolveWorkspaceArchitectureConfig', () => {
       }),
     ).toThrowError(ConfigError);
   });
+
+  it('skips malformed auto-discovered .vor/architecture.yml when strict is false and throws when strict is true', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ws-malformed-default-'));
+    try {
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      writeFileSync(join(ws, '.vor/architecture.yml'), 'preset: [unclosed\n');
+
+      const nonStrict = resolveWorkspaceArchitectureConfig({ workspaceDir: ws });
+      expect(nonStrict.architecture.enabled).toBe(false);
+
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({ workspaceDir: ws, strict: true }),
+      ).toThrowError(ConfigError);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('skips missing or malformed explicit architecture.file when strict is false and throws when strict is true', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ws-explicit-strict-'));
+    try {
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      writeFileSync(
+        join(ws, '.vor.yml'),
+        [
+          'architecture:',
+          '  enabled: true',
+          '  preset: hexagonal',
+          '  file: .vor/architecture.yml',
+        ].join('\n'),
+      );
+
+      // Missing external file
+      const missingNonStrict = resolveWorkspaceArchitectureConfig({
+        workspaceDir: ws,
+        strict: false,
+      });
+      expect(missingNonStrict.architecture.enabled).toBe(true);
+      expect(missingNonStrict.architecture.preset).toBe('hexagonal');
+
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({ workspaceDir: ws, strict: true }),
+      ).toThrowError(ConfigError);
+
+      // Malformed external file
+      writeFileSync(join(ws, '.vor/architecture.yml'), 'preset: not_a_real_preset\n');
+      const malformedNonStrict = resolveWorkspaceArchitectureConfig({
+        workspaceDir: ws,
+        strict: false,
+      });
+      expect(malformedNonStrict.architecture.enabled).toBe(true);
+      expect(malformedNonStrict.architecture.preset).toBe('hexagonal');
+
+      expect(() =>
+        resolveWorkspaceArchitectureConfig({ workspaceDir: ws, strict: true }),
+      ).toThrowError(ConfigError);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

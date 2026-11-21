@@ -76668,18 +76668,27 @@ function resolveWorkspaceArchitectureConfig(opts) {
     if (!isSafeRelativePath(opts.workspaceDir, explicitFile)) {
       throw new ConfigError(`Architecture config path '${explicitFile}' escapes workspace root.`);
     }
-    let extRaw;
+    let extRaw = null;
     try {
       extRaw = (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(opts.workspaceDir, explicitFile), "utf-8");
     } catch (err) {
-      throw new ConfigError(
-        `Architecture config file '${explicitFile}' could not be read: ${err.message}`,
-        { cause: err }
+      if (opts.strict) {
+        throw new ConfigError(
+          `Architecture config file '${explicitFile}' could not be read: ${err.message}`,
+          { cause: err }
+        );
+      }
+      void logger.warn(
+        `Architecture config file '${explicitFile}' could not be read: ${err.message}. Using inline config.`
       );
     }
-    const extParsed = parseExternalArchitectureYamlStrict(extRaw);
-    const baseArch = opts.archConfigPath ? { ...arch2, enabled: extParsed.enabled !== false } : arch2;
-    arch2 = mergeArchitectureConfig(baseArch, extParsed, rawInline);
+    if (extRaw !== null) {
+      const extParsed = opts.strict ? parseExternalArchitectureYamlStrict(extRaw) : parseExternalArchitectureYamlSafe(extRaw, explicitFile);
+      if (extParsed) {
+        const baseArch = opts.archConfigPath ? { ...arch2, enabled: extParsed.enabled !== false } : arch2;
+        arch2 = mergeArchitectureConfig(baseArch, extParsed, rawInline);
+      }
+    }
   } else if (!arch2.enabled && isSafeRelativePath(opts.workspaceDir, DEFAULT_ARCH_FILE)) {
     let defaultRaw = null;
     try {
@@ -76688,12 +76697,14 @@ function resolveWorkspaceArchitectureConfig(opts) {
       defaultRaw = null;
     }
     if (defaultRaw !== null && defaultRaw.trim().length > 0) {
-      const extParsed = parseExternalArchitectureYamlStrict(defaultRaw);
-      arch2 = mergeArchitectureConfig(
-        { ...arch2, enabled: extParsed.enabled !== false },
-        extParsed,
-        rawInline
-      );
+      const extParsed = opts.strict ? parseExternalArchitectureYamlStrict(defaultRaw) : parseExternalArchitectureYamlSafe(defaultRaw, DEFAULT_ARCH_FILE);
+      if (extParsed) {
+        arch2 = mergeArchitectureConfig(
+          { ...arch2, enabled: extParsed.enabled !== false },
+          extParsed,
+          rawInline
+        );
+      }
     }
   }
   if (opts.preset !== void 0 || opts.root !== void 0) {
@@ -79863,7 +79874,7 @@ function evaluateFileArchitecture(input2) {
           line: resolved.line,
           severity: sourceLayer.def.severity ?? input2.spec.severity,
           title: `Layer '${sourceLayer.name}' cannot import '${targetLayer.name}'`,
-          description: `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports \`${resolved.specifier}\` (resolved to \`${resolved.resolvedPath}\`, layer \`${targetLayer.name}\`), which violates the configured \`${input2.spec.preset}\` architecture boundaries.${allowedText}`,
+          description: `\`${normFile}\` (layer \`${sourceLayer.name}\`) imports \`${resolved.specifier}\` ` + (resolved.resolvedPath ? `(resolved to \`${resolved.resolvedPath}\`, layer \`${targetLayer.name}\`), which violates ` : `(layer \`${targetLayer.name}\`), which violates `) + `the configured \`${input2.spec.preset}\` architecture boundaries.${allowedText}`,
           specifier: resolved.specifier,
           snippet: resolved.snippet,
           source_layer: sourceLayer.name,
@@ -110222,12 +110233,23 @@ async function loadGithubSource(src, input2, cache, warnings) {
   }
 }
 function deduplicateIds(docs) {
-  const seen = /* @__PURE__ */ new Map();
+  const reserved = new Set(docs.map((doc) => doc.id));
+  const assigned = /* @__PURE__ */ new Set();
+  const nextSuffix = /* @__PURE__ */ new Map();
   return docs.map((doc) => {
-    const count = seen.get(doc.id) ?? 0;
-    seen.set(doc.id, count + 1);
-    if (count === 0) return doc;
-    return { ...doc, id: `${doc.id}-${count + 1}` };
+    if (!assigned.has(doc.id)) {
+      assigned.add(doc.id);
+      return doc;
+    }
+    let suffix = nextSuffix.get(doc.id) ?? 2;
+    let candidate = `${doc.id}-${suffix}`;
+    while (reserved.has(candidate) || assigned.has(candidate)) {
+      suffix += 1;
+      candidate = `${doc.id}-${suffix}`;
+    }
+    nextSuffix.set(doc.id, suffix + 1);
+    assigned.add(candidate);
+    return { ...doc, id: candidate };
   });
 }
 function allocatePlacements(rawDocs, maxInlineBytes, warnings) {
