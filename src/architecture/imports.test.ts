@@ -488,4 +488,57 @@ describe('extractImports & resolveImport across languages', () => {
     expect(resEmpty.resolvedPath).toBeUndefined();
     expect(resEmpty.packageName).toBe('@infra/repo');
   });
+
+  it('falls back to package resolution when catch-all or alias targets do not exist in the repo tree', () => {
+    const tsconfig = parseTsConfigContent(
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '*': ['src/*'],
+            '@lib/*': ['src/missing/*', 'src/lib/*'],
+          },
+        },
+      }),
+    );
+    const knownFiles = new Set([
+      'src/domain/order.ts',
+      'src/infrastructure/repo.ts',
+      'src/lib/util.ts',
+    ]);
+    const ctx = { tsconfig, knownFiles };
+
+    const { imports } = extractImports(
+      'src/domain/order.ts',
+      [
+        "import express from 'express';",
+        "import { Repo } from 'infrastructure/repo';",
+        "import { util } from '@lib/util';",
+        "import { nope } from '@lib/missing';",
+      ].join('\n'),
+    );
+
+    expect(resolveImport(imports[0]!, 'src/domain/order.ts', ctx).resolvedPath).toBeUndefined();
+    expect(resolveImport(imports[0]!, 'src/domain/order.ts', ctx).packageName).toBe('express');
+    expect(resolveImport(imports[1]!, 'src/domain/order.ts', ctx).resolvedPath).toBe(
+      'src/infrastructure/repo.ts',
+    );
+    expect(resolveImport(imports[2]!, 'src/domain/order.ts', ctx).resolvedPath).toBe(
+      'src/lib/util.ts',
+    );
+    expect(resolveImport(imports[3]!, 'src/domain/order.ts', ctx).resolvedPath).toBeUndefined();
+    expect(resolveImport(imports[3]!, 'src/domain/order.ts', ctx).packageName).toBe('@lib/missing');
+
+    // Without a repo tree (API-only reviews), bare `*` never swallows external packages while explicit prefixes still resolve.
+    const noTreeCtx = { tsconfig };
+    expect(resolveImport(imports[0]!, 'src/domain/order.ts', noTreeCtx).packageName).toBe(
+      'express',
+    );
+    expect(
+      resolveImport(imports[0]!, 'src/domain/order.ts', noTreeCtx).resolvedPath,
+    ).toBeUndefined();
+    expect(resolveImport(imports[3]!, 'src/domain/order.ts', noTreeCtx).resolvedPath).toBe(
+      'src/missing/missing',
+    );
+  });
 });

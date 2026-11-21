@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
@@ -119,6 +119,8 @@ entries:
         join(ws, 'tsconfig.json'),
         '{"compilerOptions":{"baseUrl":".","paths":{"@domain/*":["src/domain/*"]}}}',
       );
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/infrastructure/pg.ts'), 'export const pg = 1;\n');
       const spec = resolveArchitectureSpec({
         ...DEFAULT_CONFIG.architecture,
         enabled: true,

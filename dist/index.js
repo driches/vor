@@ -89384,6 +89384,7 @@ function loadWorkspaceResolveContext(workspaceDir, opts = {}) {
 function existsRepoFile(path28, ctx) {
   const norm = normalizePath(path28);
   if (!norm) return false;
+  if (ctx.extraFiles?.has(norm)) return true;
   if (ctx.knownFiles) {
     return ctx.knownFiles.has(norm);
   }
@@ -89416,26 +89417,28 @@ function resolveTsJsCandidate(basePath, ctx) {
   const candidates = [norm];
   if (norm.endsWith(".js")) {
     const stem = norm.slice(0, -3);
-    candidates.push(`${stem}.ts`, `${stem}.tsx`);
+    candidates.push(`${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`);
   } else if (norm.endsWith(".jsx")) {
     const stem = norm.slice(0, -4);
-    candidates.push(`${stem}.tsx`, `${stem}.ts`);
+    candidates.push(`${stem}.tsx`, `${stem}.ts`, `${stem}.d.ts`);
   } else if (norm.endsWith(".mjs")) {
-    candidates.push(`${norm.slice(0, -4)}.mts`);
+    candidates.push(`${norm.slice(0, -4)}.mts`, `${norm.slice(0, -4)}.d.mts`);
   } else if (norm.endsWith(".cjs")) {
-    candidates.push(`${norm.slice(0, -4)}.cts`);
+    candidates.push(`${norm.slice(0, -4)}.cts`, `${norm.slice(0, -4)}.d.cts`);
   } else {
     candidates.push(
       `${norm}.ts`,
       `${norm}.tsx`,
       `${norm}.mts`,
       `${norm}.cts`,
+      `${norm}.d.ts`,
       `${norm}.js`,
       `${norm}.jsx`,
       `${norm}.mjs`,
       `${norm}.cjs`,
       `${norm}/index.ts`,
       `${norm}/index.tsx`,
+      `${norm}/index.d.ts`,
       `${norm}/index.js`,
       `${norm}/index.jsx`
     );
@@ -89479,17 +89482,19 @@ function matchTsConfigAlias(specifier, tsconfig, ctx) {
     }
   }
   if (best) {
+    const hasRepoTree = Boolean(ctx.knownFiles || ctx.workspaceDir);
     let firstSubstituted;
     for (const target of best.targets) {
       const substituted = best.exact ? target : target.replace("*", best.wildcard);
       firstSubstituted ??= substituted;
       const joined = normalizePath(substituted);
       const resolved = resolveTsJsCandidate(joined, ctx);
-      if (existsRepoFile(resolved, ctx) || best.targets.length === 1) {
+      if (existsRepoFile(resolved, ctx)) {
         return resolved;
       }
     }
-    if (firstSubstituted !== void 0) {
+    const isCatchAllWildcard = !best.exact && best.prefixLen === 0 && best.suffixLen === 0;
+    if (!hasRepoTree && !isCatchAllWildcard && firstSubstituted !== void 0) {
       return normalizePath(firstSubstituted);
     }
   }
@@ -90135,6 +90140,10 @@ async function hydrateTsConfigFromHead(deps, headRaw) {
 }
 async function hydrateResolveContext(deps, languagesPresent) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
+  const prFiles = deps.changedFiles.filter((f2) => f2.status !== "removed").map((f2) => normalizePath(f2.path));
+  if (prFiles.length > 0) {
+    ctx.extraFiles = new Set(prFiles);
+  }
   if (languagesPresent.has("typescript") || languagesPresent.has("javascript")) {
     const raw = await readMetadataFile(deps, "tsconfig.json");
     if (raw !== null) {

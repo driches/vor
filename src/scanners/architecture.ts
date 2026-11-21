@@ -165,6 +165,12 @@ async function hydrateResolveContext(
   languagesPresent: ReadonlySet<ArchLanguage>,
 ): Promise<WorkspaceResolveContext> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
+  const prFiles = deps.changedFiles
+    .filter((f) => f.status !== 'removed')
+    .map((f) => normalizePath(f.path));
+  if (prFiles.length > 0) {
+    ctx.extraFiles = new Set(prFiles);
+  }
 
   if (languagesPresent.has('typescript') || languagesPresent.has('javascript')) {
     const raw = await readMetadataFile(deps, 'tsconfig.json');
