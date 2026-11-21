@@ -25,6 +25,11 @@ describe('matchesGlob', () => {
     expect(matchesGlob('index.ts', 'index.{ts,tsx,js}')).toBe(true);
     expect(matchesGlob('a1.ts', 'a?.ts')).toBe(true);
     expect(matchesGlob('a12.ts', 'a?.ts')).toBe(false);
+    expect(matchesGlob('src/domain-helper/order.ts', 'src/domain**')).toBe(false);
+    expect(matchesGlob('src/domain.ts', 'src/domain**')).toBe(true);
+    expect(matchesGlob('src/a/b-helper/order.ts', 'src/**helper/order.ts')).toBe(false);
+    expect(matchesGlob('src/my-helper/order.ts', 'src/**helper/order.ts')).toBe(true);
+    expect(matchesGlob('src/domain/a/b.ts', 'src/domain/**')).toBe(true);
   });
 
   it('matchesAnyGlob checks a list', () => {

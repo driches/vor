@@ -108,6 +108,8 @@ export interface CLikeScanOptions {
   templateInterpolation?: boolean;
   /** Skip `/` regex literals in JS/TS so embedded `import`/`require` text is ignored. */
   regexLiterals?: boolean;
+  /** Skip JSX element text (while still scanning `{expr}` blocks) in `.jsx`/`.tsx` files. */
+  jsx?: boolean;
   /** Treat `` `...` `` as raw strings without backslash escapes (Go). */
   rawBackticks?: boolean;
   /** Recognize `"""..."""` (and `'''...'''`) multi-line strings (Dart, Java, Kotlin, C#). */
@@ -196,6 +198,63 @@ function findJsRegexLiteralEnd(chars: readonly string[], start: number): number 
   return -1;
 }
 
+type CodeFrame =
+  | {
+      kind: 'template';
+      braceDepth: number;
+      baseJsxDepth: number;
+      resumeJsxMode: 'none' | 'open_tag';
+    }
+  | {
+      kind: 'jsx_child_expr' | 'jsx_attr_expr';
+      braceDepth: number;
+      baseJsxDepth: number;
+    };
+
+function isJsxOpeningStart(chars: readonly string[], start: number): boolean {
+  const n = chars.length;
+  if (chars[start + 1] === '>') return true; // JSX fragment <>
+  const first = chars[start + 1];
+  if (first === undefined || !/[A-Za-z_$]/.test(first)) return false;
+
+  let j = start + 2;
+  while (j < n && /[A-Za-z0-9_$.:-]/.test(chars[j]!)) j += 1;
+  const tagName = chars.slice(start + 1, j).join('');
+
+  // Optional TypeScript type arguments on a JSX component: `<List<Item> ...>`
+  if (chars[j] === '<') {
+    let angle = 1;
+    j += 1;
+    while (j < n && angle > 0) {
+      const c = chars[j]!;
+      if (c === '\n' || c === '\r' || c === ';') return false;
+      if (c === '<') angle += 1;
+      else if (c === '>') angle -= 1;
+      j += 1;
+    }
+    if (angle !== 0) return false;
+  }
+
+  const next = chars[j];
+  if (next === '>' || (next === '/' && chars[j + 1] === '>')) return true;
+  if (next === undefined || !/[ \t\n\r]/.test(next)) return false;
+
+  let k = j + 1;
+  while (k < n && /[ \t\n\r]/.test(chars[k]!)) k += 1;
+  const ch = chars[k];
+  if (ch === '>' || (ch === '/' && chars[k + 1] === '>') || ch === '{') return true;
+  // Distinguish TS generic lambdas (`<T,>`, `<const T,>`, `<T = U>`, `<T extends U>`) from JSX tags.
+  if (tagName === 'const' || ch === ',' || ch === '=') return false;
+  if (ch !== undefined && /[A-Za-z_$]/.test(ch)) {
+    let wordEnd = k + 1;
+    while (wordEnd < n && isIdentChar(chars[wordEnd])) wordEnd += 1;
+    const nextWord = chars.slice(k, wordEnd).join('');
+    if (nextWord === 'extends') return false;
+    return true;
+  }
+  return false;
+}
+
 type ActiveString =
   | { kind: 'quote'; quote: "'" | '"' | '`'; spanStart: number }
   | { kind: 'raw_backtick'; spanStart: number }
@@ -214,7 +273,13 @@ export function scanCLikeSource(
   const chars = src.split('');
   const n = chars.length;
   const stringSpans: StringSpan[] = [];
-  const templateBraceDepths: number[] = [];
+  const codeFrames: CodeFrame[] = [];
+  let jsxMode: 'none' | 'open_tag' | 'children' = 'none';
+  let jsxDepth = 0;
+  let jsxTextStart = -1;
+  const currentBaseJsxDepth = (): number =>
+    codeFrames.length > 0 ? codeFrames[codeFrames.length - 1]!.baseJsxDepth : 0;
+
   let active: ActiveString | null = null;
   let lastToken: 'expr_start' | 'expr_end' | 'control_kw' | 'dot' | 'close_brace' = 'expr_start';
   const parenStack: boolean[] = [];
@@ -282,7 +347,13 @@ export function scanCLikeSource(
         chars[i + 1] === '{'
       ) {
         stringSpans.push({ start: active.spanStart, end: i + 1 });
-        templateBraceDepths.push(0);
+        codeFrames.push({
+          kind: 'template',
+          braceDepth: 0,
+          baseJsxDepth: jsxDepth,
+          resumeJsxMode: jsxMode === 'open_tag' ? 'open_tag' : 'none',
+        });
+        jsxMode = 'none';
         active = null;
         lastToken = 'expr_start';
         i += 2;
@@ -309,7 +380,63 @@ export function scanCLikeSource(
       continue;
     }
 
-    // Outside strings: handle comments first.
+    // JSX children text runs before quotes/comments so apostrophes or slashes
+    // in rendered prose never open strings or comments.
+    if (jsxMode === 'children') {
+      if (ch === '{') {
+        if (jsxTextStart >= 0 && i > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i });
+        }
+        codeFrames.push({ kind: 'jsx_child_expr', braceDepth: 0, baseJsxDepth: jsxDepth });
+        jsxMode = 'none';
+        jsxTextStart = -1;
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === '<' && chars[i + 1] === '/') {
+        if (jsxTextStart >= 0 && i > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i });
+        }
+        const closeGt = chars.indexOf('>', i + 2);
+        if (closeGt === -1) {
+          jsxTextStart = -1;
+          jsxMode = 'none';
+          break;
+        }
+        jsxDepth = Math.max(0, jsxDepth - 1);
+        if (jsxDepth > currentBaseJsxDepth()) {
+          jsxMode = 'children';
+          jsxTextStart = closeGt;
+        } else {
+          jsxMode = 'none';
+          jsxTextStart = -1;
+          lastToken = 'expr_end';
+        }
+        i = closeGt + 1;
+        continue;
+      }
+      if (ch === '<' && isJsxOpeningStart(chars, i)) {
+        if (jsxTextStart >= 0 && i > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i });
+        }
+        if (chars[i + 1] === '>') {
+          jsxDepth += 1;
+          jsxTextStart = i + 1;
+          i += 2;
+          continue;
+        }
+        jsxDepth += 1;
+        jsxMode = 'open_tag';
+        jsxTextStart = -1;
+        i += 1;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    // Outside strings and JSX children: handle comments first.
     if (ch === '/' && chars[i + 1] === '/') {
       chars[i] = ' ';
       chars[i + 1] = ' ';
@@ -340,28 +467,6 @@ export function scanCLikeSource(
         i += 1;
       }
       continue;
-    }
-
-    // Track JS/TS `${ ... }` interpolation braces back into template literal.
-    if (opts.templateInterpolation && templateBraceDepths.length > 0) {
-      if (ch === '{') {
-        templateBraceDepths[templateBraceDepths.length - 1]! += 1;
-        lastToken = 'expr_start';
-        i += 1;
-        continue;
-      }
-      if (ch === '}') {
-        const top = templateBraceDepths[templateBraceDepths.length - 1]!;
-        if (top === 0) {
-          templateBraceDepths.pop();
-          active = { kind: 'quote', quote: '`', spanStart: i };
-        } else {
-          templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
-          lastToken = 'close_brace';
-        }
-        i += 1;
-        continue;
-      }
     }
 
     // Rust raw strings: `r"..."`, `r#"..."#`, `br#"..."#`, `cr#"..."#`.
@@ -413,6 +518,81 @@ export function scanCLikeSource(
 
     if (ch === "'" || ch === '"') {
       active = { kind: 'quote', quote: ch, spanStart: i };
+      i += 1;
+      continue;
+    }
+
+    if (jsxMode === 'open_tag') {
+      if (ch === '{') {
+        codeFrames.push({ kind: 'jsx_attr_expr', braceDepth: 0, baseJsxDepth: jsxDepth });
+        jsxMode = 'none';
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === '/' && chars[i + 1] === '>') {
+        jsxDepth = Math.max(0, jsxDepth - 1);
+        if (jsxDepth > currentBaseJsxDepth()) {
+          jsxMode = 'children';
+          jsxTextStart = i + 1;
+        } else {
+          jsxMode = 'none';
+          jsxTextStart = -1;
+          lastToken = 'expr_end';
+        }
+        i += 2;
+        continue;
+      }
+      if (ch === '>') {
+        jsxMode = 'children';
+        jsxTextStart = i;
+        i += 1;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    // Track JS/TS `${ ... }` and JSX `{ ... }` interpolation braces.
+    if ((opts.templateInterpolation || opts.jsx) && codeFrames.length > 0) {
+      if (ch === '{') {
+        codeFrames[codeFrames.length - 1]!.braceDepth += 1;
+        lastToken = 'expr_start';
+        i += 1;
+        continue;
+      }
+      if (ch === '}') {
+        const top = codeFrames[codeFrames.length - 1]!;
+        if (top.braceDepth === 0) {
+          codeFrames.pop();
+          if (top.kind === 'template') {
+            jsxMode = top.resumeJsxMode;
+            active = { kind: 'quote', quote: '`', spanStart: i };
+          } else if (top.kind === 'jsx_child_expr') {
+            jsxMode = 'children';
+            jsxTextStart = i;
+          } else {
+            jsxMode = 'open_tag';
+          }
+        } else {
+          top.braceDepth -= 1;
+          lastToken = 'close_brace';
+        }
+        i += 1;
+        continue;
+      }
+    }
+
+    if (opts.jsx && ch === '<' && lastToken === 'expr_start' && isJsxOpeningStart(chars, i)) {
+      if (chars[i + 1] === '>') {
+        jsxDepth += 1;
+        jsxMode = 'children';
+        jsxTextStart = i + 1;
+        i += 2;
+        continue;
+      }
+      jsxDepth += 1;
+      jsxMode = 'open_tag';
       i += 1;
       continue;
     }
@@ -654,10 +834,12 @@ function dedupExtracted(items: ExtractedImport[]): ExtractedImport[] {
 function extractJsTsImports(
   content: string,
   language: 'typescript' | 'javascript',
+  jsx = false,
 ): ExtractedImport[] {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     templateInterpolation: true,
     regexLiterals: true,
+    jsx,
   });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
@@ -1132,7 +1314,10 @@ export function extractImports(
   switch (language) {
     case 'typescript':
     case 'javascript':
-      return { imports: extractJsTsImports(content, language), meta: {} };
+      return {
+        imports: extractJsTsImports(content, language, /\.(?:jsx|tsx)$/i.test(filePath)),
+        meta: {},
+      };
     case 'python':
       return { imports: extractPythonImports(content), meta: {} };
     case 'go':

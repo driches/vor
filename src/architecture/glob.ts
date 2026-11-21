@@ -66,12 +66,18 @@ function compileGlobBody(pattern: string): string {
     if (ch === '*') {
       const next = pattern[i + 1];
       if (next === '*') {
+        const atSegStart = i === 0 || pattern[i - 1] === '/';
         const after = pattern[i + 2];
-        if (after === '/') {
+        if (atSegStart && after === '/') {
           out += '(?:.*/)?';
           i += 2;
-        } else {
+        } else if (atSegStart && after === undefined) {
           out += '.*';
+          i += 1;
+        } else {
+          // `**` not occupying a full path segment (e.g. `src/domain**` or `src/**helper`)
+          // collapses to single-segment `*` so it cannot cross `/` separators.
+          out += '[^/]*';
           i += 1;
         }
       } else {

@@ -1322,7 +1322,21 @@ async function loadGithubFile(
       warnings.push(`GitHub reference '${sourceLabel}' is not a regular file; skipping.`);
       return null;
     }
-    const buf = Buffer.from(res.data.content, res.data.encoding as BufferEncoding);
+    let buf: Buffer;
+    if (res.data.encoding === 'base64') {
+      buf = Buffer.from(res.data.content, 'base64');
+    } else if (res.data.encoding && res.data.encoding !== 'none') {
+      buf = Buffer.from(res.data.content, res.data.encoding as BufferEncoding);
+    } else {
+      // Contents API only inlines base64 content up to 1 MB; larger files arrive
+      // with `encoding: "none"` and require falling back to the Git Blobs API.
+      const blob = await input.octokit.rest.git.getBlob({
+        owner,
+        repo,
+        file_sha: res.data.sha,
+      });
+      buf = Buffer.from(blob.data.content, blob.data.encoding as BufferEncoding);
+    }
     if (isLikelyBinary(buf)) {
       warnings.push(`GitHub reference '${sourceLabel}' appears binary; skipping.`);
       return null;

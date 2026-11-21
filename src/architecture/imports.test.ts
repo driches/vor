@@ -403,6 +403,35 @@ describe('extractImports & resolveImport across languages', () => {
     ]);
   });
 
+  it('ignores JSX text in .tsx/.jsx while preserving JSX expression containers and TS generics', () => {
+    const preExample =
+      'export function Doc() { return <pre>import express from "express";</pre>; }\n';
+    expect(extractImports('src/Doc.tsx', preExample).imports).toEqual([]);
+
+    const mixed = [
+      "import { ok } from './ok';",
+      'const id = <T,>(x: T) => x;',
+      'const fn = <T extends object>(x: T) => x;',
+      'export function View({ items }: { items: string[] }) {',
+      '  return (',
+      '    <div>',
+      "      <p>Don't import \"express\" or require('fs')</p>",
+      "      <button onClick={() => 1}>import 'fastify'</button>",
+      "      <>import 'prisma'{require('zod')}</>",
+      "      {items.map((x) => <span>{require('pg')}</span>)}",
+      '    </div>',
+      '  );',
+      '}',
+    ].join('\n');
+
+    const extracted = extractImports('src/View.tsx', mixed).imports;
+    expect(extracted.map((i) => [i.specifier, i.line])).toEqual([
+      ['./ok', 1],
+      ['zod', 9],
+      ['pg', 10],
+    ]);
+  });
+
   it('rebases inherited paths against the child baseUrl when child overrides baseUrl without paths', () => {
     const files: Record<string, string> = {
       'tsconfig.base.json': JSON.stringify({

@@ -76743,12 +76743,16 @@ function compileGlobBody(pattern) {
     if (ch === "*") {
       const next = pattern[i2 + 1];
       if (next === "*") {
+        const atSegStart = i2 === 0 || pattern[i2 - 1] === "/";
         const after = pattern[i2 + 2];
-        if (after === "/") {
+        if (atSegStart && after === "/") {
           out2 += "(?:.*/)?";
           i2 += 2;
-        } else {
+        } else if (atSegStart && after === void 0) {
           out2 += ".*";
+          i2 += 1;
+        } else {
+          out2 += "[^/]*";
           i2 += 1;
         }
       } else {
@@ -77704,11 +77708,52 @@ function findJsRegexLiteralEnd(chars, start) {
   }
   return -1;
 }
+function isJsxOpeningStart(chars, start) {
+  const n2 = chars.length;
+  if (chars[start + 1] === ">") return true;
+  const first = chars[start + 1];
+  if (first === void 0 || !/[A-Za-z_$]/.test(first)) return false;
+  let j2 = start + 2;
+  while (j2 < n2 && /[A-Za-z0-9_$.:-]/.test(chars[j2])) j2 += 1;
+  const tagName = chars.slice(start + 1, j2).join("");
+  if (chars[j2] === "<") {
+    let angle = 1;
+    j2 += 1;
+    while (j2 < n2 && angle > 0) {
+      const c2 = chars[j2];
+      if (c2 === "\n" || c2 === "\r" || c2 === ";") return false;
+      if (c2 === "<") angle += 1;
+      else if (c2 === ">") angle -= 1;
+      j2 += 1;
+    }
+    if (angle !== 0) return false;
+  }
+  const next = chars[j2];
+  if (next === ">" || next === "/" && chars[j2 + 1] === ">") return true;
+  if (next === void 0 || !/[ \t\n\r]/.test(next)) return false;
+  let k2 = j2 + 1;
+  while (k2 < n2 && /[ \t\n\r]/.test(chars[k2])) k2 += 1;
+  const ch = chars[k2];
+  if (ch === ">" || ch === "/" && chars[k2 + 1] === ">" || ch === "{") return true;
+  if (tagName === "const" || ch === "," || ch === "=") return false;
+  if (ch !== void 0 && /[A-Za-z_$]/.test(ch)) {
+    let wordEnd = k2 + 1;
+    while (wordEnd < n2 && isIdentChar(chars[wordEnd])) wordEnd += 1;
+    const nextWord = chars.slice(k2, wordEnd).join("");
+    if (nextWord === "extends") return false;
+    return true;
+  }
+  return false;
+}
 function scanCLikeSource(src, opts = {}) {
   const chars = src.split("");
   const n2 = chars.length;
   const stringSpans = [];
-  const templateBraceDepths = [];
+  const codeFrames = [];
+  let jsxMode = "none";
+  let jsxDepth = 0;
+  let jsxTextStart = -1;
+  const currentBaseJsxDepth = () => codeFrames.length > 0 ? codeFrames[codeFrames.length - 1].baseJsxDepth : 0;
   let active = null;
   let lastToken = "expr_start";
   const parenStack = [];
@@ -77765,7 +77810,13 @@ function scanCLikeSource(src, opts = {}) {
       }
       if (opts.templateInterpolation && active.quote === "`" && ch === "$" && chars[i2 + 1] === "{") {
         stringSpans.push({ start: active.spanStart, end: i2 + 1 });
-        templateBraceDepths.push(0);
+        codeFrames.push({
+          kind: "template",
+          braceDepth: 0,
+          baseJsxDepth: jsxDepth,
+          resumeJsxMode: jsxMode === "open_tag" ? "open_tag" : "none"
+        });
+        jsxMode = "none";
         active = null;
         lastToken = "expr_start";
         i2 += 2;
@@ -77782,6 +77833,59 @@ function scanCLikeSource(src, opts = {}) {
         stringSpans.push({ start: active.spanStart, end: i2 });
         active = null;
         lastToken = "expr_end";
+        i2 += 1;
+        continue;
+      }
+      i2 += 1;
+      continue;
+    }
+    if (jsxMode === "children") {
+      if (ch === "{") {
+        if (jsxTextStart >= 0 && i2 > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i2 });
+        }
+        codeFrames.push({ kind: "jsx_child_expr", braceDepth: 0, baseJsxDepth: jsxDepth });
+        jsxMode = "none";
+        jsxTextStart = -1;
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "<" && chars[i2 + 1] === "/") {
+        if (jsxTextStart >= 0 && i2 > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i2 });
+        }
+        const closeGt = chars.indexOf(">", i2 + 2);
+        if (closeGt === -1) {
+          jsxTextStart = -1;
+          jsxMode = "none";
+          break;
+        }
+        jsxDepth = Math.max(0, jsxDepth - 1);
+        if (jsxDepth > currentBaseJsxDepth()) {
+          jsxMode = "children";
+          jsxTextStart = closeGt;
+        } else {
+          jsxMode = "none";
+          jsxTextStart = -1;
+          lastToken = "expr_end";
+        }
+        i2 = closeGt + 1;
+        continue;
+      }
+      if (ch === "<" && isJsxOpeningStart(chars, i2)) {
+        if (jsxTextStart >= 0 && i2 > jsxTextStart + 1) {
+          stringSpans.push({ start: jsxTextStart, end: i2 });
+        }
+        if (chars[i2 + 1] === ">") {
+          jsxDepth += 1;
+          jsxTextStart = i2 + 1;
+          i2 += 2;
+          continue;
+        }
+        jsxDepth += 1;
+        jsxMode = "open_tag";
+        jsxTextStart = -1;
         i2 += 1;
         continue;
       }
@@ -77818,26 +77922,6 @@ function scanCLikeSource(src, opts = {}) {
       }
       continue;
     }
-    if (opts.templateInterpolation && templateBraceDepths.length > 0) {
-      if (ch === "{") {
-        templateBraceDepths[templateBraceDepths.length - 1] += 1;
-        lastToken = "expr_start";
-        i2 += 1;
-        continue;
-      }
-      if (ch === "}") {
-        const top = templateBraceDepths[templateBraceDepths.length - 1];
-        if (top === 0) {
-          templateBraceDepths.pop();
-          active = { kind: "quote", quote: "`", spanStart: i2 };
-        } else {
-          templateBraceDepths[templateBraceDepths.length - 1] = top - 1;
-          lastToken = "close_brace";
-        }
-        i2 += 1;
-        continue;
-      }
-    }
     if (opts.rustRawStrings && ch === "r" && (!isIdentChar(chars[i2 - 1]) || (chars[i2 - 1] === "b" || chars[i2 - 1] === "c") && !isIdentChar(chars[i2 - 2]))) {
       let hashes = 0;
       while (chars[i2 + 1 + hashes] === "#") hashes += 1;
@@ -77870,6 +77954,77 @@ function scanCLikeSource(src, opts = {}) {
     }
     if (ch === "'" || ch === '"') {
       active = { kind: "quote", quote: ch, spanStart: i2 };
+      i2 += 1;
+      continue;
+    }
+    if (jsxMode === "open_tag") {
+      if (ch === "{") {
+        codeFrames.push({ kind: "jsx_attr_expr", braceDepth: 0, baseJsxDepth: jsxDepth });
+        jsxMode = "none";
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "/" && chars[i2 + 1] === ">") {
+        jsxDepth = Math.max(0, jsxDepth - 1);
+        if (jsxDepth > currentBaseJsxDepth()) {
+          jsxMode = "children";
+          jsxTextStart = i2 + 1;
+        } else {
+          jsxMode = "none";
+          jsxTextStart = -1;
+          lastToken = "expr_end";
+        }
+        i2 += 2;
+        continue;
+      }
+      if (ch === ">") {
+        jsxMode = "children";
+        jsxTextStart = i2;
+        i2 += 1;
+        continue;
+      }
+      i2 += 1;
+      continue;
+    }
+    if ((opts.templateInterpolation || opts.jsx) && codeFrames.length > 0) {
+      if (ch === "{") {
+        codeFrames[codeFrames.length - 1].braceDepth += 1;
+        lastToken = "expr_start";
+        i2 += 1;
+        continue;
+      }
+      if (ch === "}") {
+        const top = codeFrames[codeFrames.length - 1];
+        if (top.braceDepth === 0) {
+          codeFrames.pop();
+          if (top.kind === "template") {
+            jsxMode = top.resumeJsxMode;
+            active = { kind: "quote", quote: "`", spanStart: i2 };
+          } else if (top.kind === "jsx_child_expr") {
+            jsxMode = "children";
+            jsxTextStart = i2;
+          } else {
+            jsxMode = "open_tag";
+          }
+        } else {
+          top.braceDepth -= 1;
+          lastToken = "close_brace";
+        }
+        i2 += 1;
+        continue;
+      }
+    }
+    if (opts.jsx && ch === "<" && lastToken === "expr_start" && isJsxOpeningStart(chars, i2)) {
+      if (chars[i2 + 1] === ">") {
+        jsxDepth += 1;
+        jsxMode = "children";
+        jsxTextStart = i2 + 1;
+        i2 += 2;
+        continue;
+      }
+      jsxDepth += 1;
+      jsxMode = "open_tag";
       i2 += 1;
       continue;
     }
@@ -78081,10 +78236,11 @@ function dedupExtracted(items) {
   }
   return out2;
 }
-function extractJsTsImports(content, language) {
+function extractJsTsImports(content, language, jsx = false) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     templateInterpolation: true,
-    regexLiterals: true
+    regexLiterals: true,
+    jsx
   });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
@@ -78474,7 +78630,10 @@ function extractImports(filePath, content) {
   switch (language) {
     case "typescript":
     case "javascript":
-      return { imports: extractJsTsImports(content, language), meta: {} };
+      return {
+        imports: extractJsTsImports(content, language, /\.(?:jsx|tsx)$/i.test(filePath)),
+        meta: {}
+      };
     case "python":
       return { imports: extractPythonImports(content), meta: {} };
     case "go":
@@ -108970,7 +109129,19 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
       warnings.push(`GitHub reference '${sourceLabel}' is not a regular file; skipping.`);
       return null;
     }
-    const buf = Buffer.from(res.data.content, res.data.encoding);
+    let buf;
+    if (res.data.encoding === "base64") {
+      buf = Buffer.from(res.data.content, "base64");
+    } else if (res.data.encoding && res.data.encoding !== "none") {
+      buf = Buffer.from(res.data.content, res.data.encoding);
+    } else {
+      const blob = await input2.octokit.rest.git.getBlob({
+        owner,
+        repo,
+        file_sha: res.data.sha
+      });
+      buf = Buffer.from(blob.data.content, blob.data.encoding);
+    }
     if (isLikelyBinary(buf)) {
       warnings.push(`GitHub reference '${sourceLabel}' appears binary; skipping.`);
       return null;

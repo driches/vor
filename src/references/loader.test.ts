@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import type { FileReader } from '../github/file-reader.js';
-import { loadReferences, pinnedNodeFetch } from './loader.js';
+import { type LoadReferencesInput, loadReferences, pinnedNodeFetch } from './loader.js';
 
 describe('loadReferences', () => {
   it('loads repo globs, caches on disk, and splits inline vs on-demand on budget overflow', async () => {
@@ -784,6 +784,63 @@ describe('loadReferences', () => {
       expect(res.warnings.some((w) => w.includes('Could not persist reference'))).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to git.getBlob when GitHub Contents API returns encoding "none" for >1 MB files', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-largeblob-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-largeblob-cache-'));
+    try {
+      const largeBody = `# Large Spec\n\n${'word '.repeat(500)}`;
+      const getContent = vi.fn(async () => ({
+        data: {
+          type: 'file',
+          sha: 'largeblob1',
+          encoding: 'none',
+          content: '',
+          size: 1_500_000,
+        },
+        headers: { etag: '"etag-large"' },
+      }));
+      const getBlob = vi.fn(async () => ({
+        data: {
+          sha: 'largeblob1',
+          encoding: 'base64',
+          content: Buffer.from(largeBody, 'utf-8').toString('base64'),
+        },
+      }));
+      const octokit = {
+        rest: {
+          repos: { getContent },
+          git: { getBlob },
+        },
+      } as unknown as LoadReferencesInput['octokit'];
+
+      const res = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          max_doc_bytes: 200,
+          sources: ['github:acme/standards/docs/large-spec.md@main'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+        },
+        workspaceDir: ws,
+        octokit,
+      });
+
+      expect(getBlob).toHaveBeenCalledWith({
+        owner: 'acme',
+        repo: 'standards',
+        file_sha: 'largeblob1',
+      });
+      expect(res.warnings).toEqual([]);
+      expect(res.docs).toHaveLength(1);
+      expect(res.docs[0]?.truncated).toBe(true);
+      expect(Buffer.byteLength(res.docs[0]!.content, 'utf-8')).toBeLessThanOrEqual(200);
+      expect(res.docs[0]?.content).toContain('# Large Spec');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
     }
   });
 });
