@@ -907,4 +907,31 @@ describe('extractImports & resolveImport across languages', () => {
     expect(imports.map((i) => i.specifier)).toEqual(['express', './spread', './dynamic']);
     expect(imports.map((i) => i.line)).toEqual([10, 11, 12]);
   });
+
+  it('extracts Dart conditional import and export branch URIs with individual line numbers', () => {
+    const dartSrc = [
+      "import '../shared/repo.dart' if (dart.library.io) '../infrastructure/repo.dart';",
+      "export '../shared/stub.dart' // default stub",
+      "  if (dart.library.io == 'true') '../infrastructure/io_repo.dart'",
+      "  if (dart.library.html) r'../infrastructure/web_repo.dart'",
+      '  show OrderRepo;',
+      "part 'order_part.dart';",
+    ].join('\n');
+
+    const parsed = extractImports('lib/domain/order.dart', dartSrc);
+    expect(parsed.imports.map((i) => [i.specifier, i.line])).toEqual([
+      ['../shared/repo.dart', 1],
+      ['../infrastructure/repo.dart', 1],
+      ['../shared/stub.dart', 2],
+      ['../infrastructure/io_repo.dart', 3],
+      ['../infrastructure/web_repo.dart', 4],
+      ['order_part.dart', 6],
+    ]);
+
+    const resolved = resolveImports(parsed.imports, 'lib/domain/order.dart', {
+      dartPackage: 'sample_app',
+      knownFiles: new Set(['lib/shared/repo.dart', 'lib/infrastructure/repo.dart']),
+    });
+    expect(resolved[1]?.resolvedPath).toBe('lib/infrastructure/repo.dart');
+  });
 });

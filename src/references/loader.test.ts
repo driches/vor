@@ -843,4 +843,125 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('revalidates url and github cache entries when ttl_seconds is lowered below stored TTL', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-ttl-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-ttl-cache-'));
+    try {
+      const nowMs = Date.parse('2026-02-01T12:00:00Z');
+      const lookupImpl: LoadReferencesInput['lookupImpl'] = async () => [
+        { address: '93.184.216.34', family: 4 as const },
+      ];
+
+      // 1. Seed URL cache entry with 24h TTL, then lower to 0s with stale_on_error: false.
+      const urlFetchOk: LoadReferencesInput['fetchImpl'] = async () =>
+        new Response('# Remote V1', { status: 200, headers: { 'content-type': 'text/markdown' } });
+      const firstUrl = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['https://example.com/guide.md'],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            dir: cacheDir,
+            ttl_seconds: 86_400,
+            stale_on_error: false,
+          },
+        },
+        workspaceDir: ws,
+        nowMs,
+        fetchImpl: urlFetchOk,
+        lookupImpl,
+      });
+      expect(firstUrl.docs[0]?.cache_status).toBe('miss');
+
+      const urlFetchFail = vi.fn(async () => new Response('down', { status: 503 }));
+      const loweredUrlFail = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['https://example.com/guide.md'],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            dir: cacheDir,
+            ttl_seconds: 0,
+            stale_on_error: false,
+          },
+        },
+        workspaceDir: ws,
+        nowMs: nowMs + 1_000,
+        fetchImpl: urlFetchFail,
+        lookupImpl,
+      });
+      expect(urlFetchFail).toHaveBeenCalledTimes(1);
+      expect(loweredUrlFail.docs).toEqual([]);
+      expect(loweredUrlFail.cache_stats.hits).toBe(0);
+
+      // 2. Seed GitHub cache entry with 24h TTL, then lower source ttl_seconds to 0.
+      const getContent = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            type: 'file',
+            sha: 'sha1',
+            encoding: 'base64',
+            content: Buffer.from('# GitHub V1', 'utf-8').toString('base64'),
+          },
+          headers: { etag: '"e1"' },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            type: 'file',
+            sha: 'sha2',
+            encoding: 'base64',
+            content: Buffer.from('# GitHub V2', 'utf-8').toString('base64'),
+          },
+          headers: { etag: '"e2"' },
+        });
+      const octokit = {
+        rest: { repos: { getContent } },
+      } as unknown as LoadReferencesInput['octokit'];
+
+      const firstGh = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['github:acme/standards/docs/style.md@main'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir, ttl_seconds: 86_400 },
+        },
+        workspaceDir: ws,
+        nowMs,
+        octokit,
+      });
+      expect(firstGh.docs[0]?.content).toBe('# GitHub V1');
+
+      const loweredGh = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: [
+            {
+              github: 'acme/standards/docs/style.md@main',
+              ttl_seconds: 0,
+            },
+          ],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            dir: cacheDir,
+            ttl_seconds: 86_400,
+            stale_on_error: false,
+          },
+        },
+        workspaceDir: ws,
+        nowMs: nowMs + 1_000,
+        octokit,
+      });
+      expect(getContent).toHaveBeenCalledTimes(2);
+      expect(loweredGh.docs[0]?.content).toBe('# GitHub V2');
+      expect(loweredGh.cache_stats.hits).toBe(0);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
 });

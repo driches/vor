@@ -78447,12 +78447,8 @@ function extractDartImports(content) {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out2 = [];
-  const re2 = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
-  for (const m2 of cleaned.matchAll(re2)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
-    const spec = m2[2];
-    const offset = idx + m2[0].lastIndexOf(spec);
+  const n2 = cleaned.length;
+  const addUri = (spec, offset) => {
     const line = lineAtOffset(starts, offset);
     out2.push({
       specifier: spec,
@@ -78461,6 +78457,43 @@ function extractDartImports(content) {
       language: "dart",
       kindHint: spec.startsWith("dart:") ? "package" : spec.startsWith("package:") ? "ambiguous" : "relative"
     });
+  };
+  const re2 = /^[ \t]*(import|export|part)\s+(?:r)?(['"])([^'"]+)\2/gm;
+  for (const m2 of cleaned.matchAll(re2)) {
+    const idx = m2.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
+    const directive = m2[1];
+    const spec = m2[3];
+    const offset = idx + m2[0].lastIndexOf(spec);
+    addUri(spec, offset);
+    if (directive !== "import" && directive !== "export") continue;
+    let pos = idx + m2[0].length;
+    while (pos < n2) {
+      while (pos < n2 && /\s/.test(cleaned[pos])) pos += 1;
+      const ifMatch = /^if\s*\(/.exec(cleaned.slice(pos));
+      if (!ifMatch) break;
+      pos += ifMatch[0].length;
+      let parenDepth = 1;
+      while (pos < n2 && parenDepth > 0) {
+        if (isInsideStringSpan(pos, stringSpans)) {
+          pos += 1;
+          continue;
+        }
+        const ch = cleaned[pos];
+        if (ch === ";") break;
+        if (ch === "(") parenDepth += 1;
+        else if (ch === ")") parenDepth -= 1;
+        pos += 1;
+      }
+      if (parenDepth !== 0) break;
+      while (pos < n2 && /\s/.test(cleaned[pos])) pos += 1;
+      const uriMatch = /^(?:r)?(['"])([^'"]+)\1/.exec(cleaned.slice(pos));
+      if (!uriMatch) break;
+      const condSpec = uriMatch[2];
+      const uriOffset = pos + (uriMatch[0].startsWith("r") ? 2 : 1);
+      addUri(condSpec, uriOffset);
+      pos += uriMatch[0].length;
+    }
   }
   return dedupExtracted(out2);
 }
@@ -96817,6 +96850,255 @@ function makeReadRepoContextFileTool(deps) {
   );
 }
 
+// src/references/text.ts
+var ENTITY_MAP = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " "
+};
+function safeFromCodePoint(code, fallback) {
+  if (!Number.isInteger(code) || code < 0 || code > 1114111) {
+    return fallback;
+  }
+  return String.fromCodePoint(code);
+}
+function decodeHtmlEntities(text) {
+  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity) => {
+    if (entity.startsWith("#x") || entity.startsWith("#X")) {
+      const code = Number.parseInt(entity.slice(2), 16);
+      return safeFromCodePoint(code, full);
+    }
+    if (entity.startsWith("#")) {
+      const code = Number.parseInt(entity.slice(1), 10);
+      return safeFromCodePoint(code, full);
+    }
+    return ENTITY_MAP[entity.toLowerCase()] ?? full;
+  });
+}
+function stripTags(html) {
+  return html.replace(/<[^<>]+>/g, "");
+}
+var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style"]);
+function readTagNameAt(lower, nameStart) {
+  let pos = nameStart;
+  while (pos < lower.length) {
+    const ch = lower.charCodeAt(pos);
+    const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
+    if (!isAlphaNum) break;
+    pos += 1;
+  }
+  return pos;
+}
+function isTagBoundaryChar(ch, allowSlash) {
+  return ch === 62 || allowSlash && ch === 47 || ch === 32 || ch === 9 || ch === 10 || ch === 12 || ch === 13;
+}
+function replaceHtmlElements(html, tagNames, transform2) {
+  const lower = html.replace(/[A-Z]+/g, (m2) => m2.toLowerCase());
+  const tagSet = new Set(tagNames);
+  const stacks = /* @__PURE__ */ new Map();
+  const matches = /* @__PURE__ */ new Map();
+  let rawOpen = null;
+  let scan = 0;
+  while (scan < lower.length) {
+    const idx = lower.indexOf("<", scan);
+    if (idx === -1) break;
+    if (rawOpen !== null) {
+      if (lower.charCodeAt(idx + 1) === 47) {
+        const nameEnd2 = readTagNameAt(lower, idx + 2);
+        const closeTag = lower.slice(idx + 2, nameEnd2);
+        const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
+        if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary2, false)) {
+          const endBracket = lower.indexOf(">", nameEnd2);
+          if (endBracket === -1) break;
+          matches.set(rawOpen.openIdx, {
+            tag: rawOpen.tag,
+            openClose: rawOpen.openClose,
+            closeStart: idx,
+            closeEnd: endBracket + 1
+          });
+          rawOpen = null;
+          scan = endBracket + 1;
+          continue;
+        }
+      }
+      scan = idx + 1;
+      continue;
+    }
+    if (lower.charCodeAt(idx + 1) === 47) {
+      const nameEnd2 = readTagNameAt(lower, idx + 2);
+      if (nameEnd2 === idx + 2) {
+        scan = idx + 1;
+        continue;
+      }
+      const closeTag = lower.slice(idx + 2, nameEnd2);
+      const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
+      if (!tagSet.has(closeTag) || !isTagBoundaryChar(boundary2, false)) {
+        scan = idx + 1;
+        continue;
+      }
+      const endBracket = lower.indexOf(">", nameEnd2);
+      if (endBracket === -1) break;
+      const frame = stacks.get(closeTag)?.pop();
+      if (frame) {
+        matches.set(frame.openIdx, {
+          tag: closeTag,
+          openClose: frame.openClose,
+          closeStart: idx,
+          closeEnd: endBracket + 1
+        });
+      }
+      scan = endBracket + 1;
+      continue;
+    }
+    const nameEnd = readTagNameAt(lower, idx + 1);
+    if (nameEnd === idx + 1) {
+      scan = idx + 1;
+      continue;
+    }
+    const openTag = lower.slice(idx + 1, nameEnd);
+    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+    if (!tagSet.has(openTag) || !isTagBoundaryChar(boundary, true)) {
+      scan = idx + 1;
+      continue;
+    }
+    const openClose = lower.indexOf(">", nameEnd);
+    if (openClose === -1) break;
+    if (html.charCodeAt(openClose - 1) === 47) {
+      scan = openClose + 1;
+      continue;
+    }
+    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
+      rawOpen = { tag: openTag, openIdx: idx, openClose };
+      scan = openClose + 1;
+      continue;
+    }
+    let stack = stacks.get(openTag);
+    if (!stack) {
+      stack = [];
+      stacks.set(openTag, stack);
+    }
+    stack.push({ openIdx: idx, openClose });
+    scan = openClose + 1;
+  }
+  const out2 = [];
+  let cursor = 0;
+  while (cursor < lower.length) {
+    const openIdx = lower.indexOf("<", cursor);
+    if (openIdx === -1) {
+      out2.push(html.slice(cursor));
+      break;
+    }
+    const m2 = matches.get(openIdx);
+    if (m2) {
+      out2.push(html.slice(cursor, openIdx));
+      out2.push(transform2(m2.tag, html.slice(m2.openClose + 1, m2.closeStart)));
+      cursor = m2.closeEnd;
+      continue;
+    }
+    out2.push(html.slice(cursor, openIdx + 1));
+    cursor = openIdx + 1;
+  }
+  return out2.join("");
+}
+function htmlToMarkdownText(html) {
+  let out2 = replaceHtmlElements(
+    html,
+    ["script", "style", "noscript", "svg", "nav", "footer"],
+    () => ""
+  );
+  out2 = replaceHtmlElements(out2, ["pre"], (_tag, inner) => {
+    const clean = stripTags(inner).trim();
+    return `
+\`\`\`
+${clean}
+\`\`\`
+`;
+  });
+  out2 = replaceHtmlElements(out2, ["code"], (_tag, inner) => {
+    const clean = stripTags(inner).trim();
+    return clean ? `\`${clean}\`` : "";
+  });
+  out2 = replaceHtmlElements(out2, ["h1", "h2", "h3", "h4", "h5", "h6"], (tag, inner) => {
+    const hashes = "#".repeat(Number(tag.slice(1)));
+    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
+    return clean ? `
+${hashes} ${clean}
+` : "\n";
+  });
+  out2 = replaceHtmlElements(out2, ["li"], (_tag, inner) => {
+    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
+    return clean ? `
+- ${clean}` : "";
+  });
+  out2 = out2.replace(
+    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^<>]*>/gi,
+    "\n"
+  );
+  out2 = decodeHtmlEntities(stripTags(out2));
+  return out2;
+}
+function isLikelyBinary(input2) {
+  if (Buffer.isBuffer(input2)) {
+    return input2.subarray(0, 8192).includes(0);
+  }
+  return input2.slice(0, 8192).includes("\0");
+}
+function normalizeDocumentText(raw, contentType) {
+  const lf = raw.replace(/\r\n?/g, "\n");
+  const isHtml = contentType !== void 0 && contentType.toLowerCase().includes("html") || /^\s*(?:<!doctype\s+html|<html\b)/i.test(lf);
+  const text = isHtml ? htmlToMarkdownText(lf) : lf;
+  return text.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function extractDocumentHeadings(markdown, maxHeadings = 8) {
+  const headings = [];
+  let inFence = false;
+  for (const line of markdown.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m2 = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
+    if (m2?.[1]) {
+      headings.push(m2[1].trim());
+      if (headings.length >= maxHeadings) break;
+    }
+  }
+  return headings;
+}
+function truncateUtf8Bytes(text, maxBytes) {
+  if (maxBytes <= 0) {
+    return { content: "", truncated: text.length > 0 };
+  }
+  const totalBytes = Buffer.byteLength(text, "utf-8");
+  if (totalBytes <= maxBytes) {
+    return { content: text, truncated: false };
+  }
+  const notice2 = `
+
+...(truncated at ${maxBytes} bytes)`;
+  const noticeBytes = Buffer.byteLength(notice2, "utf-8");
+  if (noticeBytes >= maxBytes) {
+    return { content: "", truncated: true };
+  }
+  const budget = maxBytes - noticeBytes;
+  const rawBuf = Buffer.from(text, "utf-8");
+  let end = Math.min(budget, rawBuf.length);
+  while (end > 0 && (rawBuf[end] & 192) === 128) {
+    end -= 1;
+  }
+  let sliced = rawBuf.subarray(0, end).toString("utf-8");
+  const lastNewline = sliced.lastIndexOf("\n");
+  if (lastNewline > sliced.length * 0.8) {
+    sliced = sliced.slice(0, lastNewline);
+  }
+  return { content: `${sliced.trimEnd()}${notice2}`, truncated: true };
+}
+
 // src/references/search.ts
 var DEFAULT_SLICE_LINES = 400;
 var MAX_SLICE_BYTES = 24e3;
@@ -96864,7 +97146,11 @@ function readReferenceSlice(corpus, opts) {
   for (let ln = start; ln <= hardEnd; ln++) {
     const lineText = lines[ln - 1] ?? "";
     const lineBytes = Buffer.byteLength(lineText, "utf-8") + (kept.length > 0 ? 1 : 0);
-    if (kept.length > 0 && byteCount + lineBytes > MAX_SLICE_BYTES) {
+    if (byteCount + lineBytes > MAX_SLICE_BYTES) {
+      if (kept.length === 0) {
+        kept.push(truncateUtf8Bytes(lineText, MAX_SLICE_BYTES).content);
+        actualEnd = ln;
+      }
       truncated = true;
       break;
     }
@@ -108630,7 +108916,7 @@ var DiskReferenceCache = class {
       contentPath: (0, import_node_path29.join)(this.cacheDir, `${hash2}.content`)
     };
   }
-  get(key, nowMs = Date.now()) {
+  get(key, nowMs = Date.now(), ttlSecondsOverride) {
     const { metaPath, contentPath } = this.entryPaths(key);
     if (!(0, import_node_fs15.existsSync)(metaPath) || !(0, import_node_fs15.existsSync)(contentPath)) {
       return { status: "miss" };
@@ -108662,7 +108948,8 @@ var DiskReferenceCache = class {
     }
     const fetchedMs = Date.parse(meta3.fetched_at);
     const ageMs = nowMs - fetchedMs;
-    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < meta3.ttl_seconds * 1e3;
+    const effectiveTtlSeconds = ttlSecondsOverride ?? meta3.ttl_seconds;
+    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < effectiveTtlSeconds * 1e3;
     return fresh ? { status: "hit", meta: meta3, content } : { status: "stale", meta: meta3, content };
   }
   set(key, meta3, content) {
@@ -108765,255 +109052,6 @@ var DiskReferenceCache = class {
     return removed;
   }
 };
-
-// src/references/text.ts
-var ENTITY_MAP = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " "
-};
-function safeFromCodePoint(code, fallback) {
-  if (!Number.isInteger(code) || code < 0 || code > 1114111) {
-    return fallback;
-  }
-  return String.fromCodePoint(code);
-}
-function decodeHtmlEntities(text) {
-  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity) => {
-    if (entity.startsWith("#x") || entity.startsWith("#X")) {
-      const code = Number.parseInt(entity.slice(2), 16);
-      return safeFromCodePoint(code, full);
-    }
-    if (entity.startsWith("#")) {
-      const code = Number.parseInt(entity.slice(1), 10);
-      return safeFromCodePoint(code, full);
-    }
-    return ENTITY_MAP[entity.toLowerCase()] ?? full;
-  });
-}
-function stripTags(html) {
-  return html.replace(/<[^<>]+>/g, "");
-}
-var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style"]);
-function readTagNameAt(lower, nameStart) {
-  let pos = nameStart;
-  while (pos < lower.length) {
-    const ch = lower.charCodeAt(pos);
-    const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
-    if (!isAlphaNum) break;
-    pos += 1;
-  }
-  return pos;
-}
-function isTagBoundaryChar(ch, allowSlash) {
-  return ch === 62 || allowSlash && ch === 47 || ch === 32 || ch === 9 || ch === 10 || ch === 12 || ch === 13;
-}
-function replaceHtmlElements(html, tagNames, transform2) {
-  const lower = html.replace(/[A-Z]+/g, (m2) => m2.toLowerCase());
-  const tagSet = new Set(tagNames);
-  const stacks = /* @__PURE__ */ new Map();
-  const matches = /* @__PURE__ */ new Map();
-  let rawOpen = null;
-  let scan = 0;
-  while (scan < lower.length) {
-    const idx = lower.indexOf("<", scan);
-    if (idx === -1) break;
-    if (rawOpen !== null) {
-      if (lower.charCodeAt(idx + 1) === 47) {
-        const nameEnd2 = readTagNameAt(lower, idx + 2);
-        const closeTag = lower.slice(idx + 2, nameEnd2);
-        const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
-        if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary2, false)) {
-          const endBracket = lower.indexOf(">", nameEnd2);
-          if (endBracket === -1) break;
-          matches.set(rawOpen.openIdx, {
-            tag: rawOpen.tag,
-            openClose: rawOpen.openClose,
-            closeStart: idx,
-            closeEnd: endBracket + 1
-          });
-          rawOpen = null;
-          scan = endBracket + 1;
-          continue;
-        }
-      }
-      scan = idx + 1;
-      continue;
-    }
-    if (lower.charCodeAt(idx + 1) === 47) {
-      const nameEnd2 = readTagNameAt(lower, idx + 2);
-      if (nameEnd2 === idx + 2) {
-        scan = idx + 1;
-        continue;
-      }
-      const closeTag = lower.slice(idx + 2, nameEnd2);
-      const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
-      if (!tagSet.has(closeTag) || !isTagBoundaryChar(boundary2, false)) {
-        scan = idx + 1;
-        continue;
-      }
-      const endBracket = lower.indexOf(">", nameEnd2);
-      if (endBracket === -1) break;
-      const frame = stacks.get(closeTag)?.pop();
-      if (frame) {
-        matches.set(frame.openIdx, {
-          tag: closeTag,
-          openClose: frame.openClose,
-          closeStart: idx,
-          closeEnd: endBracket + 1
-        });
-      }
-      scan = endBracket + 1;
-      continue;
-    }
-    const nameEnd = readTagNameAt(lower, idx + 1);
-    if (nameEnd === idx + 1) {
-      scan = idx + 1;
-      continue;
-    }
-    const openTag = lower.slice(idx + 1, nameEnd);
-    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
-    if (!tagSet.has(openTag) || !isTagBoundaryChar(boundary, true)) {
-      scan = idx + 1;
-      continue;
-    }
-    const openClose = lower.indexOf(">", nameEnd);
-    if (openClose === -1) break;
-    if (html.charCodeAt(openClose - 1) === 47) {
-      scan = openClose + 1;
-      continue;
-    }
-    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
-      rawOpen = { tag: openTag, openIdx: idx, openClose };
-      scan = openClose + 1;
-      continue;
-    }
-    let stack = stacks.get(openTag);
-    if (!stack) {
-      stack = [];
-      stacks.set(openTag, stack);
-    }
-    stack.push({ openIdx: idx, openClose });
-    scan = openClose + 1;
-  }
-  const out2 = [];
-  let cursor = 0;
-  while (cursor < lower.length) {
-    const openIdx = lower.indexOf("<", cursor);
-    if (openIdx === -1) {
-      out2.push(html.slice(cursor));
-      break;
-    }
-    const m2 = matches.get(openIdx);
-    if (m2) {
-      out2.push(html.slice(cursor, openIdx));
-      out2.push(transform2(m2.tag, html.slice(m2.openClose + 1, m2.closeStart)));
-      cursor = m2.closeEnd;
-      continue;
-    }
-    out2.push(html.slice(cursor, openIdx + 1));
-    cursor = openIdx + 1;
-  }
-  return out2.join("");
-}
-function htmlToMarkdownText(html) {
-  let out2 = replaceHtmlElements(
-    html,
-    ["script", "style", "noscript", "svg", "nav", "footer"],
-    () => ""
-  );
-  out2 = replaceHtmlElements(out2, ["pre"], (_tag, inner) => {
-    const clean = stripTags(inner).trim();
-    return `
-\`\`\`
-${clean}
-\`\`\`
-`;
-  });
-  out2 = replaceHtmlElements(out2, ["code"], (_tag, inner) => {
-    const clean = stripTags(inner).trim();
-    return clean ? `\`${clean}\`` : "";
-  });
-  out2 = replaceHtmlElements(out2, ["h1", "h2", "h3", "h4", "h5", "h6"], (tag, inner) => {
-    const hashes = "#".repeat(Number(tag.slice(1)));
-    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
-    return clean ? `
-${hashes} ${clean}
-` : "\n";
-  });
-  out2 = replaceHtmlElements(out2, ["li"], (_tag, inner) => {
-    const clean = stripTags(inner).replace(/\s+/g, " ").trim();
-    return clean ? `
-- ${clean}` : "";
-  });
-  out2 = out2.replace(
-    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^<>]*>/gi,
-    "\n"
-  );
-  out2 = decodeHtmlEntities(stripTags(out2));
-  return out2;
-}
-function isLikelyBinary(input2) {
-  if (Buffer.isBuffer(input2)) {
-    return input2.subarray(0, 8192).includes(0);
-  }
-  return input2.slice(0, 8192).includes("\0");
-}
-function normalizeDocumentText(raw, contentType) {
-  const lf = raw.replace(/\r\n?/g, "\n");
-  const isHtml = contentType !== void 0 && contentType.toLowerCase().includes("html") || /^\s*(?:<!doctype\s+html|<html\b)/i.test(lf);
-  const text = isHtml ? htmlToMarkdownText(lf) : lf;
-  return text.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-function extractDocumentHeadings(markdown, maxHeadings = 8) {
-  const headings = [];
-  let inFence = false;
-  for (const line of markdown.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const m2 = trimmed.match(/^#{1,3}\s+(.+?)\s*#*$/);
-    if (m2?.[1]) {
-      headings.push(m2[1].trim());
-      if (headings.length >= maxHeadings) break;
-    }
-  }
-  return headings;
-}
-function truncateUtf8Bytes(text, maxBytes) {
-  if (maxBytes <= 0) {
-    return { content: "", truncated: text.length > 0 };
-  }
-  const totalBytes = Buffer.byteLength(text, "utf-8");
-  if (totalBytes <= maxBytes) {
-    return { content: text, truncated: false };
-  }
-  const notice2 = `
-
-...(truncated at ${maxBytes} bytes)`;
-  const noticeBytes = Buffer.byteLength(notice2, "utf-8");
-  if (noticeBytes >= maxBytes) {
-    return { content: "", truncated: true };
-  }
-  const budget = maxBytes - noticeBytes;
-  const rawBuf = Buffer.from(text, "utf-8");
-  let end = Math.min(budget, rawBuf.length);
-  while (end > 0 && (rawBuf[end] & 192) === 128) {
-    end -= 1;
-  }
-  let sliced = rawBuf.subarray(0, end).toString("utf-8");
-  const lastNewline = sliced.lastIndexOf("\n");
-  if (lastNewline > sliced.length * 0.8) {
-    sliced = sliced.slice(0, lastNewline);
-  }
-  return { content: `${sliced.trimEnd()}${notice2}`, truncated: true };
-}
 
 // src/references/loader.ts
 var FETCH_TIMEOUT_MS = 15e3;
@@ -109439,7 +109477,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   }
   if (hasRemoteRef) {
     if (cache && !input2.forceRefresh) {
-      const cached2 = cache.get(cacheKey, nowMs);
+      const cached2 = cache.get(cacheKey, nowMs, ttl);
       if (cached2.status === "hit") {
         const fp = cached2.meta.source_fingerprint ?? "";
         const refMatch = fp.startsWith(`ref:${input2.ref}:`);
@@ -109493,7 +109531,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
       });
     }
   } else if (cache && !input2.forceRefresh && diskFingerprint) {
-    const cached2 = cache.get(cacheKey, nowMs);
+    const cached2 = cache.get(cacheKey, nowMs, ttl);
     if (cached2.status === "hit" && cached2.meta.source_fingerprint === diskFingerprint) {
       return buildRepoCacheHit(cached2, docId, normPath, metaOpts, input2.config.max_doc_bytes);
     }
@@ -109778,7 +109816,7 @@ async function loadRemoteUrl(src, input2, cache, warnings) {
   let staleMeta;
   let staleContent;
   if (cache) {
-    const lookup = cache.get(cacheKey, nowMs);
+    const lookup = cache.get(cacheKey, nowMs, ttl);
     if (lookup.status === "hit" && !input2.forceRefresh) {
       return materializeNormalizedDoc(lookup.content, {
         id: docId,
@@ -109911,7 +109949,7 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
   let staleMeta;
   let staleContent;
   if (cache) {
-    const lookup = cache.get(cacheKey, nowMs);
+    const lookup = cache.get(cacheKey, nowMs, ttl);
     if (lookup.status === "hit" && !input2.forceRefresh) {
       return materializeNormalizedDoc(lookup.content, {
         id: docId,

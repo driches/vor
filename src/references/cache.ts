@@ -109,7 +109,7 @@ export class DiskReferenceCache {
     };
   }
 
-  get(key: string, nowMs: number = Date.now()): CacheLookupResult {
+  get(key: string, nowMs: number = Date.now(), ttlSecondsOverride?: number): CacheLookupResult {
     const { metaPath, contentPath } = this.entryPaths(key);
     if (!existsSync(metaPath) || !existsSync(contentPath)) {
       return { status: 'miss' };
@@ -146,7 +146,8 @@ export class DiskReferenceCache {
 
     const fetchedMs = Date.parse(meta.fetched_at);
     const ageMs = nowMs - fetchedMs;
-    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < meta.ttl_seconds * 1000;
+    const effectiveTtlSeconds = ttlSecondsOverride ?? meta.ttl_seconds;
+    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < effectiveTtlSeconds * 1000;
     return fresh ? { status: 'hit', meta, content } : { status: 'stale', meta, content };
   }
 

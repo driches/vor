@@ -716,7 +716,7 @@ async function loadRepoFile(
     // came from API content (`ref:...`) or its disk fallback still matches the
     // verified workspace file.
     if (cache && !input.forceRefresh) {
-      const cached = cache.get(cacheKey, nowMs);
+      const cached = cache.get(cacheKey, nowMs, ttl);
       if (cached.status === 'hit') {
         const fp = cached.meta.source_fingerprint ?? '';
         const refMatch = fp.startsWith(`ref:${input.ref}:`);
@@ -775,7 +775,7 @@ async function loadRepoFile(
       });
     }
   } else if (cache && !input.forceRefresh && diskFingerprint) {
-    const cached = cache.get(cacheKey, nowMs);
+    const cached = cache.get(cacheKey, nowMs, ttl);
     if (cached.status === 'hit' && cached.meta.source_fingerprint === diskFingerprint) {
       return buildRepoCacheHit(cached, docId, normPath, metaOpts, input.config.max_doc_bytes);
     }
@@ -1122,7 +1122,7 @@ async function loadRemoteUrl(
   let staleMeta: ReferenceCacheMeta | undefined;
   let staleContent: string | undefined;
   if (cache) {
-    const lookup = cache.get(cacheKey, nowMs);
+    const lookup = cache.get(cacheKey, nowMs, ttl);
     if (lookup.status === 'hit' && !input.forceRefresh) {
       return materializeNormalizedDoc(lookup.content, {
         id: docId,
@@ -1273,7 +1273,7 @@ async function loadGithubFile(
   let staleMeta: ReferenceCacheMeta | undefined;
   let staleContent: string | undefined;
   if (cache) {
-    const lookup = cache.get(cacheKey, nowMs);
+    const lookup = cache.get(cacheKey, nowMs, ttl);
     if (lookup.status === 'hit' && !input.forceRefresh) {
       return materializeNormalizedDoc(lookup.content, {
         id: docId,

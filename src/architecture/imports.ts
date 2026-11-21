@@ -1092,13 +1092,9 @@ function extractDartImports(content: string): ExtractedImport[] {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
+  const n = cleaned.length;
 
-  const re = /^[ \t]*(?:import|export|part)\s+(['"])([^'"]+)\1/gm;
-  for (const m of cleaned.matchAll(re)) {
-    const idx = m.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
-    const spec = m[2]!;
-    const offset = idx + m[0].lastIndexOf(spec);
+  const addUri = (spec: string, offset: number): void => {
     const line = lineAtOffset(starts, offset);
     out.push({
       specifier: spec,
@@ -1111,6 +1107,49 @@ function extractDartImports(content: string): ExtractedImport[] {
           ? 'ambiguous'
           : 'relative',
     });
+  };
+
+  const re = /^[ \t]*(import|export|part)\s+(?:r)?(['"])([^'"]+)\2/gm;
+  for (const m of cleaned.matchAll(re)) {
+    const idx = m.index ?? 0;
+    if (isInsideStringSpan(idx, stringSpans)) continue;
+    const directive = m[1]!;
+    const spec = m[3]!;
+    const offset = idx + m[0].lastIndexOf(spec);
+    addUri(spec, offset);
+
+    if (directive !== 'import' && directive !== 'export') continue;
+
+    // Extract zero or more conditional `if (...) '<uri>'` targets belonging to this directive.
+    let pos = idx + m[0].length;
+    while (pos < n) {
+      while (pos < n && /\s/.test(cleaned[pos]!)) pos += 1;
+      const ifMatch = /^if\s*\(/.exec(cleaned.slice(pos));
+      if (!ifMatch) break;
+      pos += ifMatch[0].length;
+
+      let parenDepth = 1;
+      while (pos < n && parenDepth > 0) {
+        if (isInsideStringSpan(pos, stringSpans)) {
+          pos += 1;
+          continue;
+        }
+        const ch = cleaned[pos]!;
+        if (ch === ';') break;
+        if (ch === '(') parenDepth += 1;
+        else if (ch === ')') parenDepth -= 1;
+        pos += 1;
+      }
+      if (parenDepth !== 0) break;
+
+      while (pos < n && /\s/.test(cleaned[pos]!)) pos += 1;
+      const uriMatch = /^(?:r)?(['"])([^'"]+)\1/.exec(cleaned.slice(pos));
+      if (!uriMatch) break;
+      const condSpec = uriMatch[2]!;
+      const uriOffset = pos + (uriMatch[0].startsWith('r') ? 2 : 1);
+      addUri(condSpec, uriOffset);
+      pos += uriMatch[0].length;
+    }
   }
 
   return dedupExtracted(out);

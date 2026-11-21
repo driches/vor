@@ -5,6 +5,7 @@
  */
 
 import type { LoadedReferenceCorpus } from './loader.js';
+import { truncateUtf8Bytes } from './text.js';
 
 const DEFAULT_SLICE_LINES = 400;
 const MAX_SLICE_BYTES = 24_000;
@@ -95,7 +96,11 @@ export function readReferenceSlice(
   for (let ln = start; ln <= hardEnd; ln++) {
     const lineText = lines[ln - 1] ?? '';
     const lineBytes = Buffer.byteLength(lineText, 'utf-8') + (kept.length > 0 ? 1 : 0);
-    if (kept.length > 0 && byteCount + lineBytes > MAX_SLICE_BYTES) {
+    if (byteCount + lineBytes > MAX_SLICE_BYTES) {
+      if (kept.length === 0) {
+        kept.push(truncateUtf8Bytes(lineText, MAX_SLICE_BYTES).content);
+        actualEnd = ln;
+      }
       truncated = true;
       break;
     }

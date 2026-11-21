@@ -93,4 +93,27 @@ describe('DiskReferenceCache', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('evaluates freshness against a lowered ttlSecondsOverride', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vor-ref-ttl-override-'));
+    try {
+      const cache = new DiskReferenceCache(dir);
+      const key = 'url:https://example.com/std.md';
+      const fetchedMs = Date.parse('2026-01-01T00:00:00Z');
+      cache.set(
+        key,
+        makeMeta(
+          { fetched_at: new Date(fetchedMs).toISOString(), ttl_seconds: 86_400 },
+          'cached text',
+        ),
+        'cached text',
+      );
+
+      expect(cache.get(key, fetchedMs + 10_000).status).toBe('hit');
+      expect(cache.get(key, fetchedMs + 10_000, 5).status).toBe('stale');
+      expect(cache.get(key, fetchedMs, 0).status).toBe('stale');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
