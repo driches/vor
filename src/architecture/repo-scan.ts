@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { expiredIgnoreNotice, IgnoreList } from '../scanners/ignore-list.js';
 import type { ScanFinding } from '../scanners/types.js';
@@ -24,6 +24,7 @@ import {
 } from './glob.js';
 import {
   detectArchLanguage,
+  extractCSharpNamespace,
   extractImports,
   loadWorkspaceResolveContext,
   resolveImports,
@@ -122,9 +123,17 @@ function enumerateRepoFiles(workspaceDir: string): string[] {
     // Non-git directory fallback: walk filesystem directly while pruning heavy build dirs.
     const files: string[] = [];
     const walk = (dir: string, relBase: string): void => {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return; // unreadable or vanished directory during walk
+      }
       for (const entry of entries) {
         if (WALK_SKIP_DIRS.has(entry.name)) continue;
+        // Skip symlinks before isDirectory()/isFile() so circular directory
+        // links cannot cause infinite recursion or escape workspaceDir.
+        if (entry.isSymbolicLink()) continue;
         const abs = join(dir, entry.name);
         const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
@@ -175,6 +184,88 @@ function violationToIgnoreProbe(v: ArchViolation): ScanFinding {
   };
 }
 
+const MAX_CS_NAMESPACE_INDEX_FILES = 2000;
+const MAX_CS_FILE_BYTES = 512 * 1024;
+
+function commonDirPrefix(a: string, b: string): string {
+  const segsA = a.split('/');
+  const segsB = b.split('/');
+  const limit = Math.min(segsA.length, segsB.length);
+  const shared: string[] = [];
+  for (let i = 0; i < limit; i++) {
+    if (segsA[i] !== segsB[i]) break;
+    shared.push(segsA[i]!);
+  }
+  return shared.join('/');
+}
+
+function collapseNamespaceTargets(files: readonly string[]): string | undefined {
+  if (files.length === 1) return files[0];
+  let shared = files[0]!.includes('/') ? files[0]!.slice(0, files[0]!.lastIndexOf('/')) : '';
+  for (let i = 1; i < files.length; i++) {
+    const f = files[i]!;
+    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+    shared = shared && dir ? commonDirPrefix(shared, dir) : '';
+    if (!shared) return undefined;
+  }
+  return shared || undefined;
+}
+
+function buildCSharpNamespaceIndex(
+  workspaceDir: string,
+  repoFiles: readonly string[],
+): Map<string, string> {
+  const prodCs: string[] = [];
+  const testCs: string[] = [];
+  for (const f of repoFiles) {
+    if (!/\.cs$/i.test(f)) continue;
+    if (isTestFile(f)) testCs.push(f);
+    else prodCs.push(f);
+  }
+
+  const root = resolve(workspaceDir);
+  const prodByNs = new Map<string, string[]>();
+  const testByNs = new Map<string, string[]>();
+
+  let scanned = 0;
+  for (const [bucketMap, list] of [[prodByNs, prodCs] as const, [testByNs, testCs] as const]) {
+    for (const relPath of list) {
+      if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
+      const absPath = resolve(root, relPath);
+      let content: string;
+      try {
+        const st = statSync(absPath);
+        if (!st.isFile() || st.size > MAX_CS_FILE_BYTES) continue;
+        content = readFileSync(absPath, 'utf-8');
+      } catch {
+        continue; // missing, unreadable, or non-regular file
+      }
+      scanned += 1;
+      const ns = extractCSharpNamespace(content);
+      if (!ns) continue;
+      let bucket = bucketMap.get(ns);
+      if (!bucket) {
+        bucket = [];
+        bucketMap.set(ns, bucket);
+      }
+      bucket.push(normalizePath(relPath));
+    }
+    if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
+  }
+
+  const index = new Map<string, string>();
+  for (const [ns, files] of prodByNs) {
+    const target = collapseNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  for (const [ns, files] of testByNs) {
+    if (index.has(ns)) continue;
+    const target = collapseNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  return index;
+}
+
 export async function runRepoArchitectureCheck(
   opts: RepoArchCheckOptions,
 ): Promise<RepoArchCheckResult> {
@@ -183,6 +274,18 @@ export async function runRepoArchitectureCheck(
   const allRepoFiles = enumerateRepoFiles(opts.workspaceDir);
   const knownFiles = new Set(allRepoFiles);
   const resolveCtx = loadWorkspaceResolveContext(opts.workspaceDir, { knownFiles });
+
+  const excludePaths = opts.excludePaths ?? [];
+  const hasScannableCSharp = allRepoFiles.some(
+    (filePath) =>
+      detectArchLanguage(filePath) === 'csharp' &&
+      !matchesAnyGlob(filePath, excludePaths) &&
+      !matchesAnyGlob(filePath, opts.spec.exclude) &&
+      !(opts.spec.ignore_tests && isTestFile(filePath)),
+  );
+  if (hasScannableCSharp) {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(opts.workspaceDir, allRepoFiles);
+  }
 
   const ignoreList = loadLocalIgnoreList(
     opts.workspaceDir,
@@ -194,7 +297,6 @@ export async function runRepoArchitectureCheck(
       ? new Set<string>()
       : loadArchBaseline(opts.workspaceDir, baselinePath);
 
-  const excludePaths = opts.excludePaths ?? [];
   let filesScanned = 0;
   let layersMatched = 0;
   let contextsMatched = 0;
@@ -328,6 +430,9 @@ export function explainFileArchitecture(
 
   const resolvedKnownFiles = knownFiles ?? new Set(enumerateRepoFiles(workspaceDir));
   const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles: resolvedKnownFiles });
+  if (language === 'csharp') {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(workspaceDir, [...resolvedKnownFiles]);
+  }
   const content = readFileSync(resolve(root, relPath), 'utf-8');
   const { imports, meta } = extractImports(relPath, content);
   const allViolations = evaluateFileArchitecture({

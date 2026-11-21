@@ -78591,18 +78591,25 @@ function extractJavaKotlinImports(content, language) {
     meta: declaredPackage ? { declaredPackage } : {}
   };
 }
+var CS_NAMESPACE_RE = /^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm;
+function findCSharpNamespaceFromCleaned(cleaned, stringSpans) {
+  for (const m2 of cleaned.matchAll(CS_NAMESPACE_RE)) {
+    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
+      return m2[1];
+    }
+  }
+  return void 0;
+}
+function extractCSharpNamespace(content) {
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
+}
 function extractCSharpImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out2 = [];
-  let declaredPackage;
-  for (const m2 of cleaned.matchAll(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm)) {
-    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
-      declaredPackage = m2[1];
-      break;
-    }
-  }
+  const declaredPackage = findCSharpNamespaceFromCleaned(cleaned, stringSpans);
   const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
   for (const m2 of cleaned.matchAll(usingRe)) {
     const idx = m2.index ?? 0;
@@ -78838,8 +78845,13 @@ function existsRepoFile(path28, ctx) {
 function existsRepoPrefix(prefixDir, ctx) {
   const norm = normalizePath(prefixDir);
   if (!norm) return false;
+  const slash = `${norm}/`;
+  if (ctx.extraFiles) {
+    for (const f2 of ctx.extraFiles) {
+      if (f2.startsWith(slash)) return true;
+    }
+  }
   if (ctx.knownFiles) {
-    const slash = `${norm}/`;
     for (const f2 of ctx.knownFiles) {
       if (f2.startsWith(slash)) return true;
     }
@@ -79195,6 +79207,100 @@ function rustLogicalModuleDir(normSource) {
   const isDirModule = baseName === "mod.rs" || baseName === "lib.rs" || baseName === "main.rs";
   return isDirModule ? import_node_path2.posix.dirname(normSource) : normSource.replace(/\.rs$/, "");
 }
+function existsCSharpTarget(candidate, ctx) {
+  if (existsRepoFile(`${candidate}.cs`, ctx)) return `${candidate}.cs`;
+  if (existsRepoPrefix(candidate, ctx)) return candidate;
+  return void 0;
+}
+function alignCSharpSpecCandidates(specSegs, dirSegs, pkgSegs) {
+  const candidates = [];
+  let fallbackPath;
+  for (let dirIdx = dirSegs.length - 1; dirIdx >= 0; dirIdx--) {
+    const seg = dirSegs[dirIdx];
+    if (!seg.includes(".")) continue;
+    const maxSegs = Math.min(pkgSegs.length, seg.split(".").length);
+    for (let m2 = maxSegs; m2 >= 2; m2--) {
+      if (pkgSegs.slice(0, m2).join(".") !== seg) continue;
+      if (pkgSegs[0] && specSegs[0] === pkgSegs[0]) {
+        const dirPrefix = dirSegs.slice(0, dirIdx);
+        const startCount = Math.min(m2, specSegs.length);
+        for (let sc = startCount; sc >= 2; sc--) {
+          const mapped = [
+            ...dirPrefix,
+            specSegs.slice(0, sc).join("."),
+            ...specSegs.slice(sc)
+          ].join("/");
+          candidates.push(mapped);
+          fallbackPath ??= mapped;
+        }
+      }
+      return { candidates, fallbackPath };
+    }
+  }
+  const maxOverlap = Math.min(pkgSegs.length, dirSegs.length);
+  for (let k2 = maxOverlap; k2 >= 1; k2--) {
+    let matched = true;
+    for (let i2 = 0; i2 < k2; i2++) {
+      if (pkgSegs[pkgSegs.length - k2 + i2] !== dirSegs[dirSegs.length - k2 + i2]) {
+        matched = false;
+        break;
+      }
+    }
+    if (!matched) continue;
+    const nsPrefix = pkgSegs.slice(0, pkgSegs.length - k2);
+    const dirPrefix = dirSegs.slice(0, dirSegs.length - k2);
+    if (nsPrefix.length > 0 && specSegs.length > nsPrefix.length && nsPrefix.every((seg, idx) => specSegs[idx] === seg)) {
+      const mapped = [...dirPrefix, ...specSegs.slice(nsPrefix.length)].join("/");
+      candidates.push(mapped);
+      if (dirPrefix.length > 0) {
+        fallbackPath = mapped;
+      }
+    }
+    break;
+  }
+  return { candidates, fallbackPath };
+}
+function resolveCSharpImport(specifier, normSource, declaredPackage, ctx) {
+  if (ctx.csharpNamespaces) {
+    const exact = ctx.csharpNamespaces.get(specifier);
+    if (exact) return { resolvedPath: exact };
+  }
+  const nsPath = specifier.replace(/\./g, "/");
+  const directHit = existsCSharpTarget(nsPath, ctx);
+  if (directHit) return { resolvedPath: directHit };
+  let alignedFallback;
+  let sameRoot = false;
+  if (declaredPackage) {
+    const pkgSegs = declaredPackage.split(".");
+    const specSegs = specifier.split(".");
+    const rootNs = pkgSegs[0];
+    sameRoot = Boolean(
+      rootNs && specSegs[0] === rootNs && rootNs !== "System" && rootNs !== "Microsoft"
+    );
+    const sourceDir = import_node_path2.posix.dirname(normSource);
+    const dirSegs = sourceDir === "." ? [] : sourceDir.split("/");
+    const aligned = alignCSharpSpecCandidates(specSegs, dirSegs, pkgSegs);
+    for (const candidate of aligned.candidates) {
+      const hit = existsCSharpTarget(candidate, ctx);
+      if (hit) return { resolvedPath: hit };
+    }
+    if (sameRoot) {
+      alignedFallback = aligned.fallbackPath;
+    }
+  }
+  if (ctx.csharpNamespaces) {
+    let prefix = specifier;
+    while (prefix.includes(".")) {
+      prefix = prefix.slice(0, prefix.lastIndexOf("."));
+      const parentMatch = ctx.csharpNamespaces.get(prefix);
+      if (parentMatch) return { resolvedPath: parentMatch };
+    }
+  }
+  if (sameRoot) {
+    return { resolvedPath: alignedFallback ?? nsPath };
+  }
+  return { packageName: specifier };
+}
 function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
   const base = {
     specifier: imp.specifier,
@@ -79323,18 +79429,13 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       return { ...base, packageName: imp.specifier };
     }
     case "csharp": {
-      const nsPath = imp.specifier.replace(/\./g, "/");
-      if (existsRepoPrefix(nsPath, ctx)) {
-        return { ...base, resolvedPath: nsPath };
-      }
-      if (fileMeta.declaredPackage) {
-        const rootNs = fileMeta.declaredPackage.split(".")[0];
-        const specRoot = imp.specifier.split(".")[0];
-        if (rootNs && specRoot === rootNs && rootNs !== "System" && rootNs !== "Microsoft") {
-          return { ...base, resolvedPath: nsPath };
-        }
-      }
-      return { ...base, packageName: imp.specifier };
+      const resolved = resolveCSharpImport(
+        imp.specifier,
+        normSource,
+        fileMeta.declaredPackage,
+        ctx
+      );
+      return { ...base, ...resolved };
     }
   }
 }
@@ -79343,7 +79444,7 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
 function matchesLayerPath(filePath, patterns) {
   const norm = normalizePath(filePath);
   if (!norm) return -1;
-  const extensionless = !/\.[^/]+$/.test(norm);
+  const extensionless = detectArchLanguage(norm) === null && !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(norm);
   let best = -1;
   for (const pattern of patterns) {
     if (matchesGlob(norm, pattern) || extensionless && matchesGlob(`${norm}/index`, pattern)) {
@@ -79358,7 +79459,7 @@ function classifyLayer(filePath, spec) {
   let bestScore = -1;
   for (const [name, def] of Object.entries(spec.layers)) {
     const score = matchesLayerPath(filePath, def.paths);
-    if (score > bestScore) {
+    if (score >= 0 && score > bestScore) {
       bestScore = score;
       best = { name, def };
     }
@@ -79583,9 +79684,15 @@ function enumerateRepoFiles(workspaceDir) {
   } catch {
     const files = [];
     const walk = (dir, relBase) => {
-      const entries = (0, import_node_fs3.readdirSync)(dir, { withFileTypes: true });
+      let entries;
+      try {
+        entries = (0, import_node_fs3.readdirSync)(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
       for (const entry of entries) {
         if (WALK_SKIP_DIRS.has(entry.name)) continue;
+        if (entry.isSymbolicLink()) continue;
         const abs = (0, import_node_path3.join)(dir, entry.name);
         const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
@@ -79633,19 +79740,97 @@ function violationToIgnoreProbe(v2) {
     fingerprint: v2.fingerprint
   };
 }
+var MAX_CS_NAMESPACE_INDEX_FILES = 2e3;
+var MAX_CS_FILE_BYTES = 512 * 1024;
+function commonDirPrefix(a2, b2) {
+  const segsA = a2.split("/");
+  const segsB = b2.split("/");
+  const limit2 = Math.min(segsA.length, segsB.length);
+  const shared = [];
+  for (let i2 = 0; i2 < limit2; i2++) {
+    if (segsA[i2] !== segsB[i2]) break;
+    shared.push(segsA[i2]);
+  }
+  return shared.join("/");
+}
+function collapseNamespaceTargets(files) {
+  if (files.length === 1) return files[0];
+  let shared = files[0].includes("/") ? files[0].slice(0, files[0].lastIndexOf("/")) : "";
+  for (let i2 = 1; i2 < files.length; i2++) {
+    const f2 = files[i2];
+    const dir = f2.includes("/") ? f2.slice(0, f2.lastIndexOf("/")) : "";
+    shared = shared && dir ? commonDirPrefix(shared, dir) : "";
+    if (!shared) return void 0;
+  }
+  return shared || void 0;
+}
+function buildCSharpNamespaceIndex(workspaceDir, repoFiles) {
+  const prodCs = [];
+  const testCs = [];
+  for (const f2 of repoFiles) {
+    if (!/\.cs$/i.test(f2)) continue;
+    if (isTestFile(f2)) testCs.push(f2);
+    else prodCs.push(f2);
+  }
+  const root = (0, import_node_path3.resolve)(workspaceDir);
+  const prodByNs = /* @__PURE__ */ new Map();
+  const testByNs = /* @__PURE__ */ new Map();
+  let scanned = 0;
+  for (const [bucketMap, list] of [[prodByNs, prodCs], [testByNs, testCs]]) {
+    for (const relPath of list) {
+      if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
+      const absPath = (0, import_node_path3.resolve)(root, relPath);
+      let content;
+      try {
+        const st2 = (0, import_node_fs3.statSync)(absPath);
+        if (!st2.isFile() || st2.size > MAX_CS_FILE_BYTES) continue;
+        content = (0, import_node_fs3.readFileSync)(absPath, "utf-8");
+      } catch {
+        continue;
+      }
+      scanned += 1;
+      const ns = extractCSharpNamespace(content);
+      if (!ns) continue;
+      let bucket = bucketMap.get(ns);
+      if (!bucket) {
+        bucket = [];
+        bucketMap.set(ns, bucket);
+      }
+      bucket.push(normalizePath(relPath));
+    }
+    if (scanned >= MAX_CS_NAMESPACE_INDEX_FILES) break;
+  }
+  const index = /* @__PURE__ */ new Map();
+  for (const [ns, files] of prodByNs) {
+    const target = collapseNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  for (const [ns, files] of testByNs) {
+    if (index.has(ns)) continue;
+    const target = collapseNamespaceTargets(files);
+    if (target) index.set(ns, target);
+  }
+  return index;
+}
 async function runRepoArchitectureCheck(opts) {
   const started = Date.now();
   const failOn = opts.failOn ?? "minor";
   const allRepoFiles = enumerateRepoFiles(opts.workspaceDir);
   const knownFiles = new Set(allRepoFiles);
   const resolveCtx = loadWorkspaceResolveContext(opts.workspaceDir, { knownFiles });
+  const excludePaths = opts.excludePaths ?? [];
+  const hasScannableCSharp = allRepoFiles.some(
+    (filePath) => detectArchLanguage(filePath) === "csharp" && !matchesAnyGlob(filePath, excludePaths) && !matchesAnyGlob(filePath, opts.spec.exclude) && !(opts.spec.ignore_tests && isTestFile(filePath))
+  );
+  if (hasScannableCSharp) {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(opts.workspaceDir, allRepoFiles);
+  }
   const ignoreList = loadLocalIgnoreList(
     opts.workspaceDir,
     opts.ignoreFilePath ?? ".vor/security-ignore.yml"
   );
   const baselinePath = opts.baselinePath ?? opts.spec.baseline_file ?? DEFAULT_BASELINE_FILE;
   const baseline = opts.useBaseline === false ? /* @__PURE__ */ new Set() : loadArchBaseline(opts.workspaceDir, baselinePath);
-  const excludePaths = opts.excludePaths ?? [];
   let filesScanned = 0;
   let layersMatched = 0;
   let contextsMatched = 0;
@@ -79751,6 +79936,9 @@ function explainFileArchitecture(workspaceDir, filePath, spec, excludePaths = []
   }
   const resolvedKnownFiles = knownFiles ?? new Set(enumerateRepoFiles(workspaceDir));
   const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles: resolvedKnownFiles });
+  if (language === "csharp") {
+    resolveCtx.csharpNamespaces = buildCSharpNamespaceIndex(workspaceDir, [...resolvedKnownFiles]);
+  }
   const content = (0, import_node_fs3.readFileSync)((0, import_node_path3.resolve)(root, relPath), "utf-8");
   const { imports, meta: meta3 } = extractImports(relPath, content);
   const allViolations = evaluateFileArchitecture({

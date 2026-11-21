@@ -21,7 +21,12 @@ import {
   normalizePath,
   type ContextMatch,
 } from './glob.js';
-import { extractImports, resolveImports, type WorkspaceResolveContext } from './imports.js';
+import {
+  detectArchLanguage,
+  extractImports,
+  resolveImports,
+  type WorkspaceResolveContext,
+} from './imports.js';
 import type { ResolvedArchitectureSpec } from './presets.js';
 
 export interface ArchViolation {
@@ -57,7 +62,11 @@ export interface LayerMatch {
 function matchesLayerPath(filePath: string, patterns: readonly string[]): number {
   const norm = normalizePath(filePath);
   if (!norm) return -1;
-  const extensionless = !/\.[^/]+$/.test(norm);
+  // Directory/namespace targets (including dotted .NET project folders such as
+  // `src/Acme.Infrastructure`) probe `${norm}/index` so subtree globs (`/**`) match.
+  const extensionless =
+    detectArchLanguage(norm) === null &&
+    !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(norm);
   let best = -1;
   for (const pattern of patterns) {
     if (matchesGlob(norm, pattern) || (extensionless && matchesGlob(`${norm}/index`, pattern))) {
@@ -77,7 +86,7 @@ export function classifyLayer(filePath: string, spec: ResolvedArchitectureSpec):
   let bestScore = -1;
   for (const [name, def] of Object.entries(spec.layers)) {
     const score = matchesLayerPath(filePath, def.paths);
-    if (score > bestScore) {
+    if (score >= 0 && score > bestScore) {
       bestScore = score;
       best = { name, def };
     }

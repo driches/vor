@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
@@ -116,6 +116,72 @@ describe('runRepoArchitectureCheck', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('skips circular directory symlinks during non-git fallback walk while reporting real violations', async () => {
+    const ws = setupSampleHexRepo();
+    try {
+      writeFileSync(
+        join(ws, 'src/domain/order.ts'),
+        "import { pgRepo } from '../adapters/out/pg_order_repo';\nexport const x = pgRepo;\n",
+      );
+      symlinkSync('..', join(ws, 'src/loop'), 'dir');
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'hexagonal',
+      });
+      const res = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(res.passed).toBe(false);
+      expect(res.files_scanned).toBe(4);
+      expect(res.violations).toHaveLength(1);
+      expect(res.violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters_out');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('indexes C# namespaces across multi-file dotted project directories', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-cs-multi-'));
+    try {
+      mkdirSync(join(ws, 'src/Acme.Domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/Acme.Infrastructure'), { recursive: true });
+      writeFileSync(
+        join(ws, 'src/Acme.Domain/Order.cs'),
+        'namespace Acme.Domain;\nusing Acme.Infrastructure;\npublic class Order {}\n',
+      );
+      writeFileSync(
+        join(ws, 'src/Acme.Infrastructure/Repository.cs'),
+        'namespace Acme.Infrastructure;\npublic class Repository {}\n',
+      );
+      writeFileSync(
+        join(ws, 'src/Acme.Infrastructure/UnitOfWork.cs'),
+        'namespace Acme.Infrastructure;\npublic class UnitOfWork {}\n',
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'custom',
+        layers: {
+          domain: {
+            paths: ['src/Acme.Domain/**'],
+            can_import: ['domain'],
+          },
+          infrastructure: {
+            paths: ['src/Acme.Infrastructure/**'],
+            can_import: ['domain', 'infrastructure'],
+          },
+        },
+      });
+      const res = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(res.passed).toBe(false);
+      expect(res.violations).toHaveLength(1);
+      expect(res.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('explainFileArchitecture', () => {
@@ -171,6 +237,46 @@ describe('explainFileArchitecture', () => {
       const info = explainFileArchitecture(ws, 'src/domain/order.ts', spec, [], knownFiles);
       expect(info.imports[0]?.resolved_path).toBe('src/adapters/out/pg_order_repo.ts');
       expect(info.imports[0]?.violations).toHaveLength(1);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('explains C# namespace imports resolved to repository layer paths', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-cs-'));
+    try {
+      mkdirSync(join(ws, 'src/Domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/Infrastructure'), { recursive: true });
+      writeFileSync(
+        join(ws, 'src/Domain/Order.cs'),
+        'namespace Acme.Domain;\nusing Acme.Infrastructure;\npublic class Order {}\n',
+      );
+      writeFileSync(
+        join(ws, 'src/Infrastructure/Repository.cs'),
+        'namespace Acme.Infrastructure;\npublic class Repository {}\n',
+      );
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'custom',
+        layers: {
+          domain: {
+            paths: ['src/Domain/**'],
+            can_import: ['domain'],
+          },
+          infrastructure: {
+            paths: ['src/Infrastructure/**'],
+            can_import: ['domain', 'infrastructure'],
+          },
+        },
+      });
+      const info = explainFileArchitecture(ws, 'src/Domain/Order.cs', spec);
+      expect(info.layer?.name).toBe('domain');
+      expect(info.imports).toHaveLength(1);
+      expect(info.imports[0]?.resolved_path).toBe('src/Infrastructure/Repository.cs');
+      expect(info.imports[0]?.target_layer).toBe('infrastructure');
+      expect(info.imports[0]?.violations).toHaveLength(1);
+      expect(info.imports[0]?.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

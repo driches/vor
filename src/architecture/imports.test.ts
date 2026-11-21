@@ -700,4 +700,62 @@ describe('extractImports & resolveImport across languages', () => {
       'src/missing/missing',
     );
   });
+
+  it('resolves C# namespaces to repo paths via namespace index and directory alignment', () => {
+    const csSrc = [
+      'namespace Acme.Domain;',
+      'using Acme.Infrastructure;',
+      'using static Acme.Infrastructure.Repository;',
+      'using Microsoft.Extensions.Logging;',
+    ].join('\n');
+
+    const nestedParsed = extractImports('src/Domain/Order.cs', csSrc);
+    const knownFiles = new Set(['src/Domain/Order.cs', 'src/Infrastructure/Repository.cs']);
+
+    // Nested folder layout (`src/Domain` declaring `Acme.Domain`) resolves with and without knownFiles.
+    const withFiles = resolveImport(
+      nestedParsed.imports[0]!,
+      'src/Domain/Order.cs',
+      { knownFiles },
+      nestedParsed.meta,
+    );
+    expect(withFiles.resolvedPath).toBe('src/Infrastructure');
+
+    const withoutFiles = resolveImport(
+      nestedParsed.imports[0]!,
+      'src/Domain/Order.cs',
+      {},
+      nestedParsed.meta,
+    );
+    expect(withoutFiles.resolvedPath).toBe('src/Infrastructure');
+
+    // `using static Ns.Type` resolves via csharpNamespaces even when file path diverges from namespace.
+    const indexedStatic = resolveImport(
+      nestedParsed.imports[1]!,
+      'src/Domain/Order.cs',
+      { csharpNamespaces: new Map([['Acme.Infrastructure', 'src/Persistence/Repository.cs']]) },
+      nestedParsed.meta,
+    );
+    expect(indexedStatic.resolvedPath).toBe('src/Persistence/Repository.cs');
+
+    // External framework namespaces remain package references.
+    expect(
+      resolveImport(
+        nestedParsed.imports[2]!,
+        'src/Domain/Order.cs',
+        { knownFiles },
+        nestedParsed.meta,
+      ).packageName,
+    ).toBe('Microsoft.Extensions.Logging');
+
+    // SDK-style dotted project directory (`src/Acme.Domain/Order.cs`) maps to sibling `src/Acme.Infrastructure`.
+    const dottedParsed = extractImports('src/Acme.Domain/Order.cs', csSrc);
+    const dottedResolved = resolveImport(
+      dottedParsed.imports[0]!,
+      'src/Acme.Domain/Order.cs',
+      {},
+      dottedParsed.meta,
+    );
+    expect(dottedResolved.resolvedPath).toBe('src/Acme.Infrastructure');
+  });
 });

@@ -54,6 +54,8 @@ export interface WorkspaceResolveContext {
   knownFiles?: ReadonlySet<string>;
   /** Additional PR-added/modified repo files to treat as present alongside `knownFiles`/`workspaceDir`. */
   extraFiles?: ReadonlySet<string>;
+  /** Optional map of C# declared namespace -> repo file path or shared directory prefix. */
+  csharpNamespaces?: ReadonlyMap<string, string>;
   tsconfig?: TsConfigPaths;
   goModule?: string;
   dartPackage?: string;
@@ -1263,6 +1265,29 @@ function extractJavaKotlinImports(
   };
 }
 
+const CS_NAMESPACE_RE = /^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm;
+
+function findCSharpNamespaceFromCleaned(
+  cleaned: string,
+  stringSpans: readonly StringSpan[],
+): string | undefined {
+  for (const m of cleaned.matchAll(CS_NAMESPACE_RE)) {
+    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
+      return m[1];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract the primary `namespace` declaration from C# source text (ignoring
+ * comments and string literals).
+ */
+export function extractCSharpNamespace(content: string): string | undefined {
+  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
+}
+
 function extractCSharpImports(content: string): {
   imports: ExtractedImport[];
   meta: FileImportMeta;
@@ -1272,13 +1297,7 @@ function extractCSharpImports(content: string): {
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
 
-  let declaredPackage: string | undefined;
-  for (const m of cleaned.matchAll(/^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm)) {
-    if (!isInsideStringSpan(m.index ?? 0, stringSpans)) {
-      declaredPackage = m[1];
-      break;
-    }
-  }
+  const declaredPackage = findCSharpNamespaceFromCleaned(cleaned, stringSpans);
 
   const usingRe =
     /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm;
@@ -1581,8 +1600,13 @@ function existsRepoFile(path: string, ctx: WorkspaceResolveContext): boolean {
 function existsRepoPrefix(prefixDir: string, ctx: WorkspaceResolveContext): boolean {
   const norm = normalizePath(prefixDir);
   if (!norm) return false;
+  const slash = `${norm}/`;
+  if (ctx.extraFiles) {
+    for (const f of ctx.extraFiles) {
+      if (f.startsWith(slash)) return true;
+    }
+  }
   if (ctx.knownFiles) {
-    const slash = `${norm}/`;
     for (const f of ctx.knownFiles) {
       if (f.startsWith(slash)) return true;
     }
@@ -2052,6 +2076,128 @@ function rustLogicalModuleDir(normSource: string): string {
   return isDirModule ? posix.dirname(normSource) : normSource.replace(/\.rs$/, '');
 }
 
+function existsCSharpTarget(candidate: string, ctx: WorkspaceResolveContext): string | undefined {
+  if (existsRepoFile(`${candidate}.cs`, ctx)) return `${candidate}.cs`;
+  if (existsRepoPrefix(candidate, ctx)) return candidate;
+  return undefined;
+}
+
+function alignCSharpSpecCandidates(
+  specSegs: readonly string[],
+  dirSegs: readonly string[],
+  pkgSegs: readonly string[],
+): { candidates: string[]; fallbackPath?: string } {
+  const candidates: string[] = [];
+  let fallbackPath: string | undefined;
+
+  // 1. SDK-style dotted project directory (e.g. `src/Acme.Domain/Order.cs` -> `src/Acme.Infrastructure`).
+  for (let dirIdx = dirSegs.length - 1; dirIdx >= 0; dirIdx--) {
+    const seg = dirSegs[dirIdx]!;
+    if (!seg.includes('.')) continue;
+    const maxSegs = Math.min(pkgSegs.length, seg.split('.').length);
+    for (let m = maxSegs; m >= 2; m--) {
+      if (pkgSegs.slice(0, m).join('.') !== seg) continue;
+      if (pkgSegs[0] && specSegs[0] === pkgSegs[0]) {
+        const dirPrefix = dirSegs.slice(0, dirIdx);
+        const startCount = Math.min(m, specSegs.length);
+        for (let sc = startCount; sc >= 2; sc--) {
+          const mapped = [
+            ...dirPrefix,
+            specSegs.slice(0, sc).join('.'),
+            ...specSegs.slice(sc),
+          ].join('/');
+          candidates.push(mapped);
+          fallbackPath ??= mapped;
+        }
+      }
+      return { candidates, fallbackPath };
+    }
+  }
+
+  // 2. Nested directory layout sharing trailing segments with declared namespace
+  // (e.g. `src/Domain/Order.cs` with `namespace Acme.Domain` -> `src/Infrastructure`).
+  const maxOverlap = Math.min(pkgSegs.length, dirSegs.length);
+  for (let k = maxOverlap; k >= 1; k--) {
+    let matched = true;
+    for (let i = 0; i < k; i++) {
+      if (pkgSegs[pkgSegs.length - k + i] !== dirSegs[dirSegs.length - k + i]) {
+        matched = false;
+        break;
+      }
+    }
+    if (!matched) continue;
+
+    const nsPrefix = pkgSegs.slice(0, pkgSegs.length - k);
+    const dirPrefix = dirSegs.slice(0, dirSegs.length - k);
+    if (
+      nsPrefix.length > 0 &&
+      specSegs.length > nsPrefix.length &&
+      nsPrefix.every((seg, idx) => specSegs[idx] === seg)
+    ) {
+      const mapped = [...dirPrefix, ...specSegs.slice(nsPrefix.length)].join('/');
+      candidates.push(mapped);
+      if (dirPrefix.length > 0) {
+        fallbackPath = mapped;
+      }
+    }
+    break;
+  }
+
+  return { candidates, fallbackPath };
+}
+
+function resolveCSharpImport(
+  specifier: string,
+  normSource: string,
+  declaredPackage: string | undefined,
+  ctx: WorkspaceResolveContext,
+): { resolvedPath?: string; packageName?: string } {
+  if (ctx.csharpNamespaces) {
+    const exact = ctx.csharpNamespaces.get(specifier);
+    if (exact) return { resolvedPath: exact };
+  }
+
+  const nsPath = specifier.replace(/\./g, '/');
+  const directHit = existsCSharpTarget(nsPath, ctx);
+  if (directHit) return { resolvedPath: directHit };
+
+  let alignedFallback: string | undefined;
+  let sameRoot = false;
+  if (declaredPackage) {
+    const pkgSegs = declaredPackage.split('.');
+    const specSegs = specifier.split('.');
+    const rootNs = pkgSegs[0];
+    sameRoot = Boolean(
+      rootNs && specSegs[0] === rootNs && rootNs !== 'System' && rootNs !== 'Microsoft',
+    );
+
+    const sourceDir = posix.dirname(normSource);
+    const dirSegs = sourceDir === '.' ? [] : sourceDir.split('/');
+    const aligned = alignCSharpSpecCandidates(specSegs, dirSegs, pkgSegs);
+    for (const candidate of aligned.candidates) {
+      const hit = existsCSharpTarget(candidate, ctx);
+      if (hit) return { resolvedPath: hit };
+    }
+    if (sameRoot) {
+      alignedFallback = aligned.fallbackPath;
+    }
+  }
+
+  if (ctx.csharpNamespaces) {
+    let prefix = specifier;
+    while (prefix.includes('.')) {
+      prefix = prefix.slice(0, prefix.lastIndexOf('.'));
+      const parentMatch = ctx.csharpNamespaces.get(prefix);
+      if (parentMatch) return { resolvedPath: parentMatch };
+    }
+  }
+
+  if (sameRoot) {
+    return { resolvedPath: alignedFallback ?? nsPath };
+  }
+  return { packageName: specifier };
+}
+
 /**
  * Resolve an {@link ExtractedImport} into either an internal repo-relative path
  * or an external package identifier.
@@ -2206,18 +2352,13 @@ export function resolveImport(
     }
 
     case 'csharp': {
-      const nsPath = imp.specifier.replace(/\./g, '/');
-      if (existsRepoPrefix(nsPath, ctx)) {
-        return { ...base, resolvedPath: nsPath };
-      }
-      if (fileMeta.declaredPackage) {
-        const rootNs = fileMeta.declaredPackage.split('.')[0];
-        const specRoot = imp.specifier.split('.')[0];
-        if (rootNs && specRoot === rootNs && rootNs !== 'System' && rootNs !== 'Microsoft') {
-          return { ...base, resolvedPath: nsPath };
-        }
-      }
-      return { ...base, packageName: imp.specifier };
+      const resolved = resolveCSharpImport(
+        imp.specifier,
+        normSource,
+        fileMeta.declaredPackage,
+        ctx,
+      );
+      return { ...base, ...resolved };
     }
   }
 }
