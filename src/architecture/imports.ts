@@ -66,7 +66,18 @@ export interface WorkspaceResolveContext {
    */
   tsconfigsByDir?: ReadonlyMap<string, TsConfigPaths | null>;
   goModule?: string;
+  /**
+   * Optional per-directory `go.mod` module cache (keyed by normalized POSIX dir, `''` for root).
+   * `null` means `go.mod` is confirmed absent in that directory; `''` means `go.mod` exists without
+   * a parseable module declaration and acts as a boundary.
+   */
+  goModulesByDir?: ReadonlyMap<string, string | null>;
   dartPackage?: string;
+  /**
+   * Optional per-directory `pubspec.yaml` package name cache (keyed by normalized POSIX dir, `''`
+   * for root). `null` means absent; `''` means present without a parseable `name` boundary.
+   */
+  dartPackagesByDir?: ReadonlyMap<string, string | null>;
 }
 
 export interface ResolvedImport {
@@ -997,18 +1008,27 @@ function parsePythonImportNames(
   clauseStart: number,
   clauseEnd: number,
   starts: readonly number[],
+  allowDots = false,
 ): Array<{ name: string; line: number }> {
   const names: Array<{ name: string; line: number }> = [];
   let segStart = clauseStart;
+  const specPattern = allowDots
+    ? /^([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/
+    : /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/;
   const pushSegment = (rawStart: number, rawEnd: number): void => {
-    const raw = cleaned.slice(rawStart, rawEnd).replace(/\\\r?\n/g, ' ');
+    // Replace backslash continuations with same-length spaces so character
+    // offsets keep pointing at each imported name's physical line.
+    const raw = cleaned
+      .slice(rawStart, rawEnd)
+      .replace(/\\\r?\n/g, (seq) => ' '.repeat(seq.length));
     const leadWs = raw.length - raw.trimStart().length;
     const trimmed = raw.trim();
     if (!trimmed || trimmed === '*') return;
-    const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/.exec(trimmed);
+    const m = specPattern.exec(trimmed);
     if (!m?.[1]) return;
     const identOffset = rawStart + leadWs;
-    names.push({ name: m[1], line: lineAtOffset(starts, identOffset) });
+    const normalizedName = allowDots ? m[1].replace(/\s+/g, '') : m[1];
+    names.push({ name: normalizedName, line: lineAtOffset(starts, identOffset) });
   };
 
   for (let i = clauseStart; i < clauseEnd; i++) {
@@ -1024,12 +1044,23 @@ function parsePythonImportNames(
 function findPythonImportClauseBounds(
   cleaned: string,
   afterImportOffset: number,
+  allowParens = true,
 ): { start: number; end: number } {
   const n = cleaned.length;
   let pos = afterImportOffset;
-  while (pos < n && (cleaned[pos] === ' ' || cleaned[pos] === '\t')) pos += 1;
+  while (pos < n) {
+    if (cleaned[pos] === ' ' || cleaned[pos] === '\t') {
+      pos += 1;
+    } else if (cleaned[pos] === '\\' && cleaned[pos + 1] === '\n') {
+      pos += 2;
+    } else if (cleaned[pos] === '\\' && cleaned[pos + 1] === '\r' && cleaned[pos + 2] === '\n') {
+      pos += 3;
+    } else {
+      break;
+    }
+  }
 
-  if (cleaned[pos] === '(') {
+  if (allowParens && cleaned[pos] === '(') {
     const close = cleaned.indexOf(')', pos + 1);
     return { start: pos + 1, end: close === -1 ? n : close };
   }
@@ -1058,15 +1089,22 @@ function extractPythonImports(content: string): ExtractedImport[] {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
+  const fromSpans: StringSpan[] = [];
 
-  const fromRe = /^[ \t]*from[ \t]+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)[ \t]+import\b/gm;
+  const fromRe =
+    /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
   for (const m of cleaned.matchAll(fromRe)) {
+    const matchIdx = m.index ?? 0;
+    const fromKwRel = m[0].indexOf('from');
+    const fromKwOffset = matchIdx + fromKwRel;
+    if (isInsideStringSpan(fromKwOffset, stringSpans)) continue;
+
     const spec = m[1]!;
-    const offset = (m.index ?? 0) + m[0].indexOf(spec);
-    if (isInsideStringSpan(offset, stringSpans)) continue;
-    const baseLine = lineAtOffset(starts, offset);
-    const clause = findPythonImportClauseBounds(cleaned, (m.index ?? 0) + m[0].length);
-    const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts);
+    const specOffset = matchIdx + m[0].indexOf(spec, fromKwRel + 4);
+    const baseLine = lineAtOffset(starts, specOffset);
+    const clause = findPythonImportClauseBounds(cleaned, matchIdx + m[0].length, true);
+    fromSpans.push({ start: fromKwOffset, end: clause.end });
+    const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts, false);
 
     // Pure relative dots (`from .. import adapters, ports`) directly name sibling
     // modules/packages; expand each imported item into a relative specifier.
@@ -1094,22 +1132,23 @@ function extractPythonImports(content: string): ExtractedImport[] {
     });
   }
 
-  const importRe = /^[ \t]*import\s+([^\n;#]+)/gm;
+  const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
   for (const m of cleaned.matchAll(importRe)) {
-    const listText = m[1]!;
-    const baseOffset = (m.index ?? 0) + m[0].indexOf(listText);
-    if (isInsideStringSpan(baseOffset, stringSpans)) continue;
-    const line = lineAtOffset(starts, baseOffset);
-    for (const part of listText.split(',')) {
-      const mod = part
-        .trim()
-        .split(/\s+as\s+/)[0]
-        ?.trim();
-      if (!mod || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(mod)) continue;
+    const matchIdx = m.index ?? 0;
+    const importKwOffset = matchIdx + m[0].indexOf('import');
+    if (
+      isInsideStringSpan(importKwOffset, stringSpans) ||
+      isInsideStringSpan(importKwOffset, fromSpans)
+    ) {
+      continue;
+    }
+    const clause = findPythonImportClauseBounds(cleaned, importKwOffset + 'import'.length, false);
+    const importedModules = parsePythonImportNames(cleaned, clause.start, clause.end, starts, true);
+    for (const item of importedModules) {
       out.push({
-        specifier: mod,
-        line,
-        snippet: makeSnippet(rawLines, line),
+        specifier: item.name,
+        line: item.line,
+        snippet: makeSnippet(rawLines, item.line),
         language: 'python',
         kindHint: 'ambiguous',
       });
@@ -2023,8 +2062,8 @@ export function parseTsConfigContent(
 }
 
 export function parseGoModModule(raw: string): string | undefined {
-  const m = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
-  return m?.[1]?.trim();
+  const m = raw.match(/^[ \t]*module[ \t]+(?:"([^"\s]+)"|([^\s/"][^\s]*))/m);
+  return (m?.[1] ?? m?.[2])?.trim();
 }
 
 export function parsePubspecName(raw: string): string | undefined {
@@ -2116,6 +2155,111 @@ export function resolveTsConfigForFile(
   }
 
   return undefined;
+}
+
+const workspaceGoModuleCache = new WeakMap<WorkspaceResolveContext, Map<string, string | null>>();
+const workspaceDartPackageCache = new WeakMap<
+  WorkspaceResolveContext,
+  Map<string, string | null>
+>();
+
+interface ResolvedManifestDir {
+  dir: string;
+  value: string;
+}
+
+function resolveNearestManifestValue(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+  manifestName: string,
+  byDir: ReadonlyMap<string, string | null> | undefined,
+  rootFallback: string | undefined,
+  diskCacheMap: WeakMap<WorkspaceResolveContext, Map<string, string | null>>,
+  parse: (raw: string) => string | undefined,
+): ResolvedManifestDir | undefined {
+  let diskCache = ctx.workspaceDir ? diskCacheMap.get(ctx) : undefined;
+
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (byDir?.has(dir)) {
+      const entry = byDir.get(dir);
+      if (entry === null) continue;
+      if (entry === '') return undefined;
+      if (entry) return { dir, value: entry };
+    }
+
+    if (dir === '' && rootFallback) {
+      return { dir: '', value: rootFallback };
+    }
+
+    if (!ctx.workspaceDir) continue;
+
+    if (!diskCache) {
+      diskCache = new Map<string, string | null>();
+      diskCacheMap.set(ctx, diskCache);
+    }
+
+    if (diskCache.has(dir)) {
+      const cached = diskCache.get(dir);
+      if (cached === null) continue;
+      if (cached === '') return undefined;
+      if (cached) return { dir, value: cached };
+    }
+
+    const relPath = dir ? `${dir}/${manifestName}` : manifestName;
+    const raw = readOptionalFile(ctx.workspaceDir, relPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+
+    // Preserve an existing manifest without a parseable declaration as a module/package
+    // boundary so files inside do not fall through to an unrelated parent/root manifest.
+    const value = parse(raw) ?? '';
+    diskCache.set(dir, value);
+    return value ? { dir, value } : undefined;
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolve the nearest governing `go.mod` module path and its repository-relative
+ * directory for `sourceFilePath`, walking upward to the repository root.
+ */
+export function resolveGoModuleForFile(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+): { dir: string; modulePath: string } | undefined {
+  const res = resolveNearestManifestValue(
+    sourceFilePath,
+    ctx,
+    'go.mod',
+    ctx.goModulesByDir,
+    ctx.goModule,
+    workspaceGoModuleCache,
+    parseGoModModule,
+  );
+  return res ? { dir: res.dir, modulePath: res.value } : undefined;
+}
+
+/**
+ * Resolve the nearest governing `pubspec.yaml` package name and its
+ * repository-relative directory for `sourceFilePath`, walking upward to root.
+ */
+export function resolveDartPackageForFile(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+): { dir: string; packageName: string } | undefined {
+  const res = resolveNearestManifestValue(
+    sourceFilePath,
+    ctx,
+    'pubspec.yaml',
+    ctx.dartPackagesByDir,
+    ctx.dartPackage,
+    workspaceDartPackageCache,
+    parsePubspecName,
+  );
+  return res ? { dir: res.dir, packageName: res.value } : undefined;
 }
 
 export function loadWorkspaceResolveContext(
@@ -2800,14 +2944,16 @@ export function resolveImport(
     }
 
     case 'go': {
-      if (ctx.goModule) {
-        if (imp.specifier === ctx.goModule) {
-          return { ...base, resolvedPath: '.' };
+      const goMod = resolveGoModuleForFile(normSource, ctx);
+      if (goMod) {
+        if (imp.specifier === goMod.modulePath) {
+          return { ...base, resolvedPath: goMod.dir || '.' };
         }
-        if (imp.specifier.startsWith(`${ctx.goModule}/`)) {
+        if (imp.specifier.startsWith(`${goMod.modulePath}/`)) {
+          const subpath = imp.specifier.slice(goMod.modulePath.length + 1);
           return {
             ...base,
-            resolvedPath: normalizePath(imp.specifier.slice(ctx.goModule.length + 1)),
+            resolvedPath: normalizePath(goMod.dir ? posix.join(goMod.dir, subpath) : subpath),
           };
         }
       }
@@ -2823,8 +2969,13 @@ export function resolveImport(
         const slash = rest.indexOf('/');
         const pkg = slash === -1 ? rest : rest.slice(0, slash);
         const subpath = slash === -1 ? '' : rest.slice(slash + 1);
-        if (ctx.dartPackage && pkg === ctx.dartPackage) {
-          return { ...base, resolvedPath: normalizePath(`lib/${subpath}`) };
+        const dartPkg = resolveDartPackageForFile(normSource, ctx);
+        if (dartPkg && pkg === dartPkg.packageName) {
+          const relLib = subpath ? `lib/${subpath}` : 'lib';
+          return {
+            ...base,
+            resolvedPath: normalizePath(dartPkg.dir ? posix.join(dartPkg.dir, relLib) : relLib),
+          };
         }
         return { ...base, packageName: pkg };
       }

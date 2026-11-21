@@ -27,6 +27,17 @@ describe('normalizeDocumentText', () => {
     expect(text).not.toContain('Copyright');
   });
 
+  it('strips inline and nested svg without letting inner tags unbalance outer nav/footer chrome', () => {
+    const nestedNavInSvg = '<nav><svg><nav>icon</nav></svg>Menu</nav><p>Body</p>';
+    expect(normalizeDocumentText(nestedNavInSvg, 'text/html')).toBe('Body');
+
+    const nestedSvg = '<svg><svg><path/></svg><text>leak</text></svg><p>Body</p>';
+    expect(normalizeDocumentText(nestedSvg, 'text/html')).toBe('Body');
+
+    const selfClosingSvg = '<nav><svg width="16" />Menu</nav><p>Body</p>';
+    expect(normalizeDocumentText(selfClosingSvg, 'text/html')).toBe('Body');
+  });
+
   it('normalizes CRLF and collapses excessive blank lines in markdown', () => {
     const md = '# Title\r\n\r\n\r\n\r\nBody line   \r\n';
     expect(normalizeDocumentText(md)).toBe('# Title\n\nBody line');

@@ -581,4 +581,75 @@ entries:
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('hydrates nested go.mod from PR HEAD, respects deletions, and catches continued Python imports', async () => {
+    const goSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'services/orders',
+    });
+    const goScanner = createArchitectureScanner(goSpec);
+    const goOrderPath = 'services/orders/domain/order.go';
+    const goOrderContent = 'package domain\nimport "example.com/orders/infrastructure"\n';
+    const goModPath = 'services/orders/go.mod';
+    const goModContent = 'module example.com/orders\ngo 1.22\n';
+
+    const changedGo = makeChangedFile(goOrderPath, {
+      2: 'import "example.com/orders/infrastructure"',
+    });
+    changedGo.language = 'go';
+
+    const apiGoDeps = makeDeps([changedGo], {
+      [goOrderPath]: goOrderContent,
+      [goModPath]: goModContent,
+    });
+    const goRes = await goScanner.scan(apiGoDeps);
+    expect(goRes.findings).toHaveLength(1);
+    expect(goRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(goRes.findings[0]?.line).toBe(2);
+
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-go-mod-deleted-'));
+    try {
+      mkdirSync(join(ws, 'services/orders/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, goModPath), goModContent);
+      const removedGoMod: ChangedFile = {
+        path: goModPath,
+        status: 'removed',
+        additions: 0,
+        deletions: 2,
+        reviewable_lines: [],
+        added_lines: new Set(),
+        language: 'go',
+        is_generated: false,
+        is_binary: false,
+        size_bytes: 32,
+        head_line_text: new Map(),
+      };
+      const staleGoDeps = makeDeps([changedGo, removedGoMod], {
+        [goOrderPath]: goOrderContent,
+      });
+      staleGoDeps.workspaceDir = ws;
+      const staleGoRes = await goScanner.scan(staleGoDeps);
+      expect(staleGoRes.findings).toEqual([]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+
+    const pySpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'pyapp',
+    });
+    const pyScanner = createArchitectureScanner(pySpec);
+    const pyPath = 'pyapp/domain/service.py';
+    const pyContent = 'import os, \\\n    flask\n';
+    const changedPy = makeChangedFile(pyPath, { 2: '    flask' });
+    changedPy.language = 'python';
+    const pyRes = await pyScanner.scan(makeDeps([changedPy], { [pyPath]: pyContent }));
+    expect(pyRes.findings).toHaveLength(1);
+    expect(pyRes.findings[0]?.rule_id).toBe('arch:forbidden-package:domain');
+    expect(pyRes.findings[0]?.line).toBe(2);
+  });
 });

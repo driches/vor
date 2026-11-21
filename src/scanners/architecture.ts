@@ -461,10 +461,40 @@ async function probeHeadKotlinSymbols(
   }
 }
 
+async function hydrateManifestMapFromHead(
+  deps: ScannerDeps,
+  filePaths: readonly string[],
+  manifestName: string,
+  parse: (raw: string) => string | undefined,
+  counters: ScanCounters,
+  headTree: ReadonlySet<string> | null,
+  removedFiles: ReadonlySet<string>,
+): Promise<Map<string, string | null>> {
+  const ancestorDirs = new Set<string>(['']);
+  for (const filePath of filePaths) {
+    for (const dir of listAncestorDirs(filePath)) {
+      ancestorDirs.add(dir);
+    }
+  }
+
+  const byDir = new Map<string, string | null>();
+  for (const dir of ancestorDirs) {
+    if (deps.signal.aborted) break;
+    const manifestPath = dir ? `${dir}/${manifestName}` : manifestName;
+    const res = await readMetadataFile(deps, manifestPath, counters, headTree, removedFiles);
+    if (res.status === 'found') {
+      byDir.set(dir, parse(res.content) ?? '');
+    } else if (res.status === 'absent') {
+      byDir.set(dir, null);
+    }
+  }
+
+  return byDir;
+}
+
 async function hydrateResolveContext(
   deps: ScannerDeps,
-  languagesPresent: ReadonlySet<ArchLanguage>,
-  applicableTsJsPaths: readonly string[],
+  applicable: readonly ChangedFile[],
   counters: ScanCounters,
 ): Promise<{ ctx: WorkspaceResolveContext; removedFiles: Set<string> }> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
@@ -490,9 +520,23 @@ async function hydrateResolveContext(
     ctx.extraFiles = new Set(prFiles);
   }
 
-  if (applicableTsJsPaths.length > 0) {
+  const tsJsPaths: string[] = [];
+  const goPaths: string[] = [];
+  const dartPaths: string[] = [];
+  for (const f of applicable) {
+    const lang = detectArchLanguage(f.path);
+    if (lang === 'typescript' || lang === 'javascript') {
+      tsJsPaths.push(f.path);
+    } else if (lang === 'go') {
+      goPaths.push(f.path);
+    } else if (lang === 'dart') {
+      dartPaths.push(f.path);
+    }
+  }
+
+  if (tsJsPaths.length > 0) {
     const ancestorDirs = new Set<string>(['']);
-    for (const filePath of applicableTsJsPaths) {
+    for (const filePath of tsJsPaths) {
       for (const dir of listAncestorDirs(filePath)) {
         ancestorDirs.add(dir);
       }
@@ -533,25 +577,43 @@ async function hydrateResolveContext(
     }
   }
 
-  if (languagesPresent.has('go')) {
-    const res = await readMetadataFile(deps, 'go.mod', counters, headTree, removedFiles);
-    if (res.status === 'found') {
-      const goModule = parseGoModModule(res.content);
-      if (goModule) ctx.goModule = goModule;
+  if (goPaths.length > 0) {
+    const byDir = await hydrateManifestMapFromHead(
+      deps,
+      goPaths,
+      'go.mod',
+      parseGoModModule,
+      counters,
+      headTree,
+      removedFiles,
+    );
+    if (byDir.size > 0) {
+      ctx.goModulesByDir = byDir;
+    }
+    const rootGo = byDir.get('');
+    if (rootGo !== undefined) {
+      if (rootGo) ctx.goModule = rootGo;
       else delete ctx.goModule;
-    } else if (res.status === 'absent') {
-      delete ctx.goModule;
     }
   }
 
-  if (languagesPresent.has('dart')) {
-    const res = await readMetadataFile(deps, 'pubspec.yaml', counters, headTree, removedFiles);
-    if (res.status === 'found') {
-      const dartPkg = parsePubspecName(res.content);
-      if (dartPkg) ctx.dartPackage = dartPkg;
+  if (dartPaths.length > 0) {
+    const byDir = await hydrateManifestMapFromHead(
+      deps,
+      dartPaths,
+      'pubspec.yaml',
+      parsePubspecName,
+      counters,
+      headTree,
+      removedFiles,
+    );
+    if (byDir.size > 0) {
+      ctx.dartPackagesByDir = byDir;
+    }
+    const rootDart = byDir.get('');
+    if (rootDart !== undefined) {
+      if (rootDart) ctx.dartPackage = rootDart;
       else delete ctx.dartPackage;
-    } else if (res.status === 'absent') {
-      delete ctx.dartPackage;
     }
   }
 
@@ -799,22 +861,15 @@ export function createArchitectureScanner(
       }
 
       const languagesPresent = new Set<ArchLanguage>();
-      const applicableTsJsPaths: string[] = [];
       for (const f of applicable) {
         const lang = detectArchLanguage(f.path);
-        if (lang) {
-          languagesPresent.add(lang);
-          if (lang === 'typescript' || lang === 'javascript') {
-            applicableTsJsPaths.push(f.path);
-          }
-        }
+        if (lang) languagesPresent.add(lang);
       }
 
       const counters: ScanCounters = { networkCalls: 0, cacheHits: 0 };
       const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
         deps,
-        languagesPresent,
-        applicableTsJsPaths,
+        applicable,
         counters,
       );
       const probeCache = new Map<string, boolean>();

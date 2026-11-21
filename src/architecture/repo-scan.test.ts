@@ -502,4 +502,59 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('enforces DDD rules via nested go.mod and multiline Python imports', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-go-py-'));
+    try {
+      mkdirSync(join(ws, 'services/orders/domain'), { recursive: true });
+      mkdirSync(join(ws, 'services/orders/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'services/orders/go.mod'), 'module example.com/orders\ngo 1.22\n');
+      writeFileSync(
+        join(ws, 'services/orders/infrastructure/repo.go'),
+        'package infrastructure\ntype Repo struct{}\n',
+      );
+      writeFileSync(
+        join(ws, 'services/orders/domain/order.go'),
+        'package domain\nimport "example.com/orders/infrastructure"\nvar _ infrastructure.Repo\n',
+      );
+
+      const goSpec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'services/orders',
+      });
+      const goExplained = explainFileArchitecture(ws, 'services/orders/domain/order.go', goSpec);
+      expect(goExplained.imports[0]?.resolved_path).toBe('services/orders/infrastructure');
+      expect(goExplained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+
+      const goRepoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec: goSpec });
+      expect(goRepoRes.passed).toBe(false);
+      expect(goRepoRes.violations.map((v) => v.file_path)).toContain(
+        'services/orders/domain/order.go',
+      );
+
+      mkdirSync(join(ws, 'pyapp/domain'), { recursive: true });
+      writeFileSync(join(ws, 'pyapp/domain/service.py'), 'import os, \\\n    flask\n');
+      const pySpec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'pyapp',
+      });
+      const pyExplained = explainFileArchitecture(ws, 'pyapp/domain/service.py', pySpec);
+      expect(pyExplained.imports.map((i) => ({ spec: i.specifier, line: i.line }))).toEqual([
+        { spec: 'os', line: 1 },
+        { spec: 'flask', line: 2 },
+      ]);
+      const flaskViolations = pyExplained.imports[1]?.violations ?? [];
+      expect(flaskViolations).toHaveLength(1);
+      expect(flaskViolations[0]?.rule_id).toBe('arch:forbidden-package:domain');
+      expect(flaskViolations[0]?.line).toBe(2);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

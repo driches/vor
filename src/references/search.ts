@@ -90,6 +90,9 @@ export function readReferenceSlice(
 
   const kept: string[] = [];
   let byteCount = 0;
+  // Tracks the last kept line; initialized to `start - 1` (not `start`) because
+  // an empty keep clamps to `start` via `Math.max(start, actualEnd)`, while keeping
+  // a single truncated first line (`kept.length === 0`) sets `actualEnd = start`.
   let actualEnd = start - 1;
   // `truncated` signals unread content remains (either default slicing stopped
   // before `totalLines` or `MAX_SLICE_BYTES` cut output short). Clamping an

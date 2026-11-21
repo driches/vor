@@ -38,6 +38,7 @@ function stripTags(html: string): string {
 }
 
 const RAW_TEXT_HTML_TAGS = new Set(['script', 'style']);
+const OPAQUE_NESTABLE_HTML_TAGS = new Set(['svg']);
 
 function readTagNameAt(lower: string, nameStart: number): number {
   let pos = nameStart;
@@ -77,7 +78,13 @@ function replaceHtmlElements(
     { tag: string; openClose: number; closeStart: number; closeEnd: number }
   >();
 
-  let rawOpen: { tag: string; openIdx: number; openClose: number } | null = null;
+  let rawOpen: {
+    tag: string;
+    openIdx: number;
+    openClose: number;
+    depth: number;
+    nestable: boolean;
+  } | null = null;
   let scan = 0;
 
   while (scan < lower.length) {
@@ -92,13 +99,29 @@ function replaceHtmlElements(
         if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary, false)) {
           const endBracket = lower.indexOf('>', nameEnd);
           if (endBracket === -1) break;
-          matches.set(rawOpen.openIdx, {
-            tag: rawOpen.tag,
-            openClose: rawOpen.openClose,
-            closeStart: idx,
-            closeEnd: endBracket + 1,
-          });
-          rawOpen = null;
+          rawOpen.depth -= 1;
+          if (rawOpen.depth === 0) {
+            matches.set(rawOpen.openIdx, {
+              tag: rawOpen.tag,
+              openClose: rawOpen.openClose,
+              closeStart: idx,
+              closeEnd: endBracket + 1,
+            });
+            rawOpen = null;
+          }
+          scan = endBracket + 1;
+          continue;
+        }
+      } else if (rawOpen.nestable) {
+        const nameEnd = readTagNameAt(lower, idx + 1);
+        const openTag = lower.slice(idx + 1, nameEnd);
+        const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+        if (openTag === rawOpen.tag && isTagBoundaryChar(boundary, true)) {
+          const endBracket = lower.indexOf('>', nameEnd);
+          if (endBracket === -1) break;
+          if (html.charCodeAt(endBracket - 1) !== 47 /* / */) {
+            rawOpen.depth += 1;
+          }
           scan = endBracket + 1;
           continue;
         }
@@ -151,8 +174,14 @@ function replaceHtmlElements(
       scan = openClose + 1;
       continue;
     }
-    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
-      rawOpen = { tag: openTag, openIdx: idx, openClose };
+    if (RAW_TEXT_HTML_TAGS.has(openTag) || OPAQUE_NESTABLE_HTML_TAGS.has(openTag)) {
+      rawOpen = {
+        tag: openTag,
+        openIdx: idx,
+        openClose,
+        depth: 1,
+        nestable: OPAQUE_NESTABLE_HTML_TAGS.has(openTag),
+      };
       scan = openClose + 1;
       continue;
     }

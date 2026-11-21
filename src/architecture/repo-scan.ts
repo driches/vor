@@ -312,7 +312,7 @@ export async function runRepoArchitectureCheck(
   for (const filePath of allRepoFiles) {
     if (filesScanned >= MAX_SCAN_FILES) {
       void logger.warn(
-        `Architecture scan capped at ${MAX_SCAN_FILES} files; narrow spec.exclude or root to scan remaining files.`,
+        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
       );
       break;
     }

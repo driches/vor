@@ -1191,4 +1191,112 @@ describe('extractImports & resolveImport across languages', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('resolves nested Go modules and Dart pubspec packages per source file without inheriting across empty boundaries', () => {
+    expect(parseGoModModule('module "example.com/quoted"\ngo 1.22\n')).toBe('example.com/quoted');
+
+    const ws = mkdtempSync(join(tmpdir(), 'vor-nested-go-dart-'));
+    try {
+      mkdirSync(join(ws, 'services/orders/domain'), { recursive: true });
+      mkdirSync(join(ws, 'services/orders/infrastructure'), { recursive: true });
+      mkdirSync(join(ws, 'services/bare/domain'), { recursive: true });
+      mkdirSync(join(ws, 'services/plain/domain'), { recursive: true });
+      mkdirSync(join(ws, 'packages/billing/lib/domain'), { recursive: true });
+      mkdirSync(join(ws, 'packages/bare_dart/lib/domain'), { recursive: true });
+
+      writeFileSync(join(ws, 'go.mod'), 'module example.com/root\ngo 1.22\n');
+      writeFileSync(join(ws, 'services/orders/go.mod'), 'module "example.com/orders"\ngo 1.22\n');
+      writeFileSync(join(ws, 'services/bare/go.mod'), '// empty go.mod boundary\n');
+      writeFileSync(join(ws, 'pubspec.yaml'), 'name: root_pkg\n');
+      writeFileSync(join(ws, 'packages/billing/pubspec.yaml'), 'name: billing_pkg\n');
+      writeFileSync(join(ws, 'packages/bare_dart/pubspec.yaml'), '# empty pubspec boundary\n');
+
+      const ctx = loadWorkspaceResolveContext(ws);
+
+      const goOrderPath = 'services/orders/domain/order.go';
+      const [goOrderImp] = resolveImports(
+        extractImports(goOrderPath, 'package domain\nimport "example.com/orders/infrastructure"\n')
+          .imports,
+        goOrderPath,
+        ctx,
+      );
+      expect(goOrderImp?.resolvedPath).toBe('services/orders/infrastructure');
+
+      // Empty services/bare/go.mod blocks inheritance from root go.mod.
+      const goBarePath = 'services/bare/domain/order.go';
+      const [goBareImp] = resolveImports(
+        extractImports(goBarePath, 'package domain\nimport "example.com/root/infra"\n').imports,
+        goBarePath,
+        ctx,
+      );
+      expect(goBareImp?.resolvedPath).toBeUndefined();
+      expect(goBareImp?.packageName).toBe('example.com/root/infra');
+
+      // Subdirectory without go.mod falls back to root go.mod.
+      const goPlainPath = 'services/plain/domain/order.go';
+      const [goPlainImp] = resolveImports(
+        extractImports(goPlainPath, 'package domain\nimport "example.com/root/infra"\n').imports,
+        goPlainPath,
+        ctx,
+      );
+      expect(goPlainImp?.resolvedPath).toBe('infra');
+
+      const dartOrderPath = 'packages/billing/lib/domain/invoice.dart';
+      const [dartOrderImp] = resolveImports(
+        extractImports(dartOrderPath, "import 'package:billing_pkg/infra/db.dart';\n").imports,
+        dartOrderPath,
+        ctx,
+      );
+      expect(dartOrderImp?.resolvedPath).toBe('packages/billing/lib/infra/db.dart');
+
+      const dartBarePath = 'packages/bare_dart/lib/domain/invoice.dart';
+      const [dartBareImp] = resolveImports(
+        extractImports(dartBarePath, "import 'package:root_pkg/infra/db.dart';\n").imports,
+        dartBarePath,
+        ctx,
+      );
+      expect(dartBareImp?.resolvedPath).toBeUndefined();
+      expect(dartBareImp?.packageName).toBe('root_pkg');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('extracts continued Python imports across LF/CRLF lines and semicolons with accurate physical line numbers', () => {
+    const pyLf = ['import os, \\', '    flask', 's = "; import fake"'].join('\n');
+    const parsedLf = extractImports('app/domain/service.py', pyLf);
+    expect(parsedLf.imports.map((i) => ({ specifier: i.specifier, line: i.line }))).toEqual([
+      { specifier: 'os', line: 1 },
+      { specifier: 'flask', line: 2 },
+    ]);
+
+    const pyCrlf = 'import os, \\\r\nflask\r\n';
+    const parsedCrlf = extractImports('app/domain/service.py', pyCrlf);
+    expect(parsedCrlf.imports.map((i) => ({ specifier: i.specifier, line: 2 }))).toBeTruthy();
+    expect(parsedCrlf.imports.map((i) => ({ specifier: i.specifier, line: i.line }))).toEqual([
+      { specifier: 'os', line: 1 },
+      { specifier: 'flask', line: 2 },
+    ]);
+
+    const pyLeadingCont = ['import \\', '    os as o, \\', '    sqlalchemy.orm as sa'].join('\n');
+    const parsedLeading = extractImports('app/domain/service.py', pyLeadingCont);
+    expect(parsedLeading.imports.map((i) => ({ specifier: i.specifier, line: i.line }))).toEqual([
+      { specifier: 'os', line: 2 },
+      { specifier: 'sqlalchemy.orm', line: 3 },
+    ]);
+
+    const pyFromCont = ['from app.infra \\', '    import repo, \\', '    client'].join('\n');
+    const parsedFrom = extractImports('app/domain/service.py', pyFromCont);
+    expect(parsedFrom.imports).toHaveLength(1);
+    expect(parsedFrom.imports[0]?.specifier).toBe('app.infra');
+    expect(parsedFrom.imports[0]?.line).toBe(1);
+    expect(parsedFrom.imports[0]?.importedNames).toEqual([
+      { name: 'repo', line: 2 },
+      { name: 'client', line: 3 },
+    ]);
+
+    const pySemi = 'from app.domain import foo; import flask\n';
+    const parsedSemi = extractImports('app/domain/service.py', pySemi);
+    expect(parsedSemi.imports.map((i) => i.specifier)).toEqual(['app.domain', 'flask']);
+  });
 });

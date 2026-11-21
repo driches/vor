@@ -75978,6 +75978,7 @@ function stripTags(html) {
   return html.replace(/<[^<>]+>/g, "");
 }
 var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style"]);
+var OPAQUE_NESTABLE_HTML_TAGS = /* @__PURE__ */ new Set(["svg"]);
 function readTagNameAt(lower, nameStart) {
   let pos = nameStart;
   while (pos < lower.length) {
@@ -76009,13 +76010,29 @@ function replaceHtmlElements(html, tagNames, transform2) {
         if (closeTag === rawOpen.tag && isTagBoundaryChar(boundary2, false)) {
           const endBracket = lower.indexOf(">", nameEnd2);
           if (endBracket === -1) break;
-          matches.set(rawOpen.openIdx, {
-            tag: rawOpen.tag,
-            openClose: rawOpen.openClose,
-            closeStart: idx,
-            closeEnd: endBracket + 1
-          });
-          rawOpen = null;
+          rawOpen.depth -= 1;
+          if (rawOpen.depth === 0) {
+            matches.set(rawOpen.openIdx, {
+              tag: rawOpen.tag,
+              openClose: rawOpen.openClose,
+              closeStart: idx,
+              closeEnd: endBracket + 1
+            });
+            rawOpen = null;
+          }
+          scan = endBracket + 1;
+          continue;
+        }
+      } else if (rawOpen.nestable) {
+        const nameEnd2 = readTagNameAt(lower, idx + 1);
+        const openTag2 = lower.slice(idx + 1, nameEnd2);
+        const boundary2 = nameEnd2 < lower.length ? lower.charCodeAt(nameEnd2) : -1;
+        if (openTag2 === rawOpen.tag && isTagBoundaryChar(boundary2, true)) {
+          const endBracket = lower.indexOf(">", nameEnd2);
+          if (endBracket === -1) break;
+          if (html.charCodeAt(endBracket - 1) !== 47) {
+            rawOpen.depth += 1;
+          }
           scan = endBracket + 1;
           continue;
         }
@@ -76066,8 +76083,14 @@ function replaceHtmlElements(html, tagNames, transform2) {
       scan = openClose + 1;
       continue;
     }
-    if (RAW_TEXT_HTML_TAGS.has(openTag)) {
-      rawOpen = { tag: openTag, openIdx: idx, openClose };
+    if (RAW_TEXT_HTML_TAGS.has(openTag) || OPAQUE_NESTABLE_HTML_TAGS.has(openTag)) {
+      rawOpen = {
+        tag: openTag,
+        openIdx: idx,
+        openClose,
+        depth: 1,
+        nestable: OPAQUE_NESTABLE_HTML_TAGS.has(openTag)
+      };
       scan = openClose + 1;
       continue;
     }
@@ -89510,18 +89533,20 @@ function extractJsTsImports(content, language, jsx = false) {
   }
   return dedupExtracted(out);
 }
-function parsePythonImportNames(cleaned, clauseStart, clauseEnd, starts) {
+function parsePythonImportNames(cleaned, clauseStart, clauseEnd, starts, allowDots = false) {
   const names = [];
   let segStart = clauseStart;
+  const specPattern = allowDots ? /^([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/ : /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/;
   const pushSegment = (rawStart, rawEnd) => {
-    const raw = cleaned.slice(rawStart, rawEnd).replace(/\\\r?\n/g, " ");
+    const raw = cleaned.slice(rawStart, rawEnd).replace(/\\\r?\n/g, (seq) => " ".repeat(seq.length));
     const leadWs = raw.length - raw.trimStart().length;
     const trimmed = raw.trim();
     if (!trimmed || trimmed === "*") return;
-    const m2 = /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$/.exec(trimmed);
+    const m2 = specPattern.exec(trimmed);
     if (!m2?.[1]) return;
     const identOffset = rawStart + leadWs;
-    names.push({ name: m2[1], line: lineAtOffset(starts, identOffset) });
+    const normalizedName = allowDots ? m2[1].replace(/\s+/g, "") : m2[1];
+    names.push({ name: normalizedName, line: lineAtOffset(starts, identOffset) });
   };
   for (let i2 = clauseStart; i2 < clauseEnd; i2++) {
     if (cleaned[i2] === ",") {
@@ -89532,11 +89557,21 @@ function parsePythonImportNames(cleaned, clauseStart, clauseEnd, starts) {
   pushSegment(segStart, clauseEnd);
   return names;
 }
-function findPythonImportClauseBounds(cleaned, afterImportOffset) {
+function findPythonImportClauseBounds(cleaned, afterImportOffset, allowParens = true) {
   const n2 = cleaned.length;
   let pos = afterImportOffset;
-  while (pos < n2 && (cleaned[pos] === " " || cleaned[pos] === "	")) pos += 1;
-  if (cleaned[pos] === "(") {
+  while (pos < n2) {
+    if (cleaned[pos] === " " || cleaned[pos] === "	") {
+      pos += 1;
+    } else if (cleaned[pos] === "\\" && cleaned[pos + 1] === "\n") {
+      pos += 2;
+    } else if (cleaned[pos] === "\\" && cleaned[pos + 1] === "\r" && cleaned[pos + 2] === "\n") {
+      pos += 3;
+    } else {
+      break;
+    }
+  }
+  if (allowParens && cleaned[pos] === "(") {
     const close = cleaned.indexOf(")", pos + 1);
     return { start: pos + 1, end: close === -1 ? n2 : close };
   }
@@ -89563,14 +89598,19 @@ function extractPythonImports(content) {
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
-  const fromRe = /^[ \t]*from[ \t]+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)[ \t]+import\b/gm;
+  const fromSpans = [];
+  const fromRe = /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
   for (const m2 of cleaned.matchAll(fromRe)) {
+    const matchIdx = m2.index ?? 0;
+    const fromKwRel = m2[0].indexOf("from");
+    const fromKwOffset = matchIdx + fromKwRel;
+    if (isInsideStringSpan(fromKwOffset, stringSpans)) continue;
     const spec = m2[1];
-    const offset = (m2.index ?? 0) + m2[0].indexOf(spec);
-    if (isInsideStringSpan(offset, stringSpans)) continue;
-    const baseLine = lineAtOffset(starts, offset);
-    const clause = findPythonImportClauseBounds(cleaned, (m2.index ?? 0) + m2[0].length);
-    const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts);
+    const specOffset = matchIdx + m2[0].indexOf(spec, fromKwRel + 4);
+    const baseLine = lineAtOffset(starts, specOffset);
+    const clause = findPythonImportClauseBounds(cleaned, matchIdx + m2[0].length, true);
+    fromSpans.push({ start: fromKwOffset, end: clause.end });
+    const importedNames = parsePythonImportNames(cleaned, clause.start, clause.end, starts, false);
     if (/^\.+$/.test(spec) && importedNames.length > 0) {
       for (const item of importedNames) {
         const subSpec = `${spec}${item.name}`;
@@ -89593,19 +89633,20 @@ function extractPythonImports(content) {
       ...importedNames.length > 0 ? { importedNames } : {}
     });
   }
-  const importRe = /^[ \t]*import\s+([^\n;#]+)/gm;
+  const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
   for (const m2 of cleaned.matchAll(importRe)) {
-    const listText = m2[1];
-    const baseOffset = (m2.index ?? 0) + m2[0].indexOf(listText);
-    if (isInsideStringSpan(baseOffset, stringSpans)) continue;
-    const line = lineAtOffset(starts, baseOffset);
-    for (const part of listText.split(",")) {
-      const mod = part.trim().split(/\s+as\s+/)[0]?.trim();
-      if (!mod || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(mod)) continue;
+    const matchIdx = m2.index ?? 0;
+    const importKwOffset = matchIdx + m2[0].indexOf("import");
+    if (isInsideStringSpan(importKwOffset, stringSpans) || isInsideStringSpan(importKwOffset, fromSpans)) {
+      continue;
+    }
+    const clause = findPythonImportClauseBounds(cleaned, importKwOffset + "import".length, false);
+    const importedModules = parsePythonImportNames(cleaned, clause.start, clause.end, starts, true);
+    for (const item of importedModules) {
       out.push({
-        specifier: mod,
-        line,
-        snippet: makeSnippet(rawLines, line),
+        specifier: item.name,
+        line: item.line,
+        snippet: makeSnippet(rawLines, item.line),
         language: "python",
         kindHint: "ambiguous"
       });
@@ -90341,8 +90382,8 @@ function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
   };
 }
 function parseGoModModule(raw) {
-  const m2 = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
-  return m2?.[1]?.trim();
+  const m2 = raw.match(/^[ \t]*module[ \t]+(?:"([^"\s]+)"|([^\s/"][^\s]*))/m);
+  return (m2?.[1] ?? m2?.[2])?.trim();
 }
 function parsePubspecName(raw) {
   const m2 = raw.match(/^[ \t]*name:[ \t]*['"]?([A-Za-z0-9_-]+)['"]?/m);
@@ -90403,6 +90444,67 @@ function resolveTsConfigForFile(sourceFilePath, ctx) {
     return parsed;
   }
   return void 0;
+}
+var workspaceGoModuleCache = /* @__PURE__ */ new WeakMap();
+var workspaceDartPackageCache = /* @__PURE__ */ new WeakMap();
+function resolveNearestManifestValue(sourceFilePath, ctx, manifestName, byDir, rootFallback, diskCacheMap, parse4) {
+  let diskCache = ctx.workspaceDir ? diskCacheMap.get(ctx) : void 0;
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (byDir?.has(dir)) {
+      const entry = byDir.get(dir);
+      if (entry === null) continue;
+      if (entry === "") return void 0;
+      if (entry) return { dir, value: entry };
+    }
+    if (dir === "" && rootFallback) {
+      return { dir: "", value: rootFallback };
+    }
+    if (!ctx.workspaceDir) continue;
+    if (!diskCache) {
+      diskCache = /* @__PURE__ */ new Map();
+      diskCacheMap.set(ctx, diskCache);
+    }
+    if (diskCache.has(dir)) {
+      const cached2 = diskCache.get(dir);
+      if (cached2 === null) continue;
+      if (cached2 === "") return void 0;
+      if (cached2) return { dir, value: cached2 };
+    }
+    const relPath = dir ? `${dir}/${manifestName}` : manifestName;
+    const raw = readOptionalFile(ctx.workspaceDir, relPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+    const value = parse4(raw) ?? "";
+    diskCache.set(dir, value);
+    return value ? { dir, value } : void 0;
+  }
+  return void 0;
+}
+function resolveGoModuleForFile(sourceFilePath, ctx) {
+  const res = resolveNearestManifestValue(
+    sourceFilePath,
+    ctx,
+    "go.mod",
+    ctx.goModulesByDir,
+    ctx.goModule,
+    workspaceGoModuleCache,
+    parseGoModModule
+  );
+  return res ? { dir: res.dir, modulePath: res.value } : void 0;
+}
+function resolveDartPackageForFile(sourceFilePath, ctx) {
+  const res = resolveNearestManifestValue(
+    sourceFilePath,
+    ctx,
+    "pubspec.yaml",
+    ctx.dartPackagesByDir,
+    ctx.dartPackage,
+    workspaceDartPackageCache,
+    parsePubspecName
+  );
+  return res ? { dir: res.dir, packageName: res.value } : void 0;
 }
 function loadWorkspaceResolveContext(workspaceDir, opts = {}) {
   const ctx = {
@@ -90923,14 +91025,16 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       return { ...base, packageName: extractNpmPackageName(imp.specifier) };
     }
     case "go": {
-      if (ctx.goModule) {
-        if (imp.specifier === ctx.goModule) {
-          return { ...base, resolvedPath: "." };
+      const goMod = resolveGoModuleForFile(normSource, ctx);
+      if (goMod) {
+        if (imp.specifier === goMod.modulePath) {
+          return { ...base, resolvedPath: goMod.dir || "." };
         }
-        if (imp.specifier.startsWith(`${ctx.goModule}/`)) {
+        if (imp.specifier.startsWith(`${goMod.modulePath}/`)) {
+          const subpath = imp.specifier.slice(goMod.modulePath.length + 1);
           return {
             ...base,
-            resolvedPath: normalizePath(imp.specifier.slice(ctx.goModule.length + 1))
+            resolvedPath: normalizePath(goMod.dir ? import_node_path22.posix.join(goMod.dir, subpath) : subpath)
           };
         }
       }
@@ -90945,8 +91049,13 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         const slash = rest.indexOf("/");
         const pkg = slash === -1 ? rest : rest.slice(0, slash);
         const subpath = slash === -1 ? "" : rest.slice(slash + 1);
-        if (ctx.dartPackage && pkg === ctx.dartPackage) {
-          return { ...base, resolvedPath: normalizePath(`lib/${subpath}`) };
+        const dartPkg = resolveDartPackageForFile(normSource, ctx);
+        if (dartPkg && pkg === dartPkg.packageName) {
+          const relLib = subpath ? `lib/${subpath}` : "lib";
+          return {
+            ...base,
+            resolvedPath: normalizePath(dartPkg.dir ? import_node_path22.posix.join(dartPkg.dir, relLib) : relLib)
+          };
         }
         return { ...base, packageName: pkg };
       }
@@ -91614,7 +91723,27 @@ async function probeHeadKotlinSymbols(deps, filePath, content, onlyLines, resolv
     }
   }
 }
-async function hydrateResolveContext(deps, languagesPresent, applicableTsJsPaths, counters) {
+async function hydrateManifestMapFromHead(deps, filePaths, manifestName, parse4, counters, headTree, removedFiles) {
+  const ancestorDirs = /* @__PURE__ */ new Set([""]);
+  for (const filePath of filePaths) {
+    for (const dir of listAncestorDirs(filePath)) {
+      ancestorDirs.add(dir);
+    }
+  }
+  const byDir = /* @__PURE__ */ new Map();
+  for (const dir of ancestorDirs) {
+    if (deps.signal.aborted) break;
+    const manifestPath = dir ? `${dir}/${manifestName}` : manifestName;
+    const res = await readMetadataFile(deps, manifestPath, counters, headTree, removedFiles);
+    if (res.status === "found") {
+      byDir.set(dir, parse4(res.content) ?? "");
+    } else if (res.status === "absent") {
+      byDir.set(dir, null);
+    }
+  }
+  return byDir;
+}
+async function hydrateResolveContext(deps, applicable, counters) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
   const headTree = await fetchHeadTreeFiles(deps, counters);
   if (headTree) {
@@ -91637,9 +91766,22 @@ async function hydrateResolveContext(deps, languagesPresent, applicableTsJsPaths
   if (prFiles.length > 0) {
     ctx.extraFiles = new Set(prFiles);
   }
-  if (applicableTsJsPaths.length > 0) {
+  const tsJsPaths = [];
+  const goPaths = [];
+  const dartPaths = [];
+  for (const f2 of applicable) {
+    const lang = detectArchLanguage(f2.path);
+    if (lang === "typescript" || lang === "javascript") {
+      tsJsPaths.push(f2.path);
+    } else if (lang === "go") {
+      goPaths.push(f2.path);
+    } else if (lang === "dart") {
+      dartPaths.push(f2.path);
+    }
+  }
+  if (tsJsPaths.length > 0) {
     const ancestorDirs = /* @__PURE__ */ new Set([""]);
-    for (const filePath of applicableTsJsPaths) {
+    for (const filePath of tsJsPaths) {
       for (const dir of listAncestorDirs(filePath)) {
         ancestorDirs.add(dir);
       }
@@ -91674,24 +91816,42 @@ async function hydrateResolveContext(deps, languagesPresent, applicableTsJsPaths
       ctx.tsconfigsByDir = byDir;
     }
   }
-  if (languagesPresent.has("go")) {
-    const res = await readMetadataFile(deps, "go.mod", counters, headTree, removedFiles);
-    if (res.status === "found") {
-      const goModule = parseGoModModule(res.content);
-      if (goModule) ctx.goModule = goModule;
+  if (goPaths.length > 0) {
+    const byDir = await hydrateManifestMapFromHead(
+      deps,
+      goPaths,
+      "go.mod",
+      parseGoModModule,
+      counters,
+      headTree,
+      removedFiles
+    );
+    if (byDir.size > 0) {
+      ctx.goModulesByDir = byDir;
+    }
+    const rootGo = byDir.get("");
+    if (rootGo !== void 0) {
+      if (rootGo) ctx.goModule = rootGo;
       else delete ctx.goModule;
-    } else if (res.status === "absent") {
-      delete ctx.goModule;
     }
   }
-  if (languagesPresent.has("dart")) {
-    const res = await readMetadataFile(deps, "pubspec.yaml", counters, headTree, removedFiles);
-    if (res.status === "found") {
-      const dartPkg = parsePubspecName(res.content);
-      if (dartPkg) ctx.dartPackage = dartPkg;
+  if (dartPaths.length > 0) {
+    const byDir = await hydrateManifestMapFromHead(
+      deps,
+      dartPaths,
+      "pubspec.yaml",
+      parsePubspecName,
+      counters,
+      headTree,
+      removedFiles
+    );
+    if (byDir.size > 0) {
+      ctx.dartPackagesByDir = byDir;
+    }
+    const rootDart = byDir.get("");
+    if (rootDart !== void 0) {
+      if (rootDart) ctx.dartPackage = rootDart;
       else delete ctx.dartPackage;
-    } else if (res.status === "absent") {
-      delete ctx.dartPackage;
     }
   }
   return { ctx, removedFiles };
@@ -91893,21 +92053,14 @@ function createArchitectureScanner(spec, options = {}) {
         return emptyResult(SCANNER_ID9, Date.now() - started);
       }
       const languagesPresent = /* @__PURE__ */ new Set();
-      const applicableTsJsPaths = [];
       for (const f2 of applicable) {
         const lang = detectArchLanguage(f2.path);
-        if (lang) {
-          languagesPresent.add(lang);
-          if (lang === "typescript" || lang === "javascript") {
-            applicableTsJsPaths.push(f2.path);
-          }
-        }
+        if (lang) languagesPresent.add(lang);
       }
       const counters = { networkCalls: 0, cacheHits: 0 };
       const { ctx: resolveCtx, removedFiles } = await hydrateResolveContext(
         deps,
-        languagesPresent,
-        applicableTsJsPaths,
+        applicable,
         counters
       );
       const probeCache = /* @__PURE__ */ new Map();
