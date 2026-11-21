@@ -258,6 +258,10 @@ describe('MCP tool handlers', () => {
         content: string;
       };
       expect(read.content).toContain('Use aggregates.');
+      expect(getContent).toHaveBeenCalledTimes(1);
+
+      await h.list_references({ refresh: true });
+      expect(getContent).toHaveBeenCalledTimes(2);
     } finally {
       rmSync(cacheDir, { recursive: true, force: true });
       rmSync(repo, { recursive: true, force: true });

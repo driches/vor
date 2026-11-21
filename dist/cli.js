@@ -76711,9 +76711,10 @@ var import_yaml3 = __toESM(require_dist(), 1);
 
 // src/architecture/glob.ts
 var MAX_REGEX_CACHE = 512;
+var MAX_CONTEXT_REGEX_CACHE = 128;
 var regexCache = /* @__PURE__ */ new Map();
-function setBounded(cache, key, value) {
-  if (!cache.has(key) && cache.size >= MAX_REGEX_CACHE) {
+function setBounded(cache, key, value, limit2 = MAX_REGEX_CACHE) {
+  if (!cache.has(key) && cache.size >= limit2) {
     const oldest = cache.keys().next().value;
     if (oldest !== void 0) cache.delete(oldest);
   }
@@ -76809,7 +76810,7 @@ function buildContextRegex(pattern) {
   const segments = norm.split("/").filter(Boolean);
   const starIdx = segments.indexOf("*");
   if (starIdx === -1) {
-    setBounded(contextRegexCache, norm, null);
+    setBounded(contextRegexCache, norm, null, MAX_CONTEXT_REGEX_CACHE);
     return null;
   }
   const prefixSegments = segments.slice(0, starIdx);
@@ -76822,7 +76823,7 @@ function buildContextRegex(pattern) {
   const prefixBody = compileSegmentPrefix(prefixSegments);
   const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
   const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
-  setBounded(contextRegexCache, norm, re2);
+  setBounded(contextRegexCache, norm, re2, MAX_CONTEXT_REGEX_CACHE);
   return re2;
 }
 function extractContext(filePath, pattern) {
@@ -78547,7 +78548,9 @@ function parseTsConfigInternal(raw, readRelative, depth = 0, configDir = "") {
   }
   if (!parsed || typeof parsed !== "object") return void 0;
   const obj = parsed;
-  let base = { paths: {} };
+  let baseUrl;
+  let rawPaths = {};
+  let pathsDefinedDir = configDir;
   let inheritedExplicitPaths = false;
   if (readRelative) {
     const extEntries = typeof obj.extends === "string" ? [obj.extends] : Array.isArray(obj.extends) ? obj.extends : [];
@@ -78568,43 +78571,58 @@ function parseTsConfigInternal(raw, readRelative, depth = 0, configDir = "") {
         const parentDir = rawParentDir === "." ? "" : rawParentDir;
         const parent = parseTsConfigInternal(extRaw, readRelative, depth + 1, parentDir);
         if (parent) {
-          inheritedExplicitPaths ||= parent.hasExplicitPaths;
-          base = {
-            ...parent.config.baseUrl !== void 0 ? { baseUrl: parent.config.baseUrl } : base.baseUrl !== void 0 ? { baseUrl: base.baseUrl } : {},
-            paths: parent.hasExplicitPaths ? { ...parent.config.paths } : { ...base.paths, ...parent.config.paths }
-          };
+          if (parent.baseUrl !== void 0) {
+            baseUrl = parent.baseUrl;
+          }
+          if (parent.hasExplicitPaths) {
+            inheritedExplicitPaths = true;
+            rawPaths = { ...parent.rawPaths };
+            pathsDefinedDir = parent.pathsDefinedDir;
+          }
         }
       }
     }
   }
   const co = obj.compilerOptions;
-  const baseUrl = typeof co?.baseUrl === "string" ? rebaseFromDir(configDir, co.baseUrl) : base.baseUrl;
-  const pathsBase = baseUrl ?? configDir;
+  if (typeof co?.baseUrl === "string") {
+    baseUrl = rebaseFromDir(configDir, co.baseUrl);
+  }
   const hasOwnPaths = co?.paths !== void 0 && typeof co.paths === "object" && !Array.isArray(co.paths);
-  const paths = hasOwnPaths ? {} : { ...base.paths };
   if (hasOwnPaths) {
+    rawPaths = {};
+    pathsDefinedDir = configDir;
     for (const [k2, v2] of Object.entries(co.paths)) {
       if (Array.isArray(v2)) {
-        paths[k2] = v2.filter((item) => typeof item === "string").map((item) => rebaseFromDir(pathsBase, item));
+        rawPaths[k2] = v2.filter((item) => typeof item === "string");
       }
     }
   }
   const hasExplicitPaths = hasOwnPaths || inheritedExplicitPaths;
-  if (baseUrl === void 0 && !hasExplicitPaths && Object.keys(paths).length === 0) {
+  if (baseUrl === void 0 && !hasExplicitPaths) {
     return void 0;
   }
   return {
-    config: { ...baseUrl !== void 0 ? { baseUrl } : {}, paths },
+    ...baseUrl !== void 0 ? { baseUrl } : {},
+    rawPaths,
+    pathsDefinedDir,
     hasExplicitPaths
   };
 }
 function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
   const res = parseTsConfigInternal(raw, readRelative, depth, configDir);
   if (!res) return void 0;
-  if (res.config.baseUrl === void 0 && Object.keys(res.config.paths).length === 0) {
+  const pathsBase = res.baseUrl ?? res.pathsDefinedDir;
+  const paths = {};
+  for (const [k2, targets] of Object.entries(res.rawPaths)) {
+    paths[k2] = targets.map((item) => rebaseFromDir(pathsBase, item));
+  }
+  if (res.baseUrl === void 0 && Object.keys(paths).length === 0) {
     return void 0;
   }
-  return res.config;
+  return {
+    ...res.baseUrl !== void 0 ? { baseUrl: res.baseUrl } : {},
+    paths
+  };
 }
 function parseGoModModule(raw) {
   const m2 = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);
@@ -120214,6 +120232,7 @@ var readReferenceInput = {
   start_line: external_exports.number().int().positive().optional(),
   end_line: external_exports.number().int().positive().optional()
 };
+var REFERENCE_CORPUS_MEMO_TTL_MS = 1e4;
 function ok(payload) {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
 }
@@ -120241,6 +120260,23 @@ function createHandlers(deps) {
     if (deps.octokit) return deps.octokit;
     const token = process.env.GITHUB_TOKEN?.trim();
     return token ? createOctokit({ auth: token }) : void 0;
+  };
+  let cachedCorpus = null;
+  const getReferenceCorpus = async (config2, forceRefresh = false) => {
+    const key = `${workspace2}\0${JSON.stringify(config2)}`;
+    const now = Date.now();
+    if (!forceRefresh && cachedCorpus && cachedCorpus.key === key && now - cachedCorpus.loadedAt < REFERENCE_CORPUS_MEMO_TTL_MS) {
+      return cachedCorpus.corpus;
+    }
+    const octokit = resolveOctokit();
+    const corpus = await loadReferences({
+      config: config2,
+      workspaceDir: workspace2,
+      ...octokit ? { octokit } : {},
+      forceRefresh
+    });
+    cachedCorpus = { key, loadedAt: now, corpus };
+    return corpus;
   };
   return {
     review_local_changes: async (args) => {
@@ -120308,13 +120344,7 @@ function createHandlers(deps) {
             message: "Reference documentation is not enabled in .vor.yml (`references.enabled: true`)."
           });
         }
-        const octokit = resolveOctokit();
-        const corpus = await loadReferences({
-          config: cfg.references,
-          workspaceDir: workspace2,
-          ...octokit ? { octokit } : {},
-          forceRefresh: Boolean(args.refresh)
-        });
+        const corpus = await getReferenceCorpus(cfg.references, Boolean(args.refresh));
         return ok({
           enabled: true,
           corpus_digest: corpus.corpus_digest,
@@ -120337,12 +120367,7 @@ function createHandlers(deps) {
             "Reference documentation is not enabled in .vor.yml (`references.enabled: true`)."
           );
         }
-        const octokit = resolveOctokit();
-        const corpus = await loadReferences({
-          config: cfg.references,
-          workspaceDir: workspace2,
-          ...octokit ? { octokit } : {}
-        });
+        const corpus = await getReferenceCorpus(cfg.references);
         if (args.id) {
           const slice = readReferenceSlice(corpus, {
             id: args.id,

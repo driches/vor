@@ -85,6 +85,10 @@ export function classifyLayer(filePath: string, spec: ResolvedArchitectureSpec):
   return best;
 }
 
+/**
+ * Match an import specifier or package name against a pattern. A trailing `*` is
+ * a literal prefix wildcard (use `@scope/*` to restrict to one npm scope).
+ */
 export function matchesPackagePattern(
   packageName: string,
   rawSpecifier: string,

@@ -77367,9 +77367,10 @@ var import_yaml = __toESM(require_dist(), 1);
 
 // src/architecture/glob.ts
 var MAX_REGEX_CACHE = 512;
+var MAX_CONTEXT_REGEX_CACHE = 128;
 var regexCache2 = /* @__PURE__ */ new Map();
-function setBounded(cache, key, value) {
-  if (!cache.has(key) && cache.size >= MAX_REGEX_CACHE) {
+function setBounded(cache, key, value, limit2 = MAX_REGEX_CACHE) {
+  if (!cache.has(key) && cache.size >= limit2) {
     const oldest = cache.keys().next().value;
     if (oldest !== void 0) cache.delete(oldest);
   }
@@ -77465,7 +77466,7 @@ function buildContextRegex(pattern) {
   const segments = norm.split("/").filter(Boolean);
   const starIdx = segments.indexOf("*");
   if (starIdx === -1) {
-    setBounded(contextRegexCache, norm, null);
+    setBounded(contextRegexCache, norm, null, MAX_CONTEXT_REGEX_CACHE);
     return null;
   }
   const prefixSegments = segments.slice(0, starIdx);
@@ -77478,7 +77479,7 @@ function buildContextRegex(pattern) {
   const prefixBody = compileSegmentPrefix(prefixSegments);
   const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
   const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
-  setBounded(contextRegexCache, norm, re2);
+  setBounded(contextRegexCache, norm, re2, MAX_CONTEXT_REGEX_CACHE);
   return re2;
 }
 function extractContext(filePath, pattern) {
@@ -89442,7 +89443,9 @@ function parseTsConfigInternal(raw, readRelative, depth = 0, configDir = "") {
   }
   if (!parsed || typeof parsed !== "object") return void 0;
   const obj = parsed;
-  let base = { paths: {} };
+  let baseUrl;
+  let rawPaths = {};
+  let pathsDefinedDir = configDir;
   let inheritedExplicitPaths = false;
   if (readRelative) {
     const extEntries = typeof obj.extends === "string" ? [obj.extends] : Array.isArray(obj.extends) ? obj.extends : [];
@@ -89463,43 +89466,58 @@ function parseTsConfigInternal(raw, readRelative, depth = 0, configDir = "") {
         const parentDir = rawParentDir === "." ? "" : rawParentDir;
         const parent = parseTsConfigInternal(extRaw, readRelative, depth + 1, parentDir);
         if (parent) {
-          inheritedExplicitPaths ||= parent.hasExplicitPaths;
-          base = {
-            ...parent.config.baseUrl !== void 0 ? { baseUrl: parent.config.baseUrl } : base.baseUrl !== void 0 ? { baseUrl: base.baseUrl } : {},
-            paths: parent.hasExplicitPaths ? { ...parent.config.paths } : { ...base.paths, ...parent.config.paths }
-          };
+          if (parent.baseUrl !== void 0) {
+            baseUrl = parent.baseUrl;
+          }
+          if (parent.hasExplicitPaths) {
+            inheritedExplicitPaths = true;
+            rawPaths = { ...parent.rawPaths };
+            pathsDefinedDir = parent.pathsDefinedDir;
+          }
         }
       }
     }
   }
   const co = obj.compilerOptions;
-  const baseUrl = typeof co?.baseUrl === "string" ? rebaseFromDir(configDir, co.baseUrl) : base.baseUrl;
-  const pathsBase = baseUrl ?? configDir;
+  if (typeof co?.baseUrl === "string") {
+    baseUrl = rebaseFromDir(configDir, co.baseUrl);
+  }
   const hasOwnPaths = co?.paths !== void 0 && typeof co.paths === "object" && !Array.isArray(co.paths);
-  const paths = hasOwnPaths ? {} : { ...base.paths };
   if (hasOwnPaths) {
+    rawPaths = {};
+    pathsDefinedDir = configDir;
     for (const [k2, v2] of Object.entries(co.paths)) {
       if (Array.isArray(v2)) {
-        paths[k2] = v2.filter((item) => typeof item === "string").map((item) => rebaseFromDir(pathsBase, item));
+        rawPaths[k2] = v2.filter((item) => typeof item === "string");
       }
     }
   }
   const hasExplicitPaths = hasOwnPaths || inheritedExplicitPaths;
-  if (baseUrl === void 0 && !hasExplicitPaths && Object.keys(paths).length === 0) {
+  if (baseUrl === void 0 && !hasExplicitPaths) {
     return void 0;
   }
   return {
-    config: { ...baseUrl !== void 0 ? { baseUrl } : {}, paths },
+    ...baseUrl !== void 0 ? { baseUrl } : {},
+    rawPaths,
+    pathsDefinedDir,
     hasExplicitPaths
   };
 }
 function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
   const res = parseTsConfigInternal(raw, readRelative, depth, configDir);
   if (!res) return void 0;
-  if (res.config.baseUrl === void 0 && Object.keys(res.config.paths).length === 0) {
+  const pathsBase = res.baseUrl ?? res.pathsDefinedDir;
+  const paths = {};
+  for (const [k2, targets] of Object.entries(res.rawPaths)) {
+    paths[k2] = targets.map((item) => rebaseFromDir(pathsBase, item));
+  }
+  if (res.baseUrl === void 0 && Object.keys(paths).length === 0) {
     return void 0;
   }
-  return res.config;
+  return {
+    ...res.baseUrl !== void 0 ? { baseUrl: res.baseUrl } : {},
+    paths
+  };
 }
 function parseGoModModule(raw) {
   const m2 = raw.match(/^[ \t]*module[ \t]+([^\s/]+\/[^\s]+|[^\s]+)/m);

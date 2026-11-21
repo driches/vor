@@ -403,13 +403,45 @@ describe('extractImports & resolveImport across languages', () => {
     ]);
   });
 
+  it('rebases inherited paths against the child baseUrl when child overrides baseUrl without paths', () => {
+    const files: Record<string, string> = {
+      'tsconfig.base.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: 'src/shared',
+          paths: {
+            '@app/*': ['*'],
+          },
+        },
+      }),
+    };
+
+    const parsed = parseTsConfigContent(
+      JSON.stringify({
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          baseUrl: './src/infrastructure',
+        },
+      }),
+      (rel) => files[rel] ?? null,
+    );
+
+    expect(parsed?.baseUrl).toBe('src/infrastructure');
+    expect(parsed?.paths).toEqual({
+      '@app/*': ['src/infrastructure/*'],
+    });
+
+    const knownFiles = new Set(['src/shared/repo.ts', 'src/infrastructure/repo.ts']);
+    const imp = extractImports('src/domain/service.ts', "import { Repo } from '@app/repo';")
+      .imports[0]!;
+    expect(
+      resolveImport(imp, 'src/domain/service.ts', { tsconfig: parsed, knownFiles }).resolvedPath,
+    ).toBe('src/infrastructure/repo.ts');
+  });
+
   it('rebases inherited tsconfig baseUrl, paths, and nested extends relative to their defining directory', () => {
     const files: Record<string, string> = {
       'config/base.json': JSON.stringify({
         extends: './common/shared.json',
-        compilerOptions: {
-          baseUrl: '..',
-        },
       }),
       'config/common/shared.json': JSON.stringify({
         compilerOptions: {
@@ -428,12 +460,12 @@ describe('extractImports & resolveImport across languages', () => {
       }),
     };
 
-    // Nested extends: grandparent paths rebased from config/common/, middle sets baseUrl relative to config/.
+    // Nested extends: without an overriding baseUrl, grandparent paths rebase from config/common/.
     const nested = parseTsConfigContent(
       JSON.stringify({ extends: './config/base.json' }),
       (rel) => files[rel] ?? null,
     );
-    expect(nested?.baseUrl).toBe('.');
+    expect(nested?.baseUrl).toBeUndefined();
     expect(nested?.paths).toEqual({
       '@domain/*': ['src/domain/*'],
     });

@@ -17,8 +17,9 @@ import { resolveArchitectureSpec } from '../architecture/presets.js';
 import { runRepoArchitectureCheck } from '../architecture/repo-scan.js';
 import { loadConfigFromString } from '../config/loader.js';
 import { architecturePresetSchema } from '../config/schema.js';
+import type { ReferencesConfig } from '../config/types.js';
 import { createOctokit } from '../github/client.js';
-import { loadReferences } from '../references/loader.js';
+import { loadReferences, type LoadedReferenceCorpus } from '../references/loader.js';
 import {
   listReferenceCatalog,
   readReferenceSlice,
@@ -99,6 +100,8 @@ type ReadReferenceArgs = z.infer<z.ZodObject<typeof readReferenceInput>>;
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 
+const REFERENCE_CORPUS_MEMO_TTL_MS = 10_000;
+
 function ok(payload: unknown): ToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 }
@@ -137,6 +140,32 @@ export function createHandlers(deps: VorToolDeps) {
     if (deps.octokit) return deps.octokit;
     const token = process.env.GITHUB_TOKEN?.trim();
     return token ? createOctokit({ auth: token }) : undefined;
+  };
+
+  let cachedCorpus: { key: string; loadedAt: number; corpus: LoadedReferenceCorpus } | null = null;
+  const getReferenceCorpus = async (
+    config: ReferencesConfig,
+    forceRefresh = false,
+  ): Promise<LoadedReferenceCorpus> => {
+    const key = `${workspace}\0${JSON.stringify(config)}`;
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      cachedCorpus &&
+      cachedCorpus.key === key &&
+      now - cachedCorpus.loadedAt < REFERENCE_CORPUS_MEMO_TTL_MS
+    ) {
+      return cachedCorpus.corpus;
+    }
+    const octokit = resolveOctokit();
+    const corpus = await loadReferences({
+      config,
+      workspaceDir: workspace,
+      ...(octokit ? { octokit } : {}),
+      forceRefresh,
+    });
+    cachedCorpus = { key, loadedAt: now, corpus };
+    return corpus;
   };
 
   return {
@@ -213,13 +242,7 @@ export function createHandlers(deps: VorToolDeps) {
               'Reference documentation is not enabled in .vor.yml (`references.enabled: true`).',
           });
         }
-        const octokit = resolveOctokit();
-        const corpus = await loadReferences({
-          config: cfg.references,
-          workspaceDir: workspace,
-          ...(octokit ? { octokit } : {}),
-          forceRefresh: Boolean(args.refresh),
-        });
+        const corpus = await getReferenceCorpus(cfg.references, Boolean(args.refresh));
         return ok({
           enabled: true,
           corpus_digest: corpus.corpus_digest,
@@ -243,12 +266,7 @@ export function createHandlers(deps: VorToolDeps) {
             'Reference documentation is not enabled in .vor.yml (`references.enabled: true`).',
           );
         }
-        const octokit = resolveOctokit();
-        const corpus = await loadReferences({
-          config: cfg.references,
-          workspaceDir: workspace,
-          ...(octokit ? { octokit } : {}),
-        });
+        const corpus = await getReferenceCorpus(cfg.references);
         if (args.id) {
           const slice = readReferenceSlice(corpus, {
             id: args.id,
