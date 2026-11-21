@@ -1335,4 +1335,39 @@ describe('extractImports & resolveImport across languages', () => {
       { spec: 'mod:sub', path: 'src/domain/order/child/sub.rs' },
     ]);
   });
+
+  it('does not let unfinished import/use patterns in string or regex literals swallow subsequent real imports', () => {
+    const tsSrc = [
+      'const example = "import {";',
+      'const tpl = `export type {`;',
+      'const re = /import {/;',
+      'import { foo } from "../infrastructure/foo";',
+      'import "./side_effect";',
+      'const db = require("../infrastructure/db");',
+      'const dyn = import("../infrastructure/dyn");',
+    ].join('\n');
+    const tsParsed = extractImports('src/domain/order.ts', tsSrc);
+    expect(tsParsed.imports.map((i) => ({ spec: i.specifier, line: i.line }))).toEqual([
+      { spec: '../infrastructure/foo', line: 4 },
+      { spec: './side_effect', line: 5 },
+      { spec: '../infrastructure/db', line: 6 },
+      { spec: '../infrastructure/dyn', line: 7 },
+    ]);
+
+    const goSrc = [
+      'package domain',
+      'const ex = "import ("',
+      'import (',
+      '  "example.com/app/infrastructure"',
+      ')',
+    ].join('\n');
+    const goParsed = extractImports('domain/order.go', goSrc);
+    expect(goParsed.imports.map((i) => i.specifier)).toEqual(['example.com/app/infrastructure']);
+
+    const rsSrc = ['macro_rules! m { () => { "use " } }', 'use crate::infrastructure::Repo;'].join(
+      '\n',
+    );
+    const rsParsed = extractImports('src/domain/order.rs', rsSrc);
+    expect(rsParsed.imports.map((i) => i.specifier)).toEqual(['crate::infrastructure::Repo']);
+  });
 });

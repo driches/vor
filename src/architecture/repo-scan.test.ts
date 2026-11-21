@@ -607,4 +607,31 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('catches domain-to-infrastructure violations preceded by unfinished import text in a string literal', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-str-swallow-'));
+    try {
+      mkdirSync(join(ws, 'src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/infrastructure/foo.ts'), 'export const foo = 1;\n');
+      writeFileSync(
+        join(ws, 'src/domain/order.ts'),
+        ['const example = "import {";', 'import { foo } from "../infrastructure/foo";'].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+      const explained = explainFileArchitecture(ws, 'src/domain/order.ts', spec);
+      expect(explained.imports.map((i) => i.specifier)).toEqual(['../infrastructure/foo']);
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

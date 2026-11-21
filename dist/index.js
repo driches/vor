@@ -89357,7 +89357,7 @@ function scanCLikeSource(src, opts = {}) {
   }
   return { cleaned: chars.join(""), stringSpans };
 }
-function isInsideStringSpan(offset, spans) {
+function findEnclosingStringSpan(offset, spans) {
   let lo = 0;
   let hi = spans.length - 1;
   while (lo <= hi) {
@@ -89368,10 +89368,32 @@ function isInsideStringSpan(offset, spans) {
     } else if (offset >= span.end) {
       lo = mid + 1;
     } else {
-      return true;
+      return span;
     }
   }
-  return false;
+  return void 0;
+}
+function isInsideStringSpan(offset, spans) {
+  return findEnclosingStringSpan(offset, spans) !== void 0;
+}
+function* matchAllOutsideStrings(text, re2, stringSpans, anchorOffset = (m2) => m2.index) {
+  const flags = re2.flags.includes("g") ? re2.flags : `${re2.flags}g`;
+  const rx = new RegExp(re2.source, flags);
+  let m2;
+  while ((m2 = rx.exec(text)) !== null) {
+    const span = findEnclosingStringSpan(anchorOffset(m2), stringSpans);
+    if (span) {
+      const next = Math.max(m2.index + 1, span.end);
+      if (next >= text.length) break;
+      rx.lastIndex = next;
+      continue;
+    }
+    yield m2;
+    if (m2[0].length === 0) {
+      if (rx.lastIndex >= text.length) break;
+      rx.lastIndex += 1;
+    }
+  }
 }
 function stripCLikeComments(src) {
   return scanCLikeSource(src).cleaned;
@@ -89512,25 +89534,22 @@ function extractJsTsImports(content, language, jsx = false) {
     });
   };
   const esFrom = /\b(?:import|export)\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"]+)\1/g;
-  for (const m2 of cleaned.matchAll(esFrom)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, esFrom, stringSpans)) {
+    const idx = m2.index;
     const spec = m2[2];
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   const sideEffect = /\bimport\s+(['"])([^'"]+)\1/g;
-  for (const m2 of cleaned.matchAll(sideEffect)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, sideEffect, stringSpans)) {
+    const idx = m2.index;
     const spec = m2[2];
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
   }
   const req = /\brequire\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*\)/g;
-  for (const m2 of cleaned.matchAll(req)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, req, stringSpans)) {
+    const idx = m2.index;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m2[2] ?? m2[3];
     if (!spec) continue;
@@ -89538,9 +89557,8 @@ function extractJsTsImports(content, language, jsx = false) {
     pushMatch(spec, specOffset);
   }
   const dyn = /\bimport\s*\(\s*(?:(['"])([^'"\r\n]+)\1|`((?:[^`\\$\r\n]|\\[^\r\n]|\$(?!\{))+)`)\s*(?:,|\))/g;
-  for (const m2 of cleaned.matchAll(dyn)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, dyn, stringSpans)) {
+    const idx = m2.index;
     if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m2[2] ?? m2[3];
     if (!spec) continue;
@@ -89616,11 +89634,15 @@ function extractPythonImports(content) {
   const out = [];
   const fromSpans = [];
   const fromRe = /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
-  for (const m2 of cleaned.matchAll(fromRe)) {
-    const matchIdx = m2.index ?? 0;
+  for (const m2 of matchAllOutsideStrings(
+    cleaned,
+    fromRe,
+    stringSpans,
+    (hit) => hit.index + hit[0].indexOf("from")
+  )) {
+    const matchIdx = m2.index;
     const fromKwRel = m2[0].indexOf("from");
     const fromKwOffset = matchIdx + fromKwRel;
-    if (isInsideStringSpan(fromKwOffset, stringSpans)) continue;
     const spec = m2[1];
     const specOffset = matchIdx + m2[0].indexOf(spec, fromKwRel + 4);
     const baseLine = lineAtOffset(starts, specOffset);
@@ -89650,10 +89672,15 @@ function extractPythonImports(content) {
     });
   }
   const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
-  for (const m2 of cleaned.matchAll(importRe)) {
-    const matchIdx = m2.index ?? 0;
+  for (const m2 of matchAllOutsideStrings(
+    cleaned,
+    importRe,
+    stringSpans,
+    (hit) => hit.index + hit[0].indexOf("import")
+  )) {
+    const matchIdx = m2.index;
     const importKwOffset = matchIdx + m2[0].indexOf("import");
-    if (isInsideStringSpan(importKwOffset, stringSpans) || isInsideStringSpan(importKwOffset, fromSpans)) {
+    if (isInsideStringSpan(importKwOffset, fromSpans)) {
       continue;
     }
     const clause = findPythonImportClauseBounds(cleaned, importKwOffset + "import".length, false);
@@ -89686,9 +89713,8 @@ function extractGoImports(content) {
     });
   };
   const blockRe = /\bimport\s*\(([^)]*)\)/g;
-  for (const m2 of cleaned.matchAll(blockRe)) {
-    const mIdx = m2.index ?? 0;
-    if (isInsideStringSpan(mIdx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, blockRe, stringSpans)) {
+    const mIdx = m2.index;
     const block = m2[1];
     const blockStart = mIdx + m2[0].indexOf(block);
     const itemRe = /^[ \t]*(?:[A-Za-z_]\w*|\.)?[ \t]*(?:"([^"]+)"|`([^`]+)`)/gm;
@@ -89699,9 +89725,8 @@ function extractGoImports(content) {
     }
   }
   const singleRe = /^[ \t]*import[ \t]+(?:(?:[A-Za-z_]\w*|\.)[ \t]+)?(?:"([^"]+)"|`([^`]+)`)/gm;
-  for (const m2 of cleaned.matchAll(singleRe)) {
-    const mIdx = m2.index ?? 0;
-    if (isInsideStringSpan(mIdx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, singleRe, stringSpans)) {
+    const mIdx = m2.index;
     const spec = m2[1] ?? m2[2];
     const offset = mIdx + m2[0].indexOf(spec);
     addSpec(spec, offset);
@@ -89728,9 +89753,8 @@ function extractDartImports(content) {
     });
   };
   const re2 = /^[ \t]*(import|export|part)\s+(?:r)?(['"])([^'"]+)\2/gm;
-  for (const m2 of cleaned.matchAll(re2)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, re2, stringSpans)) {
+    const idx = m2.index;
     const directive = m2[1];
     const spec = m2[3];
     const offset = idx + m2[0].lastIndexOf(spec);
@@ -89815,9 +89839,8 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
 function extractRustInlineModuleSpans(cleaned, stringSpans) {
   const headerBraces = /* @__PURE__ */ new Map();
   const inlineModRe = /\bmod\s+(?:r#)?([A-Za-z_]\w*)\s*\{/g;
-  for (const m2 of cleaned.matchAll(inlineModRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, inlineModRe, stringSpans)) {
+    const idx = m2.index;
     if (idx > 0) {
       const prev = cleaned[idx - 1];
       const prev2 = idx >= 2 ? cleaned.slice(idx - 2, idx) : "";
@@ -89885,9 +89908,8 @@ function extractRustImports(content) {
     return "package";
   };
   const useRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?use\s+([^;]+);/g;
-  for (const m2 of cleaned.matchAll(useRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, useRe, stringSpans)) {
+    const idx = m2.index;
     const expr = m2[1];
     const exprOffset = idx + m2[0].indexOf(expr);
     for (const leaf of expandRustUseTree(expr, exprOffset)) {
@@ -89906,9 +89928,8 @@ function extractRustImports(content) {
     }
   }
   const externRe = /\bextern\s+crate\s+([A-Za-z_]\w*)(?:\s+as\s+[A-Za-z_]\w*)?\s*;/g;
-  for (const m2 of cleaned.matchAll(externRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, externRe, stringSpans)) {
+    const idx = m2.index;
     const name = m2[1];
     const offset = idx + m2[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
@@ -89921,9 +89942,8 @@ function extractRustImports(content) {
     });
   }
   const modRe = /\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_]\w*)\s*;/g;
-  for (const m2 of cleaned.matchAll(modRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, modRe, stringSpans)) {
+    const idx = m2.index;
     const name = m2[1];
     const offset = idx + m2[0].indexOf(name);
     const line = lineAtOffset(starts, offset);
@@ -90026,10 +90046,12 @@ function findJvmPackageDirsInTree(pkgPath, ctx) {
   return out;
 }
 function findJvmPackage(cleaned, stringSpans) {
-  for (const m2 of cleaned.matchAll(/^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm)) {
-    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
-      return m2[1];
-    }
+  for (const m2 of matchAllOutsideStrings(
+    cleaned,
+    /^[ \t]*package\s+([A-Za-z_][\w.]*)\s*;?/gm,
+    stringSpans
+  )) {
+    return m2[1];
   }
   return void 0;
 }
@@ -90186,9 +90208,8 @@ function extractJavaKotlinImports(content, language) {
   const out = [];
   const declaredPackage = findJvmPackage(cleaned, stringSpans);
   const importRe = /^[ \t]*import\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\.\*)?)(?:\s+as\s+[A-Za-z_]\w*)?\s*;?/gm;
-  for (const m2 of cleaned.matchAll(importRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, importRe, stringSpans)) {
+    const idx = m2.index;
     const spec = m2[1];
     const offset = idx + m2[0].indexOf(spec);
     const line = lineAtOffset(starts, offset);
@@ -90207,10 +90228,8 @@ function extractJavaKotlinImports(content, language) {
 }
 var CS_NAMESPACE_RE = /^[ \t]*(?:file\s+)?namespace\s+([A-Za-z_][\w.]*)/gm;
 function findCSharpNamespaceFromCleaned(cleaned, stringSpans) {
-  for (const m2 of cleaned.matchAll(CS_NAMESPACE_RE)) {
-    if (!isInsideStringSpan(m2.index ?? 0, stringSpans)) {
-      return m2[1];
-    }
+  for (const m2 of matchAllOutsideStrings(cleaned, CS_NAMESPACE_RE, stringSpans)) {
+    return m2[1];
   }
   return void 0;
 }
@@ -90279,9 +90298,8 @@ function extractCSharpImports(content) {
   const out = [];
   const declaredPackage = findCSharpNamespaceFromCleaned(cleaned, stringSpans);
   const usingRe = /^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?(?:global\s*::\s*)?([A-Za-z_][\w.]*)\s*;/gm;
-  for (const m2 of cleaned.matchAll(usingRe)) {
-    const idx = m2.index ?? 0;
-    if (isInsideStringSpan(idx, stringSpans)) continue;
+  for (const m2 of matchAllOutsideStrings(cleaned, usingRe, stringSpans)) {
+    const idx = m2.index;
     const spec = m2[1];
     if (spec === "var") continue;
     const offset = idx + m2[0].lastIndexOf(spec);
