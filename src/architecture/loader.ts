@@ -13,7 +13,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
-import { loadConfigFromString, loadConfigStrict } from '../config/loader.js';
+import { loadConfigStrictWithRaw, loadConfigWithRawFromString } from '../config/loader.js';
 import { architectureExternalFileSchema } from '../config/schema.js';
 import type {
   ArchitectureConfig,
@@ -104,18 +104,25 @@ export function parseExternalArchitectureYamlSafe(
   }
 }
 
+export interface RawInlineArchitectureHints {
+  severity?: ArchitectureConfig['severity'] | undefined;
+  llm_enforcement?: boolean | undefined;
+  deterministic_enforcement?: boolean | undefined;
+  ignore_tests?: boolean | undefined;
+}
+
 /**
  * Merge external architecture file values with inline `.vor.yml` config.
  * External values override defaulted inline settings (`severity`,
  * `llm_enforcement`, etc.) so setting `severity: critical` in `.vor/architecture.yml`
  * is not overwritten by `DEFAULT_CONFIG.architecture.severity`. Explicit
- * non-default inline settings (or explicit `rawInlineKeys`) win over external,
+ * non-default inline settings (or explicit `rawInline` keys) win over external,
  * except `external.enabled === false` always disables enforcement.
  */
 export function mergeArchitectureConfig(
   inline: ArchitectureConfig,
   external: Partial<ArchitectureConfig>,
-  rawInline?: Partial<ArchitectureConfig>,
+  rawInline?: RawInlineArchitectureHints,
 ): ArchitectureConfig {
   const def = DEFAULT_CONFIG.architecture;
   const pickScalar = <
@@ -140,6 +147,9 @@ export function mergeArchitectureConfig(
       ...Object.keys(inline.layers ?? {}),
     ]);
     for (const name of names) {
+      // Preserve partial layer overrides (including pathless overrides) so
+      // `resolveArchitectureSpec` can inherit `paths` from a built-in preset;
+      // unknown custom layers without `paths` warn and drop there.
       mergedLayers[name] = {
         ...(external.layers?.[name] ?? {}),
         ...(inline.layers?.[name] ?? {}),
@@ -206,7 +216,7 @@ export interface ResolveExternalArchOpts {
   repo?: string;
   ref?: string;
   workspaceDir?: string;
-  rawInline?: Partial<ArchitectureConfig>;
+  rawInline?: RawInlineArchitectureHints;
 }
 
 /**
@@ -354,12 +364,14 @@ export function resolveWorkspaceArchitectureConfig(
     rawVorYml = null; // missing .vor.yml falls back to defaults
   }
 
-  const reviewConfig =
+  const loaded =
     rawVorYml === null
-      ? DEFAULT_CONFIG
+      ? { config: DEFAULT_CONFIG, raw: {} }
       : opts.strict
-        ? loadConfigStrict(rawVorYml)
-        : loadConfigFromString(rawVorYml);
+        ? loadConfigStrictWithRaw(rawVorYml)
+        : loadConfigWithRawFromString(rawVorYml);
+  const reviewConfig = loaded.config;
+  const rawInline = loaded.raw.architecture;
 
   if (opts.strict && reviewConfig.architecture.rules) {
     const issues = validateArchitectureRules(reviewConfig.architecture.rules);
@@ -386,7 +398,7 @@ export function resolveWorkspaceArchitectureConfig(
     }
     const extParsed = parseExternalArchitectureYamlStrict(extRaw);
     const baseArch = opts.archConfigPath ? { ...arch, enabled: extParsed.enabled !== false } : arch;
-    arch = mergeArchitectureConfig(baseArch, extParsed);
+    arch = mergeArchitectureConfig(baseArch, extParsed, rawInline);
   } else if (!arch.enabled && isSafeRelativePath(opts.workspaceDir, DEFAULT_ARCH_FILE)) {
     let defaultRaw: string | null = null;
     try {
@@ -396,7 +408,11 @@ export function resolveWorkspaceArchitectureConfig(
     }
     if (defaultRaw !== null && defaultRaw.trim().length > 0) {
       const extParsed = parseExternalArchitectureYamlStrict(defaultRaw);
-      arch = mergeArchitectureConfig({ ...arch, enabled: extParsed.enabled !== false }, extParsed);
+      arch = mergeArchitectureConfig(
+        { ...arch, enabled: extParsed.enabled !== false },
+        extParsed,
+        rawInline,
+      );
     }
   }
 

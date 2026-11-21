@@ -154,4 +154,25 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('accepts precomputed knownFiles without re-walking when resolving file imports', () => {
+    const ws = setupSampleHexRepo();
+    try {
+      writeFileSync(
+        join(ws, 'src/domain/order.ts'),
+        "import { pgRepo } from '../adapters/out/pg_order_repo';\nexport const x = pgRepo;\n",
+      );
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'hexagonal',
+      });
+      const knownFiles = new Set(['src/domain/order.ts', 'src/adapters/out/pg_order_repo.ts']);
+      const info = explainFileArchitecture(ws, 'src/domain/order.ts', spec, [], knownFiles);
+      expect(info.imports[0]?.resolved_path).toBe('src/adapters/out/pg_order_repo.ts');
+      expect(info.imports[0]?.violations).toHaveLength(1);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

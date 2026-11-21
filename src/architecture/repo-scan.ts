@@ -282,6 +282,7 @@ export function explainFileArchitecture(
   filePath: string,
   spec: ResolvedArchitectureSpec,
   excludePaths: readonly string[] = [],
+  knownFiles?: ReadonlySet<string>,
 ): FileArchitectureExplanation {
   const root = resolve(workspaceDir);
   const rawRel = isAbsolute(filePath) ? relative(root, filePath) : filePath;
@@ -325,8 +326,8 @@ export function explainFileArchitecture(
     };
   }
 
-  const knownFiles = new Set(enumerateRepoFiles(workspaceDir));
-  const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles });
+  const resolvedKnownFiles = knownFiles ?? new Set(enumerateRepoFiles(workspaceDir));
+  const resolveCtx = loadWorkspaceResolveContext(workspaceDir, { knownFiles: resolvedKnownFiles });
   const content = readFileSync(resolve(root, relPath), 'utf-8');
   const { imports, meta } = extractImports(relPath, content);
   const allViolations = evaluateFileArchitecture({

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -717,6 +717,46 @@ describe('loadReferences', () => {
       await new Promise<void>((resolvePromise) => {
         server.close(() => resolvePromise());
       });
+    }
+  });
+
+  it('isolates local disk reference cache entries across workspaces even when size and mtime match', async () => {
+    const wsA = mkdtempSync(join(tmpdir(), 'vor-refs-iso-a-'));
+    const wsB = mkdtempSync(join(tmpdir(), 'vor-refs-iso-b-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-iso-cache-'));
+    try {
+      const fileA = join(wsA, 'docs.md');
+      const fileB = join(wsB, 'docs.md');
+      // Exact equal byte lengths and identical mtimes across separate workspaces.
+      writeFileSync(fileA, '# Workspace Alpha\nAlways enforce A.\n');
+      writeFileSync(fileB, '# Workspace Bravo\nAlways enforce B.\n');
+      const sharedTime = new Date('2026-01-15T12:00:00Z');
+      utimesSync(fileA, sharedTime, sharedTime);
+      utimesSync(fileB, sharedTime, sharedTime);
+
+      const config = {
+        ...DEFAULT_CONFIG.references,
+        enabled: true,
+        sources: ['docs.md'],
+        cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+      };
+
+      const resA = await loadReferences({ config, workspaceDir: wsA });
+      expect(resA.cache_stats.misses).toBe(1);
+      expect(resA.docs[0]?.content).toContain('Workspace Alpha');
+
+      const resB = await loadReferences({ config, workspaceDir: wsB });
+      expect(resB.cache_stats.misses).toBe(1);
+      expect(resB.docs[0]?.content).toContain('Workspace Bravo');
+      expect(resB.docs[0]?.content).not.toContain('Workspace Alpha');
+
+      const resARepeat = await loadReferences({ config, workspaceDir: wsA });
+      expect(resARepeat.cache_stats.hits).toBe(1);
+      expect(resARepeat.docs[0]?.content).toContain('Workspace Alpha');
+    } finally {
+      rmSync(wsA, { recursive: true, force: true });
+      rmSync(wsB, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
     }
   });
 });

@@ -289,6 +289,8 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
               target_context: targetCtx.context,
             });
           } else {
+            // Both unconfigured contexts and explicitly listed `allow_dependencies` contexts
+            // still enforce the target context's `public_api` boundary (`evaluator.test.ts`).
             const publicGlobs = input.spec.contexts.public_api ?? DEFAULT_PUBLIC_API_PATTERNS;
             const allowPublicApi = input.spec.contexts.allow_public_api_imports !== false;
             const allowsRootIndex = publicGlobs.some(

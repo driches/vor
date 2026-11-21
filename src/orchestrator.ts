@@ -14,7 +14,7 @@ import {
   type RepoContextEntry,
 } from './agent/system-prompt.js';
 import { buildUserPrompt } from './agent/user-prompt.js';
-import { loadConfigFromString } from './config/loader.js';
+import { loadConfigWithRawFromString, type LoadedConfigWithRaw } from './config/loader.js';
 import { DEFAULT_CONFIG } from './config/defaults.js';
 import type { ReviewConfig } from './config/types.js';
 import type { Octokit } from '@octokit/rest';
@@ -229,7 +229,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 
   // Load .vor.yml from the PR HEAD
   const fileReader = new FileReader(octokit);
-  const config = await loadConfig(input, fileReader, prContext.metadata.head_sha);
+  const { config, raw: rawConfig } = await loadConfig(
+    input,
+    fileReader,
+    prContext.metadata.head_sha,
+  );
   if (input.model_override) config.model = input.model_override;
   if (input.max_turns_override) config.max_turns = input.max_turns_override;
   // Note: we deliberately do NOT mutate `config.provider = input.provider_override`
@@ -281,6 +285,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     repo: input.repo,
     ref: prContext.metadata.head_sha,
     workspaceDir: input.workspace_dir,
+    ...(rawConfig.architecture ? { rawInline: rawConfig.architecture } : {}),
   });
   const archSpec = effectiveArchConfig.enabled
     ? resolveArchitectureSpec(effectiveArchConfig)
@@ -893,7 +898,7 @@ async function loadConfig(
   input: OrchestratorInput,
   fileReader: FileReader,
   headSha: string,
-): Promise<ReviewConfig> {
+): Promise<LoadedConfigWithRaw> {
   // First try fetching from the PR head via GitHub Contents API (CI mode)
   try {
     const content = await fileReader.read({
@@ -903,7 +908,7 @@ async function loadConfig(
       ref: headSha,
     });
     if (content != null) {
-      return loadConfigFromString(content);
+      return loadConfigWithRawFromString(content);
     }
   } catch (err) {
     await logger.debug(
@@ -915,9 +920,9 @@ async function loadConfig(
   try {
     const localPath = resolve(input.workspace_dir, input.config_path);
     const content = await readFile(localPath, 'utf-8');
-    return loadConfigFromString(content);
+    return loadConfigWithRawFromString(content);
   } catch {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 }
 

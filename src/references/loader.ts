@@ -643,6 +643,17 @@ function buildRepoCacheHit(
   });
 }
 
+function canonicalWorkspaceId(workspaceDir: string): string {
+  const resolved = resolve(workspaceDir);
+  let canonical = resolved;
+  try {
+    canonical = realpathSync(resolved);
+  } catch {
+    // Workspace directory may not exist yet or realpath may fail; fall back to resolved path.
+  }
+  return sha256Hex(canonical).slice(0, 32);
+}
+
 async function loadRepoFile(
   repoPath: string,
   metaOpts: { id?: string; title?: string; mode: ReferenceMode; ttl_seconds?: number },
@@ -661,7 +672,7 @@ async function loadRepoFile(
   const repoSlug = `${input.owner ?? 'local'}/${input.repo ?? 'local'}`;
   const cacheKey = hasRemoteRef
     ? `repo:${repoSlug}:${normPath}@${input.ref}`
-    : `repo:${repoSlug}:${normPath}`;
+    : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
   const nowMs = input.nowMs ?? Date.now();
   const ttl = metaOpts.ttl_seconds ?? input.config.cache.ttl_seconds;
   const docId = metaOpts.id ?? normPath;
@@ -685,7 +696,7 @@ async function loadRepoFile(
         const st = statSync(resolvedFile.realPath);
         if (st.isFile()) {
           diskPath = resolvedFile.realPath;
-          diskFingerprint = `disk:${st.mtimeMs}:${st.size}`;
+          diskFingerprint = `disk:${st.ino}:${st.mtimeMs}:${st.size}`;
         }
       } catch {
         // Fall through when local file cannot be stat'd directly.

@@ -77941,7 +77941,13 @@ function resolveArchitectureSpec(config2) {
     for (const [name, override] of Object.entries(config2.layers)) {
       if (layers[name]) continue;
       const added = mergeLayerOverride(void 0, override);
-      if (added) layers[name] = added;
+      if (added) {
+        layers[name] = added;
+      } else {
+        void logger.warn(
+          `Architecture layer '${name}' has no paths and does not match a preset layer; ignoring.`
+        );
+      }
     }
   }
   const contexts = config2.contexts ?? preset.contexts;
@@ -78824,27 +78830,30 @@ function deepMerge(base, override) {
   }
   return result;
 }
-function loadConfigFromString(yaml) {
+function loadConfigWithRawFromString(yaml) {
   if (!yaml || yaml.trim().length === 0) {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
   let parsed;
   try {
     parsed = (0, import_yaml2.parse)(yaml);
   } catch (err) {
     void logger.warn(`Failed to parse .vor.yml: ${err.message}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
   if (parsed == null || typeof parsed !== "object") {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
     const errMsg = result.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ");
     void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
-  return deepMerge(DEFAULT_CONFIG, result.data);
+  return {
+    config: deepMerge(DEFAULT_CONFIG, result.data),
+    raw: result.data
+  };
 }
 
 // node_modules/universal-user-agent/index.js
@@ -91044,6 +91053,15 @@ function buildRepoCacheHit(cached2, docId, normPath, metaOpts, maxDocBytes) {
     cacheStatus: "hit"
   });
 }
+function canonicalWorkspaceId(workspaceDir) {
+  const resolved = (0, import_node_path26.resolve)(workspaceDir);
+  let canonical = resolved;
+  try {
+    canonical = (0, import_node_fs12.realpathSync)(resolved);
+  } catch {
+  }
+  return sha256Hex(canonical).slice(0, 32);
+}
 async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   const baseDir = input2.workspaceDir ?? process.cwd();
   if (!isSafeRelativePath(baseDir, repoPath)) {
@@ -91053,7 +91071,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   const normPath = normalizePath(repoPath);
   const hasRemoteRef = Boolean(input2.fileReader && input2.owner && input2.repo && input2.ref);
   const repoSlug = `${input2.owner ?? "local"}/${input2.repo ?? "local"}`;
-  const cacheKey = hasRemoteRef ? `repo:${repoSlug}:${normPath}@${input2.ref}` : `repo:${repoSlug}:${normPath}`;
+  const cacheKey = hasRemoteRef ? `repo:${repoSlug}:${normPath}@${input2.ref}` : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
   const nowMs = input2.nowMs ?? Date.now();
   const ttl = metaOpts.ttl_seconds ?? input2.config.cache.ttl_seconds;
   const docId = metaOpts.id ?? normPath;
@@ -91076,7 +91094,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         const st2 = (0, import_node_fs12.statSync)(resolvedFile.realPath);
         if (st2.isFile()) {
           diskPath = resolvedFile.realPath;
-          diskFingerprint = `disk:${st2.mtimeMs}:${st2.size}`;
+          diskFingerprint = `disk:${st2.ino}:${st2.mtimeMs}:${st2.size}`;
         }
       } catch {
       }
@@ -92060,7 +92078,11 @@ async function runOrchestrator(input2) {
     };
   }
   const fileReader = new FileReader(octokit);
-  const config2 = await loadConfig(input2, fileReader, prContext.metadata.head_sha);
+  const { config: config2, raw: rawConfig } = await loadConfig(
+    input2,
+    fileReader,
+    prContext.metadata.head_sha
+  );
   if (input2.model_override) config2.model = input2.model_override;
   if (input2.max_turns_override) config2.max_turns = input2.max_turns_override;
   const resolvedProvider = input2.provider_override ?? config2.provider ?? inferProviderFromModel(config2.model);
@@ -92086,7 +92108,8 @@ async function runOrchestrator(input2) {
     owner: input2.owner,
     repo: input2.repo,
     ref: prContext.metadata.head_sha,
-    workspaceDir: input2.workspace_dir
+    workspaceDir: input2.workspace_dir,
+    ...rawConfig.architecture ? { rawInline: rawConfig.architecture } : {}
   });
   const archSpec = effectiveArchConfig.enabled ? resolveArchitectureSpec(effectiveArchConfig) : void 0;
   let referenceCorpus;
@@ -92475,7 +92498,7 @@ async function loadConfig(input2, fileReader, headSha) {
       ref: headSha
     });
     if (content != null) {
-      return loadConfigFromString(content);
+      return loadConfigWithRawFromString(content);
     }
   } catch (err) {
     await logger.debug(
@@ -92485,9 +92508,9 @@ async function loadConfig(input2, fileReader, headSha) {
   try {
     const localPath = (0, import_node_path27.resolve)(input2.workspace_dir, input2.config_path);
     const content = await (0, import_promises2.readFile)(localPath, "utf-8");
-    return loadConfigFromString(content);
+    return loadConfigWithRawFromString(content);
   } catch {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 }
 async function loadRepoContextFiles(fileReader, owner, repo, ref, files) {

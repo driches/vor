@@ -14,6 +14,7 @@ import type {
   ArchitecturePresetId,
 } from '../config/types.js';
 import type { Severity } from '../types.js';
+import { logger } from '../util/logger.js';
 import { normalizePath } from './glob.js';
 
 /**
@@ -539,7 +540,13 @@ export function resolveArchitectureSpec(config: ArchitectureConfig): ResolvedArc
     for (const [name, override] of Object.entries(config.layers)) {
       if (layers[name]) continue;
       const added = mergeLayerOverride(undefined, override);
-      if (added) layers[name] = added;
+      if (added) {
+        layers[name] = added;
+      } else {
+        void logger.warn(
+          `Architecture layer '${name}' has no paths and does not match a preset layer; ignoring.`,
+        );
+      }
     }
   }
 

@@ -162,6 +162,36 @@ describe('resolveWorkspaceArchitectureConfig', () => {
     }
   });
 
+  it('preserves explicit inline scalars equal to defaults over external config while inheriting omitted scalars', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ws-explicit-inline-'));
+    try {
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      writeFileSync(
+        join(ws, '.vor.yml'),
+        [
+          'architecture:',
+          '  enabled: true',
+          '  file: .vor/architecture.yml',
+          '  severity: important',
+          '  llm_enforcement: true',
+        ].join('\n'),
+      );
+      writeFileSync(
+        join(ws, '.vor/architecture.yml'),
+        ['preset: ddd', 'severity: critical', 'llm_enforcement: false', 'ignore_tests: false'].join(
+          '\n',
+        ),
+      );
+
+      const resolved = resolveWorkspaceArchitectureConfig({ workspaceDir: ws, strict: true });
+      expect(resolved.architecture.severity).toBe('important');
+      expect(resolved.architecture.llm_enforcement).toBe(true);
+      expect(resolved.architecture.ignore_tests).toBe(false);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   it('rejects escaping configPath or archConfigPath', () => {
     expect(() =>
       resolveWorkspaceArchitectureConfig({
