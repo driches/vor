@@ -835,6 +835,19 @@ function dedupExtracted(items: ExtractedImport[]): ExtractedImport[] {
   return out;
 }
 
+function isMemberOrPrefixedCall(cleaned: string, idx: number): boolean {
+  if (idx > 0 && cleaned[idx - 1] === '$') return true;
+  let j = idx - 1;
+  while (j >= 0 && /\s/.test(cleaned[j]!)) j -= 1;
+  if (j < 0) return false;
+  if (cleaned[j] === '#') return true;
+  if (cleaned[j] === '.') {
+    // Allow spread expressions (`...require('./mod')`) while skipping `obj.foo` / `obj?.foo`.
+    return !(j >= 2 && cleaned[j - 1] === '.' && cleaned[j - 2] === '.');
+  }
+  return false;
+}
+
 function extractJsTsImports(
   content: string,
   language: 'typescript' | 'javascript',
@@ -886,6 +899,7 @@ function extractJsTsImports(
   for (const m of cleaned.matchAll(req)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m[2]!;
     const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
@@ -896,6 +910,7 @@ function extractJsTsImports(
   for (const m of cleaned.matchAll(dyn)) {
     const idx = m.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m[2]!;
     const specOffset = idx + m[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);

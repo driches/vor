@@ -89132,6 +89132,17 @@ function dedupExtracted(items) {
   }
   return out;
 }
+function isMemberOrPrefixedCall(cleaned, idx) {
+  if (idx > 0 && cleaned[idx - 1] === "$") return true;
+  let j2 = idx - 1;
+  while (j2 >= 0 && /\s/.test(cleaned[j2])) j2 -= 1;
+  if (j2 < 0) return false;
+  if (cleaned[j2] === "#") return true;
+  if (cleaned[j2] === ".") {
+    return !(j2 >= 2 && cleaned[j2 - 1] === "." && cleaned[j2 - 2] === ".");
+  }
+  return false;
+}
 function extractJsTsImports(content, language, jsx = false) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     templateInterpolation: true,
@@ -89171,6 +89182,7 @@ function extractJsTsImports(content, language, jsx = false) {
   for (const m2 of cleaned.matchAll(req)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m2[2];
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);
@@ -89179,6 +89191,7 @@ function extractJsTsImports(content, language, jsx = false) {
   for (const m2 of cleaned.matchAll(dyn)) {
     const idx = m2.index ?? 0;
     if (isInsideStringSpan(idx, stringSpans)) continue;
+    if (isMemberOrPrefixedCall(cleaned, idx)) continue;
     const spec = m2[2];
     const specOffset = idx + m2[0].lastIndexOf(spec);
     pushMatch(spec, specOffset);

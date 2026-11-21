@@ -887,4 +887,24 @@ describe('extractImports & resolveImport across languages', () => {
       'modules/orders/src/main/java/com/acme/orders',
     );
   });
+
+  it('excludes member-access and $-prefixed require/import calls while keeping spread require and dynamic import', () => {
+    const src = [
+      "parser.require('express');",
+      "parser?.require('express');",
+      "parser.\n  require('express');",
+      "obj.import('express');",
+      "obj?.import('express');",
+      "this.#require('express');",
+      "$require('express');",
+      "$import('express');",
+      "const a = require('express');",
+      "const b = { ...require('./spread') };",
+      "const c = await import('./dynamic');",
+    ].join('\n');
+
+    const { imports } = extractImports('src/domain/order.ts', src);
+    expect(imports.map((i) => i.specifier)).toEqual(['express', './spread', './dynamic']);
+    expect(imports.map((i) => i.line)).toEqual([10, 11, 12]);
+  });
 });
