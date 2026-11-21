@@ -311,9 +311,6 @@ describe('extractImports & resolveImport across languages', () => {
         extends: './common/shared.json',
         compilerOptions: {
           baseUrl: '..',
-          paths: {
-            '@infra/*': ['src/infrastructure/*'],
-          },
         },
       }),
       'config/common/shared.json': JSON.stringify({
@@ -323,30 +320,52 @@ describe('extractImports & resolveImport across languages', () => {
           },
         },
       }),
+      'config/infra-base.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: '..',
+          paths: {
+            '@infra/*': ['src/infrastructure/*'],
+          },
+        },
+      }),
     };
-    const rootRaw = JSON.stringify({
-      extends: './config/base.json',
+
+    // Nested extends: grandparent paths rebased from config/common/, middle sets baseUrl relative to config/.
+    const nested = parseTsConfigContent(
+      JSON.stringify({ extends: './config/base.json' }),
+      (rel) => files[rel] ?? null,
+    );
+    expect(nested?.baseUrl).toBe('.');
+    expect(nested?.paths).toEqual({
+      '@domain/*': ['src/domain/*'],
     });
 
-    const parsed = parseTsConfigContent(rootRaw, (rel) => files[rel] ?? null);
-    expect(parsed?.baseUrl).toBe('.');
-    expect(parsed?.paths).toEqual({
-      '@domain/*': ['src/domain/*'],
+    // Parent config sets both baseUrl and paths relative to config/.
+    const infra = parseTsConfigContent(
+      JSON.stringify({ extends: './config/infra-base.json' }),
+      (rel) => files[rel] ?? null,
+    );
+    expect(infra?.baseUrl).toBe('.');
+    expect(infra?.paths).toEqual({
       '@infra/*': ['src/infrastructure/*'],
     });
 
     const knownFiles = new Set(['src/infrastructure/repo.ts', 'src/domain/order.ts']);
-    const ctx = { tsconfig: parsed, knownFiles };
-    const { imports } = extractImports(
-      'src/domain/service.ts',
-      ["import { Repo } from '@infra/repo';", "import { Order } from '@domain/order';"].join('\n'),
-    );
-    expect(resolveImport(imports[0]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
-      'src/infrastructure/repo.ts',
-    );
-    expect(resolveImport(imports[1]!, 'src/domain/service.ts', ctx).resolvedPath).toBe(
-      'src/domain/order.ts',
-    );
+    expect(
+      resolveImport(
+        extractImports('src/domain/service.ts', "import { Order } from '@domain/order';")
+          .imports[0]!,
+        'src/domain/service.ts',
+        { tsconfig: nested, knownFiles },
+      ).resolvedPath,
+    ).toBe('src/domain/order.ts');
+    expect(
+      resolveImport(
+        extractImports('src/domain/service.ts', "import { Repo } from '@infra/repo';").imports[0]!,
+        'src/domain/service.ts',
+        { tsconfig: infra, knownFiles },
+      ).resolvedPath,
+    ).toBe('src/infrastructure/repo.ts');
 
     // Single config with non-root baseUrl + paths must not double-prefix baseUrl at match time.
     const subBase = parseTsConfigContent(
