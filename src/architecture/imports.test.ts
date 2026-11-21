@@ -1012,4 +1012,38 @@ describe('extractImports & resolveImport across languages', () => {
     expect(resolved[0]?.resolvedPath).toBe('src/infrastructure');
     expect(resolved[2]?.resolvedPath).toBe('src/infrastructure');
   });
+
+  it('normalizes leading :: qualifiers on Rust imports so external crate names resolve consistently', () => {
+    const rustSrc = [
+      'use ::sqlx::Pool;',
+      'use ::serde::{Deserialize, Serialize};',
+      'use ::{tokio::spawn};',
+    ].join('\n');
+
+    const parsed = extractImports('src/domain/order.rs', rustSrc);
+    expect(parsed.imports.map((i) => i.specifier)).toEqual([
+      'sqlx::Pool',
+      'serde::Deserialize',
+      'serde::Serialize',
+      'tokio::spawn',
+    ]);
+
+    const resolved = resolveImports(parsed.imports, 'src/domain/order.rs', {}, parsed.meta);
+    expect(resolved.map((r) => r.packageName)).toEqual(['sqlx', 'serde', 'serde', 'tokio']);
+
+    // Direct resolveImport calls with an un-normalized leading `::` also resolve the crate name.
+    const direct = resolveImport(
+      {
+        specifier: '::sqlx::Pool',
+        line: 1,
+        snippet: 'use ::sqlx::Pool;',
+        language: 'rust',
+        kindHint: 'package',
+      },
+      'src/domain/order.rs',
+      {},
+      {},
+    );
+    expect(direct.packageName).toBe('sqlx');
+  });
 });

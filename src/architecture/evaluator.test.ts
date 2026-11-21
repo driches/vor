@@ -297,4 +297,21 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     expect(csViolations).toHaveLength(1);
     expect(csViolations[0]?.rule_id).toBe('arch:rule:no-legacy');
   });
+
+  it('flags absolute Rust ::sqlx::Pool imports identically to sqlx::Pool under domain forbid_packages', () => {
+    const dddSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/order.rs',
+      content: 'use ::sqlx::Pool;\n',
+      spec: dddSpec,
+      resolveCtx: {},
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.rule_id).toBe('arch:forbidden-package:domain');
+  });
 });

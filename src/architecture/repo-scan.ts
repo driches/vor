@@ -194,7 +194,7 @@ function scanPartitionedRepoFiles(
   workspaceDir: string,
   repoFiles: Iterable<string>,
   extRe: RegExp,
-  onFile: (normRelPath: string, content: string, isTest: boolean) => void,
+  onFile: (normRelPath: string, content: string) => void,
 ): void {
   const prodFiles: string[] = [];
   const testFiles: string[] = [];
@@ -208,7 +208,7 @@ function scanPartitionedRepoFiles(
 
   const root = resolve(workspaceDir);
   let scanned = 0;
-  for (const [isTest, list] of [[false, prodFiles] as const, [true, testFiles] as const]) {
+  for (const list of [prodFiles, testFiles]) {
     for (const relPath of list) {
       if (scanned >= MAX_SYMBOL_INDEX_FILES) return;
       const absPath = resolve(root, relPath);
@@ -221,7 +221,7 @@ function scanPartitionedRepoFiles(
         continue; // missing, unreadable, or non-regular file
       }
       scanned += 1;
-      onFile(normalizePath(relPath), content, isTest);
+      onFile(normalizePath(relPath), content);
     }
   }
 }

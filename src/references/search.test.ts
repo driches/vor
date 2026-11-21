@@ -85,5 +85,16 @@ describe('readReferenceSlice', () => {
     if (!byteCapped.ok) return;
     expect(byteCapped.truncated).toBe(true);
     expect(byteCapped.returned_range).toEqual([1, 2]);
+
+    const pastEof = readReferenceSlice(makeSingleDocCorpus('line 1\nline 2\nline 3'), {
+      id: 'oversized',
+      start_line: 1,
+      end_line: 100,
+    });
+    expect(pastEof.ok).toBe(true);
+    if (!pastEof.ok) return;
+    expect(pastEof.truncated).toBe(false);
+    expect(pastEof.returned_range).toEqual([1, 3]);
+    expect(pastEof.total_lines).toBe(3);
   });
 });

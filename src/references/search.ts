@@ -91,7 +91,10 @@ export function readReferenceSlice(
   const kept: string[] = [];
   let byteCount = 0;
   let actualEnd = start - 1;
-  // Explicit end_line ranges start un-truncated and flip true only if MAX_SLICE_BYTES cuts them short.
+  // `truncated` signals unread content remains (either default slicing stopped
+  // before `totalLines` or `MAX_SLICE_BYTES` cut output short). Clamping an
+  // explicit `end_line > totalLines` reaches EOF (`returned_range[1] === total_lines`),
+  // so it is not marked truncated unless `MAX_SLICE_BYTES` stops the loop early.
   let truncated = opts.end_line === undefined && hardEnd < totalLines;
 
   for (let ln = start; ln <= hardEnd; ln++) {

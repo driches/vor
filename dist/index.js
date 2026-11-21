@@ -89725,13 +89725,15 @@ function extractRustImports(content) {
     const expr = m2[1];
     const exprOffset = idx + m2[0].indexOf(expr);
     for (const leaf of expandRustUseTree(expr, exprOffset)) {
+      const normalizedPath = leaf.path.replace(/^::\s*/, "");
+      if (!normalizedPath) continue;
       const line = lineAtOffset(starts, leaf.offset);
       out.push({
-        specifier: leaf.path,
+        specifier: normalizedPath,
         line,
         snippet: makeSnippet(rawLines, line),
         language: "rust",
-        kindHint: classifyRustSpec(leaf.path)
+        kindHint: classifyRustSpec(normalizedPath)
       });
     }
   }
@@ -90846,8 +90848,9 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       return resolvePythonSubmodules(imp, normSource, ctx)[0];
     }
     case "rust": {
-      if (imp.specifier.startsWith("mod:")) {
-        const modName = imp.specifier.slice(4);
+      const spec = imp.specifier.replace(/^::\s*/, "");
+      if (spec.startsWith("mod:")) {
+        const modName = spec.slice(4);
         const dir = rustLogicalModuleDir(normSource);
         const direct = normalizePath(dir === "." ? `${modName}.rs` : `${dir}/${modName}.rs`);
         const nested = normalizePath(
@@ -90856,8 +90859,8 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         if (existsRepoFile(nested, ctx)) return { ...base, resolvedPath: nested };
         return { ...base, resolvedPath: direct };
       }
-      if (imp.specifier.startsWith("crate::")) {
-        const rel = imp.specifier.slice("crate::".length).replace(/::/g, "/");
+      if (spec.startsWith("crate::")) {
+        const rel = spec.slice("crate::".length).replace(/::/g, "/");
         const crateSrc = findRustCrateSrc(normSource);
         const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
         return {
@@ -90865,9 +90868,9 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
           resolvedPath: resolveRustModulePath(joined, crateSrc, ctx)
         };
       }
-      if (imp.specifier.startsWith("super::") || imp.specifier.startsWith("self::")) {
+      if (spec.startsWith("super::") || spec.startsWith("self::")) {
         let modDir = rustLogicalModuleDir(normSource);
-        let rest = imp.specifier;
+        let rest = spec;
         if (rest.startsWith("self::")) {
           rest = rest.slice("self::".length);
         }
@@ -90883,8 +90886,8 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
           resolvedPath: resolveRustModulePath(joined, crateSrc, ctx)
         };
       }
-      const crateName = imp.specifier.split("::")[0] ?? imp.specifier;
-      return { ...base, packageName: crateName };
+      const crateName = (spec.split("::")[0] ?? spec).trim();
+      return crateName ? { ...base, packageName: crateName } : base;
     }
     case "java":
     case "kotlin": {
