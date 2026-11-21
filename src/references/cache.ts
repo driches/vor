@@ -154,6 +154,8 @@ export class DiskReferenceCache {
     try {
       mkdirSync(this.cacheDir, { recursive: true });
       const { metaPath, contentPath } = this.entryPaths(key);
+      // Write content before `.meta.json`: `list()` indexes `.meta.json` sidecars,
+      // so `.meta.json` acts as the commit marker and prevents partial entries.
       writeFileSync(contentPath, content, 'utf-8');
       writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
       return true;
@@ -249,6 +251,19 @@ export class DiskReferenceCache {
         removed += 1;
       } catch {
         // Best-effort cleanup.
+      }
+    }
+    if (idOrKey === undefined) {
+      const fileSet = new Set(files);
+      for (const file of files) {
+        if (!file.endsWith('.content')) continue;
+        const hash = file.slice(0, -'.content'.length);
+        if (fileSet.has(`${hash}.meta.json`)) continue;
+        try {
+          unlinkSync(join(this.cacheDir, file));
+        } catch {
+          // Best-effort orphan cleanup.
+        }
       }
     }
     return removed;

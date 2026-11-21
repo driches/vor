@@ -48,6 +48,11 @@ export interface ArchitectureScannerOptions {
   logger?: Logger;
 }
 
+interface ScanCounters {
+  networkCalls: number;
+  cacheHits: number;
+}
+
 function reconstructFromHeadLines(file: ChangedFile): string {
   if (file.head_line_text.size === 0) return '';
   let maxLine = 0;
@@ -63,8 +68,13 @@ function reconstructFromHeadLines(file: ChangedFile): string {
   return lines.join('\n');
 }
 
-async function readHeadFileContent(deps: ScannerDeps, file: ChangedFile): Promise<string> {
+async function readHeadFileContent(
+  deps: ScannerDeps,
+  file: ChangedFile,
+  counters: ScanCounters,
+): Promise<string> {
   try {
+    counters.networkCalls += 1;
     const remote = await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
@@ -87,8 +97,13 @@ async function readHeadFileContent(deps: ScannerDeps, file: ChangedFile): Promis
   return reconstructFromHeadLines(file);
 }
 
-async function readMetadataFile(deps: ScannerDeps, path: string): Promise<string | null> {
+async function readMetadataFile(
+  deps: ScannerDeps,
+  path: string,
+  counters: ScanCounters,
+): Promise<string | null> {
   try {
+    counters.networkCalls += 1;
     return await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
@@ -103,6 +118,7 @@ async function readMetadataFile(deps: ScannerDeps, path: string): Promise<string
 async function hydrateTsConfigFromHead(
   deps: ScannerDeps,
   headRaw: string,
+  counters: ScanCounters,
 ): Promise<ReturnType<typeof parseTsConfigContent>> {
   const preloaded = new Map<string, string | null>();
 
@@ -128,7 +144,7 @@ async function hydrateTsConfigFromHead(
       for (const candidate of candidates) {
         let rawCandidate = preloaded.get(candidate) ?? null;
         if (!preloaded.has(candidate)) {
-          rawCandidate = await readMetadataFile(deps, candidate);
+          rawCandidate = await readMetadataFile(deps, candidate, counters);
           if (rawCandidate === null && deps.workspaceDir) {
             try {
               rawCandidate = readFileSync(resolve(deps.workspaceDir, candidate), 'utf-8');
@@ -165,11 +181,15 @@ async function hydrateTsConfigFromHead(
   });
 }
 
-async function fetchHeadTreeFiles(deps: ScannerDeps): Promise<Set<string> | null> {
+async function fetchHeadTreeFiles(
+  deps: ScannerDeps,
+  counters: ScanCounters,
+): Promise<Set<string> | null> {
   if (typeof deps.octokit?.rest?.git?.getTree !== 'function' || deps.signal.aborted) {
     return null;
   }
   try {
+    counters.networkCalls += 1;
     const res = await deps.octokit.rest.git.getTree({
       owner: deps.owner,
       repo: deps.repo,
@@ -199,6 +219,7 @@ async function probeHeadAliasTargets(
   resolveCtx: WorkspaceResolveContext,
   probeCache: Map<string, boolean>,
   probeBudget: { remaining: number },
+  counters: ScanCounters,
 ): Promise<void> {
   if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
   const lang = detectArchLanguage(filePath);
@@ -226,6 +247,7 @@ async function probeHeadAliasTargets(
       if (exists === undefined) {
         if (probeBudget.remaining <= 0) break;
         probeBudget.remaining -= 1;
+        counters.networkCalls += 1;
         try {
           const hit = await deps.fileReader.read({
             owner: deps.owner,
@@ -238,6 +260,8 @@ async function probeHeadAliasTargets(
           exists = false; // treat transient probe error as absent
         }
         probeCache.set(candidate, exists);
+      } else {
+        counters.cacheHits += 1;
       }
       if (exists) {
         mutableExtra.add(candidate);
@@ -257,9 +281,10 @@ async function probeHeadAliasTargets(
 async function hydrateResolveContext(
   deps: ScannerDeps,
   languagesPresent: ReadonlySet<ArchLanguage>,
+  counters: ScanCounters,
 ): Promise<WorkspaceResolveContext> {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
-  const headTree = await fetchHeadTreeFiles(deps);
+  const headTree = await fetchHeadTreeFiles(deps, counters);
   if (headTree) {
     ctx.knownFiles = headTree;
   }
@@ -271,16 +296,16 @@ async function hydrateResolveContext(
   }
 
   if (languagesPresent.has('typescript') || languagesPresent.has('javascript')) {
-    const raw = await readMetadataFile(deps, 'tsconfig.json');
+    const raw = await readMetadataFile(deps, 'tsconfig.json', counters);
     if (raw !== null) {
-      const parsed = await hydrateTsConfigFromHead(deps, raw);
+      const parsed = await hydrateTsConfigFromHead(deps, raw, counters);
       if (parsed) ctx.tsconfig = parsed;
       else delete ctx.tsconfig;
     }
   }
 
   if (languagesPresent.has('go')) {
-    const raw = await readMetadataFile(deps, 'go.mod');
+    const raw = await readMetadataFile(deps, 'go.mod', counters);
     if (raw !== null) {
       const goModule = parseGoModModule(raw);
       if (goModule) ctx.goModule = goModule;
@@ -289,7 +314,7 @@ async function hydrateResolveContext(
   }
 
   if (languagesPresent.has('dart')) {
-    const raw = await readMetadataFile(deps, 'pubspec.yaml');
+    const raw = await readMetadataFile(deps, 'pubspec.yaml', counters);
     if (raw !== null) {
       const dartPkg = parsePubspecName(raw);
       if (dartPkg) ctx.dartPackage = dartPkg;
@@ -346,7 +371,8 @@ export function createArchitectureScanner(
         if (lang) languagesPresent.add(lang);
       }
 
-      const resolveCtx = await hydrateResolveContext(deps, languagesPresent);
+      const counters: ScanCounters = { networkCalls: 0, cacheHits: 0 };
+      const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
       const probeCache = new Map<string, boolean>();
       const probeBudget = { remaining: 64 };
       const findings: ScanFinding[] = [];
@@ -356,7 +382,7 @@ export function createArchitectureScanner(
       for (const file of applicable) {
         if (deps.signal.aborted) break;
         try {
-          const content = await readHeadFileContent(deps, file);
+          const content = await readHeadFileContent(deps, file, counters);
           filesExamined += 1;
 
           await probeHeadAliasTargets(
@@ -367,6 +393,7 @@ export function createArchitectureScanner(
             resolveCtx,
             probeCache,
             probeBudget,
+            counters,
           );
 
           const violations = evaluateFileArchitecture({
@@ -424,8 +451,8 @@ export function createArchitectureScanner(
         metrics: {
           duration_ms: Date.now() - started,
           files_examined: filesExamined,
-          network_calls: 0,
-          cache_hits: 0,
+          network_calls: counters.networkCalls,
+          cache_hits: counters.cacheHits,
         },
       };
     },

@@ -233,6 +233,7 @@ entries:
       expect(treeResult.findings).toHaveLength(1);
       expect(treeResult.findings[0]?.line).toBe(1);
       expect(treeResult.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+      expect(treeResult.metrics.network_calls).toBeGreaterThan(0);
 
       // Case 2: git.getTree is unavailable/truncated; probeHeadAliasTargets checks fileReader at HEAD.
       const fallbackDeps = makeDeps([changed], {
@@ -245,6 +246,7 @@ entries:
       expect(fallbackResult.findings).toHaveLength(1);
       expect(fallbackResult.findings[0]?.line).toBe(1);
       expect(fallbackResult.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+      expect(fallbackResult.metrics.network_calls).toBeGreaterThan(0);
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

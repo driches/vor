@@ -809,7 +809,7 @@ describe('AnthropicProvider', () => {
       expect(createSpy.mock.calls[0]![0].max_tokens).toBe(4096);
     });
 
-    it('sets system cache_control ttl only when anthropic.prompt_cache_ttl is 1h', async () => {
+    it('sets tool and system cache_control ttl to 1h only when anthropic.prompt_cache_ttl is 1h', async () => {
       createSpy.mockResolvedValue({
         id: 'msg_test',
         type: 'message',
@@ -821,19 +821,31 @@ describe('AnthropicProvider', () => {
         usage: { input_tokens: 1, output_tokens: 1 },
       });
       const provider = new AnthropicProvider('sk-test');
-      await provider.complete([{ role: 'user', content: 'go' }], [], {
+      const tools: CanonicalTool[] = [
+        {
+          name: 'get_pr_diff',
+          description: 'diff',
+          input_schema: { type: 'object', properties: {} },
+        },
+      ];
+      await provider.complete([{ role: 'user', content: 'go' }], tools, {
         model: 'claude-sonnet-4-6',
         maxOutputTokens: 4096,
         system: 's',
         anthropic: { prompt_cache_ttl: '5m' },
       });
+      expect(createSpy.mock.calls[0]![0].tools[0].cache_control).toEqual({ type: 'ephemeral' });
       expect(createSpy.mock.calls[0]![0].system[0].cache_control).toEqual({ type: 'ephemeral' });
 
-      await provider.complete([{ role: 'user', content: 'go' }], [], {
+      await provider.complete([{ role: 'user', content: 'go' }], tools, {
         model: 'claude-sonnet-4-6',
         maxOutputTokens: 4096,
         system: 's',
         anthropic: { prompt_cache_ttl: '1h' },
+      });
+      expect(createSpy.mock.calls[1]![0].tools[0].cache_control).toEqual({
+        type: 'ephemeral',
+        ttl: '1h',
       });
       expect(createSpy.mock.calls[1]![0].system[0].cache_control).toEqual({
         type: 'ephemeral',

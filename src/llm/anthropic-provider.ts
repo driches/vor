@@ -42,6 +42,17 @@ import { inputTokensFullRateFor } from './types.js';
  */
 export const SAFE_NON_STREAMING_MAX_TOKENS = 8192;
 
+function ephemeralCacheControl(ttl?: '5m' | '1h'): Anthropic.CacheControlEphemeral {
+  // `@anthropic-ai/sdk@0.39.0`'s `CacheControlEphemeral` type only declares
+  // `{ type: 'ephemeral' }`, while Anthropic's Messages API accepts `ttl: '1h'`
+  // on ephemeral cache breakpoints. Omit `ttl` for default `'5m'` so requests
+  // stay byte-identical unless `'1h'` is explicitly configured.
+  if (ttl === '1h') {
+    return { type: 'ephemeral', ttl: '1h' } as unknown as Anthropic.CacheControlEphemeral;
+  }
+  return { type: 'ephemeral' };
+}
+
 export class AnthropicProvider implements LLMProvider {
   readonly id = 'anthropic' as const;
   private client: Anthropic;
@@ -55,12 +66,16 @@ export class AnthropicProvider implements LLMProvider {
     tools: CanonicalTool[],
     opts: CompleteOptions,
   ): Promise<CompleteResponse> {
+    const promptCacheTtl = opts.anthropic?.prompt_cache_ttl;
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     // Sliding-window cache_control on the two most recent array-content user
     // messages (see markLatestMessageForCaching JSDoc for the 4-breakpoint
     // budget math).
     markLatestMessageForCaching(anthropicMessages);
-    const anthropicTools = canonicalToolsToAnthropic(tools);
+    // Apply any longer TTL (`1h`) to the preceding tool breakpoint as well:
+    // Anthropic evaluates `tools -> system -> messages` and rejects longer
+    // TTLs placed after shorter ones.
+    const anthropicTools = canonicalToolsToAnthropic(tools, promptCacheTtl);
 
     const response = await this.client.messages.create(
       {
@@ -80,17 +95,7 @@ export class AnthropicProvider implements LLMProvider {
           {
             type: 'text',
             text: opts.system,
-            // `@anthropic-ai/sdk@0.39.0`'s `CacheControlEphemeral` type only declares
-            // `{ type: 'ephemeral' }`, while Anthropic's Messages API accepts `ttl: '1h'`
-            // on ephemeral cache breakpoints. Omit `ttl` for default `'5m'` so requests
-            // stay byte-identical unless `'1h'` is explicitly configured.
-            cache_control:
-              opts.anthropic?.prompt_cache_ttl === '1h'
-                ? ({
-                    type: 'ephemeral',
-                    ttl: '1h',
-                  } as unknown as Anthropic.CacheControlEphemeral)
-                : { type: 'ephemeral' },
+            cache_control: ephemeralCacheControl(promptCacheTtl),
           },
         ],
         messages: anthropicMessages,
@@ -209,12 +214,15 @@ export function canonicalMessagesToAnthropic(
  * rate (one of the 4 cache_control breakpoints budgeted per request — see
  * the breakpoint accounting in `markLatestMessageForCaching`).
  */
-export function canonicalToolsToAnthropic(tools: CanonicalTool[]): Anthropic.Tool[] {
+export function canonicalToolsToAnthropic(
+  tools: CanonicalTool[],
+  promptCacheTtl?: '5m' | '1h',
+): Anthropic.Tool[] {
   return tools.map((t, i) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,
-    ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
+    ...(i === tools.length - 1 ? { cache_control: ephemeralCacheControl(promptCacheTtl) } : {}),
   }));
 }
 

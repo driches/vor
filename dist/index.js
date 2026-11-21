@@ -63732,6 +63732,12 @@ function inputTokensFullRateFor(providerId, usage) {
 
 // src/llm/anthropic-provider.ts
 var SAFE_NON_STREAMING_MAX_TOKENS = 8192;
+function ephemeralCacheControl(ttl) {
+  if (ttl === "1h") {
+    return { type: "ephemeral", ttl: "1h" };
+  }
+  return { type: "ephemeral" };
+}
 var AnthropicProvider = class {
   id = "anthropic";
   client;
@@ -63739,9 +63745,10 @@ var AnthropicProvider = class {
     this.client = new sdk_default({ apiKey });
   }
   async complete(messages, tools, opts) {
+    const promptCacheTtl = opts.anthropic?.prompt_cache_ttl;
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     markLatestMessageForCaching(anthropicMessages);
-    const anthropicTools = canonicalToolsToAnthropic(tools);
+    const anthropicTools = canonicalToolsToAnthropic(tools, promptCacheTtl);
     const response = await this.client.messages.create(
       {
         model: opts.model,
@@ -63760,14 +63767,7 @@ var AnthropicProvider = class {
           {
             type: "text",
             text: opts.system,
-            // `@anthropic-ai/sdk@0.39.0`'s `CacheControlEphemeral` type only declares
-            // `{ type: 'ephemeral' }`, while Anthropic's Messages API accepts `ttl: '1h'`
-            // on ephemeral cache breakpoints. Omit `ttl` for default `'5m'` so requests
-            // stay byte-identical unless `'1h'` is explicitly configured.
-            cache_control: opts.anthropic?.prompt_cache_ttl === "1h" ? {
-              type: "ephemeral",
-              ttl: "1h"
-            } : { type: "ephemeral" }
+            cache_control: ephemeralCacheControl(promptCacheTtl)
           }
         ],
         messages: anthropicMessages,
@@ -63845,12 +63845,12 @@ function canonicalMessagesToAnthropic(messages) {
   }
   return out;
 }
-function canonicalToolsToAnthropic(tools) {
+function canonicalToolsToAnthropic(tools, promptCacheTtl) {
   return tools.map((t2, i2) => ({
     name: t2.name,
     description: t2.description,
     input_schema: t2.input_schema,
-    ...i2 === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}
+    ...i2 === tools.length - 1 ? { cache_control: ephemeralCacheControl(promptCacheTtl) } : {}
   }));
 }
 function anthropicResponseToCanonical(response) {
@@ -90460,8 +90460,9 @@ function reconstructFromHeadLines(file2) {
   }
   return lines.join("\n");
 }
-async function readHeadFileContent(deps, file2) {
+async function readHeadFileContent(deps, file2, counters) {
   try {
+    counters.networkCalls += 1;
     const remote = await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
@@ -90479,8 +90480,9 @@ async function readHeadFileContent(deps, file2) {
   }
   return reconstructFromHeadLines(file2);
 }
-async function readMetadataFile(deps, path28) {
+async function readMetadataFile(deps, path28, counters) {
   try {
+    counters.networkCalls += 1;
     return await deps.fileReader.read({
       owner: deps.owner,
       repo: deps.repo,
@@ -90491,7 +90493,7 @@ async function readMetadataFile(deps, path28) {
     return null;
   }
 }
-async function hydrateTsConfigFromHead(deps, headRaw) {
+async function hydrateTsConfigFromHead(deps, headRaw, counters) {
   const preloaded = /* @__PURE__ */ new Map();
   const queue = [
     { raw: headRaw, dir: "", depth: 0 }
@@ -90512,7 +90514,7 @@ async function hydrateTsConfigFromHead(deps, headRaw) {
       for (const candidate of candidates) {
         let rawCandidate = preloaded.get(candidate) ?? null;
         if (!preloaded.has(candidate)) {
-          rawCandidate = await readMetadataFile(deps, candidate);
+          rawCandidate = await readMetadataFile(deps, candidate, counters);
           if (rawCandidate === null && deps.workspaceDir) {
             try {
               rawCandidate = (0, import_node_fs9.readFileSync)((0, import_node_path23.resolve)(deps.workspaceDir, candidate), "utf-8");
@@ -90547,11 +90549,12 @@ async function hydrateTsConfigFromHead(deps, headRaw) {
     return null;
   });
 }
-async function fetchHeadTreeFiles(deps) {
+async function fetchHeadTreeFiles(deps, counters) {
   if (typeof deps.octokit?.rest?.git?.getTree !== "function" || deps.signal.aborted) {
     return null;
   }
   try {
+    counters.networkCalls += 1;
     const res = await deps.octokit.rest.git.getTree({
       owner: deps.owner,
       repo: deps.repo,
@@ -90572,7 +90575,7 @@ async function fetchHeadTreeFiles(deps) {
     return null;
   }
 }
-async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolveCtx, probeCache, probeBudget) {
+async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolveCtx, probeCache, probeBudget, counters) {
   if (resolveCtx.knownFiles || !resolveCtx.tsconfig) return;
   const lang = detectArchLanguage(filePath);
   if (lang !== "typescript" && lang !== "javascript") return;
@@ -90592,6 +90595,7 @@ async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolve
       if (exists2 === void 0) {
         if (probeBudget.remaining <= 0) break;
         probeBudget.remaining -= 1;
+        counters.networkCalls += 1;
         try {
           const hit = await deps.fileReader.read({
             owner: deps.owner,
@@ -90604,6 +90608,8 @@ async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolve
           exists2 = false;
         }
         probeCache.set(candidate, exists2);
+      } else {
+        counters.cacheHits += 1;
       }
       if (exists2) {
         mutableExtra.add(candidate);
@@ -90618,9 +90624,9 @@ async function probeHeadAliasTargets(deps, filePath, content, onlyLines, resolve
     resolveCtx.extraFiles = mutableExtra;
   }
 }
-async function hydrateResolveContext(deps, languagesPresent) {
+async function hydrateResolveContext(deps, languagesPresent, counters) {
   const ctx = loadWorkspaceResolveContext(deps.workspaceDir);
-  const headTree = await fetchHeadTreeFiles(deps);
+  const headTree = await fetchHeadTreeFiles(deps, counters);
   if (headTree) {
     ctx.knownFiles = headTree;
   }
@@ -90629,15 +90635,15 @@ async function hydrateResolveContext(deps, languagesPresent) {
     ctx.extraFiles = new Set(prFiles);
   }
   if (languagesPresent.has("typescript") || languagesPresent.has("javascript")) {
-    const raw = await readMetadataFile(deps, "tsconfig.json");
+    const raw = await readMetadataFile(deps, "tsconfig.json", counters);
     if (raw !== null) {
-      const parsed = await hydrateTsConfigFromHead(deps, raw);
+      const parsed = await hydrateTsConfigFromHead(deps, raw, counters);
       if (parsed) ctx.tsconfig = parsed;
       else delete ctx.tsconfig;
     }
   }
   if (languagesPresent.has("go")) {
-    const raw = await readMetadataFile(deps, "go.mod");
+    const raw = await readMetadataFile(deps, "go.mod", counters);
     if (raw !== null) {
       const goModule = parseGoModModule(raw);
       if (goModule) ctx.goModule = goModule;
@@ -90645,7 +90651,7 @@ async function hydrateResolveContext(deps, languagesPresent) {
     }
   }
   if (languagesPresent.has("dart")) {
-    const raw = await readMetadataFile(deps, "pubspec.yaml");
+    const raw = await readMetadataFile(deps, "pubspec.yaml", counters);
     if (raw !== null) {
       const dartPkg = parsePubspecName(raw);
       if (dartPkg) ctx.dartPackage = dartPkg;
@@ -90686,7 +90692,8 @@ function createArchitectureScanner(spec, options = {}) {
         const lang = detectArchLanguage(f2.path);
         if (lang) languagesPresent.add(lang);
       }
-      const resolveCtx = await hydrateResolveContext(deps, languagesPresent);
+      const counters = { networkCalls: 0, cacheHits: 0 };
+      const resolveCtx = await hydrateResolveContext(deps, languagesPresent, counters);
       const probeCache = /* @__PURE__ */ new Map();
       const probeBudget = { remaining: 64 };
       const findings = [];
@@ -90695,7 +90702,7 @@ function createArchitectureScanner(spec, options = {}) {
       for (const file2 of applicable) {
         if (deps.signal.aborted) break;
         try {
-          const content = await readHeadFileContent(deps, file2);
+          const content = await readHeadFileContent(deps, file2, counters);
           filesExamined += 1;
           await probeHeadAliasTargets(
             deps,
@@ -90704,7 +90711,8 @@ function createArchitectureScanner(spec, options = {}) {
             file2.added_lines,
             resolveCtx,
             probeCache,
-            probeBudget
+            probeBudget,
+            counters
           );
           const violations = evaluateFileArchitecture({
             filePath: file2.path,
@@ -90758,8 +90766,8 @@ function createArchitectureScanner(spec, options = {}) {
         metrics: {
           duration_ms: Date.now() - started,
           files_examined: filesExamined,
-          network_calls: 0,
-          cache_hits: 0
+          network_calls: counters.networkCalls,
+          cache_hits: counters.cacheHits
         }
       };
     }
@@ -91106,6 +91114,18 @@ var DiskReferenceCache = class {
         if ((0, import_node_fs11.existsSync)(contentPath)) (0, import_node_fs11.unlinkSync)(contentPath);
         removed += 1;
       } catch {
+      }
+    }
+    if (idOrKey === void 0) {
+      const fileSet = new Set(files);
+      for (const file2 of files) {
+        if (!file2.endsWith(".content")) continue;
+        const hash2 = file2.slice(0, -".content".length);
+        if (fileSet.has(`${hash2}.meta.json`)) continue;
+        try {
+          (0, import_node_fs11.unlinkSync)((0, import_node_path25.join)(this.cacheDir, file2));
+        } catch {
+        }
       }
     }
     return removed;
