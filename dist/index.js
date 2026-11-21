@@ -88942,6 +88942,19 @@ function scanCLikeSource(src, opts = {}) {
         i2 += 1;
         continue;
       }
+      if (active.kind === "csharp_verbatim") {
+        if (ch === '"') {
+          if (chars[i2 + 1] === '"') {
+            i2 += 2;
+            continue;
+          }
+          stringSpans.push({ start: active.spanStart, end: i2 });
+          active = null;
+          lastToken = "expr_end";
+        }
+        i2 += 1;
+        continue;
+      }
       if (active.kind === "triple") {
         if (ch === "\\") {
           i2 += chars[i2 + 1] === "\r" && chars[i2 + 2] === "\n" ? 3 : 2;
@@ -89092,6 +89105,18 @@ function scanCLikeSource(src, opts = {}) {
         const quotePos = i2 + 1 + hashes;
         active = { kind: "rust_raw", hashes, spanStart: quotePos };
         i2 = quotePos + 1;
+        continue;
+      }
+    }
+    if (opts.csharpVerbatimStrings && ch === "@") {
+      if (chars[i2 + 1] === '"') {
+        active = { kind: "csharp_verbatim", spanStart: i2 + 1 };
+        i2 += 2;
+        continue;
+      }
+      if (chars[i2 + 1] === "$" && chars[i2 + 2] === '"') {
+        active = { kind: "csharp_verbatim", spanStart: i2 + 2 };
+        i2 += 3;
         continue;
       }
     }
@@ -89285,6 +89310,9 @@ function scanCLikeSource(src, opts = {}) {
       }
     }
     i2 += 1;
+  }
+  if (active !== null) {
+    stringSpans.push({ start: active.spanStart, end: n2 });
   }
   return { cleaned: chars.join(""), stringSpans };
 }
@@ -90066,7 +90094,10 @@ function findCSharpNamespaceFromCleaned(cleaned, stringSpans) {
   return void 0;
 }
 function extractCSharpNamespace(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    csharpVerbatimStrings: true
+  });
   return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
 }
 function commonCSharpDirPrefix(a2, b2) {
@@ -90118,7 +90149,10 @@ function buildCSharpNamespaceMap(fileNamespaces) {
   return index;
 }
 function extractCSharpImports(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    csharpVerbatimStrings: true
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];

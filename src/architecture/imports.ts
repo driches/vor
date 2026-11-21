@@ -124,6 +124,8 @@ export interface CLikeScanOptions {
   rustRawStrings?: boolean;
   /** Track nested block-comment depth (Rust, Kotlin, Dart). */
   nestedBlockComments?: boolean;
+  /** Recognize C# verbatim strings `@"..."`, `$@"..."`, `@$"..."` (literal backslashes, doubled `""` escapes). */
+  csharpVerbatimStrings?: boolean;
 }
 
 function isIdentChar(ch: string | undefined): boolean {
@@ -265,7 +267,8 @@ type ActiveString =
   | { kind: 'quote'; quote: "'" | '"' | '`'; spanStart: number }
   | { kind: 'raw_backtick'; spanStart: number }
   | { kind: 'triple'; quote: '"' | "'"; spanStart: number }
-  | { kind: 'rust_raw'; hashes: number; spanStart: number };
+  | { kind: 'rust_raw'; hashes: number; spanStart: number }
+  | { kind: 'csharp_verbatim'; spanStart: number };
 
 /**
  * Strip `//` line comments and `/* ... *\/` block comments (preserving `\n` so
@@ -319,6 +322,20 @@ export function scanCLikeSource(
             i = end + 1;
             continue;
           }
+        }
+        i += 1;
+        continue;
+      }
+
+      if (active.kind === 'csharp_verbatim') {
+        if (ch === '"') {
+          if (chars[i + 1] === '"') {
+            i += 2;
+            continue;
+          }
+          stringSpans.push({ start: active.spanStart, end: i });
+          active = null;
+          lastToken = 'expr_end';
         }
         i += 1;
         continue;
@@ -497,6 +514,20 @@ export function scanCLikeSource(
         const quotePos = i + 1 + hashes;
         active = { kind: 'rust_raw', hashes, spanStart: quotePos };
         i = quotePos + 1;
+        continue;
+      }
+    }
+
+    // C# verbatim strings: `@"..."`, `$@"..."`, `@$"..."` (check before tripleQuotes so `@"""...` is verbatim).
+    if (opts.csharpVerbatimStrings && ch === '@') {
+      if (chars[i + 1] === '"') {
+        active = { kind: 'csharp_verbatim', spanStart: i + 1 };
+        i += 2;
+        continue;
+      }
+      if (chars[i + 1] === '$' && chars[i + 2] === '"') {
+        active = { kind: 'csharp_verbatim', spanStart: i + 2 };
+        i += 3;
         continue;
       }
     }
@@ -707,6 +738,10 @@ export function scanCLikeSource(
     }
 
     i += 1;
+  }
+
+  if (active !== null) {
+    stringSpans.push({ start: active.spanStart, end: n });
   }
 
   return { cleaned: chars.join(''), stringSpans };
@@ -1665,7 +1700,10 @@ function findCSharpNamespaceFromCleaned(
  * comments and string literals).
  */
 export function extractCSharpNamespace(content: string): string | undefined {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    csharpVerbatimStrings: true,
+  });
   return findCSharpNamespaceFromCleaned(cleaned, stringSpans);
 }
 
@@ -1735,7 +1773,10 @@ function extractCSharpImports(content: string): {
   imports: ExtractedImport[];
   meta: FileImportMeta;
 } {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    csharpVerbatimStrings: true,
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];

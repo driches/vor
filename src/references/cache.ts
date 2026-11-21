@@ -158,6 +158,8 @@ function ensureSafeWritableCacheDir(cacheDir: string): void {
     }
   }
   mkdirSync(cacheDir, { recursive: true });
+  // Defense-in-depth post-create check; `O_NOFOLLOW` on subsequent `openSync` calls
+  // is the kernel-level guard against concurrent symlink replacement races.
   const created = lstatSync(cacheDir);
   if (created.isSymbolicLink() || !created.isDirectory()) {
     throw new Error(`Cache directory '${cacheDir}' must be a real non-symlink directory.`);

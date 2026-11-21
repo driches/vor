@@ -1095,4 +1095,29 @@ describe('extractImports & resolveImport across languages', () => {
     expect(parsed.imports[0]?.specifier).toBe('..infra.db');
     expect(parsed.imports[0]?.line).toBe(6);
   });
+
+  it('ignores C# multiline verbatim strings with doubled quotes and trailing backslashes', () => {
+    const csSrc = [
+      'public class Examples {',
+      '  public string Ex1 = @"',
+      'using Dapper;',
+      '""escaped""',
+      'namespace Fake.Ns;',
+      '";',
+      '  public string Ex2 = $@"',
+      'using Newtonsoft.Json;',
+      '";',
+      '  public string Ex3 = @$"',
+      'using Npgsql;',
+      '";',
+      '  public string PathTail = @"C:\\dir\\";',
+      '}',
+      'namespace Acme.Domain;',
+      'using Acme.Real;',
+    ].join('\n');
+
+    const parsed = extractImports('src/domain/Order.cs', csSrc);
+    expect(parsed.meta.declaredPackage).toBe('Acme.Domain');
+    expect(parsed.imports.map((i) => i.specifier)).toEqual(['Acme.Real']);
+  });
 });

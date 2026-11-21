@@ -351,4 +351,21 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     });
     expect(violations).toEqual([]);
   });
+
+  it('does not flag C# multiline verbatim strings containing using directives', () => {
+    const dddSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const csContent = 'public class Order {\n  public string Example = @"\nusing Dapper;\n";\n}\n';
+    const violations = evaluateFileArchitecture({
+      filePath: 'src/domain/Order.cs',
+      content: csContent,
+      spec: dddSpec,
+      resolveCtx: {},
+    });
+    expect(violations).toEqual([]);
+  });
 });
