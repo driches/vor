@@ -162,6 +162,10 @@ export function createHandlers(deps: VorToolDeps) {
       return cachedCorpus.corpus;
     }
     const octokit = resolveOctokit();
+    // MCP tools run against a local workspace checkout: `workspaceDir` serves
+    // `repo-file`/`repo-glob` directly from disk, and `octokit` serves
+    // `github:owner/repo/path@ref` sources (which carry their own coordinates),
+    // so PR-only `owner`/`repo`/`ref`/`fileReader` fields are intentionally omitted.
     const corpus = await loadReferences({
       config,
       workspaceDir: workspace,

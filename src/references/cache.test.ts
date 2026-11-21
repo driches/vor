@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -129,6 +137,69 @@ describe('DiskReferenceCache', () => {
       expect(rejected).not.toContain('vor-cache-test');
     } finally {
       rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects relative cache dirs that escape workspace via symlink or dangling symlink', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ref-rel-sym-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'vor-ref-rel-sym-out-'));
+    try {
+      mkdirSync(join(ws, '.vor'), { recursive: true });
+      symlinkSync(outside, join(ws, '.vor/escaped-cache'));
+      symlinkSync(join(outside, 'missing-target'), join(ws, '.vor/dangling-cache'));
+      symlinkSync(ws, join(ws, '.vor/inside-link'));
+
+      const escapedResolved = resolveReferenceCacheDir('.vor/escaped-cache', ws);
+      expect(escapedResolved).not.toBe(realpathSync(outside));
+      expect(escapedResolved).not.toContain('escaped-cache');
+
+      const danglingResolved = resolveReferenceCacheDir('.vor/dangling-cache', ws);
+      expect(danglingResolved).not.toContain('dangling-cache');
+
+      const insideResolved = resolveReferenceCacheDir('.vor/inside-link/cache', ws);
+      expect(insideResolved).toBe(join(realpathSync(ws), 'cache'));
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked cache dirs and symlinked entry files on write, read, and touch', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vor-ref-entry-sym-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'vor-ref-outside-'));
+    try {
+      const sentinelContent = join(outsideDir, 'sentinel-content.txt');
+      const sentinelMeta = join(outsideDir, 'sentinel-meta.json');
+      writeFileSync(sentinelContent, 'ORIGINAL-SENTINEL', 'utf-8');
+      writeFileSync(sentinelMeta, 'ORIGINAL-META-SENTINEL', 'utf-8');
+
+      // 1. Direct symlinked cacheDir
+      const symlinkCacheDir = join(outsideDir, 'linked-cache-dir');
+      symlinkSync(dir, symlinkCacheDir);
+      const linkedCache = new DiskReferenceCache(symlinkCacheDir);
+      expect(linkedCache.set('url:https://example.com/a.md', makeMeta(), 'hello')).toBe(false);
+
+      // 2. Symlinked .content and .meta.json entry destinations
+      const cache = new DiskReferenceCache(dir);
+      const key = 'url:https://example.com/std.md';
+      const hash = sha256Hex(key);
+      symlinkSync(sentinelContent, join(dir, `${hash}.content`));
+
+      expect(cache.set(key, makeMeta({}, 'OVERWRITE'), 'OVERWRITE')).toBe(false);
+      expect(readFileSync(sentinelContent, 'utf-8')).toBe('ORIGINAL-SENTINEL');
+      expect(cache.get(key).status).toBe('miss');
+
+      // Also guard .meta.json symlink alone (without a .content symlink) on set() and touch()
+      const key2 = 'url:https://example.com/meta-only.md';
+      const hash2 = sha256Hex(key2);
+      symlinkSync(sentinelMeta, join(dir, `${hash2}.meta.json`));
+      expect(cache.set(key2, makeMeta({ key: key2 }, 'payload'), 'payload')).toBe(false);
+      expect(readFileSync(sentinelMeta, 'utf-8')).toBe('ORIGINAL-META-SENTINEL');
+      expect(cache.touch(key2, { etag: '"x"' })).toBeNull();
+      expect(readFileSync(sentinelMeta, 'utf-8')).toBe('ORIGINAL-META-SENTINEL');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 });

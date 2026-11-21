@@ -13,8 +13,11 @@
 
 import { createHash } from 'node:crypto';
 import {
-  existsSync,
+  closeSync,
+  constants,
+  lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -78,21 +81,35 @@ function defaultCacheDir(): string {
   return join(vorHome, 'cache', 'references');
 }
 
-function canonicalizeNearest(absPath: string): string {
+function resolveCanonicalCachePath(absPath: string): string | null {
   const resolved = resolve(absPath);
   const missingSegs: string[] = [];
   let cursor = resolved;
   while (true) {
+    let exists = false;
     try {
-      const real = realpathSync(cursor);
-      return missingSegs.length === 0 ? real : join(real, ...missingSegs.reverse());
-    } catch {
+      lstatSync(cursor);
+      exists = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        return null;
+      }
       const parent = dirname(cursor);
       if (parent === cursor) {
-        return resolved; // reached filesystem root without an existing ancestor
+        return null;
       }
       missingSegs.push(basename(cursor));
       cursor = parent;
+    }
+    if (exists) {
+      // `lstatSync` succeeded, so any `realpathSync` failure here (including
+      // ENOENT on a dangling symlink) must fail closed rather than walking up.
+      try {
+        const real = realpathSync(cursor);
+        return missingSegs.length === 0 ? real : join(real, ...missingSegs.reverse());
+      } catch {
+        return null;
+      }
     }
   }
 }
@@ -103,7 +120,8 @@ function isInsideRoot(candidate: string, root: string): boolean {
 }
 
 function isAllowedAbsoluteCacheDir(absPath: string, workspaceDir?: string): boolean {
-  const canonical = canonicalizeNearest(absPath);
+  const canonical = resolveCanonicalCachePath(absPath);
+  if (!canonical) return false;
   const roots = [workspaceDir ?? process.cwd(), tmpdir()];
   const runnerTemp = process.env.RUNNER_TEMP?.trim();
   if (runnerTemp) roots.push(runnerTemp);
@@ -112,21 +130,101 @@ function isAllowedAbsoluteCacheDir(absPath: string, workspaceDir?: string): bool
   const vorHome = process.env.VOR_HOME?.trim();
   roots.push(vorHome ? vorHome : join(homedir(), '.vor'));
 
-  return roots.some((root) => isInsideRoot(canonical, canonicalizeNearest(root)));
+  return roots.some((root) => {
+    const canonicalRoot = resolveCanonicalCachePath(root);
+    return canonicalRoot !== null && isInsideRoot(canonical, canonicalRoot);
+  });
+}
+
+function isSafeExistingCacheDir(cacheDir: string): boolean {
+  try {
+    const st = lstatSync(cacheDir);
+    return !st.isSymbolicLink() && st.isDirectory();
+  } catch {
+    return false; // missing or inaccessible cache directory
+  }
+}
+
+function ensureSafeWritableCacheDir(cacheDir: string): void {
+  try {
+    const st = lstatSync(cacheDir);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new Error(`Cache directory '${cacheDir}' must be a real non-symlink directory.`);
+    }
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
+  mkdirSync(cacheDir, { recursive: true });
+  const created = lstatSync(cacheDir);
+  if (created.isSymbolicLink() || !created.isDirectory()) {
+    throw new Error(`Cache directory '${cacheDir}' must be a real non-symlink directory.`);
+  }
+}
+
+function assertRegularOrMissingFile(filePath: string): void {
+  try {
+    const st = lstatSync(filePath);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new Error(
+        `Refusing to write cache entry through symlinked or non-regular path '${filePath}'.`,
+      );
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
+}
+
+function writeFileNoFollow(filePath: string, data: string): void {
+  assertRegularOrMissingFile(filePath);
+  // Combine upfront lstat rejection with O_NOFOLLOW at open(2) so cache writes
+  // cannot follow symlinks even under concurrent replacement.
+  const noFollowFlag = constants.O_NOFOLLOW ?? 0;
+  const fd = openSync(
+    filePath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollowFlag,
+    0o600,
+  );
+  try {
+    writeFileSync(fd, data, 'utf-8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readFileNoFollow(filePath: string): string {
+  const st = lstatSync(filePath);
+  if (st.isSymbolicLink() || !st.isFile()) {
+    throw new Error(
+      `Refusing to read cache entry from symlinked or non-regular path '${filePath}'.`,
+    );
+  }
+  const noFollowFlag = constants.O_NOFOLLOW ?? 0;
+  const fd = openSync(filePath, constants.O_RDONLY | noFollowFlag);
+  try {
+    return readFileSync(fd, 'utf-8');
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
  * Resolve the cache directory for reference docs.
- * Relative configured dirs are confined inside `workspaceDir`; absolute paths
- * are confined to trusted workspace, temp (`os.tmpdir()` / `$RUNNER_TEMP`),
+ * Relative configured dirs are canonically confined inside `workspaceDir`;
+ * absolute paths are confined to trusted workspace, temp (`os.tmpdir()` / `$RUNNER_TEMP`),
  * or VOR cache/home directories.
  */
 export function resolveReferenceCacheDir(configuredDir?: string, workspaceDir?: string): string {
   if (configuredDir && configuredDir.trim().length > 0) {
     const trimmed = configuredDir.trim();
     if (isAbsolute(trimmed)) {
-      if (isAllowedAbsoluteCacheDir(trimmed, workspaceDir)) {
-        return canonicalizeNearest(trimmed);
+      const canonical = resolveCanonicalCachePath(trimmed);
+      if (canonical && isAllowedAbsoluteCacheDir(canonical, workspaceDir)) {
+        return canonical;
       }
       void logger.warn(
         `Configured references.cache.dir '${configuredDir}' is outside allowed workspace/temp/cache roots; falling back to default cache dir.`,
@@ -135,7 +233,15 @@ export function resolveReferenceCacheDir(configuredDir?: string, workspaceDir?: 
     }
     const base = workspaceDir ?? process.cwd();
     if (isSafeRelativePath(base, trimmed)) {
-      return resolve(base, trimmed);
+      const canonicalBase = resolveCanonicalCachePath(base);
+      const canonicalTarget = resolveCanonicalCachePath(resolve(base, trimmed));
+      if (canonicalBase && canonicalTarget && isInsideRoot(canonicalTarget, canonicalBase)) {
+        return canonicalTarget;
+      }
+      void logger.warn(
+        `Configured references.cache.dir '${configuredDir}' resolves outside workspace root via symlink; falling back to default cache dir.`,
+      );
+      return defaultCacheDir();
     }
     void logger.warn(
       `Configured references.cache.dir '${configuredDir}' escapes workspace root; falling back to default cache dir.`,
@@ -157,18 +263,18 @@ export class DiskReferenceCache {
   }
 
   get(key: string, nowMs: number = Date.now(), ttlSecondsOverride?: number): CacheLookupResult {
-    const { metaPath, contentPath } = this.entryPaths(key);
-    if (!existsSync(metaPath) || !existsSync(contentPath)) {
+    if (!isSafeExistingCacheDir(this.cacheDir)) {
       return { status: 'miss' };
     }
+    const { metaPath, contentPath } = this.entryPaths(key);
 
     let metaRaw: string;
     let content: string;
     try {
-      metaRaw = readFileSync(metaPath, 'utf-8');
-      content = readFileSync(contentPath, 'utf-8');
+      metaRaw = readFileNoFollow(metaPath);
+      content = readFileNoFollow(contentPath);
     } catch {
-      return { status: 'miss' }; // unreadable cache entry degrades to cache miss
+      return { status: 'miss' }; // missing, unreadable, or symlinked entry degrades to miss
     }
 
     let parsedMeta: unknown;
@@ -200,12 +306,14 @@ export class DiskReferenceCache {
 
   set(key: string, meta: ReferenceCacheMeta, content: string): boolean {
     try {
-      mkdirSync(this.cacheDir, { recursive: true });
+      ensureSafeWritableCacheDir(this.cacheDir);
       const { metaPath, contentPath } = this.entryPaths(key);
+      assertRegularOrMissingFile(contentPath);
+      assertRegularOrMissingFile(metaPath);
       // Write content before `.meta.json`: `list()` indexes `.meta.json` sidecars,
       // so `.meta.json` acts as the commit marker and prevents partial entries.
-      writeFileSync(contentPath, content, 'utf-8');
-      writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+      writeFileNoFollow(contentPath, content);
+      writeFileNoFollow(metaPath, JSON.stringify(meta, null, 2) + '\n');
       return true;
     } catch (err) {
       void logger.warn(
@@ -221,24 +329,24 @@ export class DiskReferenceCache {
       Pick<ReferenceCacheMeta, 'fetched_at' | 'etag' | 'last_modified' | 'ttl_seconds'>
     >,
   ): ReferenceCacheMeta | null {
+    if (!isSafeExistingCacheDir(this.cacheDir)) return null;
     const { metaPath } = this.entryPaths(key);
-    if (!existsSync(metaPath)) return null;
     try {
-      const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileSync(metaPath, 'utf-8')));
+      const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileNoFollow(metaPath)));
       if (!parsed.success) return null;
       const merged: ReferenceCacheMeta = {
         ...parsed.data,
         ...updates,
       };
-      writeFileSync(metaPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+      writeFileNoFollow(metaPath, JSON.stringify(merged, null, 2) + '\n');
       return merged;
     } catch {
-      return null; // touch failure is non-fatal; next run will refresh
+      return null; // touch failure (including symlink rejection) is non-fatal; next run will refresh
     }
   }
 
   list(): ReferenceCacheMeta[] {
-    if (!existsSync(this.cacheDir)) return [];
+    if (!isSafeExistingCacheDir(this.cacheDir)) return [];
     let files: string[];
     try {
       files = readdirSync(this.cacheDir);
@@ -250,18 +358,18 @@ export class DiskReferenceCache {
       if (!file.endsWith('.meta.json')) continue;
       try {
         const parsed = cacheMetaSchema.safeParse(
-          JSON.parse(readFileSync(join(this.cacheDir, file), 'utf-8')),
+          JSON.parse(readFileNoFollow(join(this.cacheDir, file))),
         );
         if (parsed.success) entries.push(parsed.data as ReferenceCacheMeta);
       } catch {
-        // Skip malformed sidecars during listing.
+        // Skip malformed or symlinked sidecars during listing.
       }
     }
     return entries.sort((a, b) => a.source_id.localeCompare(b.source_id));
   }
 
   clear(idOrKey?: string): number {
-    if (!existsSync(this.cacheDir)) return 0;
+    if (!isSafeExistingCacheDir(this.cacheDir)) return 0;
     let files: string[];
     try {
       files = readdirSync(this.cacheDir);
@@ -280,7 +388,7 @@ export class DiskReferenceCache {
         shouldDelete = true;
       } else {
         try {
-          const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileSync(metaPath, 'utf-8')));
+          const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileNoFollow(metaPath)));
           if (
             parsed.success &&
             (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)
@@ -288,14 +396,18 @@ export class DiskReferenceCache {
             shouldDelete = true;
           }
         } catch {
-          // Corrupt file matched by idOrKey check: ignore.
+          // Corrupt or symlinked file matched by idOrKey check: ignore.
         }
       }
 
       if (!shouldDelete) continue;
       try {
         unlinkSync(metaPath);
-        if (existsSync(contentPath)) unlinkSync(contentPath);
+        try {
+          unlinkSync(contentPath);
+        } catch {
+          // Sibling .content may be absent for orphaned sidecars.
+        }
         removed += 1;
       } catch {
         // Best-effort cleanup.

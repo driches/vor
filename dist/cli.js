@@ -8982,7 +8982,7 @@ var require_client_h1 = __commonJS({
       kResume,
       kHTTPContext
     } = require_symbols();
-    var constants3 = require_constants2();
+    var constants4 = require_constants2();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util2.addListener;
@@ -9057,7 +9057,7 @@ var require_client_h1 = __commonJS({
       constructor(client, socket, { exports: exports3 }) {
         assert2(Number.isFinite(client[kMaxHeadersSize]) && client[kMaxHeadersSize] > 0);
         this.llhttp = exports3;
-        this.ptr = this.llhttp.llhttp_alloc(constants3.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants4.TYPE.RESPONSE);
         this.client = client;
         this.socket = socket;
         this.timeout = null;
@@ -9152,11 +9152,11 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret !== constants3.ERROR.OK) {
+          if (ret !== constants4.ERROR.OK) {
             const body = data.subarray(offset);
-            if (ret === constants3.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants4.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(body);
-            } else if (ret === constants3.ERROR.PAUSED) {
+            } else if (ret === constants4.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(body);
             } else {
@@ -9179,10 +9179,10 @@ var require_client_h1 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants3.ERROR.OK) {
+        if (ret === constants4.ERROR.OK) {
           return null;
         }
-        if (ret === constants3.ERROR.PAUSED || ret === constants3.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants4.ERROR.PAUSED || ret === constants4.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -9199,7 +9199,7 @@ var require_client_h1 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message, constants3.ERROR[ret], data);
+        return new HTTPParserError(message, constants4.ERROR[ret], data);
       }
       destroy() {
         assert2(this.ptr != null);
@@ -9379,7 +9379,7 @@ var require_client_h1 = __commonJS({
           socket[kBlocking] = false;
           client[kResume]();
         }
-        return pause ? constants3.ERROR.PAUSED : 0;
+        return pause ? constants4.ERROR.PAUSED : 0;
       }
       onBody(buf) {
         const { client, socket, statusCode, maxResponseSize } = this;
@@ -9401,7 +9401,7 @@ var require_client_h1 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request4.onData(buf) === false) {
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         }
       }
       onMessageComplete() {
@@ -9437,13 +9437,13 @@ var require_client_h1 = __commonJS({
         if (socket[kWriting]) {
           assert2(client[kRunning] === 0);
           util2.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util2.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (socket[kReset] && client[kRunning] === 0) {
           util2.destroy(socket, new InformationalError("reset"));
-          return constants3.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (client[kPipelining] == null || client[kPipelining] === 1) {
           setImmediate(() => client[kResume]());
         } else {
@@ -32662,10 +32662,10 @@ var require_truncate = __commonJS({
   "node_modules/semver/functions/truncate.js"(exports2, module2) {
     "use strict";
     var parse4 = require_parse2();
-    var constants3 = require_constants6();
+    var constants4 = require_constants6();
     var SemVer = require_semver();
     var truncate2 = (version2, truncation, options) => {
-      if (!constants3.RELEASE_TYPES.includes(truncation)) {
+      if (!constants4.RELEASE_TYPES.includes(truncation)) {
         return null;
       }
       const clonedVersion = cloneInputVersion(version2, options);
@@ -33706,7 +33706,7 @@ var require_semver2 = __commonJS({
   "node_modules/semver/index.js"(exports2, module2) {
     "use strict";
     var internalRe = require_re();
-    var constants3 = require_constants6();
+    var constants4 = require_constants6();
     var SemVer = require_semver();
     var identifiers = require_identifiers();
     var parse4 = require_parse2();
@@ -33790,8 +33790,8 @@ var require_semver2 = __commonJS({
       re: internalRe.re,
       src: internalRe.src,
       tokens: internalRe.t,
-      SEMVER_SPEC_VERSION: constants3.SEMVER_SPEC_VERSION,
-      RELEASE_TYPES: constants3.RELEASE_TYPES,
+      SEMVER_SPEC_VERSION: constants4.SEMVER_SPEC_VERSION,
+      RELEASE_TYPES: constants4.RELEASE_TYPES,
       compareIdentifiers: identifiers.compareIdentifiers,
       rcompareIdentifiers: identifiers.rcompareIdentifiers
     };
@@ -43494,11 +43494,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants3);
+          this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -43515,10 +43515,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants3);
+        this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -43579,8 +43579,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants3) {
-        this.code = optimizeExpr(this.code, names, constants3);
+      optimizeNames(names, constants4) {
+        this.code = optimizeExpr(this.code, names, constants4);
         return this;
       }
       get names() {
@@ -43609,12 +43609,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n2 = nodes[i2];
-          if (n2.optimizeNames(names, constants3))
+          if (n2.optimizeNames(names, constants4))
             continue;
           subtractNames(names, n2.names);
           nodes.splice(i2, 1);
@@ -43667,12 +43667,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a6;
-        this.else = (_a6 = this.else) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants3);
-        if (!(super.optimizeNames(names, constants3) || this.else))
+        this.else = (_a6 = this.else) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants4);
+        if (!(super.optimizeNames(names, constants4) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants3);
+        this.condition = optimizeExpr(this.condition, names, constants4);
         return this;
       }
       get names() {
@@ -43695,10 +43695,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants3);
+        this.iteration = optimizeExpr(this.iteration, names, constants4);
         return this;
       }
       get names() {
@@ -43734,10 +43734,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants3);
+        this.iterable = optimizeExpr(this.iterable, names, constants4);
         return this;
       }
       get names() {
@@ -43779,11 +43779,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a6, _b;
-        super.optimizeNames(names, constants3);
-        (_a6 = this.catch) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants3);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
+        super.optimizeNames(names, constants4);
+        (_a6 = this.catch) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants4);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
         return this;
       }
       get names() {
@@ -44084,7 +44084,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants3) {
+    function optimizeExpr(expr, names, constants4) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -44099,14 +44099,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n2) {
-        const c2 = constants3[n2.str];
+        const c2 = constants4[n2.str];
         if (c2 === void 0 || names[n2.str] !== 1)
           return n2;
         delete names[n2.str];
         return c2;
       }
       function canOptimize(e2) {
-        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants3[c2.str] !== void 0);
+        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants4[c2.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -50602,11 +50602,11 @@ var require_codegen2 = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants3);
+          this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -50623,10 +50623,10 @@ var require_codegen2 = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants3);
+        this.rhs = optimizeExpr(this.rhs, names, constants4);
         return this;
       }
       get names() {
@@ -50687,8 +50687,8 @@ var require_codegen2 = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants3) {
-        this.code = optimizeExpr(this.code, names, constants3);
+      optimizeNames(names, constants4) {
+        this.code = optimizeExpr(this.code, names, constants4);
         return this;
       }
       get names() {
@@ -50717,12 +50717,12 @@ var require_codegen2 = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n2 = nodes[i2];
-          if (n2.optimizeNames(names, constants3))
+          if (n2.optimizeNames(names, constants4))
             continue;
           subtractNames(names, n2.names);
           nodes.splice(i2, 1);
@@ -50775,12 +50775,12 @@ var require_codegen2 = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a6;
-        this.else = (_a6 = this.else) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants3);
-        if (!(super.optimizeNames(names, constants3) || this.else))
+        this.else = (_a6 = this.else) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants4);
+        if (!(super.optimizeNames(names, constants4) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants3);
+        this.condition = optimizeExpr(this.condition, names, constants4);
         return this;
       }
       get names() {
@@ -50803,10 +50803,10 @@ var require_codegen2 = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants3);
+        this.iteration = optimizeExpr(this.iteration, names, constants4);
         return this;
       }
       get names() {
@@ -50842,10 +50842,10 @@ var require_codegen2 = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants3) {
-        if (!super.optimizeNames(names, constants3))
+      optimizeNames(names, constants4) {
+        if (!super.optimizeNames(names, constants4))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants3);
+        this.iterable = optimizeExpr(this.iterable, names, constants4);
         return this;
       }
       get names() {
@@ -50887,11 +50887,11 @@ var require_codegen2 = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants3) {
+      optimizeNames(names, constants4) {
         var _a6, _b;
-        super.optimizeNames(names, constants3);
-        (_a6 = this.catch) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants3);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants3);
+        super.optimizeNames(names, constants4);
+        (_a6 = this.catch) === null || _a6 === void 0 ? void 0 : _a6.optimizeNames(names, constants4);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants4);
         return this;
       }
       get names() {
@@ -51192,7 +51192,7 @@ var require_codegen2 = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants3) {
+    function optimizeExpr(expr, names, constants4) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -51207,14 +51207,14 @@ var require_codegen2 = __commonJS({
         return items;
       }, []));
       function replaceName(n2) {
-        const c2 = constants3[n2.str];
+        const c2 = constants4[n2.str];
         if (c2 === void 0 || names[n2.str] !== 1)
           return n2;
         delete names[n2.str];
         return c2;
       }
       function canOptimize(e2) {
-        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants3[c2.str] !== void 0);
+        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants4[c2.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -108941,21 +108941,33 @@ function defaultCacheDir() {
   const vorHome2 = vorHomeOverride ? (0, import_node_path29.resolve)(vorHomeOverride) : (0, import_node_path29.join)((0, import_node_os3.homedir)(), ".vor");
   return (0, import_node_path29.join)(vorHome2, "cache", "references");
 }
-function canonicalizeNearest(absPath) {
+function resolveCanonicalCachePath(absPath) {
   const resolved = (0, import_node_path29.resolve)(absPath);
   const missingSegs = [];
   let cursor = resolved;
   while (true) {
+    let exists2 = false;
     try {
-      const real = (0, import_node_fs15.realpathSync)(cursor);
-      return missingSegs.length === 0 ? real : (0, import_node_path29.join)(real, ...missingSegs.reverse());
-    } catch {
+      (0, import_node_fs15.lstatSync)(cursor);
+      exists2 = true;
+    } catch (err) {
+      if (err.code !== "ENOENT") {
+        return null;
+      }
       const parent = (0, import_node_path29.dirname)(cursor);
       if (parent === cursor) {
-        return resolved;
+        return null;
       }
       missingSegs.push((0, import_node_path29.basename)(cursor));
       cursor = parent;
+    }
+    if (exists2) {
+      try {
+        const real = (0, import_node_fs15.realpathSync)(cursor);
+        return missingSegs.length === 0 ? real : (0, import_node_path29.join)(real, ...missingSegs.reverse());
+      } catch {
+        return null;
+      }
     }
   }
 }
@@ -108964,7 +108976,8 @@ function isInsideRoot(candidate, root) {
   return rel === "" || !rel.startsWith("..") && !(0, import_node_path29.isAbsolute)(rel);
 }
 function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
-  const canonical = canonicalizeNearest(absPath);
+  const canonical = resolveCanonicalCachePath(absPath);
+  if (!canonical) return false;
   const roots = [workspaceDir ?? process.cwd(), (0, import_node_os3.tmpdir)()];
   const runnerTemp = process.env.RUNNER_TEMP?.trim();
   if (runnerTemp) roots.push(runnerTemp);
@@ -108972,14 +108985,87 @@ function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
   if (vorCache) roots.push(vorCache);
   const vorHome2 = process.env.VOR_HOME?.trim();
   roots.push(vorHome2 ? vorHome2 : (0, import_node_path29.join)((0, import_node_os3.homedir)(), ".vor"));
-  return roots.some((root) => isInsideRoot(canonical, canonicalizeNearest(root)));
+  return roots.some((root) => {
+    const canonicalRoot = resolveCanonicalCachePath(root);
+    return canonicalRoot !== null && isInsideRoot(canonical, canonicalRoot);
+  });
+}
+function isSafeExistingCacheDir(cacheDir) {
+  try {
+    const st2 = (0, import_node_fs15.lstatSync)(cacheDir);
+    return !st2.isSymbolicLink() && st2.isDirectory();
+  } catch {
+    return false;
+  }
+}
+function ensureSafeWritableCacheDir(cacheDir) {
+  try {
+    const st2 = (0, import_node_fs15.lstatSync)(cacheDir);
+    if (st2.isSymbolicLink() || !st2.isDirectory()) {
+      throw new Error(`Cache directory '${cacheDir}' must be a real non-symlink directory.`);
+    }
+    return;
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+  (0, import_node_fs15.mkdirSync)(cacheDir, { recursive: true });
+  const created = (0, import_node_fs15.lstatSync)(cacheDir);
+  if (created.isSymbolicLink() || !created.isDirectory()) {
+    throw new Error(`Cache directory '${cacheDir}' must be a real non-symlink directory.`);
+  }
+}
+function assertRegularOrMissingFile(filePath) {
+  try {
+    const st2 = (0, import_node_fs15.lstatSync)(filePath);
+    if (st2.isSymbolicLink() || !st2.isFile()) {
+      throw new Error(
+        `Refusing to write cache entry through symlinked or non-regular path '${filePath}'.`
+      );
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+function writeFileNoFollow(filePath, data) {
+  assertRegularOrMissingFile(filePath);
+  const noFollowFlag = import_node_fs15.constants.O_NOFOLLOW ?? 0;
+  const fd = (0, import_node_fs15.openSync)(
+    filePath,
+    import_node_fs15.constants.O_WRONLY | import_node_fs15.constants.O_CREAT | import_node_fs15.constants.O_TRUNC | noFollowFlag,
+    384
+  );
+  try {
+    (0, import_node_fs15.writeFileSync)(fd, data, "utf-8");
+  } finally {
+    (0, import_node_fs15.closeSync)(fd);
+  }
+}
+function readFileNoFollow(filePath) {
+  const st2 = (0, import_node_fs15.lstatSync)(filePath);
+  if (st2.isSymbolicLink() || !st2.isFile()) {
+    throw new Error(
+      `Refusing to read cache entry from symlinked or non-regular path '${filePath}'.`
+    );
+  }
+  const noFollowFlag = import_node_fs15.constants.O_NOFOLLOW ?? 0;
+  const fd = (0, import_node_fs15.openSync)(filePath, import_node_fs15.constants.O_RDONLY | noFollowFlag);
+  try {
+    return (0, import_node_fs15.readFileSync)(fd, "utf-8");
+  } finally {
+    (0, import_node_fs15.closeSync)(fd);
+  }
 }
 function resolveReferenceCacheDir(configuredDir, workspaceDir) {
   if (configuredDir && configuredDir.trim().length > 0) {
     const trimmed = configuredDir.trim();
     if ((0, import_node_path29.isAbsolute)(trimmed)) {
-      if (isAllowedAbsoluteCacheDir(trimmed, workspaceDir)) {
-        return canonicalizeNearest(trimmed);
+      const canonical = resolveCanonicalCachePath(trimmed);
+      if (canonical && isAllowedAbsoluteCacheDir(canonical, workspaceDir)) {
+        return canonical;
       }
       void logger.warn(
         `Configured references.cache.dir '${configuredDir}' is outside allowed workspace/temp/cache roots; falling back to default cache dir.`
@@ -108988,7 +109074,15 @@ function resolveReferenceCacheDir(configuredDir, workspaceDir) {
     }
     const base = workspaceDir ?? process.cwd();
     if (isSafeRelativePath(base, trimmed)) {
-      return (0, import_node_path29.resolve)(base, trimmed);
+      const canonicalBase = resolveCanonicalCachePath(base);
+      const canonicalTarget = resolveCanonicalCachePath((0, import_node_path29.resolve)(base, trimmed));
+      if (canonicalBase && canonicalTarget && isInsideRoot(canonicalTarget, canonicalBase)) {
+        return canonicalTarget;
+      }
+      void logger.warn(
+        `Configured references.cache.dir '${configuredDir}' resolves outside workspace root via symlink; falling back to default cache dir.`
+      );
+      return defaultCacheDir();
     }
     void logger.warn(
       `Configured references.cache.dir '${configuredDir}' escapes workspace root; falling back to default cache dir.`
@@ -109010,15 +109104,15 @@ var DiskReferenceCache = class {
     };
   }
   get(key, nowMs = Date.now(), ttlSecondsOverride) {
-    const { metaPath, contentPath } = this.entryPaths(key);
-    if (!(0, import_node_fs15.existsSync)(metaPath) || !(0, import_node_fs15.existsSync)(contentPath)) {
+    if (!isSafeExistingCacheDir(this.cacheDir)) {
       return { status: "miss" };
     }
+    const { metaPath, contentPath } = this.entryPaths(key);
     let metaRaw;
     let content;
     try {
-      metaRaw = (0, import_node_fs15.readFileSync)(metaPath, "utf-8");
-      content = (0, import_node_fs15.readFileSync)(contentPath, "utf-8");
+      metaRaw = readFileNoFollow(metaPath);
+      content = readFileNoFollow(contentPath);
     } catch {
       return { status: "miss" };
     }
@@ -109047,10 +109141,12 @@ var DiskReferenceCache = class {
   }
   set(key, meta3, content) {
     try {
-      (0, import_node_fs15.mkdirSync)(this.cacheDir, { recursive: true });
+      ensureSafeWritableCacheDir(this.cacheDir);
       const { metaPath, contentPath } = this.entryPaths(key);
-      (0, import_node_fs15.writeFileSync)(contentPath, content, "utf-8");
-      (0, import_node_fs15.writeFileSync)(metaPath, JSON.stringify(meta3, null, 2) + "\n", "utf-8");
+      assertRegularOrMissingFile(contentPath);
+      assertRegularOrMissingFile(metaPath);
+      writeFileNoFollow(contentPath, content);
+      writeFileNoFollow(metaPath, JSON.stringify(meta3, null, 2) + "\n");
       return true;
     } catch (err) {
       void logger.warn(
@@ -109060,23 +109156,23 @@ var DiskReferenceCache = class {
     }
   }
   touch(key, updates) {
+    if (!isSafeExistingCacheDir(this.cacheDir)) return null;
     const { metaPath } = this.entryPaths(key);
-    if (!(0, import_node_fs15.existsSync)(metaPath)) return null;
     try {
-      const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs15.readFileSync)(metaPath, "utf-8")));
+      const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileNoFollow(metaPath)));
       if (!parsed.success) return null;
       const merged = {
         ...parsed.data,
         ...updates
       };
-      (0, import_node_fs15.writeFileSync)(metaPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+      writeFileNoFollow(metaPath, JSON.stringify(merged, null, 2) + "\n");
       return merged;
     } catch {
       return null;
     }
   }
   list() {
-    if (!(0, import_node_fs15.existsSync)(this.cacheDir)) return [];
+    if (!isSafeExistingCacheDir(this.cacheDir)) return [];
     let files;
     try {
       files = (0, import_node_fs15.readdirSync)(this.cacheDir);
@@ -109088,7 +109184,7 @@ var DiskReferenceCache = class {
       if (!file2.endsWith(".meta.json")) continue;
       try {
         const parsed = cacheMetaSchema.safeParse(
-          JSON.parse((0, import_node_fs15.readFileSync)((0, import_node_path29.join)(this.cacheDir, file2), "utf-8"))
+          JSON.parse(readFileNoFollow((0, import_node_path29.join)(this.cacheDir, file2)))
         );
         if (parsed.success) entries.push(parsed.data);
       } catch {
@@ -109097,7 +109193,7 @@ var DiskReferenceCache = class {
     return entries.sort((a2, b2) => a2.source_id.localeCompare(b2.source_id));
   }
   clear(idOrKey) {
-    if (!(0, import_node_fs15.existsSync)(this.cacheDir)) return 0;
+    if (!isSafeExistingCacheDir(this.cacheDir)) return 0;
     let files;
     try {
       files = (0, import_node_fs15.readdirSync)(this.cacheDir);
@@ -109115,7 +109211,7 @@ var DiskReferenceCache = class {
         shouldDelete = true;
       } else {
         try {
-          const parsed = cacheMetaSchema.safeParse(JSON.parse((0, import_node_fs15.readFileSync)(metaPath, "utf-8")));
+          const parsed = cacheMetaSchema.safeParse(JSON.parse(readFileNoFollow(metaPath)));
           if (parsed.success && (parsed.data.source_id === idOrKey || parsed.data.key === idOrKey)) {
             shouldDelete = true;
           }
@@ -109125,7 +109221,10 @@ var DiskReferenceCache = class {
       if (!shouldDelete) continue;
       try {
         (0, import_node_fs15.unlinkSync)(metaPath);
-        if ((0, import_node_fs15.existsSync)(contentPath)) (0, import_node_fs15.unlinkSync)(contentPath);
+        try {
+          (0, import_node_fs15.unlinkSync)(contentPath);
+        } catch {
+        }
         removed += 1;
       } catch {
       }
