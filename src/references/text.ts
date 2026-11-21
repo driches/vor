@@ -34,44 +34,155 @@ function decodeHtmlEntities(text: string): string {
 }
 
 function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, '');
+  return html.replace(/<[^<>]+>/g, '');
+}
+
+function replaceHtmlElements(
+  html: string,
+  tagNames: readonly string[],
+  transform: (tagName: string, inner: string) => string,
+): string {
+  // Lowercase ASCII letters only so multi-code-unit Unicode case mappings
+  // (e.g. U+0130 -> "i\u0307") cannot shift indices relative to `html`.
+  const lower = html.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+  const tagSet = new Set(tagNames);
+  // Track tags confirmed to have no closing tag later in the document so
+  // repeated unclosed tags remain linear-time rather than O(N^2).
+  const noClosingTag = new Set<string>();
+
+  const out: string[] = [];
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const openIdx = lower.indexOf('<', cursor);
+    if (openIdx === -1) {
+      out.push(html.slice(cursor));
+      break;
+    }
+
+    let nameEnd = openIdx + 1;
+    while (nameEnd < lower.length) {
+      const ch = lower.charCodeAt(nameEnd);
+      const isAlphaNum = (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57);
+      if (!isAlphaNum) break;
+      nameEnd += 1;
+    }
+
+    if (nameEnd === openIdx + 1) {
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+
+    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+    const isBoundary =
+      boundary === 62 /* > */ ||
+      boundary === 47 /* / */ ||
+      boundary === 32 /* space */ ||
+      boundary === 9 /* \t */ ||
+      boundary === 10 /* \n */ ||
+      boundary === 12 /* \f */ ||
+      boundary === 13; /* \r */
+
+    const tagName = lower.slice(openIdx + 1, nameEnd);
+    if (!isBoundary || !tagSet.has(tagName) || noClosingTag.has(tagName)) {
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+
+    const openClose = lower.indexOf('>', nameEnd);
+    if (openClose === -1) {
+      out.push(html.slice(cursor));
+      break;
+    }
+
+    if (html.charCodeAt(openClose - 1) === 47 /* / */) {
+      out.push(html.slice(cursor, openClose + 1));
+      cursor = openClose + 1;
+      continue;
+    }
+
+    const closeNeedle = `</${tagName}`;
+    let searchFrom = openClose + 1;
+    let closeStart = -1;
+    let closeEnd = -1;
+    while (true) {
+      const idx = lower.indexOf(closeNeedle, searchFrom);
+      if (idx === -1) break;
+      const afterName = idx + closeNeedle.length;
+      const nextCh = afterName < lower.length ? lower.charCodeAt(afterName) : -1;
+      const validCloseBoundary =
+        nextCh === 62 /* > */ ||
+        nextCh === 32 /* space */ ||
+        nextCh === 9 /* \t */ ||
+        nextCh === 10 /* \n */ ||
+        nextCh === 12 /* \f */ ||
+        nextCh === 13; /* \r */
+      if (!validCloseBoundary) {
+        searchFrom = afterName;
+        continue;
+      }
+      const endBracket = lower.indexOf('>', afterName);
+      if (endBracket === -1) break;
+      closeStart = idx;
+      closeEnd = endBracket + 1;
+      break;
+    }
+
+    if (closeStart === -1) {
+      noClosingTag.add(tagName);
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+
+    out.push(html.slice(cursor, openIdx));
+    out.push(transform(tagName, html.slice(openClose + 1, closeStart)));
+    cursor = closeEnd;
+  }
+
+  return out.join('');
 }
 
 function htmlToMarkdownText(html: string): string {
-  let out = html;
   // Remove non-content / chrome blocks before converting structural tags.
-  out = out.replace(/<(script|style|noscript|svg|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+  let out = replaceHtmlElements(
+    html,
+    ['script', 'style', 'noscript', 'svg', 'nav', 'footer'],
+    () => '',
+  );
 
   // Defer HTML entity decoding until after `stripTags` below so escaped `<...>`
   // inside code/headings/list items (e.g. generic type parameters) isn't stripped as markup.
   // Preformatted code blocks (unwrap inner <code> if present).
-  out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner: string) => {
+  out = replaceHtmlElements(out, ['pre'], (_tag, inner) => {
     const clean = stripTags(inner).trim();
     return `\n\`\`\`\n${clean}\n\`\`\`\n`;
   });
 
   // Inline code spans.
-  out = out.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner: string) => {
+  out = replaceHtmlElements(out, ['code'], (_tag, inner) => {
     const clean = stripTags(inner).trim();
     return clean ? `\`${clean}\`` : '';
   });
 
   // Headings h1..h6 -> Markdown #..######.
-  out = out.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl: string, inner: string) => {
-    const hashes = '#'.repeat(Number(lvl));
+  out = replaceHtmlElements(out, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], (tag, inner) => {
+    const hashes = '#'.repeat(Number(tag.slice(1)));
     const clean = stripTags(inner).replace(/\s+/g, ' ').trim();
     return clean ? `\n${hashes} ${clean}\n` : '\n';
   });
 
   // List items.
-  out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner: string) => {
+  out = replaceHtmlElements(out, ['li'], (_tag, inner) => {
     const clean = stripTags(inner).replace(/\s+/g, ' ').trim();
     return clean ? `\n- ${clean}` : '';
   });
 
   // Block separators -> newlines.
   out = out.replace(
-    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^>]*>/gi,
+    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^<>]*>/gi,
     '\n',
   );
 

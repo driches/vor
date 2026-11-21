@@ -89675,6 +89675,44 @@ function resolveImports(imports, sourceFilePath, ctx, fileMeta = {}) {
   }
   return out;
 }
+function findRustCrateSrc(normSource) {
+  const srcIdx = normSource.lastIndexOf("/src/");
+  if (srcIdx !== -1) return normSource.slice(0, srcIdx + 4);
+  return normSource.startsWith("src/") ? "src" : "";
+}
+function resolveRustModulePath(joined, crateRoot, ctx) {
+  const normJoined = normalizePath(joined);
+  const normRoot = crateRoot ? normalizePath(crateRoot) : "";
+  let candidate = normJoined;
+  while (true) {
+    if (normRoot && candidate !== normRoot && !candidate.startsWith(`${normRoot}/`)) {
+      break;
+    }
+    if (candidate === normRoot) {
+      const libRs = normRoot ? `${normRoot}/lib.rs` : "lib.rs";
+      if (existsRepoFile(libRs, ctx)) return libRs;
+      const mainRs = normRoot ? `${normRoot}/main.rs` : "main.rs";
+      if (existsRepoFile(mainRs, ctx)) return mainRs;
+      break;
+    }
+    if (candidate && candidate !== ".") {
+      const rsFile = `${candidate}.rs`;
+      if (existsRepoFile(rsFile, ctx)) return rsFile;
+      const rsMod = `${candidate}/mod.rs`;
+      if (existsRepoFile(rsMod, ctx)) return rsMod;
+    }
+    const slash = candidate.lastIndexOf("/");
+    if (slash === -1) {
+      if (normRoot === "" && candidate !== "") {
+        candidate = "";
+        continue;
+      }
+      break;
+    }
+    candidate = candidate.slice(0, slash);
+  }
+  return normJoined;
+}
 function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
   const base = {
     specifier: imp.specifier,
@@ -89742,14 +89780,11 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       }
       if (imp.specifier.startsWith("crate::")) {
         const rel = imp.specifier.slice("crate::".length).replace(/::/g, "/");
-        const srcIdx = normSource.lastIndexOf("/src/");
-        const crateSrc = srcIdx !== -1 ? normSource.slice(0, srcIdx + 4) : normSource.startsWith("src/") ? "src" : "";
+        const crateSrc = findRustCrateSrc(normSource);
         const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
-        const rsFile = `${joined}.rs`;
-        const rsMod = `${joined}/mod.rs`;
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : existsRepoFile(rsMod, ctx) ? rsMod : joined
+          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx)
         };
       }
       if (imp.specifier.startsWith("super::") || imp.specifier.startsWith("self::")) {
@@ -89766,11 +89801,10 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
         }
         const rel = rest.replace(/::/g, "/");
         const joined = normalizePath(modDir === "." ? rel : import_node_path22.posix.join(modDir, rel));
-        const rsFile = `${joined}.rs`;
-        const rsMod = `${joined}/mod.rs`;
+        const crateSrc = findRustCrateSrc(normSource);
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx) ? rsFile : existsRepoFile(rsMod, ctx) ? rsMod : joined
+          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx)
         };
       }
       const crateName = imp.specifier.split("::")[0] ?? imp.specifier;
@@ -90646,12 +90680,89 @@ function decodeHtmlEntities(text) {
   });
 }
 function stripTags(html) {
-  return html.replace(/<[^>]+>/g, "");
+  return html.replace(/<[^<>]+>/g, "");
+}
+function replaceHtmlElements(html, tagNames, transform2) {
+  const lower = html.replace(/[A-Z]+/g, (m2) => m2.toLowerCase());
+  const tagSet = new Set(tagNames);
+  const noClosingTag = /* @__PURE__ */ new Set();
+  const out = [];
+  let cursor = 0;
+  while (cursor < html.length) {
+    const openIdx = lower.indexOf("<", cursor);
+    if (openIdx === -1) {
+      out.push(html.slice(cursor));
+      break;
+    }
+    let nameEnd = openIdx + 1;
+    while (nameEnd < lower.length) {
+      const ch = lower.charCodeAt(nameEnd);
+      const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
+      if (!isAlphaNum) break;
+      nameEnd += 1;
+    }
+    if (nameEnd === openIdx + 1) {
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+    const boundary = nameEnd < lower.length ? lower.charCodeAt(nameEnd) : -1;
+    const isBoundary = boundary === 62 || boundary === 47 || boundary === 32 || boundary === 9 || boundary === 10 || boundary === 12 || boundary === 13;
+    const tagName = lower.slice(openIdx + 1, nameEnd);
+    if (!isBoundary || !tagSet.has(tagName) || noClosingTag.has(tagName)) {
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+    const openClose = lower.indexOf(">", nameEnd);
+    if (openClose === -1) {
+      out.push(html.slice(cursor));
+      break;
+    }
+    if (html.charCodeAt(openClose - 1) === 47) {
+      out.push(html.slice(cursor, openClose + 1));
+      cursor = openClose + 1;
+      continue;
+    }
+    const closeNeedle = `</${tagName}`;
+    let searchFrom = openClose + 1;
+    let closeStart = -1;
+    let closeEnd = -1;
+    while (true) {
+      const idx = lower.indexOf(closeNeedle, searchFrom);
+      if (idx === -1) break;
+      const afterName = idx + closeNeedle.length;
+      const nextCh = afterName < lower.length ? lower.charCodeAt(afterName) : -1;
+      const validCloseBoundary = nextCh === 62 || nextCh === 32 || nextCh === 9 || nextCh === 10 || nextCh === 12 || nextCh === 13;
+      if (!validCloseBoundary) {
+        searchFrom = afterName;
+        continue;
+      }
+      const endBracket = lower.indexOf(">", afterName);
+      if (endBracket === -1) break;
+      closeStart = idx;
+      closeEnd = endBracket + 1;
+      break;
+    }
+    if (closeStart === -1) {
+      noClosingTag.add(tagName);
+      out.push(html.slice(cursor, openIdx + 1));
+      cursor = openIdx + 1;
+      continue;
+    }
+    out.push(html.slice(cursor, openIdx));
+    out.push(transform2(tagName, html.slice(openClose + 1, closeStart)));
+    cursor = closeEnd;
+  }
+  return out.join("");
 }
 function htmlToMarkdownText(html) {
-  let out = html;
-  out = out.replace(/<(script|style|noscript|svg|nav|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
-  out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner) => {
+  let out = replaceHtmlElements(
+    html,
+    ["script", "style", "noscript", "svg", "nav", "footer"],
+    () => ""
+  );
+  out = replaceHtmlElements(out, ["pre"], (_tag, inner) => {
     const clean = stripTags(inner).trim();
     return `
 \`\`\`
@@ -90659,24 +90770,24 @@ ${clean}
 \`\`\`
 `;
   });
-  out = out.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner) => {
+  out = replaceHtmlElements(out, ["code"], (_tag, inner) => {
     const clean = stripTags(inner).trim();
     return clean ? `\`${clean}\`` : "";
   });
-  out = out.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, lvl, inner) => {
-    const hashes = "#".repeat(Number(lvl));
+  out = replaceHtmlElements(out, ["h1", "h2", "h3", "h4", "h5", "h6"], (tag, inner) => {
+    const hashes = "#".repeat(Number(tag.slice(1)));
     const clean = stripTags(inner).replace(/\s+/g, " ").trim();
     return clean ? `
 ${hashes} ${clean}
 ` : "\n";
   });
-  out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner) => {
+  out = replaceHtmlElements(out, ["li"], (_tag, inner) => {
     const clean = stripTags(inner).replace(/\s+/g, " ").trim();
     return clean ? `
 - ${clean}` : "";
   });
   out = out.replace(
-    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^>]*>/gi,
+    /<\/?(?:p|div|br|section|article|header|main|aside|blockquote|tr|table|ul|ol|hr|dt|dd)\b[^<>]*>/gi,
     "\n"
   );
   out = decodeHtmlEntities(stripTags(out));

@@ -164,7 +164,8 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
       ? classifyLayer(resolved.resolvedPath, input.spec)
       : null;
 
-    // 1. Layer dependency boundary
+    // 1. Layer dependency boundary (same-layer imports are always permitted
+    // regardless of can_import / cannot_import config).
     if (sourceLayer && targetLayer && sourceLayer.name !== targetLayer.name) {
       const forbiddenExplicit = sourceLayer.def.cannot_import?.includes(targetLayer.name) ?? false;
       const disallowedByAllowlist =

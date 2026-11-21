@@ -305,6 +305,59 @@ describe('extractImports & resolveImport across languages', () => {
     );
   });
 
+  it('resolves Rust item imports to the longest existing containing module', () => {
+    const knownFiles = new Set([
+      'src/lib.rs',
+      'src/modules/orders/mod.rs',
+      'src/modules/orders/internal.rs',
+      'src/modules/orders/sub.rs',
+      'src/modules/billing/service.rs',
+      'crates/nested/src/lib.rs',
+    ]);
+    const ctx = { knownFiles };
+
+    const crateSrc = [
+      'use crate::modules::orders::Order;',
+      'use crate::modules::orders::OrderStatus::Pending;',
+      'use crate::modules::orders::internal::Secret;',
+      'use crate::AppConfig;',
+    ].join('\n');
+    const parsedCrate = extractImports('src/modules/billing/service.rs', crateSrc);
+    expect(
+      resolveImports(parsedCrate.imports, 'src/modules/billing/service.rs', ctx).map(
+        (r) => r.resolvedPath,
+      ),
+    ).toEqual([
+      'src/modules/orders/mod.rs',
+      'src/modules/orders/mod.rs',
+      'src/modules/orders/internal.rs',
+      'src/lib.rs',
+    ]);
+
+    const relSrc = [
+      'use super::super::orders::Order;',
+      'use super::super::orders::internal::Secret;',
+    ].join('\n');
+    const parsedRel = extractImports('src/modules/billing/service.rs', relSrc);
+    expect(
+      resolveImports(parsedRel.imports, 'src/modules/billing/service.rs', ctx).map(
+        (r) => r.resolvedPath,
+      ),
+    ).toEqual(['src/modules/orders/mod.rs', 'src/modules/orders/internal.rs']);
+
+    const selfSrc = 'use self::sub::Helper;\n';
+    const parsedSelf = extractImports('src/modules/orders/mod.rs', selfSrc);
+    expect(
+      resolveImport(parsedSelf.imports[0]!, 'src/modules/orders/mod.rs', ctx).resolvedPath,
+    ).toBe('src/modules/orders/sub.rs');
+
+    const nestedSrc = 'use crate::Missing;\n';
+    const parsedNested = extractImports('crates/nested/src/app.rs', nestedSrc);
+    expect(
+      resolveImport(parsedNested.imports[0]!, 'crates/nested/src/app.rs', ctx).resolvedPath,
+    ).toBe('crates/nested/src/lib.rs');
+  });
+
   it('rebases inherited tsconfig baseUrl, paths, and nested extends relative to their defining directory', () => {
     const files: Record<string, string> = {
       'config/base.json': JSON.stringify({

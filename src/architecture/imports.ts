@@ -1580,6 +1580,52 @@ export function resolveImports(
   return out;
 }
 
+function findRustCrateSrc(normSource: string): string {
+  const srcIdx = normSource.lastIndexOf('/src/');
+  if (srcIdx !== -1) return normSource.slice(0, srcIdx + 4);
+  return normSource.startsWith('src/') ? 'src' : '';
+}
+
+function resolveRustModulePath(
+  joined: string,
+  crateRoot: string,
+  ctx: WorkspaceResolveContext,
+): string {
+  const normJoined = normalizePath(joined);
+  const normRoot = crateRoot ? normalizePath(crateRoot) : '';
+
+  let candidate = normJoined;
+  while (true) {
+    if (normRoot && candidate !== normRoot && !candidate.startsWith(`${normRoot}/`)) {
+      break;
+    }
+    if (candidate === normRoot) {
+      const libRs = normRoot ? `${normRoot}/lib.rs` : 'lib.rs';
+      if (existsRepoFile(libRs, ctx)) return libRs;
+      const mainRs = normRoot ? `${normRoot}/main.rs` : 'main.rs';
+      if (existsRepoFile(mainRs, ctx)) return mainRs;
+      break;
+    }
+    if (candidate && candidate !== '.') {
+      const rsFile = `${candidate}.rs`;
+      if (existsRepoFile(rsFile, ctx)) return rsFile;
+      const rsMod = `${candidate}/mod.rs`;
+      if (existsRepoFile(rsMod, ctx)) return rsMod;
+    }
+    const slash = candidate.lastIndexOf('/');
+    if (slash === -1) {
+      if (normRoot === '' && candidate !== '') {
+        candidate = '';
+        continue;
+      }
+      break;
+    }
+    candidate = candidate.slice(0, slash);
+  }
+
+  return normJoined;
+}
+
 /**
  * Resolve an {@link ExtractedImport} into either an internal repo-relative path
  * or an external package identifier.
@@ -1661,23 +1707,11 @@ export function resolveImport(
       }
       if (imp.specifier.startsWith('crate::')) {
         const rel = imp.specifier.slice('crate::'.length).replace(/::/g, '/');
-        const srcIdx = normSource.lastIndexOf('/src/');
-        const crateSrc =
-          srcIdx !== -1
-            ? normSource.slice(0, srcIdx + 4)
-            : normSource.startsWith('src/')
-              ? 'src'
-              : '';
+        const crateSrc = findRustCrateSrc(normSource);
         const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
-        const rsFile = `${joined}.rs`;
-        const rsMod = `${joined}/mod.rs`;
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx)
-            ? rsFile
-            : existsRepoFile(rsMod, ctx)
-              ? rsMod
-              : joined,
+          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx),
         };
       }
       if (imp.specifier.startsWith('super::') || imp.specifier.startsWith('self::')) {
@@ -1699,15 +1733,10 @@ export function resolveImport(
         }
         const rel = rest.replace(/::/g, '/');
         const joined = normalizePath(modDir === '.' ? rel : posix.join(modDir, rel));
-        const rsFile = `${joined}.rs`;
-        const rsMod = `${joined}/mod.rs`;
+        const crateSrc = findRustCrateSrc(normSource);
         return {
           ...base,
-          resolvedPath: existsRepoFile(rsFile, ctx)
-            ? rsFile
-            : existsRepoFile(rsMod, ctx)
-              ? rsMod
-              : joined,
+          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx),
         };
       }
       const crateName = imp.specifier.split('::')[0] ?? imp.specifier;

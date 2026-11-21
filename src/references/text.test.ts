@@ -50,6 +50,27 @@ describe('normalizeDocumentText', () => {
     expect(text).toContain('## Generic <T> &amp; `Array<string>`');
     expect(text).toContain('- Use `Result<T, E>`');
   });
+
+  it('handles adversarial unclosed HTML tags in linear time', () => {
+    const malicious = `${'<script>'.repeat(50_000)}<p>Safe content</p>`;
+    const start = Date.now();
+    const text = normalizeDocumentText(malicious, 'text/html');
+    const elapsedMs = Date.now() - start;
+    expect(text).toBe('Safe content');
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
+  it('preserves slice alignment when HTML contains expanding non-ASCII uppercase chars and self-closing chrome tags', () => {
+    const unicodeHtml = '\u0130<script>bad()</script><h2>Heading</h2><p>Body</p>';
+    const unicodeText = normalizeDocumentText(unicodeHtml, 'text/html');
+    expect(unicodeText).toContain('\u0130');
+    expect(unicodeText).toContain('## Heading');
+    expect(unicodeText).toContain('Body');
+    expect(unicodeText).not.toContain('bad()');
+
+    const selfClosing = '<svg class="icon"/><p>Keep me</p><svg>drop</svg>';
+    expect(normalizeDocumentText(selfClosing, 'text/html')).toBe('Keep me');
+  });
 });
 
 describe('extractDocumentHeadings', () => {

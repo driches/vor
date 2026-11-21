@@ -69,7 +69,7 @@ export interface RepoArchCheckResult {
   suppressed_by_ignore: number;
   suppressed_by_baseline: number;
   violations: ArchViolation[];
-  /** Fingerprints of all non-ignored violations (for writing baselines). */
+  /** Fingerprints of all non-ignore-list violations (including baseline-suppressed ones; used for writing baselines). */
   all_fingerprints: string[];
   passed: boolean;
   fail_on: Severity;
