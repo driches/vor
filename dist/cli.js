@@ -79750,13 +79750,27 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
 }
 
 // src/architecture/evaluator.ts
+function isDirectoryTarget(normPath) {
+  return detectArchLanguage(normPath) === null && !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(normPath);
+}
+function matchesTargetGlob(filePath, pattern) {
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return matchesGlob(norm, pattern) || isDirectoryTarget(norm) && matchesGlob(`${norm}/index`, pattern);
+}
+function matchesAnyTargetGlob(filePath, patterns) {
+  const norm = normalizePath(filePath);
+  if (!norm || patterns.length === 0) return false;
+  if (matchesAnyGlob(norm, patterns)) return true;
+  return isDirectoryTarget(norm) && matchesAnyGlob(`${norm}/index`, patterns);
+}
 function matchesLayerPath(filePath, patterns) {
   const norm = normalizePath(filePath);
   if (!norm) return -1;
-  const extensionless = detectArchLanguage(norm) === null && !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(norm);
+  const isDir = isDirectoryTarget(norm);
   let best = -1;
   for (const pattern of patterns) {
-    if (matchesGlob(norm, pattern) || extensionless && matchesGlob(`${norm}/index`, pattern)) {
+    if (matchesGlob(norm, pattern) || isDir && matchesGlob(`${norm}/index`, pattern)) {
       const score = globSpecificity(pattern);
       if (score > best) best = score;
     }
@@ -79791,9 +79805,7 @@ var DEFAULT_PUBLIC_API_PATTERNS = ["index.*", "public/**", "contracts/**", "api/
 function matchesAnyTarget(target, resolvedPath, targetLayer) {
   if (targetLayer && target === targetLayer.name) return true;
   if (!resolvedPath) return false;
-  if (matchesGlob(resolvedPath, target)) return true;
-  const extensionless = !/\.[^/]+$/.test(resolvedPath);
-  return extensionless && matchesGlob(`${resolvedPath}/index`, target);
+  return matchesTargetGlob(resolvedPath, target);
 }
 function evaluateFileArchitecture(input2) {
   const normFile = normalizePath(input2.filePath);
@@ -79882,7 +79894,7 @@ function evaluateFileArchitecture(input2) {
     if (input2.spec.contexts && sourceCtx && resolved.resolvedPath) {
       const targetCtx = extractContext(resolved.resolvedPath, input2.spec.contexts.pattern);
       if (targetCtx && targetCtx.context !== sourceCtx.context) {
-        const isShared = input2.spec.contexts.shared !== void 0 && matchesAnyGlob(resolved.resolvedPath, input2.spec.contexts.shared);
+        const isShared = input2.spec.contexts.shared !== void 0 && matchesAnyTargetGlob(resolved.resolvedPath, input2.spec.contexts.shared);
         if (!isShared) {
           const ctxSeverity = input2.spec.contexts.severity ?? input2.spec.severity;
           const allowDeps = input2.spec.contexts.allow_dependencies?.[sourceCtx.context];
@@ -79906,7 +79918,7 @@ function evaluateFileArchitecture(input2) {
             const allowsRootIndex = publicGlobs.some(
               (g2) => g2.startsWith("index") || g2.startsWith("__init__")
             );
-            const isPublicTarget = matchesAnyGlob(targetCtx.relativePath, publicGlobs) || allowsRootIndex && (targetCtx.relativePath === "" || targetCtx.relativePath === "index");
+            const isPublicTarget = matchesAnyTargetGlob(targetCtx.relativePath, publicGlobs) || allowsRootIndex && (targetCtx.relativePath === "" || targetCtx.relativePath === "index");
             if (!allowPublicApi || !isPublicTarget) {
               pushViolation({
                 rule_id: "arch:context-boundary",

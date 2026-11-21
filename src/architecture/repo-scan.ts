@@ -202,7 +202,8 @@ function commonDirPrefix(a: string, b: string): string {
 
 function collapseNamespaceTargets(files: readonly string[]): string | undefined {
   // Always return the directory so classifyLayer receives a consistent
-  // directory path regardless of how many files share the namespace.
+  // directory path regardless of how many files share the namespace (keep the
+  // file path only when a single file sits at repository root with no dir).
   const dir = (f: string) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
   if (files.length === 1) return dir(files[0]!) || files[0]!;
   let shared = dir(files[0]!);

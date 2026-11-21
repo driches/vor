@@ -396,4 +396,40 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('exempts Go shared-kernel directory imports even under allow_dependencies: []', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-go-shared-'));
+    try {
+      mkdirSync(join(ws, 'contexts/orders'), { recursive: true });
+      mkdirSync(join(ws, 'contexts/shared'), { recursive: true });
+      writeFileSync(join(ws, 'go.mod'), 'module example.com/app\n');
+      writeFileSync(join(ws, 'contexts/shared/money.go'), 'package shared\ntype Money struct{}\n');
+      writeFileSync(
+        join(ws, 'contexts/orders/order.go'),
+        'package orders\nimport "example.com/app/contexts/shared"\nvar _ shared.Money\n',
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'custom',
+        contexts: {
+          pattern: 'contexts/*',
+          shared: ['contexts/shared/**'],
+          allow_dependencies: { orders: [] },
+        },
+      });
+
+      const explained = explainFileArchitecture(ws, 'contexts/orders/order.go', spec);
+      expect(explained.imports).toHaveLength(1);
+      expect(explained.imports[0]?.resolved_path).toBe('contexts/shared');
+      expect(explained.imports[0]?.violations).toEqual([]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(true);
+      expect(repoRes.violations).toEqual([]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

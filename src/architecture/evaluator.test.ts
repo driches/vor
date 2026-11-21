@@ -231,4 +231,70 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     expect(violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters');
     expect(violations[0]?.description).toContain('`can_import: []`');
   });
+
+  it('matches directory targets against contexts.shared, contexts.public_api, and forbid_imports', () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'custom',
+      contexts: {
+        pattern: 'contexts/*',
+        public_api: ['public/**'],
+        shared: ['contexts/shared/**'],
+        allow_dependencies: { orders: [] },
+      },
+      rules: [
+        {
+          id: 'no-legacy',
+          from: '**',
+          forbid_imports: ['src/Acme.Legacy/**'],
+          reason: 'Legacy C# namespace is deprecated.',
+        },
+      ],
+    });
+
+    const goSharedOk = evaluateFileArchitecture({
+      filePath: 'contexts/orders/order.go',
+      content:
+        'package orders\nimport (\n  "example.com/app/contexts/shared"\n  "example.com/app/contexts/billing/public"\n  "example.com/app/contexts/billing/internal"\n)\n',
+      spec,
+      resolveCtx: { goModule: 'example.com/app' },
+    });
+    expect(goSharedOk).toHaveLength(2);
+    expect(goSharedOk.map((v) => [v.line, v.specifier, v.rule_id])).toEqual([
+      [4, 'example.com/app/contexts/billing/public', 'arch:context-boundary'],
+      [5, 'example.com/app/contexts/billing/internal', 'arch:context-boundary'],
+    ]);
+
+    // When cross-context dependency is permitted (or unconfigured), Go directory public_api passes while internal fails.
+    const pubSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'custom',
+      contexts: {
+        pattern: 'contexts/*',
+        public_api: ['public/**'],
+        shared: ['contexts/shared/**'],
+      },
+    });
+    const pubViolations = evaluateFileArchitecture({
+      filePath: 'contexts/orders/order.go',
+      content:
+        'package orders\nimport (\n  "example.com/app/contexts/shared"\n  "example.com/app/contexts/billing/public"\n  "example.com/app/contexts/billing/internal"\n)\n',
+      spec: pubSpec,
+      resolveCtx: { goModule: 'example.com/app' },
+    });
+    expect(pubViolations).toHaveLength(1);
+    expect(pubViolations[0]?.specifier).toBe('example.com/app/contexts/billing/internal');
+
+    // Dotted C# directory target matches custom rule `forbid_imports: ['src/Acme.Legacy/**']`.
+    const csViolations = evaluateFileArchitecture({
+      filePath: 'src/Acme.Domain/Order.cs',
+      content: 'namespace Acme.Domain;\nusing Acme.Legacy;\n',
+      spec,
+      resolveCtx: {},
+    });
+    expect(csViolations).toHaveLength(1);
+    expect(csViolations[0]?.rule_id).toBe('arch:rule:no-legacy');
+  });
 });

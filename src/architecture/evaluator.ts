@@ -59,17 +59,37 @@ export interface LayerMatch {
   def: ArchitectureLayerDef;
 }
 
+function isDirectoryTarget(normPath: string): boolean {
+  // Directory/namespace targets (including dotted .NET project folders such as
+  // `src/Acme.Infrastructure`) probe `${norm}/index` so subtree globs (`/**`) match.
+  return (
+    detectArchLanguage(normPath) === null &&
+    !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(normPath)
+  );
+}
+
+function matchesTargetGlob(filePath: string, pattern: string): boolean {
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return (
+    matchesGlob(norm, pattern) || (isDirectoryTarget(norm) && matchesGlob(`${norm}/index`, pattern))
+  );
+}
+
+function matchesAnyTargetGlob(filePath: string, patterns: readonly string[]): boolean {
+  const norm = normalizePath(filePath);
+  if (!norm || patterns.length === 0) return false;
+  if (matchesAnyGlob(norm, patterns)) return true;
+  return isDirectoryTarget(norm) && matchesAnyGlob(`${norm}/index`, patterns);
+}
+
 function matchesLayerPath(filePath: string, patterns: readonly string[]): number {
   const norm = normalizePath(filePath);
   if (!norm) return -1;
-  // Directory/namespace targets (including dotted .NET project folders such as
-  // `src/Acme.Infrastructure`) probe `${norm}/index` so subtree globs (`/**`) match.
-  const extensionless =
-    detectArchLanguage(norm) === null &&
-    !/\.(?:json|ya?ml|md|txt|toml|xml|csproj|fsproj|sln|lock|mod|sum)$/i.test(norm);
+  const isDir = isDirectoryTarget(norm);
   let best = -1;
   for (const pattern of patterns) {
-    if (matchesGlob(norm, pattern) || (extensionless && matchesGlob(`${norm}/index`, pattern))) {
+    if (matchesGlob(norm, pattern) || (isDir && matchesGlob(`${norm}/index`, pattern))) {
       const score = globSpecificity(pattern);
       if (score > best) best = score;
     }
@@ -134,9 +154,7 @@ function matchesAnyTarget(
 ): boolean {
   if (targetLayer && target === targetLayer.name) return true;
   if (!resolvedPath) return false;
-  if (matchesGlob(resolvedPath, target)) return true;
-  const extensionless = !/\.[^/]+$/.test(resolvedPath);
-  return extensionless && matchesGlob(`${resolvedPath}/index`, target);
+  return matchesTargetGlob(resolvedPath, target);
 }
 
 export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolation[] {
@@ -280,7 +298,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
       if (targetCtx && targetCtx.context !== sourceCtx.context) {
         const isShared =
           input.spec.contexts.shared !== undefined &&
-          matchesAnyGlob(resolved.resolvedPath, input.spec.contexts.shared);
+          matchesAnyTargetGlob(resolved.resolvedPath, input.spec.contexts.shared);
 
         if (!isShared) {
           const ctxSeverity = input.spec.contexts.severity ?? input.spec.severity;
@@ -314,7 +332,7 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
               (g) => g.startsWith('index') || g.startsWith('__init__'),
             );
             const isPublicTarget =
-              matchesAnyGlob(targetCtx.relativePath, publicGlobs) ||
+              matchesAnyTargetGlob(targetCtx.relativePath, publicGlobs) ||
               (allowsRootIndex &&
                 (targetCtx.relativePath === '' || targetCtx.relativePath === 'index'));
 

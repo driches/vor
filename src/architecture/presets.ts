@@ -127,6 +127,8 @@ function scopeGlobsToRoot(globs: readonly string[], root?: string): string[] {
     const norm = normalizePath(g);
     if (norm.startsWith('**/')) {
       const rest = norm.slice(3);
+      // Emit both root-level layers (`src/domain/**`) and per-module nested
+      // layers (`src/orders/domain/**`) while staying scoped inside `cleanRoot`.
       scoped.push(`${cleanRoot}/${rest}`, `${cleanRoot}/**/${rest}`);
     } else if (norm === cleanRoot || norm.startsWith(`${cleanRoot}/`)) {
       scoped.push(norm);
