@@ -59,8 +59,15 @@ export interface CompleteOptions {
   system: string;
   temperature?: number;
   abortSignal?: AbortSignal;
+  /** Anthropic Messages API controls. Ignored by non-Anthropic providers. */
+  anthropic?: AnthropicCompleteOptions;
   /** OpenAI Responses API controls. Ignored by non-OpenAI providers. */
   openai?: OpenAICompleteOptions;
+}
+
+export interface AnthropicCompleteOptions {
+  /** Prompt-cache TTL for the static prefix (`'5m'` default, `'1h'` for extended cross-PR caching). */
+  prompt_cache_ttl?: '5m' | '1h';
 }
 
 interface OpenAICompleteOptionsBase {

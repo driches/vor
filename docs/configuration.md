@@ -117,6 +117,36 @@ image_understanding:
   enabled: false
   # model: claude-haiku-4-5                           # default cheap vision model
   # max_images: 10                                    # cap vision calls per run
+
+# Software architecture standards enforcement (hexagonal, ddd, clean, layered,
+# modular-monolith, custom). Off by default. See architecture-standards.md.
+architecture:
+  enabled: false
+  # preset: hexagonal                                 # hexagonal | ddd | clean | layered | modular-monolith | custom
+  # file: .vor/architecture.yml                       # optional standalone architecture config
+  # root: src                                         # scope default preset globs under root dir
+  # severity: important                               # critical | important | minor | nit
+  # llm_enforcement: true
+  # deterministic_enforcement: true
+  # ignore_tests: true
+
+# Reference documentation and engineering standards reading + two-layer caching.
+# Off by default. See references.md.
+references:
+  enabled: false
+  # max_inline_bytes: 80000                           # inline prompt prefix cap; overflow becomes on-demand
+  # sources:
+  #   - docs/standards.md
+  #   - "docs/adr/**/*.md"
+  #   - https://example.com/api-guide.html
+  #   - github:acme/standards/docs/ddd.md@main
+  # cache:
+  #   enabled: true
+  #   ttl_seconds: 86400
+  #   stale_on_error: true
+  # prompt_cache:
+  #   anthropic_ttl: 5m                               # 5m | 1h
+  #   auto_openai_cache_key: true
 ```
 
 ### OpenAI reasoning controls

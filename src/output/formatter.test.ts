@@ -316,6 +316,27 @@ describe('renderSummary — body content', () => {
     });
     expect(r.body).not.toContain('Security:');
   });
+
+  it('emits an Architecture sub-line without counting architecture under Security', () => {
+    const archComment: PostedComment = {
+      ...c('important'),
+      category: 'architecture',
+      source: {
+        kind: 'scanner',
+        scanner: 'architecture',
+        rule_id: 'arch:layer:domain-to-adapters_out',
+      },
+    };
+    const r = renderSummary({
+      draft: baseDraft(),
+      keptComments: [archComment],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(r.body).not.toContain('Security:');
+    expect(r.body).toContain('**Architecture:** 1 violation from architecture scan');
+  });
 });
 
 describe('renderSummary — event selection (unchanged)', () => {

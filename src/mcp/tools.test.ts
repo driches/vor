@@ -142,4 +142,129 @@ describe('MCP tool handlers', () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it('check_architecture runs deterministic repo scan, reports violations, and confines paths', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-mcp-arch-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(join(repo, 'src/domain'), { recursive: true });
+    mkdirSync(join(repo, 'src/adapters/out'), { recursive: true });
+    writeFileSync(join(repo, 'src/adapters/out/db.ts'), 'export const db = {};\n');
+    writeFileSync(join(repo, 'src/domain/order.ts'), 'export const ok = 1;\n');
+    writeFileSync(join(repo, '.vor.yml'), 'architecture:\n  enabled: true\n  preset: hexagonal\n');
+    writeFileSync(join(repo, '..', 'outside-arch.yml'), 'preset: hexagonal\n');
+
+    try {
+      const h = createHandlers(deps({ workspace: repo }));
+
+      const clean = parse(await h.check_architecture({})) as {
+        passed: boolean;
+        violations: unknown[];
+      };
+      expect(clean.passed).toBe(true);
+      expect(clean.violations).toEqual([]);
+
+      writeFileSync(
+        join(repo, 'src/domain/order.ts'),
+        "import { db } from '../adapters/out/db';\nexport const x = db;\n",
+      );
+      const dirty = parse(await h.check_architecture({})) as {
+        passed: boolean;
+        violations: Array<{ rule_id: string }>;
+      };
+      expect(dirty.passed).toBe(false);
+      expect(dirty.violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters_out');
+
+      const escaped = await h.check_architecture({ arch_config_path: '../outside-arch.yml' });
+      expect(escaped.isError).toBe(true);
+    } finally {
+      rmSync(join(repo, '..', 'outside-arch.yml'), { force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('list_references and read_reference load, cache, slice, and search configured docs', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-mcp-refs-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-mcp-refcache-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(join(repo, 'docs'), { recursive: true });
+    writeFileSync(
+      join(repo, 'docs/api.md'),
+      '# API Standards\nUse camelCase JSON.\nAlways paginate lists.\n',
+    );
+    writeFileSync(
+      join(repo, '.vor.yml'),
+      `references:\n  enabled: true\n  sources:\n    - docs/api.md\n  cache:\n    dir: "${cacheDir}"\n`,
+    );
+
+    try {
+      const h = createHandlers(deps({ workspace: repo }));
+      const listed = parse(await h.list_references({})) as {
+        enabled: boolean;
+        cache_stats: { misses: number; hits: number };
+        docs: Array<{ id: string }>;
+      };
+      expect(listed.enabled).toBe(true);
+      expect(listed.cache_stats.misses).toBe(1);
+      expect(listed.docs[0]?.id).toBe('docs/api.md');
+
+      const sliced = parse(
+        await h.read_reference({ id: 'docs/api.md', start_line: 2, end_line: 3 }),
+      ) as { content: string };
+      expect(sliced.content).toBe('Use camelCase JSON.\nAlways paginate lists.');
+
+      const searched = parse(await h.read_reference({ query: 'paginate' })) as {
+        match_count: number;
+        matches: Array<{ id: string; line: number }>;
+      };
+      expect(searched.match_count).toBe(1);
+      expect(searched.matches[0]).toMatchObject({ id: 'docs/api.md', line: 3 });
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('passes octokit through list_references and read_reference for github: sources', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vor-mcp-gh-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-mcp-ghcache-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    writeFileSync(
+      join(repo, '.vor.yml'),
+      `references:\n  enabled: true\n  sources:\n    - github:acme/standards/docs/ddd.md@main\n  cache:\n    dir: "${cacheDir}"\n`,
+    );
+
+    const getContent = vi.fn(async () => ({
+      data: {
+        type: 'file',
+        sha: 'blob1',
+        content: Buffer.from('# Org DDD\nUse aggregates.\n', 'utf-8').toString('base64'),
+        encoding: 'base64',
+      },
+    }));
+    const octokit = { rest: { repos: { getContent } } } as unknown as VorToolDeps['octokit'];
+
+    try {
+      const h = createHandlers(deps({ workspace: repo, ...(octokit ? { octokit } : {}) }));
+      const listed = parse(await h.list_references({})) as {
+        docs: Array<{ id: string; kind: string }>;
+      };
+      expect(listed.docs).toHaveLength(1);
+      expect(listed.docs[0]).toMatchObject({
+        id: 'github:acme/standards/docs/ddd.md',
+        kind: 'github',
+      });
+
+      const read = parse(await h.read_reference({ id: 'github:acme/standards/docs/ddd.md' })) as {
+        content: string;
+      };
+      expect(read.content).toContain('Use aggregates.');
+      expect(getContent).toHaveBeenCalledTimes(1);
+
+      await h.list_references({ refresh: true });
+      expect(getContent).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });

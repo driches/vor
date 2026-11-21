@@ -378,3 +378,122 @@ providers:
     }
   });
 });
+
+describe('architecture config schema', () => {
+  it('merges architecture defaults when omitted', () => {
+    const cfg = loadConfigFromString('model: claude-sonnet-4-6');
+    expect(cfg.architecture).toEqual(DEFAULT_CONFIG.architecture);
+    expect(cfg.architecture.enabled).toBe(false);
+  });
+
+  it('accepts preset with partial layer overrides and custom rules', () => {
+    const cfg = loadConfigFromString(`
+architecture:
+  enabled: true
+  preset: hexagonal
+  root: src
+  severity: critical
+  layers:
+    domain:
+      paths:
+        - "src/core/domain/**"
+      forbid_packages:
+        - express
+  contexts:
+    pattern: "src/contexts/*"
+    public_api:
+      - "index.ts"
+      - "contracts/**"
+    allow_dependencies:
+      checkout:
+        - billing
+  rules:
+    - id: no-shared-to-adapters
+      from: shared
+      forbid_imports:
+        - adapters_in
+        - adapters_out
+      reason: Shared kernel cannot import adapters.
+  principles:
+    - Domain entities must not take framework request objects.
+`);
+    expect(cfg.architecture.enabled).toBe(true);
+    expect(cfg.architecture.preset).toBe('hexagonal');
+    expect(cfg.architecture.root).toBe('src');
+    expect(cfg.architecture.severity).toBe('critical');
+    expect(cfg.architecture.llm_enforcement).toBe(true);
+    expect(cfg.architecture.deterministic_enforcement).toBe(true);
+    expect(cfg.architecture.ignore_tests).toBe(true);
+    expect(cfg.architecture.layers?.domain?.paths).toEqual(['src/core/domain/**']);
+    expect(cfg.architecture.contexts?.allow_dependencies?.checkout).toEqual(['billing']);
+    expect(cfg.architecture.rules).toHaveLength(1);
+    expect(cfg.architecture.principles).toHaveLength(1);
+  });
+
+  it('rejects unknown architecture preset', () => {
+    const result = partialConfigSchema.safeParse({
+      architecture: { enabled: true, preset: 'spaghetti' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects unknown keys inside architecture block', () => {
+    const result = partialConfigSchema.safeParse({
+      architecture: { enabled: true, unknown_option: true },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('references config schema', () => {
+  it('merges references defaults when omitted', () => {
+    const cfg = loadConfigFromString('model: claude-sonnet-4-6');
+    expect(cfg.references).toEqual(DEFAULT_CONFIG.references);
+    expect(cfg.references.enabled).toBe(false);
+  });
+
+  it('accepts shorthand strings, object sources, and cache/prompt_cache overrides', () => {
+    const cfg = loadConfigFromString(`
+references:
+  enabled: true
+  max_inline_bytes: 40000
+  sources:
+    - docs/standards.md
+    - "docs/adr/**/*.md"
+    - https://example.com/rfc.md
+    - github:acme/standards/docs/ddd.md@main
+    - id: api-guide
+      title: API Style Guide
+      url: https://example.com/api-guide.html
+      mode: on_demand
+      ttl_seconds: 3600
+  cache:
+    dir: .vor/ref-cache
+    ttl_seconds: 7200
+    stale_on_error: false
+  prompt_cache:
+    anthropic_ttl: 1h
+    auto_openai_cache_key: false
+`);
+    expect(cfg.references.enabled).toBe(true);
+    expect(cfg.references.max_inline_bytes).toBe(40_000);
+    expect(cfg.references.sources).toHaveLength(5);
+    expect(cfg.references.cache.dir).toBe('.vor/ref-cache');
+    expect(cfg.references.cache.ttl_seconds).toBe(7200);
+    expect(cfg.references.cache.stale_on_error).toBe(false);
+    expect(cfg.references.prompt_cache.anthropic_ttl).toBe('1h');
+    expect(cfg.references.prompt_cache.auto_openai_cache_key).toBe(false);
+  });
+
+  it('rejects invalid anthropic_ttl and unknown keys', () => {
+    const badTtl = partialConfigSchema.safeParse({
+      references: { prompt_cache: { anthropic_ttl: '2h' } },
+    });
+    expect(badTtl.success).toBe(false);
+
+    const badKey = partialConfigSchema.safeParse({
+      references: { unknown_field: true },
+    });
+    expect(badKey.success).toBe(false);
+  });
+});

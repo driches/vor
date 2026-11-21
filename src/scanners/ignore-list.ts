@@ -142,6 +142,40 @@ export class IgnoreList implements IgnoreListContract {
   }
 
   /**
+   * Parse and validate ignore-list YAML from an in-memory string. Degrades to
+   * {@link IgnoreList.empty} with a warning on parse/schema failure.
+   */
+  static fromString(raw: string | null | undefined, sourceLabel = 'ignore file'): IgnoreList {
+    if (raw == null || raw.trim().length === 0) {
+      return IgnoreList.empty();
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = parseYaml(raw);
+    } catch (err) {
+      void logger.warn(
+        `Failed to parse ${sourceLabel}: ${(err as Error).message}. Treating as empty.`,
+      );
+      return IgnoreList.empty();
+    }
+
+    if (parsed == null || typeof parsed !== 'object') {
+      void logger.warn(`${sourceLabel} did not parse to an object. Treating as empty.`);
+      return IgnoreList.empty();
+    }
+
+    const result = ignoreFileSchema.safeParse(parsed);
+    if (!result.success) {
+      const detail = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      void logger.warn(`${sourceLabel} validation failed: ${detail}. Treating as empty.`);
+      return IgnoreList.empty();
+    }
+
+    return new IgnoreList(result.data.entries);
+  }
+
+  /**
    * Load the ignore file from the PR HEAD via {@link FileReader}. Any failure
    * (missing file, malformed YAML, schema violation) degrades to
    * {@link IgnoreList.empty} with a logger entry. We never throw — a typo in
@@ -170,29 +204,7 @@ export class IgnoreList implements IgnoreListContract {
       return IgnoreList.empty();
     }
 
-    let parsed: unknown;
-    try {
-      parsed = parseYaml(raw);
-    } catch (err) {
-      void logger.warn(
-        `Failed to parse ignore file ${args.path}: ${(err as Error).message}. Treating as empty.`,
-      );
-      return IgnoreList.empty();
-    }
-
-    if (parsed == null || typeof parsed !== 'object') {
-      void logger.warn(`Ignore file ${args.path} did not parse to an object. Treating as empty.`);
-      return IgnoreList.empty();
-    }
-
-    const result = ignoreFileSchema.safeParse(parsed);
-    if (!result.success) {
-      const detail = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-      void logger.warn(`Ignore file ${args.path} validation failed: ${detail}. Treating as empty.`);
-      return IgnoreList.empty();
-    }
-
-    return new IgnoreList(result.data.entries);
+    return IgnoreList.fromString(raw, `Ignore file ${args.path}`);
   }
 
   matches(finding: ScanFinding): IgnoreMatchResult {

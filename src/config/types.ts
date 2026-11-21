@@ -61,11 +61,128 @@ export interface ReviewConfig {
   /** Cost-effective vision model for image visual-understanding. Off by default. */
   image_understanding: ImageUnderstandingConfig;
 
+  /** Software architecture standards enforcement (hexagonal, DDD, clean, layered, modular-monolith, custom). */
+  architecture: ArchitectureConfig;
+
+  /** Reference documentation and engineering standards reading + caching. */
+  references: ReferencesConfig;
+
   /**
    * Opt-in feature flags. Default-disabled features land here so they ship
    * without changing behavior for anyone who hasn't opted in.
    */
   experimental: ExperimentalConfig;
+}
+
+export type ReferenceMode = 'auto' | 'inline' | 'on_demand';
+
+export interface ReferenceSourceObject {
+  id?: string;
+  title?: string;
+  /** Single repo-relative file path. */
+  path?: string;
+  /** Repo-relative glob pattern (e.g. `docs/adr/**`). */
+  glob?: string;
+  /** Remote HTTP/HTTPS URL. */
+  url?: string;
+  /** Cross-repo GitHub reference (`owner/repo/path[@ref]` or `github:owner/repo/path[@ref]`). */
+  github?: string;
+  mode?: ReferenceMode;
+  ttl_seconds?: number;
+}
+
+export type ReferenceSourceInput = string | ReferenceSourceObject;
+
+export interface ReferencesCacheConfig {
+  enabled: boolean;
+  /** Optional cache directory override (relative to workspace, or absolute e.g. `$RUNNER_TEMP`). */
+  dir?: string;
+  ttl_seconds: number;
+  stale_on_error: boolean;
+}
+
+export interface ReferencesPromptCacheConfig {
+  enabled: boolean;
+  anthropic_ttl: '5m' | '1h';
+  auto_openai_cache_key: boolean;
+}
+
+export interface ReferencesConfig {
+  enabled: boolean;
+  sources: ReferenceSourceInput[];
+  max_inline_bytes: number;
+  max_doc_bytes: number;
+  max_docs: number;
+  cache: ReferencesCacheConfig;
+  prompt_cache: ReferencesPromptCacheConfig;
+}
+
+export type ArchitecturePresetId =
+  | 'hexagonal'
+  | 'ddd'
+  | 'clean'
+  | 'layered'
+  | 'modular-monolith'
+  | 'custom';
+
+export interface ArchitectureLayerDef {
+  paths: string[];
+  description?: string;
+  can_import?: string[];
+  cannot_import?: string[];
+  forbid_packages?: string[];
+  allow_packages?: string[];
+  severity?: Severity;
+}
+
+export type ArchitectureLayerOverride = Partial<ArchitectureLayerDef>;
+
+export interface ArchitectureContextsConfig {
+  /** Glob with a single `*` segment capturing context/module name (e.g. `src/contexts/*`). */
+  pattern: string;
+  /** Paths relative to each context root that external contexts may import. */
+  public_api?: string[];
+  /** Repo-relative globs that any context is allowed to import (shared kernel). */
+  shared?: string[];
+  /** When true (default), cross-context imports to `public_api` paths are allowed unless disallowed by `allow_dependencies`. */
+  allow_public_api_imports?: boolean;
+  /**
+   * Optional explicit context-to-context dependency whitelist (`{ checkout: ['billing'] }`).
+   * Listed dependencies are still subject to the target context's `public_api` policy.
+   */
+  allow_dependencies?: Record<string, string[]>;
+  severity?: Severity;
+}
+
+export interface ArchitectureCustomRule {
+  id: string;
+  from: string | string[];
+  /** Glob/layer patterns checked against resolved internal repository paths (`resolvedPath` only). */
+  forbid_imports?: string[];
+  /** Package name patterns checked when an import resolves to an external/unresolved package. */
+  forbid_packages?: string[];
+  severity?: Severity;
+  reason: string;
+}
+
+export interface ArchitectureConfig {
+  enabled: boolean;
+  /** Optional external YAML file path (e.g. `.vor/architecture.yml`). */
+  file?: string;
+  preset?: ArchitecturePresetId;
+  /** Optional root directory scoping preset default globs (e.g. `src`, `app`, `lib`). */
+  root?: string;
+  severity: Severity;
+  layers?: Record<string, ArchitectureLayerOverride>;
+  contexts?: ArchitectureContextsConfig;
+  rules?: ArchitectureCustomRule[];
+  principles?: string[];
+  include_preset_principles?: boolean;
+  llm_enforcement: boolean;
+  deterministic_enforcement: boolean;
+  exclude?: string[];
+  ignore_tests: boolean;
+  baseline_file?: string;
 }
 
 /**

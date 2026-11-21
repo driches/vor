@@ -162,6 +162,16 @@ export type ScanEvidence =
       kind: 'coverage';
       /** Which coverage tool produced the data (vitest / jest / pytest-cov). */
       tool: 'vitest' | 'jest' | 'pytest-cov';
+    }
+  | {
+      /** Architectural boundary violation (layer import, bounded context, forbidden package, custom rule). */
+      kind: 'architecture';
+      rule: string;
+      specifier: string;
+      source_layer?: string;
+      target_layer?: string;
+      source_context?: string;
+      target_context?: string;
     };
 
 /**

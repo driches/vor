@@ -9,9 +9,11 @@ import { pathToFileURL } from 'node:url';
 import { useStderr } from '../util/logger.js';
 import { packageVersion } from '../util/package-version.js';
 import { status } from './output.js';
+import { registerArch } from './commands/arch.js';
 import { registerConfig } from './commands/config.js';
 import { registerDashboard } from './commands/dashboard.js';
 import { registerMcp } from './commands/mcp.js';
+import { registerRefs } from './commands/refs.js';
 import { registerReview } from './commands/review.js';
 import { registerRuns } from './commands/runs.js';
 
@@ -22,11 +24,13 @@ export function buildProgram(): Command {
     .description('VOR — local AI code review: review, dashboard, and MCP for your working tree')
     .version(packageVersion(), '-v, --version');
 
+  registerArch(program);
   registerReview(program);
   registerRuns(program);
   registerConfig(program);
   registerDashboard(program);
   registerMcp(program);
+  registerRefs(program);
 
   return program;
 }
