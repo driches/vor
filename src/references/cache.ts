@@ -17,11 +17,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { isSafeRelativePath } from '../architecture/loader.js';
 import { logger } from '../util/logger.js';
@@ -77,15 +78,61 @@ function defaultCacheDir(): string {
   return join(vorHome, 'cache', 'references');
 }
 
+function canonicalizeNearest(absPath: string): string {
+  const resolved = resolve(absPath);
+  const missingSegs: string[] = [];
+  let cursor = resolved;
+  while (true) {
+    try {
+      const real = realpathSync(cursor);
+      return missingSegs.length === 0 ? real : join(real, ...missingSegs.reverse());
+    } catch {
+      const parent = dirname(cursor);
+      if (parent === cursor) {
+        return resolved; // reached filesystem root without an existing ancestor
+      }
+      missingSegs.push(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+function isInsideRoot(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function isAllowedAbsoluteCacheDir(absPath: string, workspaceDir?: string): boolean {
+  const canonical = canonicalizeNearest(absPath);
+  const roots = [workspaceDir ?? process.cwd(), tmpdir()];
+  const runnerTemp = process.env.RUNNER_TEMP?.trim();
+  if (runnerTemp) roots.push(runnerTemp);
+  const vorCache = process.env.VOR_CACHE_DIR?.trim();
+  if (vorCache) roots.push(vorCache);
+  const vorHome = process.env.VOR_HOME?.trim();
+  roots.push(vorHome ? vorHome : join(homedir(), '.vor'));
+
+  return roots.some((root) => isInsideRoot(canonical, canonicalizeNearest(root)));
+}
+
 /**
  * Resolve the cache directory for reference docs.
  * Relative configured dirs are confined inside `workspaceDir`; absolute paths
- * (such as `$RUNNER_TEMP/vor-cache` in GitHub Actions) are accepted directly.
+ * are confined to trusted workspace, temp (`os.tmpdir()` / `$RUNNER_TEMP`),
+ * or VOR cache/home directories.
  */
 export function resolveReferenceCacheDir(configuredDir?: string, workspaceDir?: string): string {
   if (configuredDir && configuredDir.trim().length > 0) {
     const trimmed = configuredDir.trim();
-    if (isAbsolute(trimmed)) return trimmed;
+    if (isAbsolute(trimmed)) {
+      if (isAllowedAbsoluteCacheDir(trimmed, workspaceDir)) {
+        return canonicalizeNearest(trimmed);
+      }
+      void logger.warn(
+        `Configured references.cache.dir '${configuredDir}' is outside allowed workspace/temp/cache roots; falling back to default cache dir.`,
+      );
+      return defaultCacheDir();
+    }
     const base = workspaceDir ?? process.cwd();
     if (isSafeRelativePath(base, trimmed)) {
       return resolve(base, trimmed);

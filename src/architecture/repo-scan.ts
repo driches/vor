@@ -187,6 +187,7 @@ function violationToIgnoreProbe(v: ArchViolation): ScanFinding {
 
 const MAX_SYMBOL_INDEX_FILES = 2000;
 const MAX_INDEX_FILE_BYTES = 512 * 1024;
+const MAX_SCAN_FILES = 10_000;
 
 function commonDirPrefix(a: string, b: string): string {
   const segsA = a.split('/');
@@ -352,6 +353,12 @@ export async function runRepoArchitectureCheck(
   const allFingerprints: string[] = [];
 
   for (const filePath of allRepoFiles) {
+    if (filesScanned >= MAX_SCAN_FILES) {
+      void logger.warn(
+        `Architecture scan capped at ${MAX_SCAN_FILES} files; narrow spec.exclude or root to scan remaining files.`,
+      );
+      break;
+    }
     if (detectArchLanguage(filePath) === null) continue;
     if (matchesAnyGlob(filePath, excludePaths)) continue;
     if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
@@ -359,7 +366,10 @@ export async function runRepoArchitectureCheck(
 
     let content: string;
     try {
-      content = readFileSync(resolve(opts.workspaceDir, filePath), 'utf-8');
+      const absPath = resolve(opts.workspaceDir, filePath);
+      const st = statSync(absPath);
+      if (!st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+      content = readFileSync(absPath, 'utf-8');
     } catch {
       continue; // deleted or unreadable symlink in dirty working tree
     }

@@ -91,7 +91,7 @@ export function readReferenceSlice(
   const kept: string[] = [];
   let byteCount = 0;
   let actualEnd = start - 1;
-  let truncated = hardEnd < totalLines;
+  let truncated = opts.end_line === undefined && hardEnd < totalLines;
 
   for (let ln = start; ln <= hardEnd; ln++) {
     const lineText = lines[ln - 1] ?? '';

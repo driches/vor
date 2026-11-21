@@ -432,4 +432,31 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('skips oversized generated files above 512 KB while still evaluating normal source files', async () => {
+    const ws = setupSampleHexRepo();
+    try {
+      writeFileSync(
+        join(ws, 'src/domain/order.ts'),
+        "import { pgRepo } from '../adapters/out/pg_order_repo';\nexport const x = pgRepo;\n",
+      );
+      writeFileSync(
+        join(ws, 'src/domain/huge_bundle.ts'),
+        `import { pgRepo } from '../adapters/out/pg_order_repo';\n// ${'x'.repeat(600 * 1024)}\nexport const h = pgRepo;\n`,
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'hexagonal',
+      });
+      const res = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(res.passed).toBe(false);
+      expect(res.files_scanned).toBe(4);
+      expect(res.violations).toHaveLength(1);
+      expect(res.violations[0]?.file_path).toBe('src/domain/order.ts');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

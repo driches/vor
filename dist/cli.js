@@ -46995,50 +46995,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative7, options, skipNormalization) {
+    function resolveComponent(base, relative8, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse4(serialize(base, options), options);
-        relative7 = parse4(serialize(relative7, options), options);
+        relative8 = parse4(serialize(relative8, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative7.scheme) {
-        target.scheme = relative7.scheme;
-        target.userinfo = relative7.userinfo;
-        target.host = relative7.host;
-        target.port = relative7.port;
-        target.path = removeDotSegments(relative7.path || "");
-        target.query = relative7.query;
+      if (!options.tolerant && relative8.scheme) {
+        target.scheme = relative8.scheme;
+        target.userinfo = relative8.userinfo;
+        target.host = relative8.host;
+        target.port = relative8.port;
+        target.path = removeDotSegments(relative8.path || "");
+        target.query = relative8.query;
       } else {
-        if (relative7.userinfo !== void 0 || relative7.host !== void 0 || relative7.port !== void 0) {
-          target.userinfo = relative7.userinfo;
-          target.host = relative7.host;
-          target.port = relative7.port;
-          target.path = removeDotSegments(relative7.path || "");
-          target.query = relative7.query;
+        if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
+          target.userinfo = relative8.userinfo;
+          target.host = relative8.host;
+          target.port = relative8.port;
+          target.path = removeDotSegments(relative8.path || "");
+          target.query = relative8.query;
         } else {
-          if (!relative7.path) {
+          if (!relative8.path) {
             target.path = base.path;
-            if (relative7.query !== void 0) {
-              target.query = relative7.query;
+            if (relative8.query !== void 0) {
+              target.query = relative8.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative7.path[0] === "/") {
-              target.path = removeDotSegments(relative7.path);
+            if (relative8.path[0] === "/") {
+              target.path = removeDotSegments(relative8.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative7.path;
+                target.path = "/" + relative8.path;
               } else if (!base.path) {
-                target.path = relative7.path;
+                target.path = relative8.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative7.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative7.query;
+            target.query = relative8.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -47046,7 +47046,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative7.fragment;
+      target.fragment = relative8.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -77907,12 +77907,21 @@ function scanCLikeSource(src, opts = {}) {
       chars[i2] = " ";
       chars[i2 + 1] = " ";
       i2 += 2;
-      while (i2 < n2) {
+      let commentDepth = 1;
+      while (i2 < n2 && commentDepth > 0) {
+        if (opts.nestedBlockComments && chars[i2] === "/" && chars[i2 + 1] === "*") {
+          chars[i2] = " ";
+          chars[i2 + 1] = " ";
+          commentDepth += 1;
+          i2 += 2;
+          continue;
+        }
         if (chars[i2] === "*" && chars[i2 + 1] === "/") {
           chars[i2] = " ";
           chars[i2 + 1] = " ";
+          commentDepth -= 1;
           i2 += 2;
-          break;
+          continue;
         }
         if (chars[i2] === "\n") {
           if (lastToken === "close_brace") lastToken = "expr_start";
@@ -78443,7 +78452,10 @@ function extractGoImports(content) {
   return dedupExtracted(out2);
 }
 function extractDartImports(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out2 = [];
@@ -78546,7 +78558,8 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
 function extractRustImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     rustLifetimes: true,
-    rustRawStrings: true
+    rustRawStrings: true,
+    nestedBlockComments: true
   });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
@@ -78750,7 +78763,10 @@ function buildKotlinTopLevelSurface(cleaned, stringSpans) {
   return out2.join("").replace(/^[ \t]*(?:package|import)\b[^\n]*/gm, "");
 }
 function extractKotlinDeclarations(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true
+  });
   const packageName = findJvmPackage(cleaned, stringSpans);
   const topLevel = buildKotlinTopLevelSurface(cleaned, stringSpans);
   const len = topLevel.length;
@@ -78841,7 +78857,10 @@ function extractKotlinDeclarations(content) {
   };
 }
 function extractJavaKotlinImports(content, language) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: language === "kotlin"
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out2 = [];
@@ -80063,6 +80082,7 @@ function violationToIgnoreProbe(v2) {
 }
 var MAX_SYMBOL_INDEX_FILES = 2e3;
 var MAX_INDEX_FILE_BYTES = 512 * 1024;
+var MAX_SCAN_FILES = 1e4;
 function commonDirPrefix(a2, b2) {
   const segsA = a2.split("/");
   const segsB = b2.split("/");
@@ -80194,13 +80214,22 @@ async function runRepoArchitectureCheck(opts) {
   const violations = [];
   const allFingerprints = [];
   for (const filePath of allRepoFiles) {
+    if (filesScanned >= MAX_SCAN_FILES) {
+      void logger.warn(
+        `Architecture scan capped at ${MAX_SCAN_FILES} files; narrow spec.exclude or root to scan remaining files.`
+      );
+      break;
+    }
     if (detectArchLanguage(filePath) === null) continue;
     if (matchesAnyGlob(filePath, excludePaths)) continue;
     if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
     if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
     let content;
     try {
-      content = (0, import_node_fs3.readFileSync)((0, import_node_path3.resolve)(opts.workspaceDir, filePath), "utf-8");
+      const absPath = (0, import_node_path3.resolve)(opts.workspaceDir, filePath);
+      const st2 = (0, import_node_fs3.statSync)(absPath);
+      if (!st2.isFile() || st2.size > MAX_INDEX_FILE_BYTES) continue;
+      content = (0, import_node_fs3.readFileSync)(absPath, "utf-8");
     } catch {
       continue;
     }
@@ -97154,7 +97183,7 @@ function readReferenceSlice(corpus, opts) {
   const kept = [];
   let byteCount = 0;
   let actualEnd = start - 1;
-  let truncated = hardEnd < totalLines;
+  let truncated = opts.end_line === void 0 && hardEnd < totalLines;
   for (let ln = start; ln <= hardEnd; ln++) {
     const lineText = lines[ln - 1] ?? "";
     const lineBytes = Buffer.byteLength(lineText, "utf-8") + (kept.length > 0 ? 1 : 0);
@@ -108901,10 +108930,51 @@ function defaultCacheDir() {
   const vorHome2 = vorHomeOverride ? (0, import_node_path29.resolve)(vorHomeOverride) : (0, import_node_path29.join)((0, import_node_os3.homedir)(), ".vor");
   return (0, import_node_path29.join)(vorHome2, "cache", "references");
 }
+function canonicalizeNearest(absPath) {
+  const resolved = (0, import_node_path29.resolve)(absPath);
+  const missingSegs = [];
+  let cursor = resolved;
+  while (true) {
+    try {
+      const real = (0, import_node_fs15.realpathSync)(cursor);
+      return missingSegs.length === 0 ? real : (0, import_node_path29.join)(real, ...missingSegs.reverse());
+    } catch {
+      const parent = (0, import_node_path29.dirname)(cursor);
+      if (parent === cursor) {
+        return resolved;
+      }
+      missingSegs.push((0, import_node_path29.basename)(cursor));
+      cursor = parent;
+    }
+  }
+}
+function isInsideRoot(candidate, root) {
+  const rel = (0, import_node_path29.relative)(root, candidate);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path29.isAbsolute)(rel);
+}
+function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
+  const canonical = canonicalizeNearest(absPath);
+  const roots = [workspaceDir ?? process.cwd(), (0, import_node_os3.tmpdir)()];
+  const runnerTemp = process.env.RUNNER_TEMP?.trim();
+  if (runnerTemp) roots.push(runnerTemp);
+  const vorCache = process.env.VOR_CACHE_DIR?.trim();
+  if (vorCache) roots.push(vorCache);
+  const vorHome2 = process.env.VOR_HOME?.trim();
+  roots.push(vorHome2 ? vorHome2 : (0, import_node_path29.join)((0, import_node_os3.homedir)(), ".vor"));
+  return roots.some((root) => isInsideRoot(canonical, canonicalizeNearest(root)));
+}
 function resolveReferenceCacheDir(configuredDir, workspaceDir) {
   if (configuredDir && configuredDir.trim().length > 0) {
     const trimmed = configuredDir.trim();
-    if ((0, import_node_path29.isAbsolute)(trimmed)) return trimmed;
+    if ((0, import_node_path29.isAbsolute)(trimmed)) {
+      if (isAllowedAbsoluteCacheDir(trimmed, workspaceDir)) {
+        return canonicalizeNearest(trimmed);
+      }
+      void logger.warn(
+        `Configured references.cache.dir '${configuredDir}' is outside allowed workspace/temp/cache roots; falling back to default cache dir.`
+      );
+      return defaultCacheDir();
+    }
     const base = workspaceDir ?? process.cwd();
     if (isSafeRelativePath(base, trimmed)) {
       return (0, import_node_path29.resolve)(base, trimmed);

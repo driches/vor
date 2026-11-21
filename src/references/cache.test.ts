@@ -116,4 +116,19 @@ describe('DiskReferenceCache', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('confines absolute configured cache dirs to safe workspace, temp, or VOR roots', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-ref-abs-ws-'));
+    const tempCache = join(tmpdir(), 'vor-ref-abs-sub');
+    const wsCache = join(ws, '.vor-custom-cache');
+    try {
+      expect(resolveReferenceCacheDir(wsCache, ws)).toContain('.vor-custom-cache');
+      expect(resolveReferenceCacheDir(tempCache, ws)).toContain('vor-ref-abs-sub');
+
+      const rejected = resolveReferenceCacheDir('/etc/vor-cache-test', ws);
+      expect(rejected).not.toContain('vor-cache-test');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

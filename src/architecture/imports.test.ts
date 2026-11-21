@@ -934,4 +934,49 @@ describe('extractImports & resolveImport across languages', () => {
     });
     expect(resolved[1]?.resolvedPath).toBe('lib/infrastructure/repo.dart');
   });
+
+  it('tracks nested block comments in Rust, Dart, and Kotlin while closing C-style comments on first end marker', () => {
+    const rustSrc = [
+      '/* outer comment',
+      ' /* nested comment */',
+      ' use sqlx::Pool;',
+      '*/',
+      'use crate::domain::Order;',
+    ].join('\n');
+    expect(extractImports('src/domain/order.rs', rustSrc).imports.map((i) => i.specifier)).toEqual([
+      'crate::domain::Order',
+    ]);
+
+    const dartSrc = [
+      '/* outer',
+      ' /* inner */',
+      " import '../infrastructure/db.dart';",
+      '*/',
+      "import '../domain/money.dart';",
+    ].join('\n');
+    expect(
+      extractImports('lib/domain/order.dart', dartSrc).imports.map((i) => i.specifier),
+    ).toEqual(['../domain/money.dart']);
+
+    const ktSrc = [
+      'package com.acme.billing',
+      '/* outer',
+      ' /* inner */',
+      ' import com.acme.orders.secret',
+      '*/',
+      'import com.acme.shared.Money',
+    ].join('\n');
+    expect(
+      extractImports('src/main/kotlin/com/acme/billing/Bill.kt', ktSrc).imports.map(
+        (i) => i.specifier,
+      ),
+    ).toEqual(['com.acme.shared.Money']);
+
+    const javaSrc = ['package com.acme;', '/* outer /* inner */ import com.acme.Real;', '*/'].join(
+      '\n',
+    );
+    expect(
+      extractImports('src/main/java/com/acme/A.java', javaSrc).imports.map((i) => i.specifier),
+    ).toEqual(['com.acme.Real']);
+  });
 });

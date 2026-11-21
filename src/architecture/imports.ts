@@ -122,6 +122,8 @@ export interface CLikeScanOptions {
   rustLifetimes?: boolean;
   /** Recognize Rust raw strings `r"..."` / `r#"..."#`. */
   rustRawStrings?: boolean;
+  /** Track nested block-comment depth (Rust, Kotlin, Dart). */
+  nestedBlockComments?: boolean;
 }
 
 function isIdentChar(ch: string | undefined): boolean {
@@ -456,12 +458,21 @@ export function scanCLikeSource(
       chars[i] = ' ';
       chars[i + 1] = ' ';
       i += 2;
-      while (i < n) {
+      let commentDepth = 1;
+      while (i < n && commentDepth > 0) {
+        if (opts.nestedBlockComments && chars[i] === '/' && chars[i + 1] === '*') {
+          chars[i] = ' ';
+          chars[i + 1] = ' ';
+          commentDepth += 1;
+          i += 2;
+          continue;
+        }
         if (chars[i] === '*' && chars[i + 1] === '/') {
           chars[i] = ' ';
           chars[i + 1] = ' ';
+          commentDepth -= 1;
           i += 2;
-          break;
+          continue;
         }
         if (chars[i] === '\n') {
           if (lastToken === 'close_brace') lastToken = 'expr_start';
@@ -1088,7 +1099,10 @@ function extractGoImports(content: string): ExtractedImport[] {
 }
 
 function extractDartImports(content: string): ExtractedImport[] {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true,
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];
@@ -1216,6 +1230,7 @@ function extractRustImports(content: string): ExtractedImport[] {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     rustLifetimes: true,
     rustRawStrings: true,
+    nestedBlockComments: true,
   });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
@@ -1465,7 +1480,10 @@ export function extractKotlinDeclarations(content: string): {
   packageName?: string;
   symbols: string[];
 } {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true,
+  });
   const packageName = findJvmPackage(cleaned, stringSpans);
   const topLevel = buildKotlinTopLevelSurface(cleaned, stringSpans);
   const len = topLevel.length;
@@ -1570,7 +1588,10 @@ function extractJavaKotlinImports(
   content: string,
   language: 'java' | 'kotlin',
 ): { imports: ExtractedImport[]; meta: FileImportMeta } {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: language === 'kotlin',
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split('\n');
   const out: ExtractedImport[] = [];

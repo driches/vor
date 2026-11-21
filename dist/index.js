@@ -76238,7 +76238,7 @@ function readReferenceSlice(corpus, opts) {
   const kept = [];
   let byteCount = 0;
   let actualEnd = start - 1;
-  let truncated = hardEnd < totalLines;
+  let truncated = opts.end_line === void 0 && hardEnd < totalLines;
   for (let ln = start; ln <= hardEnd; ln++) {
     const lineText = lines[ln - 1] ?? "";
     const lineBytes = Buffer.byteLength(lineText, "utf-8") + (kept.length > 0 ? 1 : 0);
@@ -89055,12 +89055,21 @@ function scanCLikeSource(src, opts = {}) {
       chars[i2] = " ";
       chars[i2 + 1] = " ";
       i2 += 2;
-      while (i2 < n2) {
+      let commentDepth = 1;
+      while (i2 < n2 && commentDepth > 0) {
+        if (opts.nestedBlockComments && chars[i2] === "/" && chars[i2 + 1] === "*") {
+          chars[i2] = " ";
+          chars[i2 + 1] = " ";
+          commentDepth += 1;
+          i2 += 2;
+          continue;
+        }
         if (chars[i2] === "*" && chars[i2 + 1] === "/") {
           chars[i2] = " ";
           chars[i2 + 1] = " ";
+          commentDepth -= 1;
           i2 += 2;
-          break;
+          continue;
         }
         if (chars[i2] === "\n") {
           if (lastToken === "close_brace") lastToken = "expr_start";
@@ -89591,7 +89600,10 @@ function extractGoImports(content) {
   return dedupExtracted(out);
 }
 function extractDartImports(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -89694,7 +89706,8 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
 function extractRustImports(content) {
   const { cleaned, stringSpans } = scanCLikeSource(content, {
     rustLifetimes: true,
-    rustRawStrings: true
+    rustRawStrings: true,
+    nestedBlockComments: true
   });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
@@ -89898,7 +89911,10 @@ function buildKotlinTopLevelSurface(cleaned, stringSpans) {
   return out.join("").replace(/^[ \t]*(?:package|import)\b[^\n]*/gm, "");
 }
 function extractKotlinDeclarations(content) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: true
+  });
   const packageName = findJvmPackage(cleaned, stringSpans);
   const topLevel = buildKotlinTopLevelSurface(cleaned, stringSpans);
   const len = topLevel.length;
@@ -89989,7 +90005,10 @@ function extractKotlinDeclarations(content) {
   };
 }
 function extractJavaKotlinImports(content, language) {
-  const { cleaned, stringSpans } = scanCLikeSource(content, { tripleQuotes: true });
+  const { cleaned, stringSpans } = scanCLikeSource(content, {
+    tripleQuotes: true,
+    nestedBlockComments: language === "kotlin"
+  });
   const starts = buildLineStarts(cleaned);
   const rawLines = content.split("\n");
   const out = [];
@@ -91769,10 +91788,51 @@ function defaultCacheDir() {
   const vorHome = vorHomeOverride ? (0, import_node_path25.resolve)(vorHomeOverride) : (0, import_node_path25.join)((0, import_node_os2.homedir)(), ".vor");
   return (0, import_node_path25.join)(vorHome, "cache", "references");
 }
+function canonicalizeNearest(absPath) {
+  const resolved = (0, import_node_path25.resolve)(absPath);
+  const missingSegs = [];
+  let cursor = resolved;
+  while (true) {
+    try {
+      const real = (0, import_node_fs11.realpathSync)(cursor);
+      return missingSegs.length === 0 ? real : (0, import_node_path25.join)(real, ...missingSegs.reverse());
+    } catch {
+      const parent = (0, import_node_path25.dirname)(cursor);
+      if (parent === cursor) {
+        return resolved;
+      }
+      missingSegs.push((0, import_node_path25.basename)(cursor));
+      cursor = parent;
+    }
+  }
+}
+function isInsideRoot(candidate, root) {
+  const rel = (0, import_node_path25.relative)(root, candidate);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path25.isAbsolute)(rel);
+}
+function isAllowedAbsoluteCacheDir(absPath, workspaceDir) {
+  const canonical = canonicalizeNearest(absPath);
+  const roots = [workspaceDir ?? process.cwd(), (0, import_node_os2.tmpdir)()];
+  const runnerTemp = process.env.RUNNER_TEMP?.trim();
+  if (runnerTemp) roots.push(runnerTemp);
+  const vorCache = process.env.VOR_CACHE_DIR?.trim();
+  if (vorCache) roots.push(vorCache);
+  const vorHome = process.env.VOR_HOME?.trim();
+  roots.push(vorHome ? vorHome : (0, import_node_path25.join)((0, import_node_os2.homedir)(), ".vor"));
+  return roots.some((root) => isInsideRoot(canonical, canonicalizeNearest(root)));
+}
 function resolveReferenceCacheDir(configuredDir, workspaceDir) {
   if (configuredDir && configuredDir.trim().length > 0) {
     const trimmed = configuredDir.trim();
-    if ((0, import_node_path25.isAbsolute)(trimmed)) return trimmed;
+    if ((0, import_node_path25.isAbsolute)(trimmed)) {
+      if (isAllowedAbsoluteCacheDir(trimmed, workspaceDir)) {
+        return canonicalizeNearest(trimmed);
+      }
+      void logger.warn(
+        `Configured references.cache.dir '${configuredDir}' is outside allowed workspace/temp/cache roots; falling back to default cache dir.`
+      );
+      return defaultCacheDir();
+    }
     const base = workspaceDir ?? process.cwd();
     if (isSafeRelativePath(base, trimmed)) {
       return (0, import_node_path25.resolve)(base, trimmed);

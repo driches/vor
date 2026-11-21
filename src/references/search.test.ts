@@ -59,4 +59,21 @@ describe('readReferenceSlice', () => {
     expect(res.returned_range).toEqual([1, 2]);
     expect(Buffer.byteLength(res.content, 'utf-8')).toBeLessThanOrEqual(24_000);
   });
+
+  it('sets truncated to false when an explicit end_line completes and true when default slicing stops early', () => {
+    const lines = Array.from({ length: 450 }, (_, idx) => `line ${idx + 1}`).join('\n');
+    const corpus = makeSingleDocCorpus(lines);
+
+    const explicit = readReferenceSlice(corpus, { id: 'oversized', start_line: 1, end_line: 2 });
+    expect(explicit.ok).toBe(true);
+    if (!explicit.ok) return;
+    expect(explicit.truncated).toBe(false);
+    expect(explicit.returned_range).toEqual([1, 2]);
+
+    const defaulted = readReferenceSlice(corpus, { id: 'oversized', start_line: 1 });
+    expect(defaulted.ok).toBe(true);
+    if (!defaulted.ok) return;
+    expect(defaulted.truncated).toBe(true);
+    expect(defaulted.returned_range).toEqual([1, 400]);
+  });
 });
