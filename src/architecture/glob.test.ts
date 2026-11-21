@@ -81,6 +81,32 @@ describe('extractContext', () => {
     });
     expect(extractContext('packages/auth/package.json', 'packages/*/src')).toBeNull();
   });
+
+  it('normalizes trailing /** with or without an explicit * segment', () => {
+    expect(extractContext('src/contexts/billing/domain/invoice.ts', 'src/contexts/**')).toEqual({
+      context: 'billing',
+      contextRoot: 'src/contexts/billing',
+      relativePath: 'domain/invoice.ts',
+    });
+    expect(extractContext('src/contexts/billing/domain/invoice.ts', 'src/contexts/*/**')).toEqual({
+      context: 'billing',
+      contextRoot: 'src/contexts/billing',
+      relativePath: 'domain/invoice.ts',
+    });
+    expect(
+      extractContext('services/api/src/contexts/orders/internal/db.ts', '**/contexts/**'),
+    ).toEqual({
+      context: 'orders',
+      contextRoot: 'services/api/src/contexts/orders',
+      relativePath: 'internal/db.ts',
+    });
+    expect(extractContext('packages/auth/src/public/api.ts', 'packages/*/src/**')).toEqual({
+      context: 'auth',
+      contextRoot: 'packages/auth/src',
+      relativePath: 'public/api.ts',
+    });
+    expect(extractContext('src/contexts/billing/invoice.ts', 'src/contexts')).toBeNull();
+  });
 });
 
 describe('isTestFile', () => {

@@ -70,7 +70,7 @@ architecture:
     pattern: "src/contexts/*"        # single `*` segment captures context name
     public_api: ["index.*", "contracts/**"]
     shared: ["src/shared/**"]
-    allow_dependencies:
+    allow_dependencies:              # allowed targets still enforce `public_api`
       checkout: [billing, inventory]
   rules:
     - id: no-fs-in-domain

@@ -860,4 +860,31 @@ describe('extractImports & resolveImport across languages', () => {
     );
     expect(resolvedStdlib.packageName).toBe('kotlin.collections.List');
   });
+
+  it('resolves multi-module Java imports across separate repository source roots', () => {
+    const srcPath = 'modules/billing/src/main/java/com/acme/billing/Service.java';
+    const src = [
+      'package com.acme.billing;',
+      'import com.acme.orders.Order;',
+      'import com.acme.orders.Order.Builder;',
+      'import com.acme.orders.*;',
+    ].join('\n');
+
+    const parsed = extractImports(srcPath, src);
+    const knownFiles = new Set([
+      srcPath,
+      'modules/orders/src/main/java/com/acme/orders/Order.java',
+    ]);
+    const ctx = { knownFiles };
+
+    expect(resolveImport(parsed.imports[0]!, srcPath, ctx, parsed.meta).resolvedPath).toBe(
+      'modules/orders/src/main/java/com/acme/orders/Order.java',
+    );
+    expect(resolveImport(parsed.imports[1]!, srcPath, ctx, parsed.meta).resolvedPath).toBe(
+      'modules/orders/src/main/java/com/acme/orders/Order.java',
+    );
+    expect(resolveImport(parsed.imports[2]!, srcPath, ctx, parsed.meta).resolvedPath).toBe(
+      'modules/orders/src/main/java/com/acme/orders',
+    );
+  });
 });

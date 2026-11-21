@@ -9,7 +9,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
-import { normalizePath } from './glob.js';
+import { isTestFile, normalizePath } from './glob.js';
 
 export type ArchLanguage =
   | 'typescript'
@@ -1225,6 +1225,116 @@ function extractRustImports(content: string): ExtractedImport[] {
   }
 
   return dedupExtracted(out);
+}
+
+interface JvmTreeIndex {
+  byBaseName: Map<string, string[]>;
+  byLastDirSeg: Map<string, string[]>;
+}
+
+const jvmTreeIndexCache = new WeakMap<ReadonlySet<string>, JvmTreeIndex>();
+
+function getJvmTreeIndex(files: ReadonlySet<string>): JvmTreeIndex {
+  const cached = jvmTreeIndexCache.get(files);
+  if (cached) return cached;
+
+  const prod: string[] = [];
+  const test: string[] = [];
+  for (const raw of files) {
+    const norm = normalizePath(raw);
+    if (!norm || !/\.(?:java|kt|kts)$/i.test(norm)) continue;
+    if (isTestFile(norm)) test.push(norm);
+    else prod.push(norm);
+  }
+  prod.sort();
+  test.sort();
+
+  const byBaseName = new Map<string, string[]>();
+  const byLastDirSeg = new Map<string, string[]>();
+  const seenDirs = new Set<string>();
+
+  for (const f of [...prod, ...test]) {
+    const base = posix.basename(f);
+    let baseList = byBaseName.get(base);
+    if (!baseList) {
+      baseList = [];
+      byBaseName.set(base, baseList);
+    }
+    baseList.push(f);
+
+    let dir = posix.dirname(f);
+    while (dir && dir !== '.' && !seenDirs.has(dir)) {
+      seenDirs.add(dir);
+      const lastSeg = posix.basename(dir);
+      let dirList = byLastDirSeg.get(lastSeg);
+      if (!dirList) {
+        dirList = [];
+        byLastDirSeg.set(lastSeg, dirList);
+      }
+      dirList.push(dir);
+      const parent = posix.dirname(dir);
+      dir = parent === dir ? '' : parent;
+    }
+  }
+
+  const index: JvmTreeIndex = { byBaseName, byLastDirSeg };
+  jvmTreeIndexCache.set(files, index);
+  return index;
+}
+
+function findJvmFileAcrossRoots(
+  specPath: string,
+  exts: readonly string[],
+  ctx: WorkspaceResolveContext,
+): string | undefined {
+  const sets = [ctx.extraFiles, ctx.knownFiles].filter(
+    (s): s is ReadonlySet<string> => s !== undefined,
+  );
+  if (sets.length === 0) return undefined;
+
+  for (const set of sets) {
+    const idx = getJvmTreeIndex(set);
+    for (const ext of exts) {
+      const rel = `${specPath}.${ext}`;
+      const base = posix.basename(rel);
+      const candidates = idx.byBaseName.get(base);
+      if (!candidates) continue;
+      for (const f of candidates) {
+        if (f === rel) return f;
+      }
+      const suffix = `/${rel}`;
+      for (const f of candidates) {
+        if (f.endsWith(suffix)) return f;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find repository directory paths whose suffix matches `pkgPath` (e.g.
+ * `com/acme/orders` -> `modules/orders/src/main/java/com/acme/orders`).
+ */
+export function findJvmPackageDirsInTree(pkgPath: string, ctx: WorkspaceResolveContext): string[] {
+  const normPkg = normalizePath(pkgPath);
+  if (!normPkg) return [];
+  const lastSeg = posix.basename(normPkg);
+  const suffix = `/${normPkg}`;
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const set of [ctx.extraFiles, ctx.knownFiles]) {
+    if (!set) continue;
+    const dirs = getJvmTreeIndex(set).byLastDirSeg.get(lastSeg);
+    if (!dirs) continue;
+    for (const d of dirs) {
+      if ((d === normPkg || d.endsWith(suffix)) && !seen.has(d)) {
+        seen.add(d);
+        out.push(d);
+      }
+    }
+  }
+  return out;
 }
 
 function findJvmPackage(cleaned: string, stringSpans: readonly StringSpan[]): string | undefined {
@@ -2500,6 +2610,11 @@ export function resolveImport(
         if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
       }
 
+      if (!isWildcard) {
+        const crossRootFile = findJvmFileAcrossRoots(specPath, exts, ctx);
+        if (crossRootFile) return { ...base, resolvedPath: crossRootFile };
+      }
+
       if (imp.language === 'kotlin' && !isWildcard && ctx.kotlinSymbols) {
         let symbolPrefix = cleanSpec;
         while (symbolPrefix.includes('.')) {
@@ -2509,8 +2624,35 @@ export function resolveImport(
         }
       }
 
+      if (!isWildcard && specPath.includes('/')) {
+        let parentPath = specPath;
+        while (parentPath.includes('/')) {
+          parentPath = parentPath.slice(0, parentPath.lastIndexOf('/'));
+          for (const ext of exts) {
+            const candidate = `${prefix}${parentPath}.${ext}`;
+            if (existsRepoFile(candidate, ctx)) return { ...base, resolvedPath: candidate };
+          }
+          const crossParent = findJvmFileAcrossRoots(parentPath, exts, ctx);
+          if (crossParent) return { ...base, resolvedPath: crossParent };
+        }
+      }
+
       if (existsRepoPrefix(`${prefix}${specPath}`, ctx)) {
         return { ...base, resolvedPath: `${prefix}${specPath}` };
+      }
+      const crossPkgDirs = findJvmPackageDirsInTree(specPath, ctx);
+      if (crossPkgDirs.length > 0) {
+        return { ...base, resolvedPath: crossPkgDirs[0]! };
+      }
+
+      if (!isWildcard && specPath.includes('/')) {
+        const lastSlash = specPath.lastIndexOf('/');
+        const pkgPath = specPath.slice(0, lastSlash);
+        const symName = specPath.slice(lastSlash + 1);
+        const enclosingDirs = findJvmPackageDirsInTree(pkgPath, ctx);
+        if (enclosingDirs.length > 0) {
+          return { ...base, resolvedPath: `${enclosingDirs[0]!}/${symName}` };
+        }
       }
 
       if (

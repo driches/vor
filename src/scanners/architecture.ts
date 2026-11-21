@@ -19,6 +19,7 @@ import {
   extractImports,
   extractKotlinDeclarations,
   extractTsConfigExtends,
+  findJvmPackageDirsInTree,
   findJvmSourceRoot,
   listTsConfigAliasCandidates,
   loadWorkspaceResolveContext,
@@ -339,12 +340,20 @@ async function probeHeadKotlinSymbols(
 
     const segs = imp.specifier.split('.');
     if (segs.length >= 2) {
-      const parentDir = normalizePath(`${prefix}${segs.slice(0, -1).join('/')}`);
+      const parentPkgPath = segs.slice(0, -1).join('/');
+      const parentDir = normalizePath(`${prefix}${parentPkgPath}`);
       if (parentDir) targetDirs.add(parentDir);
+      for (const dir of findJvmPackageDirsInTree(parentPkgPath, resolveCtx)) {
+        targetDirs.add(dir);
+      }
     }
     if (segs.length >= 3) {
-      const grandDir = normalizePath(`${prefix}${segs.slice(0, -2).join('/')}`);
+      const grandPkgPath = segs.slice(0, -2).join('/');
+      const grandDir = normalizePath(`${prefix}${grandPkgPath}`);
       if (grandDir) targetDirs.add(grandDir);
+      for (const dir of findJvmPackageDirsInTree(grandPkgPath, resolveCtx)) {
+        targetDirs.add(dir);
+      }
     }
   }
   if (targetDirs.size === 0 || pendingSpecs.length === 0) return;

@@ -143,7 +143,8 @@ const contextRegexCache = new Map<string, RegExp | null>();
 function buildContextRegex(pattern: string): RegExp | null {
   let norm = normalizePath(pattern);
   if (norm.endsWith('/**')) {
-    norm = norm.slice(0, -3);
+    const stripped = norm.slice(0, -3);
+    norm = stripped.split('/').includes('*') ? stripped : `${stripped}/*`;
   }
   const cached = contextRegexCache.get(norm);
   if (cached !== undefined) return cached;

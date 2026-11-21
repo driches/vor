@@ -479,7 +479,14 @@ export function explainFileArchitecture(
   } else if (language === 'kotlin') {
     resolveCtx.kotlinSymbols = buildKotlinSymbolIndex(workspaceDir, [...resolvedKnownFiles]);
   }
-  const content = readFileSync(resolve(root, relPath), 'utf-8');
+  let content: string;
+  try {
+    content = readFileSync(resolve(root, relPath), 'utf-8');
+  } catch (err) {
+    throw new ConfigError(
+      `Cannot read file '${relPath}': ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const { imports, meta } = extractImports(relPath, content);
   const allViolations = evaluateFileArchitecture({
     filePath: relPath,

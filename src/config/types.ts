@@ -146,7 +146,10 @@ export interface ArchitectureContextsConfig {
   shared?: string[];
   /** When true (default), cross-context imports to `public_api` paths are allowed unless disallowed by `allow_dependencies`. */
   allow_public_api_imports?: boolean;
-  /** Optional explicit context-to-context dependency whitelist (`{ checkout: ['billing'] }`). */
+  /**
+   * Optional explicit context-to-context dependency whitelist (`{ checkout: ['billing'] }`).
+   * Listed dependencies are still subject to the target context's `public_api` policy.
+   */
   allow_dependencies?: Record<string, string[]>;
   severity?: Severity;
 }

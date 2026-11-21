@@ -338,4 +338,62 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('resolves cross-source-root Java imports to their owning module under modular-monolith', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-java-mm-'));
+    try {
+      mkdirSync(join(ws, 'modules/orders/src/main/java/com/acme/orders'), { recursive: true });
+      mkdirSync(join(ws, 'modules/billing/src/main/java/com/acme/billing'), { recursive: true });
+      writeFileSync(
+        join(ws, 'modules/orders/src/main/java/com/acme/orders/Order.java'),
+        'package com.acme.orders;\npublic class Order {}\n',
+      );
+      writeFileSync(
+        join(ws, 'modules/billing/src/main/java/com/acme/billing/Service.java'),
+        'package com.acme.billing;\nimport com.acme.orders.Order;\npublic class Service {}\n',
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'modular-monolith',
+      });
+      const explained = explainFileArchitecture(
+        ws,
+        'modules/billing/src/main/java/com/acme/billing/Service.java',
+        spec,
+      );
+      expect(explained.context?.context).toBe('billing');
+      expect(explained.imports).toHaveLength(1);
+      expect(explained.imports[0]?.resolved_path).toBe(
+        'modules/orders/src/main/java/com/acme/orders/Order.java',
+      );
+      expect(explained.imports[0]?.target_context).toBe('orders');
+      expect(explained.imports[0]?.violations).toHaveLength(1);
+      expect(explained.imports[0]?.violations[0]?.rule_id).toBe('arch:context-boundary');
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:context-boundary');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('throws ConfigError when explaining a missing or unreadable file', () => {
+    const ws = setupSampleHexRepo();
+    try {
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'hexagonal',
+      });
+      expect(() => explainFileArchitecture(ws, 'src/domain/missing.ts', spec)).toThrowError(
+        ConfigError,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
