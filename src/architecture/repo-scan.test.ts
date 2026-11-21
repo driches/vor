@@ -634,4 +634,26 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('catches forbidden Python package imports in single-line compound statements under DDD', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-py-suite-'));
+    try {
+      mkdirSync(join(ws, 'app/domain'), { recursive: true });
+      writeFileSync(join(ws, 'app/domain/service.py'), 'if True: import flask\n');
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'app',
+      });
+      const explained = explainFileArchitecture(ws, 'app/domain/service.py', spec);
+      expect(explained.imports.map((i) => i.specifier)).toEqual(['flask']);
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:forbidden-package:domain',
+      ]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

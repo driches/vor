@@ -77656,626 +77656,6 @@ function extractGoSymbols(line) {
   return [];
 }
 
-// src/architecture/presets.ts
-var import_yaml = __toESM(require_dist(), 1);
-
-// src/architecture/glob.ts
-var MAX_REGEX_CACHE = 512;
-var MAX_CONTEXT_REGEX_CACHE = 128;
-var regexCache2 = /* @__PURE__ */ new Map();
-function setBounded(cache, key, value, limit2 = MAX_REGEX_CACHE) {
-  if (!cache.has(key) && cache.size >= limit2) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== void 0) cache.delete(oldest);
-  }
-  cache.set(key, value);
-}
-function normalizePath(filePath) {
-  return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
-}
-function escapeRegexChar2(ch) {
-  return /[\\^$+?.()|{}[\]]/.test(ch) ? `\\${ch}` : ch;
-}
-function compileGlobBody(pattern) {
-  let out = "";
-  for (let i2 = 0; i2 < pattern.length; i2++) {
-    const ch = pattern[i2];
-    if (ch === "{") {
-      const close = pattern.indexOf("}", i2 + 1);
-      if (close !== -1) {
-        const inner = pattern.slice(i2 + 1, close);
-        const parts = inner.split(",").map((p2) => compileGlobBody(p2));
-        out += `(?:${parts.join("|")})`;
-        i2 = close;
-        continue;
-      }
-    }
-    if (ch === "*") {
-      const next = pattern[i2 + 1];
-      if (next === "*") {
-        const atSegStart = i2 === 0 || pattern[i2 - 1] === "/";
-        const after = pattern[i2 + 2];
-        if (atSegStart && after === "/") {
-          out += "(?:.*/)?";
-          i2 += 2;
-        } else if (atSegStart && after === void 0) {
-          out += ".*";
-          i2 += 1;
-        } else {
-          out += "[^/]*";
-          i2 += 1;
-        }
-      } else {
-        out += "[^/]*";
-      }
-      continue;
-    }
-    if (ch === "?") {
-      out += "[^/]";
-      continue;
-    }
-    out += escapeRegexChar2(ch);
-  }
-  return out;
-}
-function globToRegExp2(pattern) {
-  const norm = normalizePath(pattern);
-  const cached2 = regexCache2.get(norm);
-  if (cached2) return cached2;
-  const re2 = new RegExp(`^${compileGlobBody(norm)}$`);
-  setBounded(regexCache2, norm, re2);
-  return re2;
-}
-function matchesGlob(filePath, pattern) {
-  const norm = normalizePath(filePath);
-  if (!norm) return false;
-  return globToRegExp2(pattern).test(norm);
-}
-function matchesAnyGlob(filePath, patterns) {
-  if (patterns.length === 0) return false;
-  const norm = normalizePath(filePath);
-  if (!norm) return false;
-  return patterns.some((p2) => globToRegExp2(p2).test(norm));
-}
-function globSpecificity(pattern) {
-  const norm = normalizePath(pattern);
-  const segments = norm.split("/").filter(Boolean);
-  let literalSegments = 0;
-  let wildcardSegments = 0;
-  for (const seg of segments) {
-    if (seg === "**") continue;
-    if (seg.includes("*") || seg.includes("?") || seg.includes("{")) {
-      wildcardSegments += 1;
-    } else {
-      literalSegments += 1;
-    }
-  }
-  const literalChars = norm.replace(/[*?{}/,]/g, "").length;
-  return literalSegments * 100 + wildcardSegments * 10 + literalChars;
-}
-var contextRegexCache = /* @__PURE__ */ new Map();
-function buildContextRegex(pattern) {
-  let norm = normalizePath(pattern);
-  if (norm.endsWith("/**")) {
-    const stripped = norm.slice(0, -3);
-    norm = stripped.split("/").includes("*") ? stripped : `${stripped}/*`;
-  }
-  const cached2 = contextRegexCache.get(norm);
-  if (cached2 !== void 0) return cached2;
-  const segments = norm.split("/").filter(Boolean);
-  const starIdx = segments.indexOf("*");
-  if (starIdx === -1) {
-    setBounded(contextRegexCache, norm, null, MAX_CONTEXT_REGEX_CACHE);
-    return null;
-  }
-  const prefixSegments = segments.slice(0, starIdx);
-  const suffixSegments = segments.slice(starIdx + 1);
-  const compileSegmentPrefix = (segs) => {
-    if (segs.length === 0) return "";
-    const parts = segs.map((s2) => s2 === "**" ? "(?:.*?/)?" : `${compileGlobBody(s2)}/`);
-    return parts.join("");
-  };
-  const prefixBody = compileSegmentPrefix(prefixSegments);
-  const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
-  const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
-  setBounded(contextRegexCache, norm, re2, MAX_CONTEXT_REGEX_CACHE);
-  return re2;
-}
-function extractContext(filePath, pattern) {
-  const norm = normalizePath(filePath);
-  if (!norm) return null;
-  const re2 = buildContextRegex(pattern);
-  if (!re2) return null;
-  const m2 = norm.match(re2);
-  if (!m2 || !m2[1] || !m2[2]) return null;
-  return {
-    contextRoot: m2[1],
-    context: m2[2],
-    relativePath: m2[3] ?? ""
-  };
-}
-var TEST_FILE_PATTERNS = [
-  /(?:^|\/)(?:__tests__|tests?|spec|specs)\//i,
-  /\.(?:test|spec)\.[^/]+$/i,
-  /_test\.(?:go|py|rs|dart)$/i,
-  /(?:^|\/)test_[^/]+\.py$/i,
-  /(?:Test|Tests|Spec)\.(?:java|kt|kts|cs)$/
-];
-function isTestFile(filePath) {
-  const norm = normalizePath(filePath);
-  return TEST_FILE_PATTERNS.some((re2) => re2.test(norm));
-}
-
-// src/architecture/presets.ts
-var DEFAULT_DOMAIN_FORBIDDEN_PACKAGES = [
-  // TypeScript / JavaScript
-  "express",
-  "fastify",
-  "koa",
-  "hono",
-  "@nestjs/*",
-  "prisma",
-  "@prisma/client",
-  "typeorm",
-  "drizzle-orm",
-  "sequelize",
-  "mongoose",
-  "knex",
-  "pg",
-  "mysql2",
-  "ioredis",
-  "redis",
-  "axios",
-  "node-fetch",
-  "aws-sdk",
-  "@aws-sdk/*",
-  // Python
-  "fastapi",
-  "flask",
-  "django",
-  "starlette",
-  "sqlalchemy",
-  "psycopg2",
-  "pymongo",
-  "requests",
-  "httpx",
-  "aiohttp",
-  "boto3",
-  // Go
-  "net/http",
-  "database/sql",
-  "github.com/gin-gonic/gin",
-  "github.com/labstack/echo*",
-  "github.com/gofiber/fiber*",
-  "gorm.io/gorm",
-  "github.com/jackc/pgx*",
-  // Dart / Flutter
-  "http",
-  "dio",
-  "sqflite",
-  "drift",
-  "cloud_firestore",
-  "firebase_*",
-  // Rust
-  "sqlx",
-  "diesel",
-  "sea_orm",
-  "axum",
-  "actix_web",
-  "rocket",
-  "reqwest",
-  // Java / Kotlin
-  "org.springframework.*",
-  "jakarta.persistence.*",
-  "javax.persistence.*",
-  "org.hibernate.*",
-  "java.sql.*",
-  "io.ktor.*",
-  // C# / .NET
-  "Microsoft.EntityFrameworkCore*",
-  "Microsoft.AspNetCore*",
-  "System.Data.SqlClient*",
-  "Dapper"
-];
-function scopeGlobsToRoot(globs, root) {
-  if (!root) return [...globs];
-  const cleanRoot = normalizePath(root);
-  if (!cleanRoot) return [...globs];
-  const scoped = [];
-  for (const g2 of globs) {
-    const norm = normalizePath(g2);
-    if (norm.startsWith("**/")) {
-      const rest = norm.slice(3);
-      scoped.push(`${cleanRoot}/${rest}`, `${cleanRoot}/**/${rest}`);
-    } else if (norm === cleanRoot || norm.startsWith(`${cleanRoot}/`)) {
-      scoped.push(norm);
-    } else {
-      scoped.push(`${cleanRoot}/${norm}`);
-    }
-  }
-  return scoped;
-}
-function buildPreset(id, root) {
-  const cleanRoot = root ? normalizePath(root) : void 0;
-  switch (id) {
-    case "hexagonal":
-      return {
-        id: "hexagonal",
-        name: "Hexagonal Architecture (Ports & Adapters)",
-        summary: "Isolates pure domain and application core behind explicit ports; inbound and outbound adapters depend inward on ports/domain and never on each other.",
-        layers: {
-          domain: {
-            description: "Pure business entities, value objects, domain services, and invariants.",
-            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
-            can_import: ["domain", "ports"],
-            cannot_import: ["application", "adapters_in", "adapters_out", "adapters"],
-            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
-          },
-          ports: {
-            description: "Inbound and outbound interfaces owned by the core.",
-            paths: scopeGlobsToRoot(["**/ports/**", "**/application/ports/**"], cleanRoot),
-            can_import: ["ports", "domain"],
-            cannot_import: ["adapters_in", "adapters_out", "adapters"],
-            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
-          },
-          application: {
-            description: "Use-case orchestrators coordinating domain objects through ports.",
-            paths: scopeGlobsToRoot(
-              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
-              cleanRoot
-            ),
-            can_import: ["application", "domain", "ports"],
-            cannot_import: ["adapters_in", "adapters_out", "adapters"]
-          },
-          adapters_in: {
-            description: "Driving/inbound adapters (HTTP handlers, CLI commands, message consumers).",
-            paths: scopeGlobsToRoot(
-              [
-                "**/adapters/in/**",
-                "**/adapters/inbound/**",
-                "**/adapters/driving/**",
-                "**/adapters/primary/**",
-                "**/driving/**",
-                "**/inbound/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["adapters_in", "ports", "application", "domain"],
-            cannot_import: ["adapters_out"]
-          },
-          adapters_out: {
-            description: "Driven/outbound adapters (DB repositories, HTTP clients, queues).",
-            paths: scopeGlobsToRoot(
-              [
-                "**/adapters/out/**",
-                "**/adapters/outbound/**",
-                "**/adapters/driven/**",
-                "**/adapters/secondary/**",
-                "**/driven/**",
-                "**/outbound/**",
-                "**/infrastructure/**",
-                "**/infra/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["adapters_out", "ports", "domain"],
-            cannot_import: ["adapters_in", "application"]
-          },
-          adapters: {
-            description: "General adapter implementations when not split into inbound/outbound.",
-            paths: scopeGlobsToRoot(["**/adapters/**"], cleanRoot),
-            can_import: ["adapters", "ports", "application", "domain"]
-          }
-        },
-        principles: [
-          "Keep business rules and domain state transitions inside `domain` and `application`, never in `adapters_in` controllers or `adapters_out` repositories.",
-          "Ports belong to the core and must express signatures using domain entities, value objects, and domain errors \u2014 never framework/ORM/HTTP types.",
-          "Inbound adapters should only parse/validate transport inputs, invoke an application use case or inbound port, and map the response.",
-          "Outbound adapters must implement core port interfaces and translate persistence/network models at the boundary without leaking DB entities upward.",
-          "Concrete adapter wiring and dependency injection belong only in the composition root (`main`, bootstrap, DI container)."
-        ]
-      };
-    case "ddd":
-      return {
-        id: "ddd",
-        name: "Domain-Driven Design (DDD)",
-        summary: "Separates tactical layers (domain, application, infrastructure, interfaces) and enforces bounded-context encapsulation through explicit public APIs.",
-        layers: {
-          domain: {
-            description: "Aggregates, entities, value objects, domain events, and repository interfaces.",
-            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
-            can_import: ["domain", "shared"],
-            cannot_import: ["application", "infrastructure", "interfaces"],
-            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
-          },
-          application: {
-            description: "Application services, command/query handlers, transaction boundaries.",
-            paths: scopeGlobsToRoot(
-              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
-              cleanRoot
-            ),
-            can_import: ["application", "domain", "shared"],
-            cannot_import: ["infrastructure", "interfaces"]
-          },
-          infrastructure: {
-            description: "Persistence implementations, event buses, external integrations.",
-            paths: scopeGlobsToRoot(
-              ["**/infrastructure/**", "**/infra/**", "**/persistence/**"],
-              cleanRoot
-            ),
-            can_import: ["infrastructure", "domain", "application", "shared"],
-            cannot_import: ["interfaces"]
-          },
-          interfaces: {
-            description: "Delivery mechanisms (HTTP/GraphQL/gRPC/CLI/UI entry points).",
-            paths: scopeGlobsToRoot(
-              [
-                "**/interfaces/**",
-                "**/presentation/**",
-                "**/controllers/**",
-                "**/http/**",
-                "**/ui/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["interfaces", "application", "domain", "shared"],
-            cannot_import: ["infrastructure"]
-          },
-          shared: {
-            description: "Shared kernel primitives and cross-context value types.",
-            paths: scopeGlobsToRoot(
-              ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
-              cleanRoot
-            ),
-            can_import: ["shared"],
-            cannot_import: ["domain", "application", "infrastructure", "interfaces"]
-          }
-        },
-        contexts: {
-          pattern: cleanRoot ? `${cleanRoot}/contexts/*` : "**/contexts/*",
-          public_api: ["index.*", "public/**", "contracts/**", "api/**"],
-          shared: scopeGlobsToRoot(
-            ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
-            cleanRoot
-          ),
-          allow_public_api_imports: true
-        },
-        principles: [
-          "Enforce aggregate root invariants inside aggregate methods rather than allowing external services to mutate internal entities directly (avoid anemic domain models).",
-          "Model domain concepts as immutable, self-validating Value Objects instead of primitive obsession where domain constraints apply.",
-          "Bounded contexts must communicate only via explicit public APIs/contracts or domain events; use Anti-Corruption Layers when translating foreign models.",
-          "Repositories should load and persist whole aggregates using domain language rather than exposing raw ORM query builders to callers.",
-          "Maintain ubiquitous language consistently across types, methods, events, and modules within each bounded context."
-        ]
-      };
-    case "clean":
-      return {
-        id: "clean",
-        name: "Clean Architecture",
-        summary: "Enforces the concentric Dependency Rule: source dependencies may point only inward from frameworks -> interface adapters -> use cases -> entities.",
-        layers: {
-          entities: {
-            description: "Enterprise-wide business rules and core entities.",
-            paths: scopeGlobsToRoot(["**/entities/**", "**/domain/**"], cleanRoot),
-            can_import: ["entities"],
-            cannot_import: ["use_cases", "interface_adapters", "frameworks"],
-            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
-          },
-          use_cases: {
-            description: "Application-specific business rules and interactors.",
-            paths: scopeGlobsToRoot(
-              [
-                "**/use-cases/**",
-                "**/use_cases/**",
-                "**/usecases/**",
-                "**/application/**",
-                "**/interactors/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["use_cases", "entities"],
-            cannot_import: ["interface_adapters", "frameworks"]
-          },
-          interface_adapters: {
-            description: "Controllers, presenters, gateways, and view models.",
-            paths: scopeGlobsToRoot(
-              [
-                "**/interface-adapters/**",
-                "**/adapters/**",
-                "**/controllers/**",
-                "**/presenters/**",
-                "**/gateways/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["interface_adapters", "use_cases", "entities"],
-            cannot_import: ["frameworks"]
-          },
-          frameworks: {
-            description: "Web frameworks, database drivers, external devices.",
-            paths: scopeGlobsToRoot(
-              ["**/frameworks/**", "**/drivers/**", "**/infrastructure/**", "**/infra/**"],
-              cleanRoot
-            ),
-            can_import: ["frameworks", "interface_adapters", "use_cases", "entities"]
-          }
-        },
-        principles: [
-          "Follow the Dependency Rule strictly: inner circles (`entities`, `use_cases`) must have zero knowledge of outer circles (`interface_adapters`, `frameworks`).",
-          "Keep enterprise rules in `entities` separate from application orchestration in `use_cases`.",
-          "Boundary input/output DTOs must be defined and owned by the inner layer (`use_cases`), not by web frameworks or ORM models."
-        ]
-      };
-    case "layered":
-      return {
-        id: "layered",
-        name: "Classic Layered (N-Tier) Architecture",
-        summary: "Separates presentation -> service -> data -> model layers so requests flow downward without presentation bypassing services to touch persistence.",
-        layers: {
-          presentation: {
-            description: "HTTP routes, controllers, views, and UI components.",
-            paths: scopeGlobsToRoot(
-              [
-                "**/presentation/**",
-                "**/controllers/**",
-                "**/routes/**",
-                "**/views/**",
-                "**/api/**",
-                "**/ui/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["presentation", "service", "model", "shared"],
-            cannot_import: ["data"]
-          },
-          service: {
-            description: "Business services and domain logic.",
-            paths: scopeGlobsToRoot(
-              ["**/services/**", "**/service/**", "**/business/**", "**/domain/**"],
-              cleanRoot
-            ),
-            can_import: ["service", "data", "model", "shared"],
-            cannot_import: ["presentation"]
-          },
-          data: {
-            description: "Repositories, DAOs, and persistence queries.",
-            paths: scopeGlobsToRoot(
-              [
-                "**/data/**",
-                "**/repositories/**",
-                "**/repository/**",
-                "**/dal/**",
-                "**/persistence/**",
-                "**/db/**"
-              ],
-              cleanRoot
-            ),
-            can_import: ["data", "model", "shared"],
-            cannot_import: ["presentation", "service"]
-          },
-          model: {
-            description: "Shared domain models, DTOs, and schemas.",
-            paths: scopeGlobsToRoot(
-              ["**/models/**", "**/model/**", "**/types/**", "**/schemas/**"],
-              cleanRoot
-            ),
-            can_import: ["model", "shared"],
-            cannot_import: ["presentation", "service", "data"]
-          },
-          shared: {
-            description: "Cross-cutting utilities.",
-            paths: scopeGlobsToRoot(
-              ["**/shared/**", "**/common/**", "**/utils/**", "**/util/**"],
-              cleanRoot
-            ),
-            can_import: ["shared"],
-            cannot_import: ["presentation", "service", "data"]
-          }
-        },
-        principles: [
-          "Keep `presentation` handlers thin: no direct SQL/ORM queries or multi-step business logic inside controllers or route handlers.",
-          "Keep `data` repositories focused on persistence mechanics without embedding authorization or pricing/business rules.",
-          "Never introduce upward dependencies from lower layers (`data`, `service`) back into `presentation`."
-        ]
-      };
-    case "modular-monolith":
-      return {
-        id: "modular-monolith",
-        name: "Modular Monolith",
-        summary: "Enforces strong module boundaries where feature modules interact exclusively through declared public entrypoints or a lean shared kernel.",
-        layers: {
-          shared: {
-            description: "Shared kernel primitives with zero upward dependencies on feature modules.",
-            paths: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
-            can_import: ["shared"]
-          }
-        },
-        contexts: {
-          pattern: cleanRoot ? `${cleanRoot}/modules/*` : "**/modules/*",
-          public_api: ["index.*", "public/**", "api/**", "contracts/**"],
-          shared: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
-          allow_public_api_imports: true
-        },
-        principles: [
-          "Feature modules must expose a clean public facade (`index`, `public/`, or `contracts/`) and never leak internal repositories, tables, or private helpers.",
-          "Keep the `shared` kernel minimal \u2014 avoid turning `shared` into a dumping ground that hides cross-module coupling.",
-          "Avoid circular module dependencies; prefer event-driven decoupling or an explicit orchestration module when cycles emerge."
-        ]
-      };
-    case "custom":
-      return {
-        id: "custom",
-        name: "Custom Architecture",
-        summary: "User-defined layers, bounded contexts, import rules, and semantic principles.",
-        layers: {},
-        principles: []
-      };
-  }
-}
-function mergeLayerOverride(base, override) {
-  const paths = override.paths ?? base?.paths;
-  if (!paths || paths.length === 0) {
-    return null;
-  }
-  return {
-    paths: [...paths],
-    ...override.description !== void 0 ? { description: override.description } : base?.description !== void 0 ? { description: base.description } : {},
-    ...override.can_import !== void 0 ? { can_import: [...override.can_import] } : base?.can_import !== void 0 ? { can_import: [...base.can_import] } : {},
-    ...override.cannot_import !== void 0 ? { cannot_import: [...override.cannot_import] } : base?.cannot_import !== void 0 ? { cannot_import: [...base.cannot_import] } : {},
-    ...override.forbid_packages !== void 0 ? { forbid_packages: [...override.forbid_packages] } : base?.forbid_packages !== void 0 ? { forbid_packages: [...base.forbid_packages] } : {},
-    ...override.allow_packages !== void 0 ? { allow_packages: [...override.allow_packages] } : base?.allow_packages !== void 0 ? { allow_packages: [...base.allow_packages] } : {},
-    ...override.severity !== void 0 ? { severity: override.severity } : base?.severity !== void 0 ? { severity: base.severity } : {}
-  };
-}
-function resolveArchitectureSpec(config2) {
-  const hasCustomStructure = config2.layers !== void 0 && Object.keys(config2.layers).length > 0 || config2.contexts !== void 0 || config2.rules !== void 0 && config2.rules.length > 0;
-  const presetId = config2.preset ?? (hasCustomStructure ? "custom" : "hexagonal");
-  const preset = buildPreset(presetId, config2.root);
-  const layers = {};
-  for (const [name, def] of Object.entries(preset.layers)) {
-    const override = config2.layers?.[name];
-    const merged = override ? mergeLayerOverride(def, override) : { ...def, paths: [...def.paths] };
-    if (merged) layers[name] = merged;
-  }
-  if (config2.layers) {
-    for (const [name, override] of Object.entries(config2.layers)) {
-      if (layers[name]) continue;
-      const added = mergeLayerOverride(void 0, override);
-      if (added) {
-        layers[name] = added;
-      } else {
-        void logger.warn(
-          `Architecture layer '${name}' has no paths and does not match a preset layer; ignoring.`
-        );
-      }
-    }
-  }
-  const contexts = config2.contexts ?? preset.contexts;
-  const includePresetPrinciples = config2.include_preset_principles !== false;
-  const principles = [
-    ...includePresetPrinciples ? preset.principles : [],
-    ...config2.principles ?? []
-  ];
-  const rules = (config2.rules ?? []).filter(
-    (r2) => r2.forbid_imports !== void 0 && r2.forbid_imports.length > 0 || r2.forbid_packages !== void 0 && r2.forbid_packages.length > 0
-  );
-  return {
-    enabled: config2.enabled,
-    preset: presetId,
-    ...config2.root !== void 0 ? { root: normalizePath(config2.root) } : {},
-    severity: config2.severity,
-    layers,
-    ...contexts !== void 0 ? { contexts } : {},
-    rules,
-    principles,
-    llm_enforcement: config2.llm_enforcement,
-    deterministic_enforcement: config2.deterministic_enforcement,
-    exclude: [...config2.exclude ?? []],
-    ignore_tests: config2.ignore_tests,
-    ...config2.baseline_file !== void 0 ? { baseline_file: config2.baseline_file } : {}
-  };
-}
-
 // src/architecture/prompt.ts
 function renderArchitecturePrompt(spec) {
   if (!spec.enabled || !spec.llm_enforcement) return null;
@@ -78389,9 +77769,8 @@ function buildSystemPrompt(input2) {
   if (input2.config.security.enabled && input2.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
-  const archSpec = input2.architecture !== void 0 ? input2.architecture : input2.config.architecture.enabled ? resolveArchitectureSpec(input2.config.architecture) : null;
-  if (archSpec) {
-    const archSection = renderArchitecturePrompt(archSpec);
+  if (input2.architecture) {
+    const archSection = renderArchitecturePrompt(input2.architecture);
     if (archSection) sections.push(archSection);
   }
   if (input2.config.prompt.additions && input2.config.prompt.additions.trim().length > 0) {
@@ -78720,7 +78099,7 @@ function renderBlastRadius(map2, maxBytes = MAX_BLAST_RADIUS_BYTES) {
 }
 
 // src/config/loader.ts
-var import_yaml2 = __toESM(require_dist(), 1);
+var import_yaml = __toESM(require_dist(), 1);
 
 // src/config/defaults.ts
 var DEFAULT_CONFIG = {
@@ -79141,7 +78520,7 @@ function loadConfigWithRawFromString(yaml) {
   }
   let parsed;
   try {
-    parsed = (0, import_yaml2.parse)(yaml);
+    parsed = (0, import_yaml.parse)(yaml);
   } catch (err) {
     void logger.warn(`Failed to parse .vor.yml: ${err.message}. Using defaults.`);
     return { config: DEFAULT_CONFIG, raw: {} };
@@ -83998,7 +83377,7 @@ function dedupKeptScannerComments(kept) {
 }
 
 // src/scanners/ignore-list.ts
-var import_yaml3 = __toESM(require_dist(), 1);
+var import_yaml2 = __toESM(require_dist(), 1);
 var import_semver = __toESM(require_semver2(), 1);
 
 // src/scanners/canonicalize.ts
@@ -84094,7 +83473,7 @@ var IgnoreList = class _IgnoreList {
     }
     let parsed;
     try {
-      parsed = (0, import_yaml3.parse)(raw);
+      parsed = (0, import_yaml2.parse)(raw);
     } catch (err) {
       void logger.warn(
         `Failed to parse ${sourceLabel}: ${err.message}. Treating as empty.`
@@ -84345,7 +83724,7 @@ var yarnLockParser = new YarnLockParser();
 
 // src/scanners/parsers/pnpm-lock.ts
 var import_node_path4 = __toESM(require("node:path"), 1);
-var import_yaml4 = __toESM(require_dist(), 1);
+var import_yaml3 = __toESM(require_dist(), 1);
 function parsePnpmKey(rawKey) {
   let s2 = rawKey.startsWith("/") ? rawKey.slice(1) : rawKey;
   const parenIdx = s2.indexOf("(");
@@ -84416,7 +83795,7 @@ var PnpmLockParser = class {
   parse(content) {
     let doc;
     try {
-      doc = (0, import_yaml4.parse)(content);
+      doc = (0, import_yaml3.parse)(content);
     } catch {
       return [];
     }
@@ -88801,6 +88180,153 @@ var import_node_path23 = require("node:path");
 // src/architecture/evaluator.ts
 var import_node_crypto7 = require("node:crypto");
 
+// src/architecture/glob.ts
+var MAX_REGEX_CACHE = 512;
+var MAX_CONTEXT_REGEX_CACHE = 128;
+var regexCache2 = /* @__PURE__ */ new Map();
+function setBounded(cache, key, value, limit2 = MAX_REGEX_CACHE) {
+  if (!cache.has(key) && cache.size >= limit2) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== void 0) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
+function normalizePath(filePath) {
+  return filePath.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+function escapeRegexChar2(ch) {
+  return /[\\^$+?.()|{}[\]]/.test(ch) ? `\\${ch}` : ch;
+}
+function compileGlobBody(pattern) {
+  let out = "";
+  for (let i2 = 0; i2 < pattern.length; i2++) {
+    const ch = pattern[i2];
+    if (ch === "{") {
+      const close = pattern.indexOf("}", i2 + 1);
+      if (close !== -1) {
+        const inner = pattern.slice(i2 + 1, close);
+        const parts = inner.split(",").map((p2) => compileGlobBody(p2));
+        out += `(?:${parts.join("|")})`;
+        i2 = close;
+        continue;
+      }
+    }
+    if (ch === "*") {
+      const next = pattern[i2 + 1];
+      if (next === "*") {
+        const atSegStart = i2 === 0 || pattern[i2 - 1] === "/";
+        const after = pattern[i2 + 2];
+        if (atSegStart && after === "/") {
+          out += "(?:.*/)?";
+          i2 += 2;
+        } else if (atSegStart && after === void 0) {
+          out += ".*";
+          i2 += 1;
+        } else {
+          out += "[^/]*";
+          i2 += 1;
+        }
+      } else {
+        out += "[^/]*";
+      }
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      continue;
+    }
+    out += escapeRegexChar2(ch);
+  }
+  return out;
+}
+function globToRegExp2(pattern) {
+  const norm = normalizePath(pattern);
+  const cached2 = regexCache2.get(norm);
+  if (cached2) return cached2;
+  const re2 = new RegExp(`^${compileGlobBody(norm)}$`);
+  setBounded(regexCache2, norm, re2);
+  return re2;
+}
+function matchesGlob(filePath, pattern) {
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return globToRegExp2(pattern).test(norm);
+}
+function matchesAnyGlob(filePath, patterns) {
+  if (patterns.length === 0) return false;
+  const norm = normalizePath(filePath);
+  if (!norm) return false;
+  return patterns.some((p2) => globToRegExp2(p2).test(norm));
+}
+function globSpecificity(pattern) {
+  const norm = normalizePath(pattern);
+  const segments = norm.split("/").filter(Boolean);
+  let literalSegments = 0;
+  let wildcardSegments = 0;
+  for (const seg of segments) {
+    if (seg === "**") continue;
+    if (seg.includes("*") || seg.includes("?") || seg.includes("{")) {
+      wildcardSegments += 1;
+    } else {
+      literalSegments += 1;
+    }
+  }
+  const literalChars = norm.replace(/[*?{}/,]/g, "").length;
+  return literalSegments * 100 + wildcardSegments * 10 + literalChars;
+}
+var contextRegexCache = /* @__PURE__ */ new Map();
+function buildContextRegex(pattern) {
+  let norm = normalizePath(pattern);
+  if (norm.endsWith("/**")) {
+    const stripped = norm.slice(0, -3);
+    norm = stripped.split("/").includes("*") ? stripped : `${stripped}/*`;
+  }
+  const cached2 = contextRegexCache.get(norm);
+  if (cached2 !== void 0) return cached2;
+  const segments = norm.split("/").filter(Boolean);
+  const starIdx = segments.indexOf("*");
+  if (starIdx === -1) {
+    setBounded(contextRegexCache, norm, null, MAX_CONTEXT_REGEX_CACHE);
+    return null;
+  }
+  const prefixSegments = segments.slice(0, starIdx);
+  const suffixSegments = segments.slice(starIdx + 1);
+  const compileSegmentPrefix = (segs) => {
+    if (segs.length === 0) return "";
+    const parts = segs.map((s2) => s2 === "**" ? "(?:.*?/)?" : `${compileGlobBody(s2)}/`);
+    return parts.join("");
+  };
+  const prefixBody = compileSegmentPrefix(prefixSegments);
+  const suffixBody = suffixSegments.length > 0 ? `/${suffixSegments.map((s2) => compileGlobBody(s2)).join("/")}` : "";
+  const re2 = new RegExp(`^(${prefixBody}([^/]+)${suffixBody})(?:/(.*))?$`);
+  setBounded(contextRegexCache, norm, re2, MAX_CONTEXT_REGEX_CACHE);
+  return re2;
+}
+function extractContext(filePath, pattern) {
+  const norm = normalizePath(filePath);
+  if (!norm) return null;
+  const re2 = buildContextRegex(pattern);
+  if (!re2) return null;
+  const m2 = norm.match(re2);
+  if (!m2 || !m2[1] || !m2[2]) return null;
+  return {
+    contextRoot: m2[1],
+    context: m2[2],
+    relativePath: m2[3] ?? ""
+  };
+}
+var TEST_FILE_PATTERNS = [
+  /(?:^|\/)(?:__tests__|tests?|spec|specs)\//i,
+  /\.(?:test|spec)\.[^/]+$/i,
+  /_test\.(?:go|py|rs|dart)$/i,
+  /(?:^|\/)test_[^/]+\.py$/i,
+  /(?:Test|Tests|Spec)\.(?:java|kt|kts|cs)$/
+];
+function isTestFile(filePath) {
+  const norm = normalizePath(filePath);
+  return TEST_FILE_PATTERNS.some((re2) => re2.test(norm));
+}
+
 // src/architecture/imports.ts
 var import_node_fs8 = require("node:fs");
 var import_node_path22 = require("node:path");
@@ -89633,7 +89159,7 @@ function extractPythonImports(content) {
   const rawLines = content.split("\n");
   const out = [];
   const fromSpans = [];
-  const fromRe = /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
+  const fromRe = /(?:^[ \t]*|[;:][ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
   for (const m2 of matchAllOutsideStrings(
     cleaned,
     fromRe,
@@ -89671,7 +89197,7 @@ function extractPythonImports(content) {
       ...importedNames.length > 0 ? { importedNames } : {}
     });
   }
-  const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
+  const importRe = /(?:^[ \t]*|[;:][ \t]*)import(?=[ \t]|\\\r?\n)/gm;
   for (const m2 of matchAllOutsideStrings(
     cleaned,
     importRe,
@@ -92273,7 +91799,7 @@ function createArchitectureScanner(spec, options = {}) {
 // src/architecture/loader.ts
 var import_node_fs10 = require("node:fs");
 var import_node_path24 = require("node:path");
-var import_yaml5 = __toESM(require_dist(), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 var baselineFileSchema = external_exports.object({
   version: external_exports.literal(1),
   fingerprints: external_exports.array(external_exports.string().min(1))
@@ -92301,7 +91827,7 @@ function validateArchitectureRules(rules) {
 function parseExternalArchitectureYamlStrict(yaml) {
   let parsed;
   try {
-    parsed = (0, import_yaml5.parse)(yaml);
+    parsed = (0, import_yaml4.parse)(yaml);
   } catch (err) {
     throw new ConfigError(`Architecture YAML parse error: ${err.message}`, {
       cause: err
@@ -92504,6 +92030,477 @@ function resolveSafeWorkspaceReadPath(workspaceDir, relPath) {
     );
   }
   return resolveSafeWorkspaceWritePath(workspaceDir, relPath);
+}
+
+// src/architecture/presets.ts
+var import_yaml5 = __toESM(require_dist(), 1);
+var DEFAULT_DOMAIN_FORBIDDEN_PACKAGES = [
+  // TypeScript / JavaScript
+  "express",
+  "fastify",
+  "koa",
+  "hono",
+  "@nestjs/*",
+  "prisma",
+  "@prisma/client",
+  "typeorm",
+  "drizzle-orm",
+  "sequelize",
+  "mongoose",
+  "knex",
+  "pg",
+  "mysql2",
+  "ioredis",
+  "redis",
+  "axios",
+  "node-fetch",
+  "aws-sdk",
+  "@aws-sdk/*",
+  // Python
+  "fastapi",
+  "flask",
+  "django",
+  "starlette",
+  "sqlalchemy",
+  "psycopg2",
+  "pymongo",
+  "requests",
+  "httpx",
+  "aiohttp",
+  "boto3",
+  // Go
+  "net/http",
+  "database/sql",
+  "github.com/gin-gonic/gin",
+  "github.com/labstack/echo*",
+  "github.com/gofiber/fiber*",
+  "gorm.io/gorm",
+  "github.com/jackc/pgx*",
+  // Dart / Flutter
+  "http",
+  "dio",
+  "sqflite",
+  "drift",
+  "cloud_firestore",
+  "firebase_*",
+  // Rust
+  "sqlx",
+  "diesel",
+  "sea_orm",
+  "axum",
+  "actix_web",
+  "rocket",
+  "reqwest",
+  // Java / Kotlin
+  "org.springframework.*",
+  "jakarta.persistence.*",
+  "javax.persistence.*",
+  "org.hibernate.*",
+  "java.sql.*",
+  "io.ktor.*",
+  // C# / .NET
+  "Microsoft.EntityFrameworkCore*",
+  "Microsoft.AspNetCore*",
+  "System.Data.SqlClient*",
+  "Dapper"
+];
+function scopeGlobsToRoot(globs, root) {
+  if (!root) return [...globs];
+  const cleanRoot = normalizePath(root);
+  if (!cleanRoot) return [...globs];
+  const scoped = [];
+  for (const g2 of globs) {
+    const norm = normalizePath(g2);
+    if (norm.startsWith("**/")) {
+      const rest = norm.slice(3);
+      scoped.push(`${cleanRoot}/${rest}`, `${cleanRoot}/**/${rest}`);
+    } else if (norm === cleanRoot || norm.startsWith(`${cleanRoot}/`)) {
+      scoped.push(norm);
+    } else {
+      scoped.push(`${cleanRoot}/${norm}`);
+    }
+  }
+  return scoped;
+}
+function buildPreset(id, root) {
+  const cleanRoot = root ? normalizePath(root) : void 0;
+  switch (id) {
+    case "hexagonal":
+      return {
+        id: "hexagonal",
+        name: "Hexagonal Architecture (Ports & Adapters)",
+        summary: "Isolates pure domain and application core behind explicit ports; inbound and outbound adapters depend inward on ports/domain and never on each other.",
+        layers: {
+          domain: {
+            description: "Pure business entities, value objects, domain services, and invariants.",
+            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
+            can_import: ["domain", "ports"],
+            cannot_import: ["application", "adapters_in", "adapters_out", "adapters"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          ports: {
+            description: "Inbound and outbound interfaces owned by the core.",
+            paths: scopeGlobsToRoot(["**/ports/**", "**/application/ports/**"], cleanRoot),
+            can_import: ["ports", "domain"],
+            cannot_import: ["adapters_in", "adapters_out", "adapters"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          application: {
+            description: "Use-case orchestrators coordinating domain objects through ports.",
+            paths: scopeGlobsToRoot(
+              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
+              cleanRoot
+            ),
+            can_import: ["application", "domain", "ports"],
+            cannot_import: ["adapters_in", "adapters_out", "adapters"]
+          },
+          adapters_in: {
+            description: "Driving/inbound adapters (HTTP handlers, CLI commands, message consumers).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/adapters/in/**",
+                "**/adapters/inbound/**",
+                "**/adapters/driving/**",
+                "**/adapters/primary/**",
+                "**/driving/**",
+                "**/inbound/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["adapters_in", "ports", "application", "domain"],
+            cannot_import: ["adapters_out"]
+          },
+          adapters_out: {
+            description: "Driven/outbound adapters (DB repositories, HTTP clients, queues).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/adapters/out/**",
+                "**/adapters/outbound/**",
+                "**/adapters/driven/**",
+                "**/adapters/secondary/**",
+                "**/driven/**",
+                "**/outbound/**",
+                "**/infrastructure/**",
+                "**/infra/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["adapters_out", "ports", "domain"],
+            cannot_import: ["adapters_in", "application"]
+          },
+          adapters: {
+            description: "General adapter implementations when not split into inbound/outbound.",
+            paths: scopeGlobsToRoot(["**/adapters/**"], cleanRoot),
+            can_import: ["adapters", "ports", "application", "domain"]
+          }
+        },
+        principles: [
+          "Keep business rules and domain state transitions inside `domain` and `application`, never in `adapters_in` controllers or `adapters_out` repositories.",
+          "Ports belong to the core and must express signatures using domain entities, value objects, and domain errors \u2014 never framework/ORM/HTTP types.",
+          "Inbound adapters should only parse/validate transport inputs, invoke an application use case or inbound port, and map the response.",
+          "Outbound adapters must implement core port interfaces and translate persistence/network models at the boundary without leaking DB entities upward.",
+          "Concrete adapter wiring and dependency injection belong only in the composition root (`main`, bootstrap, DI container)."
+        ]
+      };
+    case "ddd":
+      return {
+        id: "ddd",
+        name: "Domain-Driven Design (DDD)",
+        summary: "Separates tactical layers (domain, application, infrastructure, interfaces) and enforces bounded-context encapsulation through explicit public APIs.",
+        layers: {
+          domain: {
+            description: "Aggregates, entities, value objects, domain events, and repository interfaces.",
+            paths: scopeGlobsToRoot(["**/domain/**"], cleanRoot),
+            can_import: ["domain", "shared"],
+            cannot_import: ["application", "infrastructure", "interfaces"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          application: {
+            description: "Application services, command/query handlers, transaction boundaries.",
+            paths: scopeGlobsToRoot(
+              ["**/application/**", "**/use-cases/**", "**/use_cases/**", "**/usecases/**"],
+              cleanRoot
+            ),
+            can_import: ["application", "domain", "shared"],
+            cannot_import: ["infrastructure", "interfaces"]
+          },
+          infrastructure: {
+            description: "Persistence implementations, event buses, external integrations.",
+            paths: scopeGlobsToRoot(
+              ["**/infrastructure/**", "**/infra/**", "**/persistence/**"],
+              cleanRoot
+            ),
+            can_import: ["infrastructure", "domain", "application", "shared"],
+            cannot_import: ["interfaces"]
+          },
+          interfaces: {
+            description: "Delivery mechanisms (HTTP/GraphQL/gRPC/CLI/UI entry points).",
+            paths: scopeGlobsToRoot(
+              [
+                "**/interfaces/**",
+                "**/presentation/**",
+                "**/controllers/**",
+                "**/http/**",
+                "**/ui/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["interfaces", "application", "domain", "shared"],
+            cannot_import: ["infrastructure"]
+          },
+          shared: {
+            description: "Shared kernel primitives and cross-context value types.",
+            paths: scopeGlobsToRoot(
+              ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
+              cleanRoot
+            ),
+            can_import: ["shared"],
+            cannot_import: ["domain", "application", "infrastructure", "interfaces"]
+          }
+        },
+        contexts: {
+          pattern: cleanRoot ? `${cleanRoot}/contexts/*` : "**/contexts/*",
+          public_api: ["index.*", "public/**", "contracts/**", "api/**"],
+          shared: scopeGlobsToRoot(
+            ["**/shared/**", "**/shared-kernel/**", "**/kernel/**"],
+            cleanRoot
+          ),
+          allow_public_api_imports: true
+        },
+        principles: [
+          "Enforce aggregate root invariants inside aggregate methods rather than allowing external services to mutate internal entities directly (avoid anemic domain models).",
+          "Model domain concepts as immutable, self-validating Value Objects instead of primitive obsession where domain constraints apply.",
+          "Bounded contexts must communicate only via explicit public APIs/contracts or domain events; use Anti-Corruption Layers when translating foreign models.",
+          "Repositories should load and persist whole aggregates using domain language rather than exposing raw ORM query builders to callers.",
+          "Maintain ubiquitous language consistently across types, methods, events, and modules within each bounded context."
+        ]
+      };
+    case "clean":
+      return {
+        id: "clean",
+        name: "Clean Architecture",
+        summary: "Enforces the concentric Dependency Rule: source dependencies may point only inward from frameworks -> interface adapters -> use cases -> entities.",
+        layers: {
+          entities: {
+            description: "Enterprise-wide business rules and core entities.",
+            paths: scopeGlobsToRoot(["**/entities/**", "**/domain/**"], cleanRoot),
+            can_import: ["entities"],
+            cannot_import: ["use_cases", "interface_adapters", "frameworks"],
+            forbid_packages: [...DEFAULT_DOMAIN_FORBIDDEN_PACKAGES]
+          },
+          use_cases: {
+            description: "Application-specific business rules and interactors.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/use-cases/**",
+                "**/use_cases/**",
+                "**/usecases/**",
+                "**/application/**",
+                "**/interactors/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["use_cases", "entities"],
+            cannot_import: ["interface_adapters", "frameworks"]
+          },
+          interface_adapters: {
+            description: "Controllers, presenters, gateways, and view models.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/interface-adapters/**",
+                "**/adapters/**",
+                "**/controllers/**",
+                "**/presenters/**",
+                "**/gateways/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["interface_adapters", "use_cases", "entities"],
+            cannot_import: ["frameworks"]
+          },
+          frameworks: {
+            description: "Web frameworks, database drivers, external devices.",
+            paths: scopeGlobsToRoot(
+              ["**/frameworks/**", "**/drivers/**", "**/infrastructure/**", "**/infra/**"],
+              cleanRoot
+            ),
+            can_import: ["frameworks", "interface_adapters", "use_cases", "entities"]
+          }
+        },
+        principles: [
+          "Follow the Dependency Rule strictly: inner circles (`entities`, `use_cases`) must have zero knowledge of outer circles (`interface_adapters`, `frameworks`).",
+          "Keep enterprise rules in `entities` separate from application orchestration in `use_cases`.",
+          "Boundary input/output DTOs must be defined and owned by the inner layer (`use_cases`), not by web frameworks or ORM models."
+        ]
+      };
+    case "layered":
+      return {
+        id: "layered",
+        name: "Classic Layered (N-Tier) Architecture",
+        summary: "Separates presentation -> service -> data -> model layers so requests flow downward without presentation bypassing services to touch persistence.",
+        layers: {
+          presentation: {
+            description: "HTTP routes, controllers, views, and UI components.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/presentation/**",
+                "**/controllers/**",
+                "**/routes/**",
+                "**/views/**",
+                "**/api/**",
+                "**/ui/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["presentation", "service", "model", "shared"],
+            cannot_import: ["data"]
+          },
+          service: {
+            description: "Business services and domain logic.",
+            paths: scopeGlobsToRoot(
+              ["**/services/**", "**/service/**", "**/business/**", "**/domain/**"],
+              cleanRoot
+            ),
+            can_import: ["service", "data", "model", "shared"],
+            cannot_import: ["presentation"]
+          },
+          data: {
+            description: "Repositories, DAOs, and persistence queries.",
+            paths: scopeGlobsToRoot(
+              [
+                "**/data/**",
+                "**/repositories/**",
+                "**/repository/**",
+                "**/dal/**",
+                "**/persistence/**",
+                "**/db/**"
+              ],
+              cleanRoot
+            ),
+            can_import: ["data", "model", "shared"],
+            cannot_import: ["presentation", "service"]
+          },
+          model: {
+            description: "Shared domain models, DTOs, and schemas.",
+            paths: scopeGlobsToRoot(
+              ["**/models/**", "**/model/**", "**/types/**", "**/schemas/**"],
+              cleanRoot
+            ),
+            can_import: ["model", "shared"],
+            cannot_import: ["presentation", "service", "data"]
+          },
+          shared: {
+            description: "Cross-cutting utilities.",
+            paths: scopeGlobsToRoot(
+              ["**/shared/**", "**/common/**", "**/utils/**", "**/util/**"],
+              cleanRoot
+            ),
+            can_import: ["shared"],
+            cannot_import: ["presentation", "service", "data"]
+          }
+        },
+        principles: [
+          "Keep `presentation` handlers thin: no direct SQL/ORM queries or multi-step business logic inside controllers or route handlers.",
+          "Keep `data` repositories focused on persistence mechanics without embedding authorization or pricing/business rules.",
+          "Never introduce upward dependencies from lower layers (`data`, `service`) back into `presentation`."
+        ]
+      };
+    case "modular-monolith":
+      return {
+        id: "modular-monolith",
+        name: "Modular Monolith",
+        summary: "Enforces strong module boundaries where feature modules interact exclusively through declared public entrypoints or a lean shared kernel.",
+        layers: {
+          shared: {
+            description: "Shared kernel primitives with zero upward dependencies on feature modules.",
+            paths: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
+            can_import: ["shared"]
+          }
+        },
+        contexts: {
+          pattern: cleanRoot ? `${cleanRoot}/modules/*` : "**/modules/*",
+          public_api: ["index.*", "public/**", "api/**", "contracts/**"],
+          shared: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
+          allow_public_api_imports: true
+        },
+        principles: [
+          "Feature modules must expose a clean public facade (`index`, `public/`, or `contracts/`) and never leak internal repositories, tables, or private helpers.",
+          "Keep the `shared` kernel minimal \u2014 avoid turning `shared` into a dumping ground that hides cross-module coupling.",
+          "Avoid circular module dependencies; prefer event-driven decoupling or an explicit orchestration module when cycles emerge."
+        ]
+      };
+    case "custom":
+      return {
+        id: "custom",
+        name: "Custom Architecture",
+        summary: "User-defined layers, bounded contexts, import rules, and semantic principles.",
+        layers: {},
+        principles: []
+      };
+  }
+}
+function mergeLayerOverride(base, override) {
+  const paths = override.paths ?? base?.paths;
+  if (!paths || paths.length === 0) {
+    return null;
+  }
+  return {
+    paths: [...paths],
+    ...override.description !== void 0 ? { description: override.description } : base?.description !== void 0 ? { description: base.description } : {},
+    ...override.can_import !== void 0 ? { can_import: [...override.can_import] } : base?.can_import !== void 0 ? { can_import: [...base.can_import] } : {},
+    ...override.cannot_import !== void 0 ? { cannot_import: [...override.cannot_import] } : base?.cannot_import !== void 0 ? { cannot_import: [...base.cannot_import] } : {},
+    ...override.forbid_packages !== void 0 ? { forbid_packages: [...override.forbid_packages] } : base?.forbid_packages !== void 0 ? { forbid_packages: [...base.forbid_packages] } : {},
+    ...override.allow_packages !== void 0 ? { allow_packages: [...override.allow_packages] } : base?.allow_packages !== void 0 ? { allow_packages: [...base.allow_packages] } : {},
+    ...override.severity !== void 0 ? { severity: override.severity } : base?.severity !== void 0 ? { severity: base.severity } : {}
+  };
+}
+function resolveArchitectureSpec(config2) {
+  const hasCustomStructure = config2.layers !== void 0 && Object.keys(config2.layers).length > 0 || config2.contexts !== void 0 || config2.rules !== void 0 && config2.rules.length > 0;
+  const presetId = config2.preset ?? (hasCustomStructure ? "custom" : "hexagonal");
+  const preset = buildPreset(presetId, config2.root);
+  const layers = {};
+  for (const [name, def] of Object.entries(preset.layers)) {
+    const override = config2.layers?.[name];
+    const merged = override ? mergeLayerOverride(def, override) : { ...def, paths: [...def.paths] };
+    if (merged) layers[name] = merged;
+  }
+  if (config2.layers) {
+    for (const [name, override] of Object.entries(config2.layers)) {
+      if (layers[name]) continue;
+      const added = mergeLayerOverride(void 0, override);
+      if (added) {
+        layers[name] = added;
+      } else {
+        void logger.warn(
+          `Architecture layer '${name}' has no paths and does not match a preset layer; ignoring.`
+        );
+      }
+    }
+  }
+  const contexts = config2.contexts ?? preset.contexts;
+  const includePresetPrinciples = config2.include_preset_principles !== false;
+  const principles = [
+    ...includePresetPrinciples ? preset.principles : [],
+    ...config2.principles ?? []
+  ];
+  const rules = (config2.rules ?? []).filter(
+    (r2) => r2.forbid_imports !== void 0 && r2.forbid_imports.length > 0 || r2.forbid_packages !== void 0 && r2.forbid_packages.length > 0
+  );
+  return {
+    enabled: config2.enabled,
+    preset: presetId,
+    ...config2.root !== void 0 ? { root: normalizePath(config2.root) } : {},
+    severity: config2.severity,
+    layers,
+    ...contexts !== void 0 ? { contexts } : {},
+    rules,
+    principles,
+    llm_enforcement: config2.llm_enforcement,
+    deterministic_enforcement: config2.deterministic_enforcement,
+    exclude: [...config2.exclude ?? []],
+    ignore_tests: config2.ignore_tests,
+    ...config2.baseline_file !== void 0 ? { baseline_file: config2.baseline_file } : {}
+  };
 }
 
 // src/references/loader.ts

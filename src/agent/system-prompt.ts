@@ -9,7 +9,7 @@
  */
 
 import type { ReviewConfig } from '../config/types.js';
-import { resolveArchitectureSpec, type ResolvedArchitectureSpec } from '../architecture/presets.js';
+import type { ResolvedArchitectureSpec } from '../architecture/presets.js';
 import { renderArchitecturePrompt } from '../architecture/prompt.js';
 import type { LoadedReferenceCorpus } from '../references/loader.js';
 import { renderReferencesPrompt } from '../references/prompt.js';
@@ -24,9 +24,10 @@ export interface BuildSystemPromptInput {
   repoName: string;
   contextFiles: RepoContextEntry[];
   /**
-   * Optional pre-resolved architecture spec (including external `.vor/architecture.yml`).
-   * Pass `null` when resolved and explicitly disabled (e.g., external `enabled: false`)
-   * so the fallback below does not re-enable from inline `.vor.yml`.
+   * Pre-resolved architecture spec (including any external `.vor/architecture.yml`
+   * merge). Callers must pass the resolved spec explicitly; omitting it or passing
+   * `null` disables the architecture section so unmerged inline fallback cannot hide
+   * external config overrides.
    */
   architecture?: ResolvedArchitectureSpec | null;
   /** Optional pre-loaded reference docs & standards corpus. */
@@ -50,14 +51,8 @@ export function buildSystemPrompt(input: BuildSystemPromptInput): string {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
 
-  const archSpec =
-    input.architecture !== undefined
-      ? input.architecture
-      : input.config.architecture.enabled
-        ? resolveArchitectureSpec(input.config.architecture)
-        : null;
-  if (archSpec) {
-    const archSection = renderArchitecturePrompt(archSpec);
+  if (input.architecture) {
+    const archSection = renderArchitecturePrompt(input.architecture);
     if (archSection) sections.push(archSection);
   }
 

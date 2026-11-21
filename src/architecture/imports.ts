@@ -1129,7 +1129,7 @@ function extractPythonImports(content: string): ExtractedImport[] {
   const fromSpans: StringSpan[] = [];
 
   const fromRe =
-    /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
+    /(?:^[ \t]*|[;:][ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
   for (const m of matchAllOutsideStrings(
     cleaned,
     fromRe,
@@ -1173,7 +1173,7 @@ function extractPythonImports(content: string): ExtractedImport[] {
     });
   }
 
-  const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
+  const importRe = /(?:^[ \t]*|[;:][ \t]*)import(?=[ \t]|\\\r?\n)/gm;
   for (const m of matchAllOutsideStrings(
     cleaned,
     importRe,

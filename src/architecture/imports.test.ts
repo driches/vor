@@ -1370,4 +1370,26 @@ describe('extractImports & resolveImport across languages', () => {
     const rsParsed = extractImports('src/domain/order.rs', rsSrc);
     expect(rsParsed.imports.map((i) => i.specifier)).toEqual(['crate::infrastructure::Repo']);
   });
+
+  it('extracts Python imports inside single-line compound suites while ignoring strings', () => {
+    const pySrc = [
+      'if enabled: import flask',
+      'if True:import sqlalchemy',
+      'if TYPE_CHECKING: from ..infra import repo',
+      'try: import os, \\',
+      '    requests',
+      'def f(): import httpx',
+      's = "if True: import fake"; if True: import django',
+    ].join('\n');
+    const parsed = extractImports('app/domain/service.py', pySrc);
+    expect(parsed.imports.map((i) => ({ spec: i.specifier, line: i.line }))).toEqual([
+      { spec: '..infra', line: 3 },
+      { spec: 'flask', line: 1 },
+      { spec: 'sqlalchemy', line: 2 },
+      { spec: 'os', line: 4 },
+      { spec: 'requests', line: 5 },
+      { spec: 'httpx', line: 6 },
+      { spec: 'django', line: 7 },
+    ]);
+  });
 });

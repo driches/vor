@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveArchitectureSpec } from '../architecture/presets.js';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import { sha256Hex } from '../references/cache.js';
 import { buildSystemPrompt, selectEmbeddedContextFiles } from './system-prompt.js';
@@ -139,7 +140,7 @@ describe('buildSystemPrompt', () => {
     expect(p).not.toContain('Static analysis runs in parallel');
   });
 
-  it('omits architecture standards section by default and includes it when enabled', () => {
+  it('omits architecture standards section unless a pre-resolved enabled spec is provided', () => {
     const off = buildSystemPrompt({
       config: DEFAULT_CONFIG,
       repoName: 'r',
@@ -147,51 +148,48 @@ describe('buildSystemPrompt', () => {
     });
     expect(off).not.toContain('Software architecture standards');
 
+    const archCfg = {
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'hexagonal' as const,
+    };
     const on = buildSystemPrompt({
-      config: {
-        ...DEFAULT_CONFIG,
-        architecture: {
-          ...DEFAULT_CONFIG.architecture,
-          enabled: true,
-          preset: 'hexagonal',
-        },
-      },
+      config: { ...DEFAULT_CONFIG, architecture: archCfg },
       repoName: 'r',
       contextFiles: [],
+      architecture: resolveArchitectureSpec(archCfg),
     });
     expect(on).toContain('Software architecture standards');
     expect(on).toContain('**hexagonal**');
 
+    const llmOffCfg = {
+      ...archCfg,
+      llm_enforcement: false,
+    };
     const llmOff = buildSystemPrompt({
-      config: {
-        ...DEFAULT_CONFIG,
-        architecture: {
-          ...DEFAULT_CONFIG.architecture,
-          enabled: true,
-          preset: 'hexagonal',
-          llm_enforcement: false,
-        },
-      },
+      config: { ...DEFAULT_CONFIG, architecture: llmOffCfg },
       repoName: 'r',
       contextFiles: [],
+      architecture: resolveArchitectureSpec(llmOffCfg),
     });
     expect(llmOff).not.toContain('Software architecture standards');
 
-    // Explicit `architecture: null` (external config disabled) overrides inline enabled: true.
-    const externalDisabled = buildSystemPrompt({
-      config: {
-        ...DEFAULT_CONFIG,
-        architecture: {
-          ...DEFAULT_CONFIG.architecture,
-          enabled: true,
-          preset: 'hexagonal',
-        },
-      },
-      repoName: 'r',
-      contextFiles: [],
-      architecture: null,
-    });
-    expect(externalDisabled).not.toContain('Software architecture standards');
+    // Omitting `architecture` or passing `null` omits the section even when inline enabled is true.
+    for (const omitted of [
+      buildSystemPrompt({
+        config: { ...DEFAULT_CONFIG, architecture: archCfg },
+        repoName: 'r',
+        contextFiles: [],
+      }),
+      buildSystemPrompt({
+        config: { ...DEFAULT_CONFIG, architecture: archCfg },
+        repoName: 'r',
+        contextFiles: [],
+        architecture: null,
+      }),
+    ]) {
+      expect(omitted).not.toContain('Software architecture standards');
+    }
   });
 
   it('includes reference documentation & standards section when references corpus is provided', () => {

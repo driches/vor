@@ -78489,7 +78489,7 @@ function extractPythonImports(content) {
   const rawLines = content.split("\n");
   const out2 = [];
   const fromSpans = [];
-  const fromRe = /(?:^[ \t]*|;[ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
+  const fromRe = /(?:^[ \t]*|[;:][ \t]*)from(?:[ \t]|\\\r?\n)+(\.{1,}[A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_.]*)(?:[ \t]|\\\r?\n)+import\b/gm;
   for (const m2 of matchAllOutsideStrings(
     cleaned,
     fromRe,
@@ -78527,7 +78527,7 @@ function extractPythonImports(content) {
       ...importedNames.length > 0 ? { importedNames } : {}
     });
   }
-  const importRe = /(?:^[ \t]*|;[ \t]*)import(?=[ \t]|\\\r?\n)/gm;
+  const importRe = /(?:^[ \t]*|[;:][ \t]*)import(?=[ \t]|\\\r?\n)/gm;
   for (const m2 of matchAllOutsideStrings(
     cleaned,
     importRe,
@@ -80552,12 +80552,6 @@ async function runRepoArchitectureCheck(opts) {
     if (matchesAnyGlob(filePath, excludePaths)) continue;
     if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
     if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
-    if (filesScanned >= MAX_SCAN_FILES) {
-      void logger.warn(
-        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`
-      );
-      break;
-    }
     let content;
     try {
       const absPath = (0, import_node_path3.resolve)(opts.workspaceDir, filePath);
@@ -80566,6 +80560,12 @@ async function runRepoArchitectureCheck(opts) {
       content = (0, import_node_fs3.readFileSync)(absPath, "utf-8");
     } catch {
       continue;
+    }
+    if (filesScanned >= MAX_SCAN_FILES) {
+      void logger.warn(
+        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`
+      );
+      break;
     }
     filesScanned += 1;
     if (classifyLayer(filePath, opts.spec)) layersMatched += 1;
@@ -99048,9 +99048,8 @@ function buildSystemPrompt(input2) {
   if (input2.config.security.enabled && input2.config.security.scanners.sast.enabled) {
     sections.push(STATIC_ANALYSIS_SECTION);
   }
-  const archSpec = input2.architecture !== void 0 ? input2.architecture : input2.config.architecture.enabled ? resolveArchitectureSpec(input2.config.architecture) : null;
-  if (archSpec) {
-    const archSection = renderArchitecturePrompt(archSpec);
+  if (input2.architecture) {
+    const archSection = renderArchitecturePrompt(input2.architecture);
     if (archSection) sections.push(archSection);
   }
   if (input2.config.prompt.additions && input2.config.prompt.additions.trim().length > 0) {

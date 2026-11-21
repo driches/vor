@@ -315,13 +315,6 @@ export async function runRepoArchitectureCheck(
     if (matchesAnyGlob(filePath, opts.spec.exclude)) continue;
     if (opts.spec.ignore_tests && isTestFile(filePath)) continue;
 
-    if (filesScanned >= MAX_SCAN_FILES) {
-      void logger.warn(
-        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
-      );
-      break;
-    }
-
     let content: string;
     try {
       const absPath = resolve(opts.workspaceDir, filePath);
@@ -330,6 +323,13 @@ export async function runRepoArchitectureCheck(
       content = readFileSync(absPath, 'utf-8');
     } catch {
       continue; // deleted or unreadable symlink in dirty working tree
+    }
+
+    if (filesScanned >= MAX_SCAN_FILES) {
+      void logger.warn(
+        `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,
+      );
+      break;
     }
 
     filesScanned += 1;
