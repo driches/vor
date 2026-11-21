@@ -759,4 +759,31 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('degrades cache write failures to uncached docs with warnings instead of throwing', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-unwritable-ws-'));
+    try {
+      writeFileSync(join(ws, 'docs.md'), '# Uncached Standard\nMust still load.\n');
+      const blockingCachePath = join(ws, '.cache-blocker');
+      writeFileSync(blockingCachePath, 'file-blocks-mkdir', 'utf-8');
+
+      const res = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['docs.md'],
+          cache: { ...DEFAULT_CONFIG.references.cache, dir: '.cache-blocker' },
+        },
+        workspaceDir: ws,
+      });
+
+      expect(res.docs).toHaveLength(1);
+      expect(res.docs[0]?.content).toContain('Must still load.');
+      expect(res.docs[0]?.cache_status).toBe('uncached');
+      expect(res.cache_stats.uncached).toBe(1);
+      expect(res.warnings.some((w) => w.includes('Could not persist reference'))).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

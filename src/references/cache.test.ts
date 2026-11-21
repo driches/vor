@@ -79,4 +79,18 @@ describe('DiskReferenceCache', () => {
     const resolved = resolveReferenceCacheDir('../outside-cache', '/tmp/ws');
     expect(resolved).not.toContain('outside-cache');
   });
+
+  it('returns false without throwing when the cache directory is not writable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vor-ref-cache-file-'));
+    try {
+      const blockingFile = join(dir, 'not-a-directory');
+      writeFileSync(blockingFile, 'occupied', 'utf-8');
+      const cache = new DiskReferenceCache(blockingFile);
+      expect(cache.set('url:https://example.com/std.md', makeMeta(), 'hello world')).toBe(false);
+      expect(cache.list()).toEqual([]);
+      expect(cache.clear()).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

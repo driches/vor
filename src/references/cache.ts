@@ -150,11 +150,19 @@ export class DiskReferenceCache {
     return fresh ? { status: 'hit', meta, content } : { status: 'stale', meta, content };
   }
 
-  set(key: string, meta: ReferenceCacheMeta, content: string): void {
-    mkdirSync(this.cacheDir, { recursive: true });
-    const { metaPath, contentPath } = this.entryPaths(key);
-    writeFileSync(contentPath, content, 'utf-8');
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+  set(key: string, meta: ReferenceCacheMeta, content: string): boolean {
+    try {
+      mkdirSync(this.cacheDir, { recursive: true });
+      const { metaPath, contentPath } = this.entryPaths(key);
+      writeFileSync(contentPath, content, 'utf-8');
+      writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+      return true;
+    } catch (err) {
+      void logger.warn(
+        `Failed to persist reference cache entry '${key}' in '${this.cacheDir}': ${(err as Error).message}`,
+      );
+      return false;
+    }
   }
 
   touch(
@@ -181,8 +189,14 @@ export class DiskReferenceCache {
 
   list(): ReferenceCacheMeta[] {
     if (!existsSync(this.cacheDir)) return [];
+    let files: string[];
+    try {
+      files = readdirSync(this.cacheDir);
+    } catch {
+      return []; // unreadable cache directory
+    }
     const entries: ReferenceCacheMeta[] = [];
-    for (const file of readdirSync(this.cacheDir)) {
+    for (const file of files) {
       if (!file.endsWith('.meta.json')) continue;
       try {
         const parsed = cacheMetaSchema.safeParse(
@@ -198,8 +212,14 @@ export class DiskReferenceCache {
 
   clear(idOrKey?: string): number {
     if (!existsSync(this.cacheDir)) return 0;
+    let files: string[];
+    try {
+      files = readdirSync(this.cacheDir);
+    } catch {
+      return 0; // unreadable cache directory
+    }
     let removed = 0;
-    for (const file of readdirSync(this.cacheDir)) {
+    for (const file of files) {
       if (!file.endsWith('.meta.json')) continue;
       const hash = file.slice(0, -'.meta.json'.length);
       const metaPath = join(this.cacheDir, file);

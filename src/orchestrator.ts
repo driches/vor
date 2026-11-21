@@ -513,7 +513,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       : config.providers.openai;
 
   const effectiveAnthropic =
-    config.references.enabled &&
+    referenceCorpus &&
+    referenceCorpus.docs.length > 0 &&
     config.references.prompt_cache.enabled &&
     config.references.prompt_cache.anthropic_ttl === '1h'
       ? { prompt_cache_ttl: '1h' as const }

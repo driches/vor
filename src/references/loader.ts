@@ -565,10 +565,11 @@ function writeNormalizedCacheEntry(
     lastModified?: string;
     sourceFingerprint?: string;
   },
-): void {
+  warnings: string[],
+): boolean {
   // Persist the full untruncated normalized document so later loads can
   // change `max_doc_bytes` and re-apply truncation cleanly on cache hits.
-  cache.set(
+  const persisted = cache.set(
     cacheKey,
     {
       version: 1,
@@ -587,6 +588,12 @@ function writeNormalizedCacheEntry(
     },
     normalized,
   );
+  if (!persisted) {
+    warnings.push(
+      `Could not persist reference '${meta.id}' to cache directory '${cache.cacheDir}'; using uncached copy.`,
+    );
+  }
+  return persisted;
 }
 
 type SafeWorkspaceFileResult =
@@ -740,17 +747,23 @@ async function loadRepoFile(
       }
       const fingerprint = `ref:${input.ref}:${sha256Hex(remoteText)}`;
       const normalized = normalizeDocumentText(remoteText);
-      if (cache) {
-        writeNormalizedCacheEntry(cache, cacheKey, normalized, {
-          id: docId,
-          ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
-          source: normPath,
-          kind: 'repo',
-          nowMs,
-          ttlSeconds: ttl,
-          sourceFingerprint: fingerprint,
-        });
-      }
+      const persisted = cache
+        ? writeNormalizedCacheEntry(
+            cache,
+            cacheKey,
+            normalized,
+            {
+              id: docId,
+              ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+              source: normPath,
+              kind: 'repo',
+              nowMs,
+              ttlSeconds: ttl,
+              sourceFingerprint: fingerprint,
+            },
+            warnings,
+          )
+        : false;
       return materializeNormalizedDoc(normalized, {
         id: docId,
         ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
@@ -758,7 +771,7 @@ async function loadRepoFile(
         kind: 'repo',
         mode: metaOpts.mode,
         maxDocBytes: input.config.max_doc_bytes,
-        cacheStatus: cache ? 'miss' : 'uncached',
+        cacheStatus: persisted ? 'miss' : 'uncached',
       });
     }
   } else if (cache && !input.forceRefresh && diskFingerprint) {
@@ -789,17 +802,23 @@ async function loadRepoFile(
 
   const fingerprint = diskFingerprint ?? `sha:${sha256Hex(diskContent)}`;
   const normalized = normalizeDocumentText(diskContent);
-  if (cache) {
-    writeNormalizedCacheEntry(cache, cacheKey, normalized, {
-      id: docId,
-      ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
-      source: normPath,
-      kind: 'repo',
-      nowMs,
-      ttlSeconds: ttl,
-      sourceFingerprint: fingerprint,
-    });
-  }
+  const persisted = cache
+    ? writeNormalizedCacheEntry(
+        cache,
+        cacheKey,
+        normalized,
+        {
+          id: docId,
+          ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+          source: normPath,
+          kind: 'repo',
+          nowMs,
+          ttlSeconds: ttl,
+          sourceFingerprint: fingerprint,
+        },
+        warnings,
+      )
+    : false;
   return materializeNormalizedDoc(normalized, {
     id: docId,
     ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
@@ -807,7 +826,7 @@ async function loadRepoFile(
     kind: 'repo',
     mode: metaOpts.mode,
     maxDocBytes: input.config.max_doc_bytes,
-    cacheStatus: cache ? 'miss' : 'uncached',
+    cacheStatus: persisted ? 'miss' : 'uncached',
   });
 }
 
@@ -1182,19 +1201,26 @@ async function loadRemoteUrl(
     const contentType = res.headers.get('content-type') ?? undefined;
     const normalized = normalizeDocumentText(cappedRaw, contentType);
 
+    let persisted = false;
     if (cache) {
       const etag = res.headers.get('etag') ?? undefined;
       const lastModified = res.headers.get('last-modified') ?? undefined;
-      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
-        id: docId,
-        ...(src.title !== undefined ? { explicitTitle: src.title } : {}),
-        source: src.url,
-        kind: 'url',
-        nowMs,
-        ttlSeconds: ttl,
-        ...(etag ? { etag } : {}),
-        ...(lastModified ? { lastModified } : {}),
-      });
+      persisted = writeNormalizedCacheEntry(
+        cache,
+        cacheKey,
+        normalized,
+        {
+          id: docId,
+          ...(src.title !== undefined ? { explicitTitle: src.title } : {}),
+          source: src.url,
+          kind: 'url',
+          nowMs,
+          ttlSeconds: ttl,
+          ...(etag ? { etag } : {}),
+          ...(lastModified ? { lastModified } : {}),
+        },
+        warnings,
+      );
     }
     return materializeNormalizedDoc(normalized, {
       id: docId,
@@ -1203,7 +1229,7 @@ async function loadRemoteUrl(
       kind: 'url',
       mode: src.mode,
       maxDocBytes: input.config.max_doc_bytes,
-      cacheStatus: cache ? 'miss' : 'uncached',
+      cacheStatus: persisted ? 'miss' : 'uncached',
     });
   } catch (err) {
     if (staleMeta && staleContent !== undefined && input.config.cache.stale_on_error) {
@@ -1304,21 +1330,28 @@ async function loadGithubFile(
     const rawText = buf.toString('utf-8');
     const normalized = normalizeDocumentText(rawText);
 
+    let persisted = false;
     if (cache) {
       // Octokit's `repos.getContent` union return type omits `etag` on its
       // typed response headers map even though Octokit populates `headers.etag`;
       // safely fall back to `undefined` (no conditional request) if absent.
       const etag = (res as { headers?: Record<string, string | undefined> }).headers?.etag;
-      writeNormalizedCacheEntry(cache, cacheKey, normalized, {
-        id: docId,
-        ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
-        source: sourceLabel,
-        kind: 'github',
-        nowMs,
-        ttlSeconds: ttl,
-        ...(etag ? { etag } : {}),
-        sourceFingerprint: res.data.sha,
-      });
+      persisted = writeNormalizedCacheEntry(
+        cache,
+        cacheKey,
+        normalized,
+        {
+          id: docId,
+          ...(metaOpts.title !== undefined ? { explicitTitle: metaOpts.title } : {}),
+          source: sourceLabel,
+          kind: 'github',
+          nowMs,
+          ttlSeconds: ttl,
+          ...(etag ? { etag } : {}),
+          sourceFingerprint: res.data.sha,
+        },
+        warnings,
+      );
     }
     return materializeNormalizedDoc(normalized, {
       id: docId,
@@ -1327,7 +1360,7 @@ async function loadGithubFile(
       kind: 'github',
       mode: metaOpts.mode,
       maxDocBytes: input.config.max_doc_bytes,
-      cacheStatus: cache ? 'miss' : 'uncached',
+      cacheStatus: persisted ? 'miss' : 'uncached',
     });
   } catch (err) {
     const status = (err as { status?: number }).status;
