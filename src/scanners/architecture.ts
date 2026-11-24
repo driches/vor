@@ -667,6 +667,25 @@ async function hydrateResolveContext(
         }
       }
 
+      for (const [dir, manifest] of byDir) {
+        if (deps.signal.aborted) break;
+        if (
+          !manifest?.isPackage ||
+          manifest.hasExplicitLibPath ||
+          (!manifest.autolib && !manifest.hasLibTable)
+        ) {
+          continue;
+        }
+        const libPath = dir ? `${dir}/src/lib.rs` : 'src/lib.rs';
+        if (probedTargets.has(libPath) || extraMutable.has(libPath)) continue;
+        probedTargets.add(libPath);
+        const res = await readMetadataFile(deps, libPath, counters, headTree, removedFiles);
+        if (res.status === 'found') {
+          extraMutable.add(libPath);
+          extraUpdated = true;
+        }
+      }
+
       if (extraUpdated) {
         ctx.extraFiles = extraMutable;
       }

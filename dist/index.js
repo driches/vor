@@ -75984,7 +75984,8 @@ function readTagNameAt(lower, nameStart) {
   while (pos < lower.length) {
     const ch = lower.charCodeAt(pos);
     const isAlphaNum = ch >= 97 && ch <= 122 || ch >= 48 && ch <= 57;
-    if (!isAlphaNum) break;
+    const isHyphen = pos > nameStart && ch === 45;
+    if (!isAlphaNum && !isHyphen) break;
     pos += 1;
   }
   return pos;
@@ -90323,6 +90324,8 @@ function parseTomlBooleanValue(rawVal) {
 function parseCargoManifest(raw, manifestDir = "") {
   const info2 = {
     isPackage: false,
+    hasLibTable: false,
+    autolib: true,
     explicitTargets: [],
     namedTargets: [],
     hasExplicitLibPath: false,
@@ -90338,6 +90341,10 @@ function parseCargoManifest(raw, manifestDir = "") {
     if (!currentTarget) return;
     const t2 = currentTarget;
     currentTarget = null;
+    if (t2.kind === "lib") {
+      info2.hasLibTable = true;
+      if (t2.name) info2.libName = t2.name;
+    }
     if (t2.path !== void 0) {
       const cleanPath = t2.path.replace(/\\/g, "/").trim();
       if (!cleanPath || cleanPath.startsWith("/")) return;
@@ -90396,6 +90403,9 @@ function parseCargoManifest(raw, manifestDir = "") {
       if (key === "name") {
         const s2 = parseTomlStringValue(rawVal);
         if (s2) info2.packageName = s2;
+      } else if (key === "autolib") {
+        const b2 = parseTomlBooleanValue(rawVal);
+        if (b2 !== void 0) info2.autolib = b2;
       } else if (key === "autobins") {
         const b2 = parseTomlBooleanValue(rawVal);
         if (b2 !== void 0) info2.autobins = b2;
@@ -90831,6 +90841,8 @@ var RUST_TARGET_KIND_PRIORITY = {
 };
 var DEFAULT_CARGO_MANIFEST = {
   isPackage: false,
+  hasLibTable: false,
+  autolib: true,
   explicitTargets: [],
   namedTargets: [],
   hasExplicitLibPath: false,
@@ -91003,7 +91015,7 @@ function findRustCrateTarget(normSource, ctx) {
     const srcLib = `${srcDir}/lib.rs`;
     const srcMain = `${srcDir}/main.rs`;
     let addedSrcTarget = false;
-    if (!manifest.hasExplicitLibPath && (normSource === srcLib || existsRepoFile(srcLib, ctx))) {
+    if (!manifest.hasExplicitLibPath && (manifest.autolib || manifest.hasLibTable) && (normSource === srcLib || existsRepoFile(srcLib, ctx))) {
       candidates.push({ dir: srcDir, rootFile: srcLib, kind: "lib", explicit: false });
       addedSrcTarget = true;
     }
@@ -91048,6 +91060,34 @@ function findRustCrateTarget(normSource, ctx) {
     return { dir: chosenDir, rootFile: onlyRoot };
   }
   return { dir: chosenDir };
+}
+function findOwnRustLibTarget(normSource, ctx) {
+  const manifestHit = resolveCargoManifestForFile(normSource, ctx);
+  if (!manifestHit) return void 0;
+  const { dir: pkgDir, manifest } = manifestHit;
+  const rawName = manifest.libName ?? manifest.packageName;
+  if (!rawName) return void 0;
+  const crateName = rawName.trim().replace(/-/g, "_");
+  if (!crateName) return void 0;
+  const explicitLib = manifest.explicitTargets.find((t2) => t2.kind === "lib");
+  if (explicitLib) {
+    return {
+      crateName,
+      target: { dir: explicitLib.dir, rootFile: explicitLib.rootFile }
+    };
+  }
+  if (!manifest.autolib && !manifest.hasLibTable) {
+    return void 0;
+  }
+  const defaultLibFile = joinCargoPkgPath(pkgDir, "src/lib.rs");
+  const defaultLibDir = joinCargoPkgPath(pkgDir, "src");
+  if (manifest.hasLibTable || existsRepoFile(defaultLibFile, ctx)) {
+    return {
+      crateName,
+      target: { dir: defaultLibDir, rootFile: defaultLibFile }
+    };
+  }
+  return void 0;
 }
 function resolveRustModulePath(joined, crateTarget, ctx) {
   const normJoined = normalizePath(joined);
@@ -91320,8 +91360,24 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
           resolvedPath: resolveRustModulePath(joined, crateTarget, ctx)
         };
       }
-      const crateName = (spec.split("::")[0] ?? spec).trim();
-      return crateName ? { ...base, packageName: crateName } : base;
+      const segments = spec.split("::");
+      const crateName = (segments[0] ?? spec).trim();
+      if (crateName) {
+        const ownLib = findOwnRustLibTarget(normSource, ctx);
+        const normalizedCrate = crateName.replace(/^r#/, "");
+        if (ownLib && normalizedCrate === ownLib.crateName) {
+          const rest = segments.slice(1).join("/");
+          const joined = normalizePath(
+            rest ? ownLib.target.dir ? `${ownLib.target.dir}/${rest}` : rest : ownLib.target.dir
+          );
+          return {
+            ...base,
+            resolvedPath: resolveRustModulePath(joined, ownLib.target, ctx)
+          };
+        }
+        return { ...base, packageName: crateName };
+      }
+      return base;
     }
     case "java":
     case "kotlin": {
@@ -92112,6 +92168,20 @@ async function hydrateResolveContext(deps, applicable, counters) {
         const res = await readMetadataFile(deps, targetMain, counters, headTree, removedFiles);
         if (res.status === "found") {
           extraMutable.add(targetMain);
+          extraUpdated = true;
+        }
+      }
+      for (const [dir, manifest] of byDir) {
+        if (deps.signal.aborted) break;
+        if (!manifest?.isPackage || manifest.hasExplicitLibPath || !manifest.autolib && !manifest.hasLibTable) {
+          continue;
+        }
+        const libPath = dir ? `${dir}/src/lib.rs` : "src/lib.rs";
+        if (probedTargets.has(libPath) || extraMutable.has(libPath)) continue;
+        probedTargets.add(libPath);
+        const res = await readMetadataFile(deps, libPath, counters, headTree, removedFiles);
+        if (res.status === "found") {
+          extraMutable.add(libPath);
           extraUpdated = true;
         }
       }

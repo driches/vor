@@ -45,7 +45,9 @@ function readTagNameAt(lower: string, nameStart: number): number {
   while (pos < lower.length) {
     const ch = lower.charCodeAt(pos);
     const isAlphaNum = (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57);
-    if (!isAlphaNum) break;
+    // Allow '-' after the first character for custom-element / compound tag names.
+    const isHyphen = pos > nameStart && ch === 45;
+    if (!isAlphaNum && !isHyphen) break;
     pos += 1;
   }
   return pos;

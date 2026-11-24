@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { saveArchBaseline } from '../architecture/loader.js';
 import { repoRoot } from '../local/git.js';
 import type { LocalRunRecord } from '../local/types.js';
 import { createHandlers, type VorToolDeps } from './tools.js';
@@ -173,6 +174,29 @@ describe('MCP tool handlers', () => {
       };
       expect(dirty.passed).toBe(false);
       expect(dirty.violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters_out');
+
+      const withAllFingerprints = parse(await h.check_architecture({})) as {
+        all_fingerprints: string[];
+      };
+      saveArchBaseline(repo, '.vor/arch-baseline.json', withAllFingerprints.all_fingerprints);
+
+      const suppressed = parse(await h.check_architecture({})) as {
+        passed: boolean;
+        suppressed_by_baseline: number;
+        violations: unknown[];
+      };
+      expect(suppressed.passed).toBe(true);
+      expect(suppressed.suppressed_by_baseline).toBe(1);
+      expect(suppressed.violations).toEqual([]);
+
+      const unbaselined = parse(await h.check_architecture({ use_baseline: false })) as {
+        passed: boolean;
+        suppressed_by_baseline: number;
+        violations: Array<{ rule_id: string }>;
+      };
+      expect(unbaselined.passed).toBe(false);
+      expect(unbaselined.suppressed_by_baseline).toBe(0);
+      expect(unbaselined.violations[0]?.rule_id).toBe('arch:layer:domain-to-adapters_out');
 
       const escaped = await h.check_architecture({ arch_config_path: '../outside-arch.yml' });
       expect(escaped.isError).toBe(true);

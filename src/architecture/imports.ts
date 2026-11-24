@@ -62,6 +62,12 @@ export interface CargoManifestInfo {
   /** True when the manifest declares `[package]` or explicit target tables (false for `[workspace]`-only roots). */
   isPackage: boolean;
   packageName?: string;
+  /** Explicit `[lib] name = "..."` override when declared in `Cargo.toml`. */
+  libName?: string;
+  /** True when a `[lib]` table is explicitly present in `Cargo.toml`. */
+  hasLibTable: boolean;
+  /** Default `true`; respects `[package] autolib = false` in Cargo edition 2018+. */
+  autolib: boolean;
   /** Explicit `[lib]`/`[[bin]]`/`[[example]]`/`[[test]]`/`[[bench]]` `path` entries rebased to repo-relative POSIX paths. */
   explicitTargets: Array<{
     rootFile: string;
@@ -2625,6 +2631,8 @@ function parseTomlBooleanValue(rawVal: string): boolean | undefined {
 export function parseCargoManifest(raw: string, manifestDir = ''): CargoManifestInfo {
   const info: CargoManifestInfo = {
     isPackage: false,
+    hasLibTable: false,
+    autolib: true,
     explicitTargets: [],
     namedTargets: [],
     hasExplicitLibPath: false,
@@ -2642,6 +2650,10 @@ export function parseCargoManifest(raw: string, manifestDir = ''): CargoManifest
     if (!currentTarget) return;
     const t = currentTarget;
     currentTarget = null;
+    if (t.kind === 'lib') {
+      info.hasLibTable = true;
+      if (t.name) info.libName = t.name;
+    }
     if (t.path !== undefined) {
       const cleanPath = t.path.replace(/\\/g, '/').trim();
       if (!cleanPath || cleanPath.startsWith('/')) return;
@@ -2707,6 +2719,9 @@ export function parseCargoManifest(raw: string, manifestDir = ''): CargoManifest
       if (key === 'name') {
         const s = parseTomlStringValue(rawVal);
         if (s) info.packageName = s;
+      } else if (key === 'autolib') {
+        const b = parseTomlBooleanValue(rawVal);
+        if (b !== undefined) info.autolib = b;
       } else if (key === 'autobins') {
         const b = parseTomlBooleanValue(rawVal);
         if (b !== undefined) info.autobins = b;
@@ -3289,6 +3304,8 @@ const RUST_TARGET_KIND_PRIORITY: Record<RustTargetKind, number> = {
 
 const DEFAULT_CARGO_MANIFEST: CargoManifestInfo = {
   isPackage: false,
+  hasLibTable: false,
+  autolib: true,
   explicitTargets: [],
   namedTargets: [],
   hasExplicitLibPath: false,
@@ -3502,7 +3519,11 @@ function findRustCrateTarget(normSource: string, ctx: WorkspaceResolveContext): 
     const srcMain = `${srcDir}/main.rs`;
     let addedSrcTarget = false;
 
-    if (!manifest.hasExplicitLibPath && (normSource === srcLib || existsRepoFile(srcLib, ctx))) {
+    if (
+      !manifest.hasExplicitLibPath &&
+      (manifest.autolib || manifest.hasLibTable) &&
+      (normSource === srcLib || existsRepoFile(srcLib, ctx))
+    ) {
       candidates.push({ dir: srcDir, rootFile: srcLib, kind: 'lib', explicit: false });
       addedSrcTarget = true;
     }
@@ -3553,6 +3574,41 @@ function findRustCrateTarget(normSource: string, ctx: WorkspaceResolveContext): 
     return { dir: chosenDir, rootFile: onlyRoot };
   }
   return { dir: chosenDir };
+}
+
+function findOwnRustLibTarget(
+  normSource: string,
+  ctx: WorkspaceResolveContext,
+): { crateName: string; target: RustCrateTarget } | undefined {
+  const manifestHit = resolveCargoManifestForFile(normSource, ctx);
+  if (!manifestHit) return undefined;
+  const { dir: pkgDir, manifest } = manifestHit;
+  const rawName = manifest.libName ?? manifest.packageName;
+  if (!rawName) return undefined;
+  const crateName = rawName.trim().replace(/-/g, '_');
+  if (!crateName) return undefined;
+
+  const explicitLib = manifest.explicitTargets.find((t) => t.kind === 'lib');
+  if (explicitLib) {
+    return {
+      crateName,
+      target: { dir: explicitLib.dir, rootFile: explicitLib.rootFile },
+    };
+  }
+
+  if (!manifest.autolib && !manifest.hasLibTable) {
+    return undefined;
+  }
+
+  const defaultLibFile = joinCargoPkgPath(pkgDir, 'src/lib.rs');
+  const defaultLibDir = joinCargoPkgPath(pkgDir, 'src');
+  if (manifest.hasLibTable || existsRepoFile(defaultLibFile, ctx)) {
+    return {
+      crateName,
+      target: { dir: defaultLibDir, rootFile: defaultLibFile },
+    };
+  }
+  return undefined;
 }
 
 function resolveRustModulePath(
@@ -3903,8 +3959,24 @@ export function resolveImport(
           resolvedPath: resolveRustModulePath(joined, crateTarget, ctx),
         };
       }
-      const crateName = (spec.split('::')[0] ?? spec).trim();
-      return crateName ? { ...base, packageName: crateName } : base;
+      const segments = spec.split('::');
+      const crateName = (segments[0] ?? spec).trim();
+      if (crateName) {
+        const ownLib = findOwnRustLibTarget(normSource, ctx);
+        const normalizedCrate = crateName.replace(/^r#/, '');
+        if (ownLib && normalizedCrate === ownLib.crateName) {
+          const rest = segments.slice(1).join('/');
+          const joined = normalizePath(
+            rest ? (ownLib.target.dir ? `${ownLib.target.dir}/${rest}` : rest) : ownLib.target.dir,
+          );
+          return {
+            ...base,
+            resolvedPath: resolveRustModulePath(joined, ownLib.target, ctx),
+          };
+        }
+        return { ...base, packageName: crateName };
+      }
+      return base;
     }
 
     case 'java':

@@ -324,6 +324,10 @@ export async function runRepoArchitectureCheck(
       const absPath = resolve(opts.workspaceDir, filePath);
       const st = lstatSync(absPath);
       if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_INDEX_FILE_BYTES) continue;
+      // Check the cap after filtering symlinks, non-regular files, and oversized
+      // files (before `readFileSync`) so trailing ineligible entries cannot trigger a
+      // false cap warning on a repo with <= MAX_SCAN_FILES eligible files;
+      // addressing #136 (review 4653035762).
       if (filesScanned >= MAX_SCAN_FILES) {
         void logger.warn(
           `Architecture scan capped at ${MAX_SCAN_FILES} scanned source files; narrow spec.exclude or root to scan remaining files.`,

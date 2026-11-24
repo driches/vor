@@ -731,5 +731,59 @@ entries:
     expect(customRes.findings).toHaveLength(1);
     expect(customRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
     expect(customRes.findings[0]?.line).toBe(1);
+
+    const ownLibSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src',
+    });
+    const ownLibScanner = createArchitectureScanner(ownLibSpec);
+    const ownLibChanged = makeChangedFile(workerDomainPath, {
+      1: 'use arch_sample::infrastructure::Repo;',
+    });
+    ownLibChanged.language = 'rust';
+
+    // Case A: API-only PR scan without git.getTree probes src/lib.rs from PR HEAD.
+    const ownLibApiRes = await ownLibScanner.scan(
+      makeDeps([ownLibChanged], {
+        'Cargo.toml': '[package]\nname = "arch_sample"\nversion = "0.1.0"\n',
+        [workerDomainPath]: 'use arch_sample::infrastructure::Repo;\n',
+        'src/lib.rs': 'pub mod infrastructure;\n',
+        'src/bin/worker/main.rs': 'mod domain;\n',
+        'src/infrastructure/mod.rs': 'pub struct Repo;\n',
+      }),
+    );
+    expect(ownLibApiRes.findings).toHaveLength(1);
+    expect(ownLibApiRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(ownLibApiRes.findings[0]?.line).toBe(1);
+
+    // Case B: Full-tree PR scan with git.getTree resolves to src/infrastructure/mod.rs.
+    const ownLibTreeDeps = makeDeps([ownLibChanged], {
+      'Cargo.toml': '[package]\nname = "arch_sample"\nversion = "0.1.0"\n',
+      [workerDomainPath]: 'use arch_sample::infrastructure::Repo;\n',
+    });
+    ownLibTreeDeps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: 'Cargo.toml' },
+                { type: 'blob', path: 'src/lib.rs' },
+                { type: 'blob', path: 'src/infrastructure/mod.rs' },
+                { type: 'blob', path: 'src/bin/worker/main.rs' },
+                { type: 'blob', path: workerDomainPath },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+    const ownLibTreeRes = await ownLibScanner.scan(ownLibTreeDeps);
+    expect(ownLibTreeRes.findings).toHaveLength(1);
+    expect(ownLibTreeRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(ownLibTreeRes.findings[0]?.line).toBe(1);
   });
 });

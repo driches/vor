@@ -77,6 +77,7 @@ export const checkArchitectureInput = {
   preset: architecturePresetSchema.optional(),
   root: z.string().optional(),
   fail_on: z.enum(['critical', 'important', 'minor', 'nit']).optional(),
+  use_baseline: z.boolean().optional(),
 };
 export const listReferencesInput = {
   config_path: z.string().optional(),
@@ -232,6 +233,7 @@ export function createHandlers(deps: VorToolDeps) {
           excludePaths: resolved.reviewConfig.exclude.paths,
           ignoreFilePath: resolved.reviewConfig.security.ignore_file,
           ...(args.fail_on !== undefined ? { failOn: args.fail_on } : {}),
+          ...(args.use_baseline !== undefined ? { useBaseline: args.use_baseline } : {}),
         });
         return ok(result);
       } catch (err) {

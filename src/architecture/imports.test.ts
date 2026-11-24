@@ -1645,4 +1645,150 @@ describe('extractImports & resolveImport across languages', () => {
       },
     ]);
   });
+
+  it('resolves imports of the package own Rust library target via [package].name and [lib].name overrides', () => {
+    const hyphenManifest = parseCargoManifest(
+      '[package]\nname = "arch-sample"\nversion = "0.1.0"\n',
+    );
+    const knownLibRepo = new Set([
+      'src/lib.rs',
+      'src/infrastructure/mod.rs',
+      'src/bin/worker/main.rs',
+      'src/bin/worker/domain/mod.rs',
+    ]);
+    const hyphenCtx = {
+      knownFiles: knownLibRepo,
+      cargoManifestsByDir: new Map([['', hyphenManifest]]),
+    };
+    const hyphenResolved = resolveImports(
+      extractImports(
+        'src/bin/worker/domain/mod.rs',
+        [
+          'use arch_sample::infrastructure::Repo;',
+          'use arch_sample;',
+          'use serde::Serialize;',
+        ].join('\n'),
+      ).imports,
+      'src/bin/worker/domain/mod.rs',
+      hyphenCtx,
+    );
+    expect(
+      hyphenResolved.map((r) => ({
+        spec: r.specifier,
+        resolvedPath: r.resolvedPath,
+        packageName: r.packageName,
+      })),
+    ).toEqual([
+      {
+        spec: 'arch_sample::infrastructure::Repo',
+        resolvedPath: 'src/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      { spec: 'arch_sample', resolvedPath: 'src/lib.rs', packageName: undefined },
+      { spec: 'serde::Serialize', resolvedPath: undefined, packageName: 'serde' },
+    ]);
+
+    const overrideManifest = parseCargoManifest(
+      [
+        '[package]',
+        'name = "arch-sample"',
+        'version = "0.1.0"',
+        '',
+        '[lib]',
+        'name = "core-lib"',
+        'path = "lib/root.rs"',
+      ].join('\n'),
+    );
+    const overrideCtx = {
+      knownFiles: new Set([
+        'lib/root.rs',
+        'lib/infrastructure/mod.rs',
+        'src/bin/worker/main.rs',
+        'src/bin/worker/domain/mod.rs',
+      ]),
+      cargoManifestsByDir: new Map([['', overrideManifest]]),
+    };
+    const overrideResolved = resolveImports(
+      extractImports(
+        'src/bin/worker/domain/mod.rs',
+        [
+          'use core_lib::infrastructure::Repo;',
+          'use core_lib::RootItem;',
+          'use arch_sample::External;',
+        ].join('\n'),
+      ).imports,
+      'src/bin/worker/domain/mod.rs',
+      overrideCtx,
+    );
+    expect(
+      overrideResolved.map((r) => ({
+        spec: r.specifier,
+        resolvedPath: r.resolvedPath,
+        packageName: r.packageName,
+      })),
+    ).toEqual([
+      {
+        spec: 'core_lib::infrastructure::Repo',
+        resolvedPath: 'lib/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      { spec: 'core_lib::RootItem', resolvedPath: 'lib/root.rs', packageName: undefined },
+      { spec: 'arch_sample::External', resolvedPath: undefined, packageName: 'arch_sample' },
+    ]);
+
+    const workspaceRootOnly = parseCargoManifest('[workspace]\nmembers = ["crates/billing"]\n');
+    const nestedBillingManifest = parseCargoManifest(
+      '[package]\nname = "billing-core"\nversion = "0.1.0"\n',
+      'crates/billing',
+    );
+    const nestedCtx = {
+      knownFiles: new Set([
+        'crates/billing/src/lib.rs',
+        'crates/billing/src/infrastructure/mod.rs',
+        'crates/billing/src/bin/worker/main.rs',
+        'crates/billing/src/bin/worker/domain/mod.rs',
+      ]),
+      cargoManifestsByDir: new Map<string, ReturnType<typeof parseCargoManifest> | null>([
+        ['', workspaceRootOnly],
+        ['crates/billing', nestedBillingManifest],
+      ]),
+    };
+    expect(
+      resolveImports(
+        extractImports(
+          'crates/billing/src/bin/worker/domain/mod.rs',
+          'use billing_core::infrastructure::Repo;',
+        ).imports,
+        'crates/billing/src/bin/worker/domain/mod.rs',
+        nestedCtx,
+      ).map((r) => r.resolvedPath),
+    ).toEqual(['crates/billing/src/infrastructure/mod.rs']);
+
+    const binOnlyManifest = parseCargoManifest('[package]\nname = "sqlx"\nversion = "0.1.0"\n');
+    const binOnlyRes = resolveImports(
+      extractImports('src/bin/worker/domain/mod.rs', 'use sqlx::PgPool;').imports,
+      'src/bin/worker/domain/mod.rs',
+      {
+        knownFiles: new Set(['src/bin/worker/main.rs', 'src/bin/worker/domain/mod.rs']),
+        cargoManifestsByDir: new Map([['', binOnlyManifest]]),
+      },
+    );
+    expect(binOnlyRes[0]?.resolvedPath).toBeUndefined();
+    expect(binOnlyRes[0]?.packageName).toBe('sqlx');
+
+    const autoLibDisabled = parseCargoManifest(
+      '[package]\nname = "arch-sample"\nautolib = false\n',
+    );
+    const autoLibOffRes = resolveImports(
+      extractImports('src/bin/worker/domain/mod.rs', 'use arch_sample::infrastructure::Repo;')
+        .imports,
+      'src/bin/worker/domain/mod.rs',
+      {
+        knownFiles: knownLibRepo,
+        cargoManifestsByDir: new Map([['', autoLibDisabled]]),
+      },
+    );
+    expect(autoLibOffRes[0]?.resolvedPath).toBeUndefined();
+    expect(autoLibOffRes[0]?.packageName).toBe('arch_sample');
+  });
 });
