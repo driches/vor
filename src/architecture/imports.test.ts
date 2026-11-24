@@ -1572,4 +1572,77 @@ describe('extractImports & resolveImport across languages', () => {
       ).map((r) => r.resolvedPath),
     ).toEqual(['crates/billing/src/bin/worker/infrastructure/mod.rs']);
   });
+
+  it('normalizes whitespace and comments around Rust :: path separators while keeping line numbers', () => {
+    const knownFiles = new Set([
+      'src/lib.rs',
+      'src/domain/order.rs',
+      'src/infrastructure/mod.rs',
+      'src/infrastructure/sub.rs',
+    ]);
+    const rsSrc = [
+      'use crate::',
+      '    infrastructure::Repo;',
+      'use crate :: /* inner */ infrastructure :: Repo as AliasedRepo;',
+      'use crate::',
+      '    infrastructure :: *;',
+      'use crate ::',
+      '    infrastructure :: {',
+      '        self as infra,',
+      '        sub ::',
+      '            Helper as H,',
+      '    };',
+      'use ::',
+      '    serde :: Serialize;',
+    ].join('\n');
+
+    const extracted = extractImports('src/domain/order.rs', rsSrc);
+    const resolved = resolveImports(extracted.imports, 'src/domain/order.rs', { knownFiles });
+
+    expect(
+      resolved.map((r) => ({
+        spec: r.specifier,
+        line: r.line,
+        resolvedPath: r.resolvedPath,
+        packageName: r.packageName,
+      })),
+    ).toEqual([
+      {
+        spec: 'crate::infrastructure::Repo',
+        line: 1,
+        resolvedPath: 'src/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      {
+        spec: 'crate::infrastructure::Repo',
+        line: 3,
+        resolvedPath: 'src/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      {
+        spec: 'crate::infrastructure',
+        line: 4,
+        resolvedPath: 'src/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      {
+        spec: 'crate::infrastructure',
+        line: 8,
+        resolvedPath: 'src/infrastructure/mod.rs',
+        packageName: undefined,
+      },
+      {
+        spec: 'crate::infrastructure::sub::Helper',
+        line: 9,
+        resolvedPath: 'src/infrastructure/sub.rs',
+        packageName: undefined,
+      },
+      {
+        spec: 'serde::Serialize',
+        line: 12,
+        resolvedPath: undefined,
+        packageName: 'serde',
+      },
+    ]);
+  });
 });

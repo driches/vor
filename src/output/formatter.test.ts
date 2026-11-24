@@ -306,6 +306,33 @@ describe('renderSummary — body content', () => {
     expect(r.body).toContain('dependency CVE');
   });
 
+  it('formats singular and plural image OCR finding labels in Security breakdown', () => {
+    const ocrInline = (line: number): PostedComment => ({
+      ...c('important'),
+      line,
+      category: 'security',
+      source: { kind: 'scanner', scanner: 'image-ocr', rule_id: 'aws-access-key-id' },
+    });
+
+    const single = renderSummary({
+      draft: baseDraft(),
+      keptComments: [ocrInline(1)],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(single.body).toContain('**Security:** 1 finding from scanners (1 image OCR finding)');
+
+    const plural = renderSummary({
+      draft: baseDraft(),
+      keptComments: [ocrInline(1), ocrInline(2)],
+      truncatedCount: 0,
+      configEvent: 'COMMENT',
+      modelName: 'm',
+    });
+    expect(plural.body).toContain('**Security:** 2 findings from scanners (2 image OCR findings)');
+  });
+
   it('omits the Security sub-line when no scanner-sourced comments are kept', () => {
     const r = renderSummary({
       draft: baseDraft(),

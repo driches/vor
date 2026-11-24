@@ -89351,6 +89351,9 @@ function splitTopLevelCommas(text) {
   parts.push({ part: text.slice(start), offset: start });
   return parts;
 }
+function normalizeRustUsePath(raw) {
+  return raw.replace(/\s*::\s*/g, "::").trim();
+}
 function expandRustUseTree(tree, baseOffset, prefix = "") {
   const trimmed = tree.trim();
   if (!trimmed) return [];
@@ -89358,20 +89361,17 @@ function expandRustUseTree(tree, baseOffset, prefix = "") {
   const trimmedOffset = baseOffset + leadingSpaces;
   const braceStart = trimmed.indexOf("{");
   if (braceStart === -1) {
-    let clean = trimmed.replace(/\s+as\s+[A-Za-z_]\w*$/, "").trim();
-    if (clean === "self") {
-      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
-    }
-    if (clean === "*") {
+    let clean = normalizeRustUsePath(trimmed.replace(/\s+as\s+(?:r#)?[A-Za-z_]\w*$/, ""));
+    if (clean === "self" || clean === "*") {
       return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
     }
     clean = clean.replace(/::\*$/, "");
-    const full = prefix ? `${prefix}::${clean}` : clean;
+    const full = prefix ? clean ? `${prefix}::${clean}` : prefix : clean;
     return full ? [{ path: full, offset: trimmedOffset }] : [];
   }
   const braceEnd = trimmed.lastIndexOf("}");
   if (braceEnd <= braceStart) return [];
-  const headRaw = trimmed.slice(0, braceStart).trim().replace(/::$/, "");
+  const headRaw = normalizeRustUsePath(trimmed.slice(0, braceStart)).replace(/::$/, "");
   const nextPrefix = headRaw ? prefix ? `${prefix}::${headRaw}` : headRaw : prefix;
   const inner = trimmed.slice(braceStart + 1, braceEnd);
   const innerOffset = trimmedOffset + braceStart + 1;
@@ -91253,7 +91253,7 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
     }
     case "rust": {
       const crateTarget = findRustCrateTarget(normSource, ctx);
-      const spec = imp.specifier.replace(/^::\s*/, "");
+      const spec = imp.specifier.replace(/\s*::\s*/g, "::").replace(/^::/, "").trim();
       const fileModDir = rustLogicalModuleDir(normSource, crateTarget);
       const scopedModDir = imp.rustModuleScope && imp.rustModuleScope.length > 0 ? fileModDir === "." ? imp.rustModuleScope.join("/") : import_node_path22.posix.join(fileModDir, ...imp.rustModuleScope) : fileModDir;
       if (spec.startsWith("mod:")) {

@@ -372,6 +372,8 @@ export function truncateUtf8Bytes(
   }
   let sliced = rawBuf.subarray(0, end).toString('utf-8');
   const lastNewline = sliced.lastIndexOf('\n');
+  // Snap to a line boundary when one sits in the final 20% of the budget to
+  // avoid mid-line cuts without discarding large chunks of single-line text.
   if (lastNewline > sliced.length * 0.8) {
     sliced = sliced.slice(0, lastNewline);
   }

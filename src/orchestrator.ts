@@ -315,7 +315,10 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   let referenceCorpus: LoadedReferenceCorpus | undefined;
   if (config.references.enabled && config.references.sources.length > 0) {
     try {
-      const referenceOctokit = input.referenceOctokitFactory
+      // Explicit `Octokit | null` preserves the contract that `null` from an
+      // unauthenticated local review disables cross-repo `github:` fetches
+      // rather than falling back to the local FakeOctokit.
+      const referenceOctokit: Octokit | null = input.referenceOctokitFactory
         ? input.referenceOctokitFactory({ auth: input.github_token })
         : octokit;
       referenceCorpus = await loadReferences({

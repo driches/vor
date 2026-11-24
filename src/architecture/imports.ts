@@ -1369,6 +1369,12 @@ function splitTopLevelCommas(text: string): Array<{ part: string; offset: number
   return parts;
 }
 
+function normalizeRustUsePath(raw: string): string {
+  // Rust permits newlines, spaces, and stripped comments (replaced with spaces)
+  // anywhere around `::` path separators (e.g. `use crate::\n  infrastructure::Repo;`).
+  return raw.replace(/\s*::\s*/g, '::').trim();
+}
+
 function expandRustUseTree(tree: string, baseOffset: number, prefix = ''): RustLeaf[] {
   const trimmed = tree.trim();
   if (!trimmed) return [];
@@ -1377,22 +1383,19 @@ function expandRustUseTree(tree: string, baseOffset: number, prefix = ''): RustL
 
   const braceStart = trimmed.indexOf('{');
   if (braceStart === -1) {
-    let clean = trimmed.replace(/\s+as\s+[A-Za-z_]\w*$/, '').trim();
-    if (clean === 'self') {
-      return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
-    }
-    if (clean === '*') {
+    let clean = normalizeRustUsePath(trimmed.replace(/\s+as\s+(?:r#)?[A-Za-z_]\w*$/, ''));
+    if (clean === 'self' || clean === '*') {
       return prefix ? [{ path: prefix, offset: trimmedOffset }] : [];
     }
     clean = clean.replace(/::\*$/, '');
-    const full = prefix ? `${prefix}::${clean}` : clean;
+    const full = prefix ? (clean ? `${prefix}::${clean}` : prefix) : clean;
     return full ? [{ path: full, offset: trimmedOffset }] : [];
   }
 
   const braceEnd = trimmed.lastIndexOf('}');
   if (braceEnd <= braceStart) return [];
 
-  const headRaw = trimmed.slice(0, braceStart).trim().replace(/::$/, '');
+  const headRaw = normalizeRustUsePath(trimmed.slice(0, braceStart)).replace(/::$/, '');
   const nextPrefix = headRaw ? (prefix ? `${prefix}::${headRaw}` : headRaw) : prefix;
   const inner = trimmed.slice(braceStart + 1, braceEnd);
   const innerOffset = trimmedOffset + braceStart + 1;
@@ -3812,7 +3815,10 @@ export function resolveImport(
 
     case 'rust': {
       const crateTarget = findRustCrateTarget(normSource, ctx);
-      const spec = imp.specifier.replace(/^::\s*/, '');
+      const spec = imp.specifier
+        .replace(/\s*::\s*/g, '::')
+        .replace(/^::/, '')
+        .trim();
       const fileModDir = rustLogicalModuleDir(normSource, crateTarget);
       const scopedModDir =
         imp.rustModuleScope && imp.rustModuleScope.length > 0

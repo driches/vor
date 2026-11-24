@@ -730,4 +730,41 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('catches multiline Rust use imports split across lines under DDD', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-rust-multiline-'));
+    try {
+      mkdirSync(join(ws, 'src/domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'src/lib.rs'), 'pub mod domain;\npub mod infrastructure;\n');
+      writeFileSync(join(ws, 'src/infrastructure/mod.rs'), 'pub struct Repo;\n');
+      writeFileSync(
+        join(ws, 'src/domain/order.rs'),
+        ['use crate::', '    infrastructure::Repo;', 'pub fn use_repo() { let _ = Repo; }'].join(
+          '\n',
+        ),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+
+      const explained = explainFileArchitecture(ws, 'src/domain/order.rs', spec);
+      expect(explained.imports[0]?.specifier).toBe('crate::infrastructure::Repo');
+      expect(explained.imports[0]?.resolved_path).toBe('src/infrastructure/mod.rs');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
