@@ -683,16 +683,25 @@ async function loadRepoFile(
 
   const normPath = normalizePath(repoPath);
   const hasRemoteRef = Boolean(input.fileReader && input.owner && input.repo && input.ref);
+  const isLocalRepo = input.owner === 'local' && input.repo === 'local';
+  // Local working-tree sentinel (`WORKTREE`) and local symbolic `HEAD` are mutable
+  // and must never serve cached content across edits or across distinct workspaces.
+  const isMutableRef = input.ref === 'WORKTREE' || (isLocalRepo && input.ref === 'HEAD');
   const repoSlug = `${input.owner ?? 'local'}/${input.repo ?? 'local'}`;
-  const cacheKey = hasRemoteRef
-    ? `repo:${repoSlug}:${normPath}@${input.ref}`
-    : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
+  const cacheKey =
+    hasRemoteRef && !isMutableRef && !isLocalRepo
+      ? `repo:${repoSlug}:${normPath}@${input.ref}`
+      : hasRemoteRef && !isMutableRef && isLocalRepo
+        ? `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}@${input.ref}`
+        : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
   const nowMs = input.nowMs ?? Date.now();
   const ttl = metaOpts.ttl_seconds ?? input.config.cache.ttl_seconds;
   const docId = metaOpts.id ?? normPath;
 
   let diskPath: string | null = null;
   let diskFingerprint: string | undefined;
+  let diskBuffer: Buffer | null = null;
+  let diskTextSha: string | undefined;
   if (input.workspaceDir) {
     const resolvedFile = resolveSafeWorkspaceFile(input.workspaceDir, normPath);
     if (resolvedFile.status === 'escape') {
@@ -710,7 +719,17 @@ async function loadRepoFile(
         const st = statSync(resolvedFile.realPath);
         if (st.isFile()) {
           diskPath = resolvedFile.realPath;
-          diskFingerprint = `disk:${st.ino}:${st.mtimeMs}:${st.size}`;
+          if (st.size <= 5 * 1024 * 1024) {
+            diskBuffer = readFileSync(resolvedFile.realPath);
+            if (!isLikelyBinary(diskBuffer)) {
+              diskTextSha = sha256Hex(diskBuffer.toString('utf-8'));
+              diskFingerprint = `disk:${st.ino}:${st.mtimeMs}:${st.size}:${diskTextSha}`;
+            } else {
+              diskFingerprint = `disk:${st.ino}:${st.mtimeMs}:${st.size}`;
+            }
+          } else {
+            diskFingerprint = `disk:${st.ino}:${st.mtimeMs}:${st.size}`;
+          }
         }
       } catch {
         // Fall through when local file cannot be stat'd directly.
@@ -720,13 +739,13 @@ async function loadRepoFile(
 
   if (hasRemoteRef) {
     // Serve a cache hit for this exact `ref` only when either the cached entry
-    // came from API content (`ref:...`) or its disk fallback still matches the
-    // verified workspace file.
+    // came from an immutable API `ref` or its disk fingerprint still matches
+    // the verified workspace file.
     if (cache && !input.forceRefresh) {
       const cached = cache.get(cacheKey, nowMs, ttl);
       if (cached.status === 'hit') {
         const fp = cached.meta.source_fingerprint ?? '';
-        const refMatch = fp.startsWith(`ref:${input.ref}:`);
+        const refMatch = !isMutableRef && fp.startsWith(`ref:${input.ref}:`);
         const diskMatch =
           Boolean(diskFingerprint) && fp.startsWith('disk:') && fp === diskFingerprint;
         if (refMatch || diskMatch) {
@@ -752,7 +771,11 @@ async function loadRepoFile(
         warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
         return null;
       }
-      const fingerprint = `ref:${input.ref}:${sha256Hex(remoteText)}`;
+      const remoteSha = sha256Hex(remoteText);
+      const fingerprint =
+        isMutableRef && diskFingerprint && diskTextSha === remoteSha
+          ? diskFingerprint
+          : `ref:${input.ref}:${remoteSha}`;
       const normalized = normalizeDocumentText(remoteText);
       const persisted = cache
         ? writeNormalizedCacheEntry(
@@ -791,7 +814,7 @@ async function loadRepoFile(
   let diskContent: string | null = null;
   if (diskPath) {
     try {
-      const buf = readFileSync(diskPath);
+      const buf = diskBuffer ?? readFileSync(diskPath);
       if (isLikelyBinary(buf)) {
         warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
         return null;

@@ -78,8 +78,8 @@ function reconstructFromHeadLines(file: ChangedFile): string {
   for (const [ln, text] of file.head_line_text) {
     if (ln >= 1) lines[ln - 1] = text;
   }
-  // head_line_text only contains added (+) and context lines from diff hunks,
-  // not the full file; callers prefer remote API and disk reads above this fallback.
+  // Padding absent lines with '' preserves exact 1-based line numbers for diff lines,
+  // though context outside hunks is unavailable; callers prefer remote API and disk reads above this fallback.
   return lines.join('\n');
 }
 

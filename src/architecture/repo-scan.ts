@@ -107,6 +107,8 @@ export interface FileArchitectureExplanation {
 
 function enumerateRepoFiles(workspaceDir: string): string[] {
   try {
+    // Include `--others --exclude-standard` so newly created uncommitted source files
+    // are checked by local `vor arch check` while `.gitignore` excludes build outputs.
     const out = execFileSync(
       'git',
       ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],

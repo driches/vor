@@ -67,6 +67,27 @@ describe('resolveArchitectureSpec', () => {
     expect(spec.preset).toBe('custom');
     expect(Object.keys(spec.layers)).toEqual(['core']);
   });
+
+  it('defines modules and shared isolation for modular-monolith and syncs modules paths with custom contexts.pattern', () => {
+    const defaultMm = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'modular-monolith',
+      root: 'src',
+    });
+    expect(defaultMm.layers.modules?.paths).toEqual(['src/modules/**', 'src/**/modules/**']);
+    expect(defaultMm.layers.shared?.can_import).toEqual(['shared']);
+    expect(defaultMm.layers.shared?.cannot_import).toContain('modules');
+
+    const customCtxMm = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'modular-monolith',
+      contexts: { pattern: 'src/features/*' },
+    });
+    expect(customCtxMm.layers.modules?.paths).toEqual(['src/features/**']);
+    expect(customCtxMm.layers.shared?.cannot_import).toContain('modules');
+  });
 });
 
 describe('listPresets & generateStarterYaml', () => {

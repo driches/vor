@@ -42,7 +42,7 @@ Inspect all presets from the terminal with `vor arch presets`.
 | `ddd` | `domain`, `application`, `infrastructure`, `interfaces`, `shared` + contexts (`**/contexts/*`) | `domain` depends only on `domain`/`shared`; `application` cannot import `infrastructure`/`interfaces`; cross-context imports must go through `index.*`, `public/**`, `contracts/**`, `api/**`, or `shared`. |
 | `clean` | `entities`, `use_cases`, `interface_adapters`, `frameworks` | Strict concentric Dependency Rule inward from `frameworks` -> `interface_adapters` -> `use_cases` -> `entities`. |
 | `layered` | `presentation`, `service`, `data`, `model`, `shared` | Top-down flow; `presentation` cannot bypass `service` to import `data`; lower layers cannot import `presentation`. |
-| `modular-monolith` | `shared` + contexts (`**/modules/*`) | Feature modules interact only through public entrypoints (`index.*`, `public/**`, `api/**`, `contracts/**`) or the `shared` kernel. |
+| `modular-monolith` | `modules`, `shared` + contexts (`**/modules/*`) | Feature modules interact only through public entrypoints (`index.*`, `public/**`, `api/**`, `contracts/**`) or the `shared` kernel; `shared` cannot import feature modules. |
 | `custom` | (none) | Start from a blank slate using your own `layers`, `contexts`, `rules`, and `principles`. |
 
 ## Customizing layers, contexts, rules, and principles

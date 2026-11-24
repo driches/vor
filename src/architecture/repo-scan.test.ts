@@ -901,4 +901,58 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('forbids modular-monolith shared kernel from importing feature module internals or public entrypoints', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-mm-shared-'));
+    try {
+      mkdirSync(join(ws, 'src/shared'), { recursive: true });
+      mkdirSync(join(ws, 'src/modules/orders/shared'), { recursive: true });
+      writeFileSync(join(ws, 'src/modules/orders/index.ts'), 'export const orderApi = 1;\n');
+      writeFileSync(join(ws, 'src/modules/orders/internal.ts'), 'export const secret = 2;\n');
+      writeFileSync(
+        join(ws, 'src/shared/money.ts'),
+        [
+          "import { secret } from '../modules/orders/internal';",
+          "import { orderApi } from '../modules/orders/index';",
+          'export const sum = secret + orderApi;',
+        ].join('\n'),
+      );
+      writeFileSync(
+        join(ws, 'src/modules/orders/service.ts'),
+        ["import { sum } from '../../shared/money';", 'export const run = () => sum;'].join('\n'),
+      );
+      // Nested shared folder inside a feature module remains in the `modules` layer.
+      writeFileSync(
+        join(ws, 'src/modules/orders/shared/helper.ts'),
+        ["import { secret } from '../internal';", 'export const help = () => secret;'].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'modular-monolith',
+        root: 'src',
+      });
+
+      const explained = explainFileArchitecture(ws, 'src/shared/money.ts', spec);
+      expect(explained.layer?.name).toBe('shared');
+      expect(explained.imports.map((i) => i.target_layer)).toEqual(['modules', 'modules']);
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:shared-to-modules',
+      ]);
+      expect(explained.imports[1]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:shared-to-modules',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(2);
+      expect(repoRes.violations.every((v) => v.file_path === 'src/shared/money.ts')).toBe(true);
+      expect(repoRes.violations.every((v) => v.rule_id === 'arch:layer:shared-to-modules')).toBe(
+        true,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

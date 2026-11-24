@@ -441,11 +441,18 @@ function buildPreset(id: ArchitecturePresetId, root?: string): ArchitecturePrese
         summary:
           'Enforces strong module boundaries where feature modules interact exclusively through declared public entrypoints or a lean shared kernel.',
         layers: {
+          modules: {
+            description:
+              'Feature modules that may depend on other modules (via public APIs) and the shared kernel.',
+            paths: scopeGlobsToRoot(['**/modules/**'], cleanRoot),
+            can_import: ['modules', 'shared'],
+          },
           shared: {
             description:
               'Shared kernel primitives with zero upward dependencies on feature modules.',
             paths: scopeGlobsToRoot(['**/shared/**', '**/common/**', '**/kernel/**'], cleanRoot),
             can_import: ['shared'],
+            cannot_import: ['modules'],
           },
         },
         contexts: {
@@ -517,6 +524,15 @@ function mergeLayerOverride(
   };
 }
 
+function deriveModuleLayerGlobFromContextPattern(pattern: string): string | null {
+  const norm = normalizePath(pattern);
+  if (!norm) return null;
+  if (norm === '*') return '**';
+  if (norm.endsWith('/**')) return norm;
+  if (norm.endsWith('/*')) return `${norm.slice(0, -2)}/**`;
+  return `${norm}/**`;
+}
+
 /**
  * Resolve a user {@link ArchitectureConfig} by expanding the selected preset
  * (defaulting to `'hexagonal'` when `preset` is omitted and `layers`/`contexts`/`rules`
@@ -555,6 +571,17 @@ export function resolveArchitectureSpec(config: ArchitectureConfig): ResolvedArc
   }
 
   const contexts = config.contexts ?? preset.contexts;
+  if (
+    presetId === 'modular-monolith' &&
+    config.contexts?.pattern &&
+    config.layers?.modules?.paths === undefined &&
+    layers.modules
+  ) {
+    const derivedGlob = deriveModuleLayerGlobFromContextPattern(config.contexts.pattern);
+    if (derivedGlob) {
+      layers.modules = { ...layers.modules, paths: [derivedGlob] };
+    }
+  }
   const includePresetPrinciples = config.include_preset_principles !== false;
   const principles = [
     ...(includePresetPrinciples ? preset.principles : []),

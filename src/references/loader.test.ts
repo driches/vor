@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1107,6 +1115,113 @@ describe('loadReferences', () => {
       ).toContain('Remote org/standards/rules/security.md');
     } finally {
       rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('invalidates WORKTREE reference cache on local edits and isolates workspaces sharing a cache', async () => {
+    const wsA = mkdtempSync(join(tmpdir(), 'vor-refs-worktree-a-'));
+    const wsB = mkdtempSync(join(tmpdir(), 'vor-refs-worktree-b-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-worktree-cache-'));
+    try {
+      mkdirSync(join(wsA, 'docs'), { recursive: true });
+      mkdirSync(join(wsB, 'docs'), { recursive: true });
+      const fileA = join(wsA, 'docs/standards.md');
+      const fileB = join(wsB, 'docs/standards.md');
+      // Identical byte length across edits/workspaces tests content-sha invalidation + key isolation.
+      writeFileSync(fileA, '# Standard V1\nAlways enforce A.\n');
+      writeFileSync(fileB, '# Workspace B\nAlways enforce B.\n');
+      const sharedTime = new Date('2026-01-15T12:00:00Z');
+      utimesSync(fileA, sharedTime, sharedTime);
+      utimesSync(fileB, sharedTime, sharedTime);
+
+      const makeLocalReader = (ws: string) => {
+        const read = vi.fn(async ({ path }: { path: string }) => {
+          return readFileSync(join(ws, path), 'utf-8');
+        });
+        return {
+          read,
+          reader: { read } as unknown as FileReader,
+        };
+      };
+
+      const config = {
+        ...DEFAULT_CONFIG.references,
+        enabled: true,
+        sources: ['docs/standards.md'],
+        cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+      };
+
+      const readerA = makeLocalReader(wsA);
+      const firstA = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: wsA,
+        fileReader: readerA.reader,
+      });
+      expect(firstA.cache_stats.misses).toBe(1);
+      expect(firstA.docs[0]?.content).toContain('Standard V1');
+      expect(readerA.read).toHaveBeenCalledTimes(1);
+
+      const secondA = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: wsA,
+        fileReader: readerA.reader,
+      });
+      expect(secondA.cache_stats.hits).toBe(1);
+      expect(secondA.docs[0]?.content).toContain('Standard V1');
+      expect(readerA.read).toHaveBeenCalledTimes(1);
+
+      // Edit file in wsA with identical byte length & timestamp -> must invalidate WORKTREE cache.
+      writeFileSync(fileA, '# Standard V2\nAlways enforce X.\n');
+      utimesSync(fileA, sharedTime, sharedTime);
+
+      const thirdA = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: wsA,
+        fileReader: readerA.reader,
+      });
+      expect(thirdA.cache_stats.misses).toBe(1);
+      expect(thirdA.docs[0]?.content).toContain('Standard V2');
+      expect(thirdA.docs[0]?.content).not.toContain('Standard V1');
+      expect(readerA.read).toHaveBeenCalledTimes(2);
+
+      const fourthA = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: wsA,
+        fileReader: readerA.reader,
+      });
+      expect(fourthA.cache_stats.hits).toBe(1);
+      expect(fourthA.docs[0]?.content).toContain('Standard V2');
+      expect(readerA.read).toHaveBeenCalledTimes(2);
+
+      // Distinct workspace sharing cacheDir and local/local@WORKTREE sentinel stays isolated.
+      const readerB = makeLocalReader(wsB);
+      const firstB = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: wsB,
+        fileReader: readerB.reader,
+      });
+      expect(firstB.cache_stats.misses).toBe(1);
+      expect(firstB.docs[0]?.content).toContain('Workspace B');
+      expect(firstB.docs[0]?.content).not.toContain('Standard V2');
+    } finally {
+      rmSync(wsA, { recursive: true, force: true });
+      rmSync(wsB, { recursive: true, force: true });
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });

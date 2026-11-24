@@ -37,7 +37,7 @@ function stripTags(html: string): string {
   return html.replace(/<[^<>]+>/g, '');
 }
 
-const RAW_TEXT_HTML_TAGS = new Set(['script', 'style']);
+const RAW_TEXT_HTML_TAGS = new Set(['script', 'style', 'noscript']);
 const OPAQUE_NESTABLE_HTML_TAGS = new Set(['svg']);
 
 function readTagNameAt(lower: string, nameStart: number): number {

@@ -76076,7 +76076,7 @@ function decodeHtmlEntities(text) {
 function stripTags(html) {
   return html.replace(/<[^<>]+>/g, "");
 }
-var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style"]);
+var RAW_TEXT_HTML_TAGS = /* @__PURE__ */ new Set(["script", "style", "noscript"]);
 var OPAQUE_NESTABLE_HTML_TAGS = /* @__PURE__ */ new Set(["svg"]);
 function readTagNameAt(lower, nameStart) {
   let pos = nameStart;
@@ -93542,10 +93542,16 @@ function buildPreset(id, root) {
         name: "Modular Monolith",
         summary: "Enforces strong module boundaries where feature modules interact exclusively through declared public entrypoints or a lean shared kernel.",
         layers: {
+          modules: {
+            description: "Feature modules that may depend on other modules (via public APIs) and the shared kernel.",
+            paths: scopeGlobsToRoot(["**/modules/**"], cleanRoot),
+            can_import: ["modules", "shared"]
+          },
           shared: {
             description: "Shared kernel primitives with zero upward dependencies on feature modules.",
             paths: scopeGlobsToRoot(["**/shared/**", "**/common/**", "**/kernel/**"], cleanRoot),
-            can_import: ["shared"]
+            can_import: ["shared"],
+            cannot_import: ["modules"]
           }
         },
         contexts: {
@@ -93585,6 +93591,14 @@ function mergeLayerOverride(base, override) {
     ...override.severity !== void 0 ? { severity: override.severity } : base?.severity !== void 0 ? { severity: base.severity } : {}
   };
 }
+function deriveModuleLayerGlobFromContextPattern(pattern) {
+  const norm = normalizePath(pattern);
+  if (!norm) return null;
+  if (norm === "*") return "**";
+  if (norm.endsWith("/**")) return norm;
+  if (norm.endsWith("/*")) return `${norm.slice(0, -2)}/**`;
+  return `${norm}/**`;
+}
 function resolveArchitectureSpec(config2) {
   const hasCustomStructure = config2.layers !== void 0 && Object.keys(config2.layers).length > 0 || config2.contexts !== void 0 || config2.rules !== void 0 && config2.rules.length > 0;
   const presetId = config2.preset ?? (hasCustomStructure ? "custom" : "hexagonal");
@@ -93609,6 +93623,12 @@ function resolveArchitectureSpec(config2) {
     }
   }
   const contexts = config2.contexts ?? preset.contexts;
+  if (presetId === "modular-monolith" && config2.contexts?.pattern && config2.layers?.modules?.paths === void 0 && layers.modules) {
+    const derivedGlob = deriveModuleLayerGlobFromContextPattern(config2.contexts.pattern);
+    if (derivedGlob) {
+      layers.modules = { ...layers.modules, paths: [derivedGlob] };
+    }
+  }
   const includePresetPrinciples = config2.include_preset_principles !== false;
   const principles = [
     ...includePresetPrinciples ? preset.principles : [],
@@ -94370,13 +94390,17 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   }
   const normPath = normalizePath(repoPath);
   const hasRemoteRef = Boolean(input2.fileReader && input2.owner && input2.repo && input2.ref);
+  const isLocalRepo = input2.owner === "local" && input2.repo === "local";
+  const isMutableRef = input2.ref === "WORKTREE" || isLocalRepo && input2.ref === "HEAD";
   const repoSlug = `${input2.owner ?? "local"}/${input2.repo ?? "local"}`;
-  const cacheKey = hasRemoteRef ? `repo:${repoSlug}:${normPath}@${input2.ref}` : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
+  const cacheKey = hasRemoteRef && !isMutableRef && !isLocalRepo ? `repo:${repoSlug}:${normPath}@${input2.ref}` : hasRemoteRef && !isMutableRef && isLocalRepo ? `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}@${input2.ref}` : `repo:${repoSlug}:ws:${canonicalWorkspaceId(baseDir)}:${normPath}`;
   const nowMs = input2.nowMs ?? Date.now();
   const ttl = metaOpts.ttl_seconds ?? input2.config.cache.ttl_seconds;
   const docId = metaOpts.id ?? normPath;
   let diskPath = null;
   let diskFingerprint;
+  let diskBuffer = null;
+  let diskTextSha;
   if (input2.workspaceDir) {
     const resolvedFile = resolveSafeWorkspaceFile(input2.workspaceDir, normPath);
     if (resolvedFile.status === "escape") {
@@ -94394,7 +94418,17 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         const st2 = (0, import_node_fs12.statSync)(resolvedFile.realPath);
         if (st2.isFile()) {
           diskPath = resolvedFile.realPath;
-          diskFingerprint = `disk:${st2.ino}:${st2.mtimeMs}:${st2.size}`;
+          if (st2.size <= 5 * 1024 * 1024) {
+            diskBuffer = (0, import_node_fs12.readFileSync)(resolvedFile.realPath);
+            if (!isLikelyBinary(diskBuffer)) {
+              diskTextSha = sha256Hex(diskBuffer.toString("utf-8"));
+              diskFingerprint = `disk:${st2.ino}:${st2.mtimeMs}:${st2.size}:${diskTextSha}`;
+            } else {
+              diskFingerprint = `disk:${st2.ino}:${st2.mtimeMs}:${st2.size}`;
+            }
+          } else {
+            diskFingerprint = `disk:${st2.ino}:${st2.mtimeMs}:${st2.size}`;
+          }
         }
       } catch {
       }
@@ -94405,7 +94439,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
       const cached2 = cache.get(cacheKey, nowMs, ttl);
       if (cached2.status === "hit") {
         const fp = cached2.meta.source_fingerprint ?? "";
-        const refMatch = fp.startsWith(`ref:${input2.ref}:`);
+        const refMatch = !isMutableRef && fp.startsWith(`ref:${input2.ref}:`);
         const diskMatch = Boolean(diskFingerprint) && fp.startsWith("disk:") && fp === diskFingerprint;
         if (refMatch || diskMatch) {
           return buildRepoCacheHit(cached2, docId, normPath, metaOpts, input2.config.max_doc_bytes);
@@ -94428,7 +94462,8 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
         return null;
       }
-      const fingerprint2 = `ref:${input2.ref}:${sha256Hex(remoteText)}`;
+      const remoteSha = sha256Hex(remoteText);
+      const fingerprint2 = isMutableRef && diskFingerprint && diskTextSha === remoteSha ? diskFingerprint : `ref:${input2.ref}:${remoteSha}`;
       const normalized2 = normalizeDocumentText(remoteText);
       const persisted2 = cache ? writeNormalizedCacheEntry(
         cache,
@@ -94464,7 +94499,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
   let diskContent = null;
   if (diskPath) {
     try {
-      const buf = (0, import_node_fs12.readFileSync)(diskPath);
+      const buf = diskBuffer ?? (0, import_node_fs12.readFileSync)(diskPath);
       if (isLikelyBinary(buf)) {
         warnings.push(`Reference file '${normPath}' appears to be binary; skipping.`);
         return null;

@@ -109,6 +109,13 @@ describe('normalizeDocumentText', () => {
     expect(normalizeDocumentText('<p>keep</p><style>body{color:red}', 'text/html')).toBe('keep');
     expect(normalizeDocumentText('<p>keep</p><svg><text>ignored', 'text/html')).toBe('keep');
     expect(normalizeDocumentText('<p>keep</p><script src="x"', 'text/html')).toBe('keep');
+    expect(
+      normalizeDocumentText(
+        '<noscript><meta http-equiv="refresh" content="0"><nav>unbalanced</noscript><p>keep</p>',
+        'text/html',
+      ),
+    ).toBe('keep');
+    expect(normalizeDocumentText('<p>keep</p><noscript><p>fallback', 'text/html')).toBe('keep');
 
     // Hyphenated custom-element tags (<nav-bar>) must not be misread as <nav> and stripped.
     expect(normalizeDocumentText('<nav-bar><p>Keep content</p></nav-bar>', 'text/html')).toBe(
