@@ -63804,7 +63804,9 @@ var AnthropicProvider = class {
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     markLatestMessageForCaching(anthropicMessages);
     const hasMessageCacheBreakpoint = anthropicMessages.some(
-      (msg) => msg.role === "user" && Array.isArray(msg.content) && msg.content.length > 0
+      (msg) => msg.role === "user" && Array.isArray(msg.content) && msg.content.some(
+        (block) => typeof block === "object" && block !== null && "cache_control" in block && block.cache_control != null
+      )
     );
     const anthropicTools = canonicalToolsToAnthropic(tools, promptCacheTtl);
     const response = await this.client.messages.create(
@@ -91981,20 +91983,24 @@ function evaluateFileArchitecture(input2) {
     }
     if (input2.spec.contexts && sourceCtx && resolved.resolvedPath) {
       const targetCtx = extractContext(resolved.resolvedPath, input2.spec.contexts.pattern);
-      if (targetCtx && targetCtx.context !== sourceCtx.context) {
+      if (targetCtx && targetCtx.contextRoot !== sourceCtx.contextRoot) {
         const isShared = input2.spec.contexts.shared !== void 0 && matchesAnyTargetGlob(resolved.resolvedPath, input2.spec.contexts.shared);
         if (!isShared) {
           const ctxSeverity = input2.spec.contexts.severity ?? input2.spec.severity;
-          const allowDeps = input2.spec.contexts.allow_dependencies?.[sourceCtx.context];
-          if (allowDeps !== void 0 && !allowDeps.includes(targetCtx.context)) {
+          const allowDeps = input2.spec.contexts.allow_dependencies?.[sourceCtx.contextRoot] ?? input2.spec.contexts.allow_dependencies?.[sourceCtx.context];
+          const sameLeafName = targetCtx.context === sourceCtx.context;
+          const sourceLabel = sameLeafName ? sourceCtx.contextRoot : sourceCtx.context;
+          const targetLabel = sameLeafName ? targetCtx.contextRoot : targetCtx.context;
+          const targetAllowed = allowDeps !== void 0 && (allowDeps.includes(targetCtx.contextRoot) || allowDeps.includes(targetCtx.context));
+          if (allowDeps !== void 0 && !targetAllowed) {
             const permitted = allowDeps.length > 0 ? ` Allowed context dependencies: ${allowDeps.map((c2) => `\`${c2}\``).join(", ")}.` : " This context has no allowed cross-context dependencies.";
             pushViolation({
               rule_id: "arch:context-boundary",
               file_path: normFile,
               line: resolved.line,
               severity: ctxSeverity,
-              title: `Context '${sourceCtx.context}' cannot depend on context '${targetCtx.context}'`,
-              description: `\`${normFile}\` (context \`${sourceCtx.context}\`) imports \`${resolved.resolvedPath}\` (context \`${targetCtx.context}\`).${permitted}`,
+              title: `Context '${sourceLabel}' cannot depend on context '${targetLabel}'`,
+              description: `\`${normFile}\` (context \`${sourceLabel}\`) imports \`${resolved.resolvedPath}\` (context \`${targetLabel}\`).${permitted}`,
               specifier: resolved.specifier,
               snippet: resolved.snippet,
               source_context: sourceCtx.context,
@@ -92013,8 +92019,8 @@ function evaluateFileArchitecture(input2) {
                 file_path: normFile,
                 line: resolved.line,
                 severity: ctxSeverity,
-                title: `Cross-context import bypasses '${targetCtx.context}' public API`,
-                description: `\`${normFile}\` (context \`${sourceCtx.context}\`) imports internal path \`${resolved.resolvedPath}\` from context \`${targetCtx.context}\`. ` + (allowPublicApi ? `Import through \`${targetCtx.context}\`'s public API (${publicGlobs.map((g2) => `\`${g2}\``).join(", ")}) or shared kernel instead.` : `Direct cross-context imports are disabled; communicate via events or shared contracts.`),
+                title: `Cross-context import bypasses '${targetLabel}' public API`,
+                description: `\`${normFile}\` (context \`${sourceLabel}\`) imports internal path \`${resolved.resolvedPath}\` from context \`${targetLabel}\`. ` + (allowPublicApi ? `Import through \`${targetLabel}\`'s public API (${publicGlobs.map((g2) => `\`${g2}\``).join(", ")}) or shared kernel instead.` : `Direct cross-context imports are disabled; communicate via events or shared contracts.`),
                 specifier: resolved.specifier,
                 snippet: resolved.snippet,
                 source_context: sourceCtx.context,

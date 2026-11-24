@@ -955,4 +955,43 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('flags cross-root modular-monolith internal imports with identical module names in explain and repo checks', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-mm-same-leaf-'));
+    try {
+      mkdirSync(join(ws, 'apps/a/modules/users'), { recursive: true });
+      mkdirSync(join(ws, 'apps/b/modules/users'), { recursive: true });
+      writeFileSync(join(ws, 'apps/b/modules/users/internal.ts'), 'export const bSecret = 1;\n');
+      writeFileSync(join(ws, 'apps/b/modules/users/index.ts'), 'export const bPublic = 2;\n');
+      writeFileSync(
+        join(ws, 'apps/a/modules/users/index.ts'),
+        [
+          "import { bSecret } from '../../../b/modules/users/internal';",
+          "import { bPublic } from '../../../b/modules/users/index';",
+          'export const combined = bSecret + bPublic;',
+        ].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'modular-monolith',
+      });
+
+      const explained = explainFileArchitecture(ws, 'apps/a/modules/users/index.ts', spec);
+      expect(explained.imports[0]?.resolved_path).toBe('apps/b/modules/users/internal.ts');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:context-boundary',
+      ]);
+      expect(explained.imports[1]?.violations).toEqual([]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.file_path).toBe('apps/a/modules/users/index.ts');
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:context-boundary');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

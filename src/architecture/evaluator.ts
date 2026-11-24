@@ -297,16 +297,24 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
     // 4. Bounded-context / module boundary check
     if (input.spec.contexts && sourceCtx && resolved.resolvedPath) {
       const targetCtx = extractContext(resolved.resolvedPath, input.spec.contexts.pattern);
-      if (targetCtx && targetCtx.context !== sourceCtx.context) {
+      if (targetCtx && targetCtx.contextRoot !== sourceCtx.contextRoot) {
         const isShared =
           input.spec.contexts.shared !== undefined &&
           matchesAnyTargetGlob(resolved.resolvedPath, input.spec.contexts.shared);
 
         if (!isShared) {
           const ctxSeverity = input.spec.contexts.severity ?? input.spec.severity;
-          const allowDeps = input.spec.contexts.allow_dependencies?.[sourceCtx.context];
+          const allowDeps =
+            input.spec.contexts.allow_dependencies?.[sourceCtx.contextRoot] ??
+            input.spec.contexts.allow_dependencies?.[sourceCtx.context];
+          const sameLeafName = targetCtx.context === sourceCtx.context;
+          const sourceLabel = sameLeafName ? sourceCtx.contextRoot : sourceCtx.context;
+          const targetLabel = sameLeafName ? targetCtx.contextRoot : targetCtx.context;
+          const targetAllowed =
+            allowDeps !== undefined &&
+            (allowDeps.includes(targetCtx.contextRoot) || allowDeps.includes(targetCtx.context));
 
-          if (allowDeps !== undefined && !allowDeps.includes(targetCtx.context)) {
+          if (allowDeps !== undefined && !targetAllowed) {
             const permitted =
               allowDeps.length > 0
                 ? ` Allowed context dependencies: ${allowDeps.map((c) => `\`${c}\``).join(', ')}.`
@@ -316,10 +324,10 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
               file_path: normFile,
               line: resolved.line,
               severity: ctxSeverity,
-              title: `Context '${sourceCtx.context}' cannot depend on context '${targetCtx.context}'`,
+              title: `Context '${sourceLabel}' cannot depend on context '${targetLabel}'`,
               description:
-                `\`${normFile}\` (context \`${sourceCtx.context}\`) imports \`${resolved.resolvedPath}\` ` +
-                `(context \`${targetCtx.context}\`).${permitted}`,
+                `\`${normFile}\` (context \`${sourceLabel}\`) imports \`${resolved.resolvedPath}\` ` +
+                `(context \`${targetLabel}\`).${permitted}`,
               specifier: resolved.specifier,
               snippet: resolved.snippet,
               source_context: sourceCtx.context,
@@ -344,12 +352,12 @@ export function evaluateFileArchitecture(input: EvaluateFileInput): ArchViolatio
                 file_path: normFile,
                 line: resolved.line,
                 severity: ctxSeverity,
-                title: `Cross-context import bypasses '${targetCtx.context}' public API`,
+                title: `Cross-context import bypasses '${targetLabel}' public API`,
                 description:
-                  `\`${normFile}\` (context \`${sourceCtx.context}\`) imports internal path ` +
-                  `\`${resolved.resolvedPath}\` from context \`${targetCtx.context}\`. ` +
+                  `\`${normFile}\` (context \`${sourceLabel}\`) imports internal path ` +
+                  `\`${resolved.resolvedPath}\` from context \`${targetLabel}\`. ` +
                   (allowPublicApi
-                    ? `Import through \`${targetCtx.context}\`'s public API (${publicGlobs.map((g) => `\`${g}\``).join(', ')}) or shared kernel instead.`
+                    ? `Import through \`${targetLabel}\`'s public API (${publicGlobs.map((g) => `\`${g}\``).join(', ')}) or shared kernel instead.`
                     : `Direct cross-context imports are disabled; communicate via events or shared contracts.`),
                 specifier: resolved.specifier,
                 snippet: resolved.snippet,

@@ -76,10 +76,19 @@ export class AnthropicProvider implements LLMProvider {
     // at 1h (2×) would inflate cost without cross-PR reuse (Anthropic allows
     // longer TTLs on `tools`/`system` before shorter `messages` TTLs).
     markLatestMessageForCaching(anthropicMessages);
-    // Array-content user messages carry the 5m tool_result breakpoints; when
-    // none exist yet (turn 1), every breakpoint sent in this request uses `promptCacheTtl`.
+    // Sliding-window user messages carry explicit `cache_control` breakpoints at 5m;
+    // when none are marked (turn 1), every breakpoint sent uses `promptCacheTtl`.
     const hasMessageCacheBreakpoint = anthropicMessages.some(
-      (msg) => msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0,
+      (msg) =>
+        msg.role === 'user' &&
+        Array.isArray(msg.content) &&
+        msg.content.some(
+          (block) =>
+            typeof block === 'object' &&
+            block !== null &&
+            'cache_control' in block &&
+            block.cache_control != null,
+        ),
     );
     // Apply any longer TTL (`1h`) to the preceding tool breakpoint as well:
     // Anthropic evaluates `tools -> system -> messages` and rejects longer

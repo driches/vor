@@ -368,4 +368,27 @@ describe('evaluateFileArchitecture — ddd bounded contexts & custom rules', () 
     });
     expect(violations).toEqual([]);
   });
+
+  it('enforces context boundaries across distinct module roots that share the same captured context name', () => {
+    const mmSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'modular-monolith',
+    });
+    const content = [
+      "import { secret } from '../../../b/modules/users/internal';",
+      "import { usersApi } from '../../../b/modules/users/index';",
+      "import { ownInternal } from './internal';",
+    ].join('\n');
+    const violations = evaluateFileArchitecture({
+      filePath: 'apps/a/modules/users/index.ts',
+      content,
+      spec: mmSpec,
+      resolveCtx: {},
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.rule_id).toBe('arch:context-boundary');
+    expect(violations[0]?.line).toBe(1);
+    expect(violations[0]?.title).toContain('apps/b/modules/users');
+  });
 });
