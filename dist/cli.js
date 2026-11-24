@@ -76975,7 +76975,8 @@ var DEFAULT_DOMAIN_FORBIDDEN_PACKAGES = [
   "Microsoft.EntityFrameworkCore*",
   "Microsoft.AspNetCore*",
   "System.Data.SqlClient*",
-  "Dapper"
+  "Dapper",
+  "Dapper.*"
 ];
 function scopeGlobsToRoot(globs, root) {
   if (!root) return [...globs];
@@ -79404,9 +79405,176 @@ function parseTsConfigContent(raw, readRelative, depth = 0, configDir = "") {
     paths
   };
 }
+function tokenizeGoModLine(line) {
+  const tokens = [];
+  let i2 = 0;
+  while (i2 < line.length) {
+    const ch = line[i2];
+    if (ch === " " || ch === "	" || ch === "\r") {
+      i2 += 1;
+      continue;
+    }
+    if (ch === "/" && line[i2 + 1] === "/") {
+      break;
+    }
+    if (ch === "(" || ch === ")") {
+      tokens.push(ch);
+      i2 += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "`") {
+      const quote = ch;
+      i2 += 1;
+      let buf = "";
+      while (i2 < line.length) {
+        const c2 = line[i2];
+        if (quote === '"' && c2 === "\\" && i2 + 1 < line.length) {
+          buf += line[i2 + 1];
+          i2 += 2;
+          continue;
+        }
+        if (c2 === quote) {
+          i2 += 1;
+          break;
+        }
+        buf += c2;
+        i2 += 1;
+      }
+      tokens.push(buf);
+      continue;
+    }
+    if (line.startsWith("=>", i2)) {
+      tokens.push("=>");
+      i2 += 2;
+      continue;
+    }
+    let end = i2;
+    while (end < line.length) {
+      const c2 = line[end];
+      if (c2 === " " || c2 === "	" || c2 === "\r" || c2 === "(" || c2 === ")" || c2 === '"' || c2 === "`" || c2 === "/" && line[end + 1] === "/" || line.startsWith("=>", end)) {
+        break;
+      }
+      end += 1;
+    }
+    tokens.push(line.slice(i2, end));
+    i2 = end;
+  }
+  return tokens;
+}
+function rebaseRepoRelativeDir(baseDir, rawDir) {
+  const normBase = normalizePath(baseDir);
+  const base = normBase === "." ? "" : normBase;
+  const slashNorm = rawDir.trim().replace(/\\/g, "/");
+  if (!slashNorm || slashNorm.startsWith("/") || /^[A-Za-z]:/.test(slashNorm)) {
+    return null;
+  }
+  const joined = import_node_path2.posix.normalize(base ? `${base}/${slashNorm}` : slashNorm);
+  if (joined === ".." || joined.startsWith("../")) {
+    return null;
+  }
+  if (joined === ".") return "";
+  return joined.replace(/\/+$/, "");
+}
+function isLocalGoReplaceTarget(rawTarget) {
+  const slashNorm = rawTarget.trim().replace(/\\/g, "/");
+  return slashNorm === "." || slashNorm === ".." || slashNorm.startsWith("./") || slashNorm.startsWith("../");
+}
+function parseLocalGoReplaceTokens(args, baseDir) {
+  const arrowIdx = args.indexOf("=>");
+  if (arrowIdx !== 1 && arrowIdx !== 2 || args.length !== arrowIdx + 2) {
+    return null;
+  }
+  const modulePath = args[0].trim();
+  const rawTarget = args[arrowIdx + 1];
+  if (!modulePath || modulePath.startsWith("./") || modulePath.startsWith("../") || modulePath.startsWith("/") || /[\s()]/.test(modulePath)) {
+    return null;
+  }
+  if (!isLocalGoReplaceTarget(rawTarget)) {
+    return null;
+  }
+  const dir = rebaseRepoRelativeDir(baseDir, rawTarget);
+  if (dir === null) return null;
+  return { modulePath, dir };
+}
+function parseGoDirectives(raw, baseDir = "") {
+  let modulePath;
+  const useDirs = [];
+  const seenUseDirs = /* @__PURE__ */ new Set();
+  const replaces = [];
+  let activeBlock = null;
+  const consumeDirective = (kind2, args) => {
+    if (args.length === 0) return;
+    if (kind2 === "module") {
+      const candidate = args[0].trim();
+      if (modulePath === void 0 && candidate.length > 0 && !candidate.startsWith("/") && !/\s/.test(candidate)) {
+        modulePath = candidate;
+      }
+      return;
+    }
+    if (kind2 === "use") {
+      for (const rawDir of args) {
+        const dir = rebaseRepoRelativeDir(baseDir, rawDir);
+        if (dir !== null && !seenUseDirs.has(dir)) {
+          seenUseDirs.add(dir);
+          useDirs.push(dir);
+        }
+      }
+      return;
+    }
+    if (kind2 === "replace") {
+      const entry = parseLocalGoReplaceTokens(args, baseDir);
+      if (entry) replaces.push(entry);
+    }
+  };
+  for (const line of raw.split("\n")) {
+    const tokens = tokenizeGoModLine(line);
+    if (tokens.length === 0) continue;
+    let i2 = 0;
+    while (i2 < tokens.length) {
+      if (activeBlock !== null) {
+        const closeIdx = tokens.indexOf(")", i2);
+        const args = closeIdx === -1 ? tokens.slice(i2) : tokens.slice(i2, closeIdx);
+        consumeDirective(activeBlock, args);
+        if (closeIdx !== -1) {
+          activeBlock = null;
+          i2 = closeIdx + 1;
+          continue;
+        }
+        break;
+      }
+      const kw = tokens[i2++];
+      const kind2 = kw === "module" || kw === "use" || kw === "replace" ? kw : "other";
+      if (i2 < tokens.length && tokens[i2] === "(") {
+        i2 += 1;
+        const closeIdx = tokens.indexOf(")", i2);
+        if (closeIdx !== -1) {
+          consumeDirective(kind2, tokens.slice(i2, closeIdx));
+          i2 = closeIdx + 1;
+          continue;
+        }
+        consumeDirective(kind2, tokens.slice(i2));
+        activeBlock = kind2 === "module" ? "other" : kind2;
+        break;
+      }
+      consumeDirective(kind2, tokens.slice(i2));
+      break;
+    }
+  }
+  return {
+    ...modulePath !== void 0 ? { modulePath } : {},
+    useDirs,
+    replaces
+  };
+}
 function parseGoModModule(raw) {
-  const m2 = raw.match(/^[ \t]*module[ \t]+(?:"([^"\s]+)"|([^\s/"][^\s]*))/m);
-  return (m2?.[1] ?? m2?.[2])?.trim();
+  return parseGoDirectives(raw).modulePath;
+}
+function parseGoModReplaces(raw, goModDir = "") {
+  return parseGoDirectives(raw, goModDir).replaces;
+}
+function parseGoWork(raw, goWorkDir = "") {
+  const { useDirs, replaces } = parseGoDirectives(raw, goWorkDir);
+  return { useDirs, replaces };
 }
 function parsePubspecName(raw) {
   const m2 = raw.match(/^[ \t]*name:[ \t]*['"]?([A-Za-z0-9_-]+)['"]?/m);
@@ -79469,6 +79637,8 @@ function resolveTsConfigForFile(sourceFilePath, ctx) {
   return void 0;
 }
 var workspaceGoModuleCache = /* @__PURE__ */ new WeakMap();
+var workspaceGoModReplacesCache = /* @__PURE__ */ new WeakMap();
+var workspaceGoWorkCache = /* @__PURE__ */ new WeakMap();
 var workspaceDartPackageCache = /* @__PURE__ */ new WeakMap();
 function resolveNearestManifestValue(sourceFilePath, ctx, manifestName, byDir, rootFallback, diskCacheMap, parse4) {
   let diskCache = ctx.workspaceDir ? diskCacheMap.get(ctx) : void 0;
@@ -79516,6 +79686,123 @@ function resolveGoModuleForFile(sourceFilePath, ctx) {
     parseGoModModule
   );
   return res ? { dir: res.dir, modulePath: res.value } : void 0;
+}
+function resolveGoWorkForFile(sourceFilePath, ctx) {
+  let diskCache = ctx.workspaceDir ? workspaceGoWorkCache.get(ctx) : void 0;
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (ctx.goWorksByDir?.has(dir)) {
+      const entry = ctx.goWorksByDir.get(dir);
+      if (entry === null) continue;
+      if (entry) return { dir, work: entry };
+    }
+    if (!ctx.workspaceDir) continue;
+    if (!diskCache) {
+      diskCache = /* @__PURE__ */ new Map();
+      workspaceGoWorkCache.set(ctx, diskCache);
+    }
+    if (diskCache.has(dir)) {
+      const cached2 = diskCache.get(dir);
+      if (cached2 === null) continue;
+      if (cached2) return { dir, work: cached2 };
+    }
+    const relPath = dir ? `${dir}/go.work` : "go.work";
+    const raw = readOptionalFile(ctx.workspaceDir, relPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+    const work = parseGoWork(raw, dir);
+    diskCache.set(dir, work);
+    return { dir, work };
+  }
+  return void 0;
+}
+function resolveGoModuleAtDir(dir, ctx) {
+  if (ctx.goModulesByDir?.has(dir)) {
+    const entry = ctx.goModulesByDir.get(dir);
+    return entry ? entry : void 0;
+  }
+  if (dir === "" && ctx.goModule) {
+    return ctx.goModule;
+  }
+  if (!ctx.workspaceDir) return void 0;
+  let diskCache = workspaceGoModuleCache.get(ctx);
+  if (!diskCache) {
+    diskCache = /* @__PURE__ */ new Map();
+    workspaceGoModuleCache.set(ctx, diskCache);
+  }
+  if (diskCache.has(dir)) {
+    const cached2 = diskCache.get(dir);
+    return cached2 ? cached2 : void 0;
+  }
+  const relPath = dir ? `${dir}/go.mod` : "go.mod";
+  const raw = readOptionalFile(ctx.workspaceDir, relPath);
+  if (raw === null) {
+    diskCache.set(dir, null);
+    return void 0;
+  }
+  const value = parseGoModModule(raw) ?? "";
+  diskCache.set(dir, value);
+  return value || void 0;
+}
+function resolveGoModReplacesAtDir(dir, ctx) {
+  if (ctx.goModReplacesByDir?.has(dir)) {
+    return ctx.goModReplacesByDir.get(dir) ?? [];
+  }
+  if (ctx.goModulesByDir?.has(dir) && ctx.goModulesByDir.get(dir) === null) {
+    return [];
+  }
+  if (!ctx.workspaceDir) return [];
+  let diskCache = workspaceGoModReplacesCache.get(ctx);
+  if (!diskCache) {
+    diskCache = /* @__PURE__ */ new Map();
+    workspaceGoModReplacesCache.set(ctx, diskCache);
+  }
+  if (diskCache.has(dir)) {
+    return diskCache.get(dir) ?? [];
+  }
+  const relPath = dir ? `${dir}/go.mod` : "go.mod";
+  const raw = readOptionalFile(ctx.workspaceDir, relPath);
+  const replaces = raw === null ? [] : parseGoModReplaces(raw, dir);
+  diskCache.set(dir, replaces);
+  return replaces;
+}
+function resolveGoImport(specifier, normSource, ctx) {
+  const candidates = [];
+  const goWork = resolveGoWorkForFile(normSource, ctx);
+  if (goWork) {
+    for (const rep of goWork.work.replaces) {
+      candidates.push({ modulePath: rep.modulePath, dir: rep.dir, priority: 4 });
+    }
+    for (const useDir of goWork.work.useDirs) {
+      const modPath = resolveGoModuleAtDir(useDir, ctx);
+      if (modPath) {
+        candidates.push({ modulePath: modPath, dir: useDir, priority: 2 });
+      }
+    }
+  }
+  const goMod = resolveGoModuleForFile(normSource, ctx);
+  if (goMod) {
+    for (const rep of resolveGoModReplacesAtDir(goMod.dir, ctx)) {
+      candidates.push({ modulePath: rep.modulePath, dir: rep.dir, priority: 3 });
+    }
+    candidates.push({ modulePath: goMod.modulePath, dir: goMod.dir, priority: 1 });
+  }
+  let best;
+  for (const c2 of candidates) {
+    if (specifier !== c2.modulePath && !specifier.startsWith(`${c2.modulePath}/`)) {
+      continue;
+    }
+    if (best === void 0 || c2.modulePath.length > best.modulePath.length || c2.modulePath.length === best.modulePath.length && c2.priority > best.priority) {
+      best = c2;
+    }
+  }
+  if (!best) return void 0;
+  if (specifier === best.modulePath) {
+    return best.dir || ".";
+  }
+  const subpath = specifier.slice(best.modulePath.length + 1);
+  return normalizePath(best.dir ? import_node_path2.posix.join(best.dir, subpath) : subpath);
 }
 function resolveDartPackageForFile(sourceFilePath, ctx) {
   const res = resolveNearestManifestValue(
@@ -80563,18 +80850,9 @@ function resolveImport(imp, sourceFilePath, ctx, fileMeta = {}) {
       return { ...base, packageName: extractNpmPackageName(imp.specifier) };
     }
     case "go": {
-      const goMod = resolveGoModuleForFile(normSource, ctx);
-      if (goMod) {
-        if (imp.specifier === goMod.modulePath) {
-          return { ...base, resolvedPath: goMod.dir || "." };
-        }
-        if (imp.specifier.startsWith(`${goMod.modulePath}/`)) {
-          const subpath = imp.specifier.slice(goMod.modulePath.length + 1);
-          return {
-            ...base,
-            resolvedPath: normalizePath(goMod.dir ? import_node_path2.posix.join(goMod.dir, subpath) : subpath)
-          };
-        }
+      const resolvedPath = resolveGoImport(imp.specifier, normSource, ctx);
+      if (resolvedPath !== void 0) {
+        return { ...base, resolvedPath };
       }
       return { ...base, packageName: imp.specifier };
     }
@@ -109561,6 +109839,7 @@ function buildEnabledScanners(config2, options = {}) {
 var import_node_fs14 = require("node:fs");
 var import_node_path28 = require("node:path");
 var SCANNER_ID9 = "architecture";
+var MAX_GO_WORKSPACE_MODULES = 64;
 function reconstructFromHeadLines(file2) {
   if (file2.head_line_text.size === 0) return "";
   let maxLine = 0;
@@ -109971,19 +110250,60 @@ async function hydrateResolveContext(deps, applicable, counters) {
     }
   }
   if (goPaths.length > 0) {
-    const byDir = await hydrateManifestMapFromHead(
-      deps,
-      goPaths,
-      "go.mod",
-      parseGoModModule,
-      counters,
-      headTree,
-      removedFiles
-    );
-    if (byDir.size > 0) {
-      ctx.goModulesByDir = byDir;
+    const ancestorDirs = /* @__PURE__ */ new Set([""]);
+    for (const filePath of goPaths) {
+      for (const dir of listAncestorDirs(filePath)) {
+        ancestorDirs.add(dir);
+      }
     }
-    const rootGo = byDir.get("");
+    const goModulesByDir = /* @__PURE__ */ new Map();
+    const goModReplacesByDir = /* @__PURE__ */ new Map();
+    const goWorksByDir = /* @__PURE__ */ new Map();
+    const workspaceUseDirs = /* @__PURE__ */ new Set();
+    const recordGoMod = (dir, modRes) => {
+      if (modRes.status === "found") {
+        goModulesByDir.set(dir, parseGoModModule(modRes.content) ?? "");
+        goModReplacesByDir.set(dir, parseGoModReplaces(modRes.content, dir));
+      } else if (modRes.status === "absent") {
+        goModulesByDir.set(dir, null);
+        goModReplacesByDir.set(dir, []);
+      }
+    };
+    for (const dir of ancestorDirs) {
+      if (deps.signal.aborted) break;
+      const modPath = dir ? `${dir}/go.mod` : "go.mod";
+      recordGoMod(dir, await readMetadataFile(deps, modPath, counters, headTree, removedFiles));
+      if (deps.signal.aborted) break;
+      const workPath = dir ? `${dir}/go.work` : "go.work";
+      const workRes = await readMetadataFile(deps, workPath, counters, headTree, removedFiles);
+      if (workRes.status === "found") {
+        const parsedWork = parseGoWork(workRes.content, dir);
+        goWorksByDir.set(dir, parsedWork);
+        for (const useDir of parsedWork.useDirs) {
+          workspaceUseDirs.add(useDir);
+        }
+      } else if (workRes.status === "absent") {
+        goWorksByDir.set(dir, null);
+      }
+    }
+    let hydratedWorkspaceModules = 0;
+    for (const useDir of workspaceUseDirs) {
+      if (deps.signal.aborted || hydratedWorkspaceModules >= MAX_GO_WORKSPACE_MODULES) break;
+      if (goModulesByDir.has(useDir)) continue;
+      hydratedWorkspaceModules += 1;
+      const modPath = useDir ? `${useDir}/go.mod` : "go.mod";
+      recordGoMod(useDir, await readMetadataFile(deps, modPath, counters, headTree, removedFiles));
+    }
+    if (goModulesByDir.size > 0) {
+      ctx.goModulesByDir = goModulesByDir;
+    }
+    if (goModReplacesByDir.size > 0) {
+      ctx.goModReplacesByDir = goModReplacesByDir;
+    }
+    if (goWorksByDir.size > 0) {
+      ctx.goWorksByDir = goWorksByDir;
+    }
+    const rootGo = goModulesByDir.get("");
     if (rootGo !== void 0) {
       if (rootGo) ctx.goModule = rootGo;
       else delete ctx.goModule;

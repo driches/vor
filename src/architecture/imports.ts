@@ -86,6 +86,16 @@ export interface CargoManifestInfo {
   autobenches: boolean;
 }
 
+export interface GoReplaceEntry {
+  modulePath: string;
+  dir: string;
+}
+
+export interface GoWorkInfo {
+  useDirs: string[];
+  replaces: GoReplaceEntry[];
+}
+
 export interface WorkspaceResolveContext {
   workspaceDir?: string;
   knownFiles?: ReadonlySet<string>;
@@ -109,6 +119,15 @@ export interface WorkspaceResolveContext {
    * a parseable module declaration and acts as a boundary.
    */
   goModulesByDir?: ReadonlyMap<string, string | null>;
+  /**
+   * Optional per-directory local `go.mod` `replace` entries (keyed by `go.mod` dir).
+   */
+  goModReplacesByDir?: ReadonlyMap<string, readonly GoReplaceEntry[]>;
+  /**
+   * Optional per-directory `go.work` cache (keyed by normalized POSIX dir, `''` for root).
+   * `null` means `go.work` is confirmed absent in that directory at PR HEAD.
+   */
+  goWorksByDir?: ReadonlyMap<string, GoWorkInfo | null>;
   dartPackage?: string;
   /**
    * Optional per-directory `pubspec.yaml` package name cache (keyed by normalized POSIX dir, `''`
@@ -2305,9 +2324,228 @@ export function parseTsConfigContent(
   };
 }
 
+function tokenizeGoModLine(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+
+  while (i < line.length) {
+    const ch = line[i]!;
+    if (ch === ' ' || ch === '\t' || ch === '\r') {
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && line[i + 1] === '/') {
+      break;
+    }
+    if (ch === '(' || ch === ')') {
+      tokens.push(ch);
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === '`') {
+      const quote = ch;
+      i += 1;
+      let buf = '';
+      while (i < line.length) {
+        const c = line[i]!;
+        if (quote === '"' && c === '\\' && i + 1 < line.length) {
+          buf += line[i + 1]!;
+          i += 2;
+          continue;
+        }
+        if (c === quote) {
+          i += 1;
+          break;
+        }
+        buf += c;
+        i += 1;
+      }
+      tokens.push(buf);
+      continue;
+    }
+    if (line.startsWith('=>', i)) {
+      tokens.push('=>');
+      i += 2;
+      continue;
+    }
+
+    let end = i;
+    while (end < line.length) {
+      const c = line[end]!;
+      if (
+        c === ' ' ||
+        c === '\t' ||
+        c === '\r' ||
+        c === '(' ||
+        c === ')' ||
+        c === '"' ||
+        c === '`' ||
+        (c === '/' && line[end + 1] === '/') ||
+        line.startsWith('=>', end)
+      ) {
+        break;
+      }
+      end += 1;
+    }
+    tokens.push(line.slice(i, end));
+    i = end;
+  }
+
+  return tokens;
+}
+
+function rebaseRepoRelativeDir(baseDir: string, rawDir: string): string | null {
+  const normBase = normalizePath(baseDir);
+  const base = normBase === '.' ? '' : normBase;
+  const slashNorm = rawDir.trim().replace(/\\/g, '/');
+  if (!slashNorm || slashNorm.startsWith('/') || /^[A-Za-z]:/.test(slashNorm)) {
+    return null;
+  }
+  const joined = posix.normalize(base ? `${base}/${slashNorm}` : slashNorm);
+  if (joined === '..' || joined.startsWith('../')) {
+    return null;
+  }
+  if (joined === '.') return '';
+  return joined.replace(/\/+$/, '');
+}
+
+function isLocalGoReplaceTarget(rawTarget: string): boolean {
+  const slashNorm = rawTarget.trim().replace(/\\/g, '/');
+  return (
+    slashNorm === '.' ||
+    slashNorm === '..' ||
+    slashNorm.startsWith('./') ||
+    slashNorm.startsWith('../')
+  );
+}
+
+function parseLocalGoReplaceTokens(
+  args: readonly string[],
+  baseDir: string,
+): GoReplaceEntry | null {
+  const arrowIdx = args.indexOf('=>');
+  if ((arrowIdx !== 1 && arrowIdx !== 2) || args.length !== arrowIdx + 2) {
+    return null;
+  }
+  const modulePath = args[0]!.trim();
+  const rawTarget = args[arrowIdx + 1]!;
+  if (
+    !modulePath ||
+    modulePath.startsWith('./') ||
+    modulePath.startsWith('../') ||
+    modulePath.startsWith('/') ||
+    /[\s()]/.test(modulePath)
+  ) {
+    return null;
+  }
+  if (!isLocalGoReplaceTarget(rawTarget)) {
+    return null;
+  }
+  const dir = rebaseRepoRelativeDir(baseDir, rawTarget);
+  if (dir === null) return null;
+  return { modulePath, dir };
+}
+
+function parseGoDirectives(
+  raw: string,
+  baseDir = '',
+): { modulePath?: string; useDirs: string[]; replaces: GoReplaceEntry[] } {
+  let modulePath: string | undefined;
+  const useDirs: string[] = [];
+  const seenUseDirs = new Set<string>();
+  const replaces: GoReplaceEntry[] = [];
+  let activeBlock: 'use' | 'replace' | 'other' | null = null;
+
+  const consumeDirective = (
+    kind: 'module' | 'use' | 'replace' | 'other',
+    args: readonly string[],
+  ) => {
+    if (args.length === 0) return;
+    if (kind === 'module') {
+      const candidate = args[0]!.trim();
+      if (
+        modulePath === undefined &&
+        candidate.length > 0 &&
+        !candidate.startsWith('/') &&
+        !/\s/.test(candidate)
+      ) {
+        modulePath = candidate;
+      }
+      return;
+    }
+    if (kind === 'use') {
+      for (const rawDir of args) {
+        const dir = rebaseRepoRelativeDir(baseDir, rawDir);
+        if (dir !== null && !seenUseDirs.has(dir)) {
+          seenUseDirs.add(dir);
+          useDirs.push(dir);
+        }
+      }
+      return;
+    }
+    if (kind === 'replace') {
+      const entry = parseLocalGoReplaceTokens(args, baseDir);
+      if (entry) replaces.push(entry);
+    }
+  };
+
+  for (const line of raw.split('\n')) {
+    const tokens = tokenizeGoModLine(line);
+    if (tokens.length === 0) continue;
+
+    let i = 0;
+    while (i < tokens.length) {
+      if (activeBlock !== null) {
+        const closeIdx = tokens.indexOf(')', i);
+        const args = closeIdx === -1 ? tokens.slice(i) : tokens.slice(i, closeIdx);
+        consumeDirective(activeBlock, args);
+        if (closeIdx !== -1) {
+          activeBlock = null;
+          i = closeIdx + 1;
+          continue;
+        }
+        break;
+      }
+
+      const kw = tokens[i++]!;
+      const kind: 'module' | 'use' | 'replace' | 'other' =
+        kw === 'module' || kw === 'use' || kw === 'replace' ? kw : 'other';
+      if (i < tokens.length && tokens[i] === '(') {
+        i += 1;
+        const closeIdx = tokens.indexOf(')', i);
+        if (closeIdx !== -1) {
+          consumeDirective(kind, tokens.slice(i, closeIdx));
+          i = closeIdx + 1;
+          continue;
+        }
+        consumeDirective(kind, tokens.slice(i));
+        activeBlock = kind === 'module' ? 'other' : kind;
+        break;
+      }
+
+      consumeDirective(kind, tokens.slice(i));
+      break;
+    }
+  }
+
+  return {
+    ...(modulePath !== undefined ? { modulePath } : {}),
+    useDirs,
+    replaces,
+  };
+}
+
 export function parseGoModModule(raw: string): string | undefined {
-  const m = raw.match(/^[ \t]*module[ \t]+(?:"([^"\s]+)"|([^\s/"][^\s]*))/m);
-  return (m?.[1] ?? m?.[2])?.trim();
+  return parseGoDirectives(raw).modulePath;
+}
+
+export function parseGoModReplaces(raw: string, goModDir = ''): GoReplaceEntry[] {
+  return parseGoDirectives(raw, goModDir).replaces;
+}
+
+export function parseGoWork(raw: string, goWorkDir = ''): GoWorkInfo {
+  const { useDirs, replaces } = parseGoDirectives(raw, goWorkDir);
+  return { useDirs, replaces };
 }
 
 export function parsePubspecName(raw: string): string | undefined {
@@ -2402,6 +2640,11 @@ export function resolveTsConfigForFile(
 }
 
 const workspaceGoModuleCache = new WeakMap<WorkspaceResolveContext, Map<string, string | null>>();
+const workspaceGoModReplacesCache = new WeakMap<
+  WorkspaceResolveContext,
+  Map<string, readonly GoReplaceEntry[]>
+>();
+const workspaceGoWorkCache = new WeakMap<WorkspaceResolveContext, Map<string, GoWorkInfo | null>>();
 const workspaceDartPackageCache = new WeakMap<
   WorkspaceResolveContext,
   Map<string, string | null>
@@ -2484,6 +2727,165 @@ export function resolveGoModuleForFile(
     parseGoModModule,
   );
   return res ? { dir: res.dir, modulePath: res.value } : undefined;
+}
+
+function resolveGoWorkForFile(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+): { dir: string; work: GoWorkInfo } | undefined {
+  let diskCache = ctx.workspaceDir ? workspaceGoWorkCache.get(ctx) : undefined;
+
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (ctx.goWorksByDir?.has(dir)) {
+      const entry = ctx.goWorksByDir.get(dir);
+      if (entry === null) continue;
+      if (entry) return { dir, work: entry };
+    }
+
+    if (!ctx.workspaceDir) continue;
+
+    if (!diskCache) {
+      diskCache = new Map<string, GoWorkInfo | null>();
+      workspaceGoWorkCache.set(ctx, diskCache);
+    }
+
+    if (diskCache.has(dir)) {
+      const cached = diskCache.get(dir);
+      if (cached === null) continue;
+      if (cached) return { dir, work: cached };
+    }
+
+    const relPath = dir ? `${dir}/go.work` : 'go.work';
+    const raw = readOptionalFile(ctx.workspaceDir, relPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+
+    const work = parseGoWork(raw, dir);
+    diskCache.set(dir, work);
+    return { dir, work };
+  }
+
+  return undefined;
+}
+
+function resolveGoModuleAtDir(dir: string, ctx: WorkspaceResolveContext): string | undefined {
+  if (ctx.goModulesByDir?.has(dir)) {
+    const entry = ctx.goModulesByDir.get(dir);
+    return entry ? entry : undefined;
+  }
+
+  if (dir === '' && ctx.goModule) {
+    return ctx.goModule;
+  }
+
+  if (!ctx.workspaceDir) return undefined;
+
+  let diskCache = workspaceGoModuleCache.get(ctx);
+  if (!diskCache) {
+    diskCache = new Map<string, string | null>();
+    workspaceGoModuleCache.set(ctx, diskCache);
+  }
+
+  if (diskCache.has(dir)) {
+    const cached = diskCache.get(dir);
+    return cached ? cached : undefined;
+  }
+
+  const relPath = dir ? `${dir}/go.mod` : 'go.mod';
+  const raw = readOptionalFile(ctx.workspaceDir, relPath);
+  if (raw === null) {
+    diskCache.set(dir, null);
+    return undefined;
+  }
+
+  const value = parseGoModModule(raw) ?? '';
+  diskCache.set(dir, value);
+  return value || undefined;
+}
+
+function resolveGoModReplacesAtDir(
+  dir: string,
+  ctx: WorkspaceResolveContext,
+): readonly GoReplaceEntry[] {
+  if (ctx.goModReplacesByDir?.has(dir)) {
+    return ctx.goModReplacesByDir.get(dir) ?? [];
+  }
+  if (ctx.goModulesByDir?.has(dir) && ctx.goModulesByDir.get(dir) === null) {
+    return [];
+  }
+  if (!ctx.workspaceDir) return [];
+
+  let diskCache = workspaceGoModReplacesCache.get(ctx);
+  if (!diskCache) {
+    diskCache = new Map<string, readonly GoReplaceEntry[]>();
+    workspaceGoModReplacesCache.set(ctx, diskCache);
+  }
+  if (diskCache.has(dir)) {
+    return diskCache.get(dir) ?? [];
+  }
+
+  const relPath = dir ? `${dir}/go.mod` : 'go.mod';
+  const raw = readOptionalFile(ctx.workspaceDir, relPath);
+  const replaces = raw === null ? [] : parseGoModReplaces(raw, dir);
+  diskCache.set(dir, replaces);
+  return replaces;
+}
+
+function resolveGoImport(
+  specifier: string,
+  normSource: string,
+  ctx: WorkspaceResolveContext,
+): string | undefined {
+  interface GoCandidate {
+    modulePath: string;
+    dir: string;
+    priority: number;
+  }
+  const candidates: GoCandidate[] = [];
+
+  const goWork = resolveGoWorkForFile(normSource, ctx);
+  if (goWork) {
+    for (const rep of goWork.work.replaces) {
+      candidates.push({ modulePath: rep.modulePath, dir: rep.dir, priority: 4 });
+    }
+    for (const useDir of goWork.work.useDirs) {
+      const modPath = resolveGoModuleAtDir(useDir, ctx);
+      if (modPath) {
+        candidates.push({ modulePath: modPath, dir: useDir, priority: 2 });
+      }
+    }
+  }
+
+  const goMod = resolveGoModuleForFile(normSource, ctx);
+  if (goMod) {
+    for (const rep of resolveGoModReplacesAtDir(goMod.dir, ctx)) {
+      candidates.push({ modulePath: rep.modulePath, dir: rep.dir, priority: 3 });
+    }
+    candidates.push({ modulePath: goMod.modulePath, dir: goMod.dir, priority: 1 });
+  }
+
+  let best: GoCandidate | undefined;
+  for (const c of candidates) {
+    if (specifier !== c.modulePath && !specifier.startsWith(`${c.modulePath}/`)) {
+      continue;
+    }
+    if (
+      best === undefined ||
+      c.modulePath.length > best.modulePath.length ||
+      (c.modulePath.length === best.modulePath.length && c.priority > best.priority)
+    ) {
+      best = c;
+    }
+  }
+
+  if (!best) return undefined;
+  if (specifier === best.modulePath) {
+    return best.dir || '.';
+  }
+  const subpath = specifier.slice(best.modulePath.length + 1);
+  return normalizePath(best.dir ? posix.join(best.dir, subpath) : subpath);
 }
 
 /**
@@ -3827,18 +4229,9 @@ export function resolveImport(
     }
 
     case 'go': {
-      const goMod = resolveGoModuleForFile(normSource, ctx);
-      if (goMod) {
-        if (imp.specifier === goMod.modulePath) {
-          return { ...base, resolvedPath: goMod.dir || '.' };
-        }
-        if (imp.specifier.startsWith(`${goMod.modulePath}/`)) {
-          const subpath = imp.specifier.slice(goMod.modulePath.length + 1);
-          return {
-            ...base,
-            resolvedPath: normalizePath(goMod.dir ? posix.join(goMod.dir, subpath) : subpath),
-          };
-        }
+      const resolvedPath = resolveGoImport(imp.specifier, normSource, ctx);
+      if (resolvedPath !== undefined) {
+        return { ...base, resolvedPath };
       }
       return { ...base, packageName: imp.specifier };
     }

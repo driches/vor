@@ -9,6 +9,8 @@ import {
   loadWorkspaceResolveContext,
   parseCargoManifest,
   parseGoModModule,
+  parseGoModReplaces,
+  parseGoWork,
   parsePubspecName,
   parseTsConfigContent,
   resolveImport,
@@ -1790,5 +1792,178 @@ describe('extractImports & resolveImport across languages', () => {
     );
     expect(autoLibOffRes[0]?.resolvedPath).toBeUndefined();
     expect(autoLibOffRes[0]?.packageName).toBe('arch_sample');
+  });
+
+  it('parses go.work use/replace directives and go.mod local replacements safely', () => {
+    const work = parseGoWork(
+      [
+        'go 1.22',
+        '',
+        'use ./app // trailing comment',
+        'use (',
+        '  "./storage"',
+        '  `../shared`',
+        '  ../../outside // escapes repo root — ignored',
+        '  ./app // duplicate ignored',
+        ')',
+        '',
+        'replace example.com/legacy => ./legacy',
+        'replace (',
+        '  example.com/override v1.2.3 => ../override-mod',
+        '  example.com/remote v1.0.0 => github.com/fork/remote v1.1.0',
+        ')',
+      ].join('\n'),
+      'services',
+    );
+    expect(work.useDirs).toEqual(['services/app', 'services/storage', 'shared']);
+    expect(work.replaces).toEqual([
+      { modulePath: 'example.com/legacy', dir: 'services/legacy' },
+      { modulePath: 'example.com/override', dir: 'override-mod' },
+    ]);
+
+    const modReplaces = parseGoModReplaces(
+      [
+        'module example.com/app',
+        'require (',
+        '  example.com/storage v0.0.0',
+        ')',
+        'replace example.com/storage => ../storage',
+        'replace (',
+        '  example.com/local v0.1.0 => ./local',
+        '  example.com/remote => github.com/fork/remote v1.0.0',
+        '  example.com/outside => ../../outside',
+        ')',
+      ].join('\n'),
+      'app',
+    );
+    expect(modReplaces).toEqual([
+      { modulePath: 'example.com/storage', dir: 'storage' },
+      { modulePath: 'example.com/local', dir: 'app/local' },
+    ]);
+  });
+
+  it('resolves Go workspace sibling modules and local replace targets before external fallback', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-go-work-'));
+    try {
+      mkdirSync(join(ws, 'app/domain'), { recursive: true });
+      mkdirSync(join(ws, 'storage/infrastructure'), { recursive: true });
+      mkdirSync(join(ws, 'override-storage/infrastructure'), { recursive: true });
+      mkdirSync(join(ws, 'legacy-consumer/domain'), { recursive: true });
+      mkdirSync(join(ws, 'isolated/domain'), { recursive: true });
+
+      writeFileSync(
+        join(ws, 'go.work'),
+        ['go 1.22', 'use (', '  ./app', '  ./storage', ')', ''].join('\n'),
+      );
+      writeFileSync(join(ws, 'app/go.mod'), 'module example.com/app\ngo 1.22\n');
+      writeFileSync(join(ws, 'storage/go.mod'), 'module example.com/storage\ngo 1.22\n');
+      writeFileSync(
+        join(ws, 'override-storage/go.mod'),
+        'module example.com/storage/submod\ngo 1.22\n',
+      );
+      writeFileSync(
+        join(ws, 'legacy-consumer/go.mod'),
+        ['module example.com/legacy', 'replace example.com/storage => ../storage'].join('\n'),
+      );
+      // Empty go.mod without go.work or replace must still block unrelated imports.
+      writeFileSync(join(ws, 'isolated/go.mod'), '// empty go.mod\n');
+
+      const ctx = loadWorkspaceResolveContext(ws);
+
+      // 1. Sibling module via root go.work.
+      const resolvedSibling = resolveImports(
+        extractImports(
+          'app/domain/order.go',
+          [
+            'package domain',
+            'import (',
+            '  "example.com/storage/infrastructure"',
+            '  "example.com/storage"',
+            '  "github.com/gin-gonic/gin"',
+            ')',
+          ].join('\n'),
+        ).imports,
+        'app/domain/order.go',
+        ctx,
+      );
+      expect(
+        resolvedSibling.map((r) => ({ resolvedPath: r.resolvedPath, packageName: r.packageName })),
+      ).toEqual([
+        { resolvedPath: 'storage/infrastructure', packageName: undefined },
+        { resolvedPath: 'storage', packageName: undefined },
+        { resolvedPath: undefined, packageName: 'github.com/gin-gonic/gin' },
+      ]);
+
+      // 2. go.mod local replace resolves without needing go.work, while empty isolated/go.mod still blocks unrelated imports.
+      const noWorkCtx = loadWorkspaceResolveContext(ws);
+      noWorkCtx.goWorksByDir = new Map([['', null]]);
+      const [replacedImport] = resolveImports(
+        extractImports(
+          'legacy-consumer/domain/order.go',
+          'package domain\nimport "example.com/storage/infrastructure"\n',
+        ).imports,
+        'legacy-consumer/domain/order.go',
+        noWorkCtx,
+      );
+      expect(replacedImport?.resolvedPath).toBe('storage/infrastructure');
+
+      const [isolatedImp] = resolveImports(
+        extractImports(
+          'isolated/domain/order.go',
+          'package domain\nimport "example.com/app/infrastructure"\n',
+        ).imports,
+        'isolated/domain/order.go',
+        noWorkCtx,
+      );
+      expect(isolatedImp?.resolvedPath).toBeUndefined();
+      expect(isolatedImp?.packageName).toBe('example.com/app/infrastructure');
+
+      // 3. go.work replace takes priority over use ./storage, and longest module prefix wins.
+      const overrideCtx = {
+        goWorksByDir: new Map([
+          [
+            '',
+            parseGoWork(
+              [
+                'use (',
+                '  .',
+                '  ./app',
+                '  ./storage',
+                '  ./override-storage',
+                ')',
+                'replace example.com/storage => ./override-storage',
+              ].join('\n'),
+            ),
+          ],
+        ]),
+        goModulesByDir: new Map([
+          ['', 'example.com/root'],
+          ['app', 'example.com/app'],
+          ['storage', 'example.com/storage'],
+          ['override-storage', 'example.com/root/submod'],
+        ]),
+      };
+      const [replacedWork] = resolveImports(
+        extractImports(
+          'app/domain/order.go',
+          'package domain\nimport "example.com/storage/infrastructure"\n',
+        ).imports,
+        'app/domain/order.go',
+        overrideCtx,
+      );
+      expect(replacedWork?.resolvedPath).toBe('override-storage/infrastructure');
+
+      const [longestPrefix] = resolveImports(
+        extractImports(
+          'app/domain/order.go',
+          'package domain\nimport "example.com/root/submod/infrastructure"\n',
+        ).imports,
+        'app/domain/order.go',
+        overrideCtx,
+      );
+      expect(longestPrefix?.resolvedPath).toBe('override-storage/infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });

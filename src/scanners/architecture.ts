@@ -28,12 +28,16 @@ import {
   loadWorkspaceResolveContext,
   parseCargoManifest,
   parseGoModModule,
+  parseGoModReplaces,
+  parseGoWork,
   parsePubspecName,
   parseTsConfigContent,
   resolveImport,
   resolveTsConfigForFile,
   type ArchLanguage,
   type CargoManifestInfo,
+  type GoReplaceEntry,
+  type GoWorkInfo,
   type TsConfigPaths,
   type WorkspaceResolveContext,
 } from '../architecture/imports.js';
@@ -51,6 +55,7 @@ import {
 } from './types.js';
 
 const SCANNER_ID: ScannerId = 'architecture';
+const MAX_GO_WORKSPACE_MODULES = 64;
 
 export type Logger = Pick<typeof defaultLogger, 'debug' | 'notice' | 'warn'>;
 
@@ -583,19 +588,65 @@ async function hydrateResolveContext(
   }
 
   if (goPaths.length > 0) {
-    const byDir = await hydrateManifestMapFromHead(
-      deps,
-      goPaths,
-      'go.mod',
-      parseGoModModule,
-      counters,
-      headTree,
-      removedFiles,
-    );
-    if (byDir.size > 0) {
-      ctx.goModulesByDir = byDir;
+    const ancestorDirs = new Set<string>(['']);
+    for (const filePath of goPaths) {
+      for (const dir of listAncestorDirs(filePath)) {
+        ancestorDirs.add(dir);
+      }
     }
-    const rootGo = byDir.get('');
+
+    const goModulesByDir = new Map<string, string | null>();
+    const goModReplacesByDir = new Map<string, readonly GoReplaceEntry[]>();
+    const goWorksByDir = new Map<string, GoWorkInfo | null>();
+    const workspaceUseDirs = new Set<string>();
+    const recordGoMod = (dir: string, modRes: MetadataReadResult): void => {
+      if (modRes.status === 'found') {
+        goModulesByDir.set(dir, parseGoModModule(modRes.content) ?? '');
+        goModReplacesByDir.set(dir, parseGoModReplaces(modRes.content, dir));
+      } else if (modRes.status === 'absent') {
+        goModulesByDir.set(dir, null);
+        goModReplacesByDir.set(dir, []);
+      }
+    };
+
+    for (const dir of ancestorDirs) {
+      if (deps.signal.aborted) break;
+      const modPath = dir ? `${dir}/go.mod` : 'go.mod';
+      recordGoMod(dir, await readMetadataFile(deps, modPath, counters, headTree, removedFiles));
+
+      if (deps.signal.aborted) break;
+      const workPath = dir ? `${dir}/go.work` : 'go.work';
+      const workRes = await readMetadataFile(deps, workPath, counters, headTree, removedFiles);
+      if (workRes.status === 'found') {
+        const parsedWork = parseGoWork(workRes.content, dir);
+        goWorksByDir.set(dir, parsedWork);
+        for (const useDir of parsedWork.useDirs) {
+          workspaceUseDirs.add(useDir);
+        }
+      } else if (workRes.status === 'absent') {
+        goWorksByDir.set(dir, null);
+      }
+    }
+
+    let hydratedWorkspaceModules = 0;
+    for (const useDir of workspaceUseDirs) {
+      if (deps.signal.aborted || hydratedWorkspaceModules >= MAX_GO_WORKSPACE_MODULES) break;
+      if (goModulesByDir.has(useDir)) continue;
+      hydratedWorkspaceModules += 1;
+      const modPath = useDir ? `${useDir}/go.mod` : 'go.mod';
+      recordGoMod(useDir, await readMetadataFile(deps, modPath, counters, headTree, removedFiles));
+    }
+
+    if (goModulesByDir.size > 0) {
+      ctx.goModulesByDir = goModulesByDir;
+    }
+    if (goModReplacesByDir.size > 0) {
+      ctx.goModReplacesByDir = goModReplacesByDir;
+    }
+    if (goWorksByDir.size > 0) {
+      ctx.goWorksByDir = goWorksByDir;
+    }
+    const rootGo = goModulesByDir.get('');
     if (rootGo !== undefined) {
       if (rootGo) ctx.goModule = rootGo;
       else delete ctx.goModule;

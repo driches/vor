@@ -786,4 +786,83 @@ entries:
     expect(ownLibTreeRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
     expect(ownLibTreeRes.findings[0]?.line).toBe(1);
   });
+
+  it('hydrates go.work sibling modules from PR HEAD and ignores deleted go.work on checkout disk', async () => {
+    const spec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+    });
+    const scanner = createArchitectureScanner(spec);
+    const domainPath = 'app/domain/order.go';
+    const domainContent = 'package domain\nimport "example.com/storage/infrastructure"\n';
+    const changed = makeChangedFile(domainPath, {
+      2: 'import "example.com/storage/infrastructure"',
+    });
+    changed.language = 'go';
+
+    // Case A: API-only PR scan hydrates root go.work and sibling storage/go.mod.
+    const apiDeps = makeDeps([changed], {
+      [domainPath]: domainContent,
+      'go.work': 'go 1.22\nuse (\n  ./app\n  ./storage\n)\n',
+      'app/go.mod': 'module example.com/app\n',
+      'storage/go.mod': 'module example.com/storage\n',
+    });
+    apiDeps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: 'go.work' },
+                { type: 'blob', path: 'app/go.mod' },
+                { type: 'blob', path: 'storage/go.mod' },
+                { type: 'blob', path: domainPath },
+                { type: 'blob', path: 'storage/infrastructure/repo.go' },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+
+    const apiRes = await scanner.scan(apiDeps);
+    expect(apiRes.findings).toHaveLength(1);
+    expect(apiRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(apiRes.findings[0]?.line).toBe(2);
+
+    // Case B: Deleted go.work at PR HEAD must not fall back to local checkout go.work.
+    const ws = mkdtempSync(join(tmpdir(), 'vor-arch-go-work-deleted-'));
+    try {
+      mkdirSync(join(ws, 'app/domain'), { recursive: true });
+      mkdirSync(join(ws, 'storage/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'go.work'), 'go 1.22\nuse (\n  ./app\n  ./storage\n)\n');
+      writeFileSync(join(ws, 'app/go.mod'), 'module example.com/app\n');
+      writeFileSync(join(ws, 'storage/go.mod'), 'module example.com/storage\n');
+
+      const removedGoWork: ChangedFile = {
+        path: 'go.work',
+        status: 'removed',
+        additions: 0,
+        deletions: 4,
+        reviewable_lines: [],
+        added_lines: new Set(),
+        language: 'go',
+        is_generated: false,
+        is_binary: false,
+        size_bytes: 36,
+        head_line_text: new Map(),
+      };
+      const deletedDeps = makeDeps([changed, removedGoWork], {
+        [domainPath]: domainContent,
+        'app/go.mod': 'module example.com/app\n',
+      });
+      deletedDeps.workspaceDir = ws;
+      const deletedRes = await scanner.scan(deletedDeps);
+      expect(deletedRes.findings).toEqual([]);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

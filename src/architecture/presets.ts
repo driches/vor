@@ -90,6 +90,7 @@ export const DEFAULT_DOMAIN_FORBIDDEN_PACKAGES: readonly string[] = [
   'Microsoft.AspNetCore*',
   'System.Data.SqlClient*',
   'Dapper',
+  'Dapper.*',
 ];
 
 export interface ArchitecturePresetDefinition {

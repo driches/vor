@@ -805,4 +805,100 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('catches cross-module Go workspace imports in explain and repo checks under DDD', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-go-work-'));
+    try {
+      mkdirSync(join(ws, 'app/domain'), { recursive: true });
+      mkdirSync(join(ws, 'storage/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'go.work'), 'go 1.22\nuse (\n  ./app\n  ./storage\n)\n');
+      writeFileSync(join(ws, 'app/go.mod'), 'module example.com/app\ngo 1.22\n');
+      writeFileSync(join(ws, 'storage/go.mod'), 'module example.com/storage\ngo 1.22\n');
+      writeFileSync(
+        join(ws, 'storage/infrastructure/repo.go'),
+        'package infrastructure\ntype Repo struct{}\n',
+      );
+      writeFileSync(
+        join(ws, 'app/domain/order.go'),
+        [
+          'package domain',
+          'import "example.com/storage/infrastructure"',
+          'var _ infrastructure.Repo',
+        ].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+      });
+
+      const explained = explainFileArchitecture(ws, 'app/domain/order.go', spec);
+      expect(explained.imports[0]?.resolved_path).toBe('storage/infrastructure');
+      expect(explained.imports[0]?.target_layer).toBe('infrastructure');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.file_path).toBe('app/domain/order.go');
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('catches C# static and alias Dapper type imports in domain under DDD without false-matching prefix names', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-csharp-dapper-'));
+    try {
+      mkdirSync(join(ws, 'src/domain'), { recursive: true });
+      writeFileSync(
+        join(ws, 'src/domain/OrderRepository.cs'),
+        [
+          'using static Dapper.SqlMapper;',
+          'using Sql = Dapper.SqlMapper;',
+          'using static global::Dapper.SqlMapper;',
+          'using Dapper.Contrib.Extensions;',
+          'using Dapperness;',
+          'namespace App.Domain;',
+          'public class OrderRepository {}',
+        ].join('\n'),
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src',
+      });
+
+      const explained = explainFileArchitecture(ws, 'src/domain/OrderRepository.cs', spec);
+      expect(explained.imports).toHaveLength(5);
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:forbidden-package:domain',
+      ]);
+      expect(explained.imports[1]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:forbidden-package:domain',
+      ]);
+      expect(explained.imports[2]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:forbidden-package:domain',
+      ]);
+      expect(explained.imports[3]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:forbidden-package:domain',
+      ]);
+      // Unrelated package whose name merely starts with "Dapper" must not trigger.
+      expect(explained.imports[4]?.violations).toEqual([]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(4);
+      expect(repoRes.violations.every((v) => v.rule_id === 'arch:forbidden-package:domain')).toBe(
+        true,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

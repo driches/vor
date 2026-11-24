@@ -70,7 +70,11 @@ export class AnthropicProvider implements LLMProvider {
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     // Sliding-window cache_control on the two most recent array-content user
     // messages (see markLatestMessageForCaching JSDoc for the 4-breakpoint
-    // breakpoint budget math).
+    // breakpoint budget math). These breakpoints intentionally stay at the
+    // default `5m` TTL (1.25× write rate) even when `promptCacheTtl === '1h'`:
+    // dynamic per-PR tool outputs are never shared across PRs, so writing them
+    // at 1h (2×) would inflate cost without cross-PR reuse (Anthropic allows
+    // longer TTLs on `tools`/`system` before shorter `messages` TTLs).
     markLatestMessageForCaching(anthropicMessages);
     // Array-content user messages carry the 5m tool_result breakpoints; when
     // none exist yet (turn 1), every breakpoint sent in this request uses `promptCacheTtl`.
