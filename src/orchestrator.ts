@@ -138,6 +138,14 @@ export interface OrchestratorInput {
    * copy with no GitHub round-trip. Same shape as `providerFactory`.
    */
   octokitFactory?: (opts: { auth: string }) => Octokit;
+  /**
+   * Optional override for the GitHub client used to fetch cross-repository
+   * `github:` reference sources. When omitted, `runOrchestrator` reuses the
+   * primary `octokit` client (the default for GitHub Actions). Local reviews
+   * inject a real `createOctokit` when `GITHUB_TOKEN` is set, or return `null`
+   * when unauthenticated so cross-repo sources never hit the local FakeOctokit.
+   */
+  referenceOctokitFactory?: (opts: { auth: string }) => Octokit | null;
 }
 
 export interface OrchestratorOutput {
@@ -307,6 +315,9 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   let referenceCorpus: LoadedReferenceCorpus | undefined;
   if (config.references.enabled && config.references.sources.length > 0) {
     try {
+      const referenceOctokit = input.referenceOctokitFactory
+        ? input.referenceOctokitFactory({ auth: input.github_token })
+        : octokit;
       referenceCorpus = await loadReferences({
         config: config.references,
         owner: input.owner,
@@ -315,6 +326,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
         workspaceDir: input.workspace_dir,
         fileReader,
         octokit,
+        githubOctokit: referenceOctokit,
       });
       for (const w of referenceCorpus.warnings) {
         await logger.warn(`References: ${w}`);

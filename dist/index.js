@@ -94398,7 +94398,8 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
       staleContent = lookup.content;
     }
   }
-  if (!input2.octokit?.rest?.repos?.getContent) {
+  const ghClient = input2.githubOctokit !== void 0 ? input2.githubOctokit : input2.octokit;
+  if (!ghClient?.rest?.repos?.getContent) {
     if (staleMeta && staleContent !== void 0 && input2.config.cache.stale_on_error) {
       warnings.push(`No GitHub client available for '${sourceLabel}'; using cached copy.`);
       return materializeNormalizedDoc(staleContent, {
@@ -94415,7 +94416,7 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
     return null;
   }
   try {
-    const res = await input2.octokit.rest.repos.getContent({
+    const res = await ghClient.rest.repos.getContent({
       owner,
       repo,
       path: normPath,
@@ -94432,7 +94433,7 @@ async function loadGithubFile(owner, repo, filePath, ref, metaOpts, input2, cach
     } else if (res.data.encoding && res.data.encoding !== "none") {
       buf = Buffer.from(res.data.content, res.data.encoding);
     } else {
-      const blob = await input2.octokit.rest.git.getBlob({
+      const blob = await ghClient.rest.git.getBlob({
         owner,
         repo,
         file_sha: res.data.sha
@@ -94528,14 +94529,15 @@ async function loadGithubSource(src, input2, cache, warnings) {
     );
     return single ? [single] : [];
   }
-  if (!input2.octokit?.rest?.git?.getTree) {
+  const ghClient = input2.githubOctokit !== void 0 ? input2.githubOctokit : input2.octokit;
+  if (!ghClient?.rest?.git?.getTree) {
     warnings.push(
       `Cannot expand GitHub glob '${src.rawSpec}' without an authenticated GitHub client.`
     );
     return [];
   }
   try {
-    const treeRes = await input2.octokit.rest.git.getTree({
+    const treeRes = await ghClient.rest.git.getTree({
       owner: src.owner,
       repo: src.repo,
       tree_sha: src.ref,
@@ -94974,6 +94976,7 @@ async function runOrchestrator(input2) {
   let referenceCorpus;
   if (config2.references.enabled && config2.references.sources.length > 0) {
     try {
+      const referenceOctokit = input2.referenceOctokitFactory ? input2.referenceOctokitFactory({ auth: input2.github_token }) : octokit;
       referenceCorpus = await loadReferences({
         config: config2.references,
         owner: input2.owner,
@@ -94981,7 +94984,8 @@ async function runOrchestrator(input2) {
         ref: prContext.metadata.head_sha,
         workspaceDir: input2.workspace_dir,
         fileReader,
-        octokit
+        octokit,
+        githubOctokit: referenceOctokit
       });
       for (const w2 of referenceCorpus.warnings) {
         await logger.warn(`References: ${w2}`);

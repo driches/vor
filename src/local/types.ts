@@ -50,4 +50,5 @@ export interface LocalReviewOptions {
   configPath?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
+  githubToken?: string;
 }

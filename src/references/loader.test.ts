@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { DEFAULT_CONFIG } from '../config/defaults.js';
 import type { FileReader } from '../github/file-reader.js';
+import { DiskReferenceCache } from './cache.js';
 import { type LoadReferencesInput, loadReferences, pinnedNodeFetch } from './loader.js';
 
 describe('loadReferences', () => {
@@ -991,6 +992,119 @@ describe('loadReferences', () => {
       expect(res.docs.find((d) => d.id === 'guide')?.content).toContain('# Alpha');
       expect(res.docs.find((d) => d.id === 'guide-3')?.content).toContain('# Beta');
       expect(res.docs.find((d) => d.id === 'guide-2')?.content).toContain('# Gamma');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses githubOctokit for cross-repo sources while keeping local octokit/workspaceDir for repo globs', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-split-client-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-split-client-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      writeFileSync(join(ws, 'docs/style.md'), '# Local Style\nLocal workspace doc.\n');
+      writeFileSync(join(ws, 'docs/local-extra.md'), '# Local Extra\nFrom workspace.\n');
+
+      const localGetContent = vi.fn(async () => ({
+        data: {
+          type: 'file',
+          sha: 'local-sha',
+          content: Buffer.from('# Local Fake GetContent\n', 'utf-8').toString('base64'),
+          encoding: 'base64',
+        },
+      }));
+      const localOctokit = {
+        rest: { repos: { getContent: localGetContent } },
+      } as unknown as NonNullable<LoadReferencesInput['octokit']>;
+
+      const config = {
+        ...DEFAULT_CONFIG.references,
+        enabled: true,
+        sources: ['docs/*.md', 'github:org/standards/docs/style.md@HEAD'],
+        cache: { ...DEFAULT_CONFIG.references.cache, dir: cacheDir },
+      };
+
+      // With githubOctokit: null, cross-repo source must neither call localOctokit nor poison the remote cache key.
+      const unauthRes = await loadReferences({
+        config,
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: ws,
+        octokit: localOctokit,
+        githubOctokit: null,
+      });
+      expect(localGetContent).not.toHaveBeenCalled();
+      expect(unauthRes.docs.map((d) => d.source)).toEqual(['docs/local-extra.md', 'docs/style.md']);
+      expect(
+        unauthRes.warnings.some((w) => w.includes('github:org/standards/docs/style.md@HEAD')),
+      ).toBe(true);
+      const diskCache = new DiskReferenceCache(cacheDir);
+      expect(
+        diskCache.get('github:org/standards@HEAD:docs/style.md', Date.now(), 86_400).status,
+      ).toBe('miss');
+
+      // With an explicit remote githubOctokit, both single-file and glob github: sources use remoteOctokit
+      // while repo globs still enumerate workspaceDir rather than calling remoteOctokit.rest.git.getTree for local/local.
+      const remoteGetContent = vi.fn(
+        async (args: { owner: string; repo: string; path: string }) => ({
+          data: {
+            type: 'file',
+            sha: `remote-${args.path}`,
+            content: Buffer.from(
+              `# Remote ${args.owner}/${args.repo}/${args.path}\n`,
+              'utf-8',
+            ).toString('base64'),
+            encoding: 'base64',
+          },
+        }),
+      );
+      const remoteGetTree = vi.fn(async () => ({
+        data: {
+          truncated: false,
+          tree: [{ type: 'blob', path: 'rules/security.md' }],
+        },
+      }));
+      const remoteOctokit = {
+        rest: {
+          repos: { getContent: remoteGetContent },
+          git: { getTree: remoteGetTree },
+        },
+      } as unknown as NonNullable<LoadReferencesInput['octokit']>;
+
+      const authRes = await loadReferences({
+        config: {
+          ...config,
+          sources: [
+            'docs/*.md',
+            'github:org/standards/docs/style.md@HEAD',
+            'github:org/standards/rules/*.md@main',
+          ],
+        },
+        owner: 'local',
+        repo: 'local',
+        ref: 'WORKTREE',
+        workspaceDir: ws,
+        octokit: localOctokit,
+        githubOctokit: remoteOctokit,
+      });
+      expect(localGetContent).not.toHaveBeenCalled();
+      expect(remoteGetTree).toHaveBeenCalledTimes(1);
+      expect(remoteGetTree).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: 'org', repo: 'standards', tree_sha: 'main' }),
+      );
+      expect(remoteGetContent).toHaveBeenCalledTimes(2);
+      expect(authRes.docs.find((d) => d.source === 'docs/style.md')?.content).toContain(
+        'Local workspace doc.',
+      );
+      expect(
+        authRes.docs.find((d) => d.source === 'github:org/standards/docs/style.md@HEAD')?.content,
+      ).toContain('Remote org/standards/docs/style.md');
+      expect(
+        authRes.docs.find((d) => d.source === 'github:org/standards/rules/security.md@main')
+          ?.content,
+      ).toContain('Remote org/standards/rules/security.md');
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(cacheDir, { recursive: true, force: true });

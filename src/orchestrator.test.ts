@@ -329,6 +329,9 @@ vi.mock('./ocr/recognize.js', () => ({
 // Now the orchestrator import — `vi.mock` calls above have already swapped
 // the dependency graph for this module.
 // -----------------------------------------------------------------
+import type { Octokit } from '@octokit/rest';
+import { buildLocalOctokit } from './local/git-octokit.js';
+import { DiskReferenceCache } from './references/cache.js';
 import { runOrchestrator, type OrchestratorInput } from './orchestrator.js';
 import { _clearRegisteredSecrets } from './util/secrets.js';
 import { OsvClientError } from './scanners/osv-client.js';
@@ -2504,6 +2507,124 @@ describe('runOrchestrator — reference documentation & two-layer caching', () =
       expect(String(openaiCreateCalls[0]?.prompt_cache_key)).toMatch(
         /^vor:driches\/test:refs-[0-9a-f]{12}$/,
       );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses referenceOctokitFactory for cross-repo github: sources while reading local docs locally', async () => {
+    const base = buildBaseDiff();
+    const ws = mkdtempSync(join(tmpdir(), 'vor-orch-local-ghref-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-local-ghref-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      writeFileSync(join(ws, 'docs/style.md'), '# Local Style\nLocal style only.\n');
+      const vorYml = [
+        'security:',
+        '  enabled: false',
+        'references:',
+        '  enabled: true',
+        '  sources:',
+        '    - "docs/*.md"',
+        '    - "github:org/standards/docs/style.md@HEAD"',
+        '    - "github:org/standards/rules/*.md@main"',
+        '  cache:',
+        `    dir: "${cacheDir}"`,
+      ].join('\n');
+
+      const localOctokit = buildLocalOctokit({
+        owner: 'local',
+        repo: 'local',
+        baseSha: 'a'.repeat(40),
+        headSha: 'WORKTREE',
+        files: base.filesApi.map((f) => ({
+          path: f.filename,
+          status: 'modified',
+          additions: f.changes,
+          deletions: 0,
+        })),
+        diff: base.diff,
+        prMeta: { title: 'Local PR', body: '', author: 'dev', additions: 2, deletions: 0 },
+        resolveBytes: (filePath) => {
+          if (filePath === '.vor.yml') return Buffer.from(vorYml, 'utf-8');
+          if (filePath === 'docs/style.md') {
+            return Buffer.from('# Local Style\nLocal style only.\n', 'utf-8');
+          }
+          return null;
+        },
+      });
+
+      const localInput = (
+        refFactory: OrchestratorInput['referenceOctokitFactory'],
+      ): OrchestratorInput => ({
+        ...baseInput({ workspace_dir: ws }),
+        owner: 'local',
+        repo: 'local',
+        pull_number: 0,
+        dry_run: true,
+        octokitFactory: () => localOctokit,
+        referenceOctokitFactory: refFactory,
+      });
+
+      // Case 1: unauthenticated local review (`() => null`) does not leak local docs/style.md under remote cache key.
+      scriptSummaryOnly();
+      await runOrchestrator(localInput(() => null));
+      const sysUnauth = String(
+        (anthropicCreateCalls[0]?.system as Array<{ text: string }> | undefined)?.[0]?.text ?? '',
+      );
+      expect(sysUnauth).toContain('Local style only.');
+      expect(sysUnauth).not.toContain('github:org/standards/docs/style.md@HEAD');
+      expect(
+        new DiskReferenceCache(cacheDir).get(
+          'github:org/standards@HEAD:docs/style.md',
+          Date.now(),
+          86_400,
+        ).status,
+      ).toBe('miss');
+
+      // Case 2: authenticated remote client fetches cross-repo docs & globs without querying local/local.
+      const remoteGetContent = vi.fn(
+        async (args: { owner: string; repo: string; path: string }) => ({
+          data: {
+            type: 'file',
+            sha: `sha-${args.path}`,
+            content: Buffer.from(
+              `# Remote ${args.owner}/${args.repo}\nContent for ${args.path}.\n`,
+              'utf-8',
+            ).toString('base64'),
+            encoding: 'base64',
+          },
+        }),
+      );
+      const remoteGetTree = vi.fn(async () => ({
+        data: {
+          truncated: false,
+          tree: [{ type: 'blob', path: 'rules/auth.md' }],
+        },
+      }));
+      const remoteOctokit = {
+        rest: { repos: { getContent: remoteGetContent }, git: { getTree: remoteGetTree } },
+      } as unknown as Octokit;
+
+      scriptSummaryOnly();
+      await runOrchestrator(localInput(() => remoteOctokit));
+      expect(remoteGetTree).toHaveBeenCalledTimes(1);
+      expect(remoteGetTree).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: 'org', repo: 'standards', tree_sha: 'main' }),
+      );
+      expect(remoteGetContent).toHaveBeenCalledTimes(2);
+      expect(
+        remoteGetContent.mock.calls.every(
+          ([args]) => args.owner === 'org' && args.repo === 'standards',
+        ),
+      ).toBe(true);
+      const sysAuth = String(
+        (anthropicCreateCalls[1]?.system as Array<{ text: string }> | undefined)?.[0]?.text ?? '',
+      );
+      expect(sysAuth).toContain('Local style only.');
+      expect(sysAuth).toContain('Content for docs/style.md.');
+      expect(sysAuth).toContain('Content for rules/auth.md.');
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(cacheDir, { recursive: true, force: true });

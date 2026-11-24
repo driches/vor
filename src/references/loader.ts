@@ -101,6 +101,13 @@ export interface LoadReferencesInput {
   workspaceDir?: string;
   fileReader?: FileReader;
   octokit?: Octokit;
+  /**
+   * Optional client for fetching cross-repository `github:` reference sources.
+   * When explicitly provided (including `null` to disable remote GitHub fetches
+   * while keeping local `fileReader`/`octokit`), overrides `octokit` for `github:`
+   * sources without affecting reviewed-repo glob enumeration.
+   */
+  githubOctokit?: Octokit | null;
   fetchImpl?: typeof fetch;
   lookupImpl?: DnsLookupFn;
   forceRefresh?: boolean;
@@ -1291,7 +1298,8 @@ async function loadGithubFile(
     }
   }
 
-  if (!input.octokit?.rest?.repos?.getContent) {
+  const ghClient = input.githubOctokit !== undefined ? input.githubOctokit : input.octokit;
+  if (!ghClient?.rest?.repos?.getContent) {
     if (staleMeta && staleContent !== undefined && input.config.cache.stale_on_error) {
       warnings.push(`No GitHub client available for '${sourceLabel}'; using cached copy.`);
       return materializeNormalizedDoc(staleContent, {
@@ -1309,7 +1317,7 @@ async function loadGithubFile(
   }
 
   try {
-    const res = await input.octokit.rest.repos.getContent({
+    const res = await ghClient.rest.repos.getContent({
       owner,
       repo,
       path: normPath,
@@ -1330,7 +1338,7 @@ async function loadGithubFile(
     } else {
       // Contents API only inlines base64 content up to 1 MB; larger files arrive
       // with `encoding: "none"` and require falling back to the Git Blobs API.
-      const blob = await input.octokit.rest.git.getBlob({
+      const blob = await ghClient.rest.git.getBlob({
         owner,
         repo,
         file_sha: res.data.sha,
@@ -1439,7 +1447,8 @@ async function loadGithubSource(
     return single ? [single] : [];
   }
 
-  if (!input.octokit?.rest?.git?.getTree) {
+  const ghClient = input.githubOctokit !== undefined ? input.githubOctokit : input.octokit;
+  if (!ghClient?.rest?.git?.getTree) {
     warnings.push(
       `Cannot expand GitHub glob '${src.rawSpec}' without an authenticated GitHub client.`,
     );
@@ -1447,7 +1456,7 @@ async function loadGithubSource(
   }
 
   try {
-    const treeRes = await input.octokit.rest.git.getTree({
+    const treeRes = await ghClient.rest.git.getTree({
       owner: src.owner,
       repo: src.repo,
       tree_sha: src.ref,
