@@ -1225,4 +1225,92 @@ describe('loadReferences', () => {
       rmSync(cacheDir, { recursive: true, force: true });
     }
   });
+
+  it('skips repo references confirmed absent at the reviewed ref while still falling back on read errors', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-refs-absent-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-refs-absent-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      writeFileSync(join(ws, 'docs/deleted.md'), '# Obsolete Standard\nExists only in checkout.\n');
+
+      // Minimal FileReader test double providing only the read() method used by loadRepoFile.
+      const absentReader = {
+        read: vi.fn(async () => null),
+      } as unknown as FileReader;
+
+      const uncachedRes = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['docs/deleted.md'],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            enabled: false,
+            stale_on_error: false,
+          },
+        },
+        workspaceDir: ws,
+        owner: 'acme',
+        repo: 'svc',
+        ref: 'pr-head-deleted',
+        fileReader: absentReader,
+      });
+
+      expect(uncachedRes.docs).toEqual([]);
+      expect(uncachedRes.warnings.some((w) => w.includes('not found at ref'))).toBe(true);
+
+      const cachedRes = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['docs/deleted.md'],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            enabled: true,
+            dir: cacheDir,
+          },
+        },
+        workspaceDir: ws,
+        owner: 'acme',
+        repo: 'svc',
+        ref: 'pr-head-deleted-cached',
+        fileReader: absentReader,
+      });
+
+      expect(cachedRes.docs).toEqual([]);
+      expect(cachedRes.warnings.some((w) => w.includes('not found at ref'))).toBe(true);
+
+      // Transient API failures throw rather than returning null, so checkout fallback stays active.
+      // Minimal FileReader test double simulating a transient GitHub Contents API error.
+      const errorReader = {
+        read: vi.fn(async () => {
+          throw new Error('503 Service Unavailable');
+        }),
+      } as unknown as FileReader;
+
+      const fallbackRes = await loadReferences({
+        config: {
+          ...DEFAULT_CONFIG.references,
+          enabled: true,
+          sources: ['docs/deleted.md'],
+          cache: {
+            ...DEFAULT_CONFIG.references.cache,
+            enabled: false,
+            stale_on_error: false,
+          },
+        },
+        workspaceDir: ws,
+        owner: 'acme',
+        repo: 'svc',
+        ref: 'pr-head-error',
+        fileReader: errorReader,
+      });
+
+      expect(fallbackRes.docs).toHaveLength(1);
+      expect(fallbackRes.docs[0]?.content).toContain('# Obsolete Standard');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
 });

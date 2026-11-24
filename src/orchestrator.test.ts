@@ -2420,11 +2420,12 @@ describe('runOrchestrator — reference documentation & two-layer caching', () =
     const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-refcache-'));
     try {
       mkdirSync(join(ws, 'docs/standards'), { recursive: true });
-      writeFileSync(
-        join(ws, 'docs/standards/api.md'),
-        '# API Standards\nAll endpoints must validate payloads.\n',
-      );
-      writeFileSync(join(ws, 'docs/standards/large.md'), `# Large Guide\n${'word '.repeat(200)}\n`);
+      const apiDoc = '# API Standards\nAll endpoints must validate payloads.\n';
+      const largeDoc = `# Large Guide\n${'word '.repeat(200)}\n`;
+      writeFileSync(join(ws, 'docs/standards/api.md'), apiDoc);
+      writeFileSync(join(ws, 'docs/standards/large.md'), largeDoc);
+      octokitState.contents.set('docs/standards/api.md', apiDoc);
+      octokitState.contents.set('docs/standards/large.md', largeDoc);
       octokitState.contents.set(
         '.vor.yml',
         [
@@ -2471,7 +2472,9 @@ describe('runOrchestrator — reference documentation & two-layer caching', () =
     const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-refcache-oai-'));
     try {
       mkdirSync(join(ws, 'docs'), { recursive: true });
-      writeFileSync(join(ws, 'docs/std.md'), '# Standards\nAlways check errors.\n');
+      const stdDoc = '# Standards\nAlways check errors.\n';
+      writeFileSync(join(ws, 'docs/std.md'), stdDoc);
+      octokitState.contents.set('docs/std.md', stdDoc);
       octokitState.contents.set(
         '.vor.yml',
         [

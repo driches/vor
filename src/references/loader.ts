@@ -755,6 +755,7 @@ async function loadRepoFile(
     }
 
     let remoteText: string | null = null;
+    let remoteReadSucceeded = false;
     try {
       remoteText = await input.fileReader!.read({
         owner: input.owner!,
@@ -762,8 +763,16 @@ async function loadRepoFile(
         path: normPath,
         ref: input.ref!,
       });
+      remoteReadSucceeded = true;
     } catch {
       remoteText = null; // fall back to local workspace file when Contents API read fails
+    }
+
+    if (remoteReadSucceeded && remoteText === null) {
+      // Confirmed absent (404 / directory) at the reviewed ref: skip rather than
+      // falling back to a stale workspace file copied from the base checkout.
+      warnings.push(`Reference file '${normPath}' was not found at ref '${input.ref}'; skipping.`);
+      return null;
     }
 
     if (remoteText !== null) {

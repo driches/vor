@@ -94453,6 +94453,7 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
       }
     }
     let remoteText = null;
+    let remoteReadSucceeded = false;
     try {
       remoteText = await input2.fileReader.read({
         owner: input2.owner,
@@ -94460,8 +94461,13 @@ async function loadRepoFile(repoPath, metaOpts, input2, cache, warnings) {
         path: normPath,
         ref: input2.ref
       });
+      remoteReadSucceeded = true;
     } catch {
       remoteText = null;
+    }
+    if (remoteReadSucceeded && remoteText === null) {
+      warnings.push(`Reference file '${normPath}' was not found at ref '${input2.ref}'; skipping.`);
+      return null;
     }
     if (remoteText !== null) {
       if (isLikelyBinary(remoteText)) {
