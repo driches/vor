@@ -618,6 +618,38 @@ describe('runAgent', () => {
     expect(result.perModelCost[0]!.cacheReadTokens).toBe(600_000);
   });
 
+  it('prices Anthropic 1h cache writes at 2x base input in perModelCost and costUsd', async () => {
+    const provider = new FakeProvider(
+      [
+        makeResponse({
+          text: 'fine',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 100_000,
+            output_tokens: 10_000,
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 600_000,
+            cache_read_tokens: 500_000,
+          },
+        }),
+      ],
+      'anthropic',
+    );
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent({
+      ...baseInput(),
+      maxInputTokens: 2_000_000,
+      model: 'claude-sonnet-4-6',
+    });
+
+    expect(result.perModelCost[0]!.cacheCreationTokens).toBe(1_000_000);
+    expect(result.perModelCost[0]!.cacheCreation1hTokens).toBe(600_000);
+    // Sonnet: 100K*$3/M ($0.30) + 10K*$15/M ($0.15) + 400K*$3.75/M ($1.50)
+    //       + 600K*$6/M ($3.60) + 500K*$0.30/M ($0.15) = $5.70
+    expect(result.costUsd).toBeCloseTo(5.7, 4);
+  });
+
   it('exits with `aborted` when the abortController is fired before the first turn', async () => {
     const provider = new FakeProvider([makeResponse()]);
     vi.mocked(llmIndex.createProvider).mockReturnValue(provider);

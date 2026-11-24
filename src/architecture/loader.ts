@@ -449,6 +449,10 @@ export interface ResolvedWorkspaceArch {
  *   2. Explicit `archConfigPath`, else `architecture.file`, else `.vor/architecture.yml`
  *      auto-discovery when `.vor.yml` hasn't enabled architecture
  *   3. Optional ad-hoc `preset` / `root` overrides
+ *
+ * Throws `ConfigError` when `configPath` (`.vor.yml`) or an explicit `archConfigPath` /
+ * `architecture.file` escapes `workspaceDir` (fail-closed regardless of `strict`);
+ * optional auto-discovered `.vor/architecture.yml` only throws when `strict` is true.
  */
 export function resolveWorkspaceArchitectureConfig(
   opts: ResolveWorkspaceArchOptions,

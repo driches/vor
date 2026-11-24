@@ -577,6 +577,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       inputTokens: number;
       outputTokens: number;
       cacheCreationTokens: number;
+      cacheCreation1hTokens: number;
       cacheReadTokens: number;
     }>;
     error?: string;

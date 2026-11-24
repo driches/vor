@@ -63501,7 +63501,13 @@ var Budget = class {
   addUsage(model, usage) {
     const inDelta = usage.input_tokens;
     const outDelta = usage.output_tokens;
-    const creationDelta = usage.cache_creation_input_tokens ?? 0;
+    const c5mFromBreakdown = Math.max(0, usage.cache_creation?.ephemeral_5m_input_tokens ?? 0);
+    const c1hFromBreakdown = Math.max(0, usage.cache_creation?.ephemeral_1h_input_tokens ?? 0);
+    const creation1hDelta = Math.max(0, usage.cache_creation_1h_input_tokens ?? c1hFromBreakdown);
+    const creationDelta = Math.max(
+      Math.max(0, usage.cache_creation_input_tokens ?? 0),
+      c5mFromBreakdown + creation1hDelta
+    );
     const readDelta = usage.cache_read_input_tokens ?? 0;
     const proposedBillable = this.totalBillableInput() + inDelta + creationDelta;
     if (proposedBillable > this.limits.maxInputTokens) {
@@ -63517,12 +63523,19 @@ var Budget = class {
     }
     let m2 = this.state.perModel.get(model);
     if (m2 === void 0) {
-      m2 = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+      m2 = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
+        cacheReadTokens: 0
+      };
       this.state.perModel.set(model, m2);
     }
     m2.inputTokens += inDelta;
     m2.outputTokens += outDelta;
     m2.cacheCreationTokens += creationDelta;
+    m2.cacheCreation1hTokens += creation1hDelta;
     m2.cacheReadTokens += readDelta;
   }
   /** True once we cross the warn threshold — runner should signal "wrap up". */
@@ -63536,11 +63549,13 @@ var Budget = class {
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheCreationTokens = 0;
+    let cacheCreation1hTokens = 0;
     let cacheReadTokens = 0;
     for (const m2 of this.state.perModel.values()) {
       inputTokens += m2.inputTokens;
       outputTokens += m2.outputTokens;
       cacheCreationTokens += m2.cacheCreationTokens;
+      cacheCreation1hTokens += m2.cacheCreation1hTokens;
       cacheReadTokens += m2.cacheReadTokens;
     }
     return {
@@ -63548,6 +63563,7 @@ var Budget = class {
       inputTokens,
       outputTokens,
       cacheCreationTokens,
+      cacheCreation1hTokens,
       cacheReadTokens
     };
   }
@@ -63666,16 +63682,52 @@ var logger = {
 
 // src/util/pricing.ts
 var MODEL_PRICING = {
-  "claude-sonnet-4-6": { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  "claude-sonnet-4-6": {
+    input: 3,
+    output: 15,
+    cache_creation: 3.75,
+    cache_creation_1h: 6,
+    cache_read: 0.3
+  },
   // Opus 4.5, 4.6, and 4.7 share the lower-tier Opus pricing that Anthropic
   // introduced starting with 4.5. Opus 4.1 retains the original higher Opus
   // tier and is kept here so legacy configs still resolve to real pricing
   // instead of falling through to the Sonnet fallback.
-  "claude-opus-4-7": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  "claude-opus-4-6": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  "claude-opus-4-5": { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  "claude-opus-4-1": { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
-  "claude-haiku-4-5": { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
+  "claude-opus-4-7": {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5
+  },
+  "claude-opus-4-6": {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5
+  },
+  "claude-opus-4-5": {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5
+  },
+  "claude-opus-4-1": {
+    input: 15,
+    output: 75,
+    cache_creation: 18.75,
+    cache_creation_1h: 30,
+    cache_read: 1.5
+  },
+  "claude-haiku-4-5": {
+    input: 1,
+    output: 5,
+    cache_creation: 1.25,
+    cache_creation_1h: 2,
+    cache_read: 0.1
+  },
   // OpenAI rates from the published price list as of 2026-08. Verify before
   // each release; published rates shift.
   "gpt-4.1": { input: 2, output: 8, cache_read: 0.5 },
@@ -63712,11 +63764,14 @@ var SONNET_FALLBACK_PRICING = {
   input: 3,
   output: 15,
   cache_creation: 3.75,
+  cache_creation_1h: 6,
   cache_read: 0.3
 };
 function costFromUsage(model, usage) {
   const pricing = pricingForModel(model) ?? pricingForModel("claude-sonnet-4-6") ?? SONNET_FALLBACK_PRICING;
-  return (usage.inputTokens ?? 0) * pricing.input / 1e6 + (usage.outputTokens ?? 0) * pricing.output / 1e6 + (usage.cacheCreationTokens ?? 0) * (pricing.cache_creation ?? 0) / 1e6 + (usage.cacheReadTokens ?? 0) * (pricing.cache_read ?? 0) / 1e6;
+  const create1h = Math.max(0, usage.cacheCreation1hTokens ?? 0);
+  const create5m = Math.max(0, (usage.cacheCreationTokens ?? 0) - create1h);
+  return (usage.inputTokens ?? 0) * pricing.input / 1e6 + (usage.outputTokens ?? 0) * pricing.output / 1e6 + create5m * (pricing.cache_creation ?? 0) / 1e6 + create1h * (pricing.cache_creation_1h ?? pricing.cache_creation ?? 0) / 1e6 + (usage.cacheReadTokens ?? 0) * (pricing.cache_read ?? 0) / 1e6;
 }
 
 // src/config/warnings.ts
@@ -63748,6 +63803,9 @@ var AnthropicProvider = class {
     const promptCacheTtl = opts.anthropic?.prompt_cache_ttl;
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     markLatestMessageForCaching(anthropicMessages);
+    const hasMessageCacheBreakpoint = anthropicMessages.some(
+      (msg) => msg.role === "user" && Array.isArray(msg.content) && msg.content.length > 0
+    );
     const anthropicTools = canonicalToolsToAnthropic(tools, promptCacheTtl);
     const response = await this.client.messages.create(
       {
@@ -63775,7 +63833,10 @@ var AnthropicProvider = class {
       },
       opts.abortSignal ? { signal: opts.abortSignal } : void 0
     );
-    return anthropicResponseToCanonical(response);
+    return anthropicResponseToCanonical(
+      response,
+      promptCacheTtl === "1h" && !hasMessageCacheBreakpoint ? { defaultCacheCreationTtl: "1h" } : void 0
+    );
   }
   /**
    * Full-rate input-token portion for the Budget accumulator. The runner
@@ -63790,8 +63851,8 @@ var AnthropicProvider = class {
    * fields), so we return it unchanged.
    *
    * The combined `input + cache_creation` formula treats cache_creation
-   * as billable input — Anthropic charges cache writes at 1.25× input rate
-   * (full-cost equivalent). Cache reads are deliberately excluded from
+   * as billable input — Anthropic charges cache writes at 1.25× (5m) or 2× (1h)
+   * input rate. Cache reads are deliberately excluded from
    * the budget gate (billed at 0.1× input, effectively free; on cached
    * runs the read count dominates and would saturate the 500K default
    * cap on turn 1).
@@ -63853,7 +63914,41 @@ function canonicalToolsToAnthropic(tools, promptCacheTtl) {
     ...i2 === tools.length - 1 ? { cache_control: ephemeralCacheControl(promptCacheTtl) } : {}
   }));
 }
-function anthropicResponseToCanonical(response) {
+function readNonNegativeFinite(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
+function readCacheCreationBreakdown(usage) {
+  if (usage === null || typeof usage !== "object" || !("cache_creation" in usage)) {
+    return null;
+  }
+  const rawBreakdown = usage.cache_creation;
+  if (rawBreakdown === null || typeof rawBreakdown !== "object") {
+    return null;
+  }
+  const ephemeral5m = "ephemeral_5m_input_tokens" in rawBreakdown ? readNonNegativeFinite(rawBreakdown.ephemeral_5m_input_tokens) : void 0;
+  const ephemeral1h = "ephemeral_1h_input_tokens" in rawBreakdown ? readNonNegativeFinite(rawBreakdown.ephemeral_1h_input_tokens) : void 0;
+  if (ephemeral5m === void 0 && ephemeral1h === void 0) {
+    return null;
+  }
+  return {
+    ...ephemeral5m !== void 0 ? { ephemeral5m } : {},
+    ...ephemeral1h !== void 0 ? { ephemeral1h } : {}
+  };
+}
+function extractAnthropicCacheCreation(usage, defaultTtl) {
+  const rawTotal = readNonNegativeFinite(usage.cache_creation_input_tokens) ?? 0;
+  const breakdown = readCacheCreationBreakdown(usage);
+  if (breakdown !== null) {
+    const c5m = breakdown.ephemeral5m ?? 0;
+    const c1h = breakdown.ephemeral1h ?? 0;
+    return { total: Math.max(rawTotal, c5m + c1h), ephemeral1h: c1h };
+  }
+  return {
+    total: rawTotal,
+    ephemeral1h: defaultTtl === "1h" ? rawTotal : 0
+  };
+}
+function anthropicResponseToCanonical(response, opts) {
   const textBlocks = response.content.filter((b2) => b2.type === "text");
   const toolUseBlocks = response.content.filter(
     (b2) => b2.type === "tool_use"
@@ -63884,8 +63979,12 @@ function anthropicResponseToCanonical(response) {
   };
   const cacheRead = response.usage.cache_read_input_tokens ?? 0;
   if (cacheRead > 0) usage.cache_read_tokens = cacheRead;
-  const cacheCreation = response.usage.cache_creation_input_tokens ?? 0;
+  const { total: cacheCreation, ephemeral1h: cacheCreation1h } = extractAnthropicCacheCreation(
+    response.usage,
+    opts?.defaultCacheCreationTtl
+  );
   if (cacheCreation > 0) usage.cache_creation_tokens = cacheCreation;
+  if (cacheCreation1h > 0) usage.cache_creation_1h_tokens = cacheCreation1h;
   return {
     text,
     tool_calls,
@@ -77267,6 +77366,7 @@ async function runAgent(input2) {
           input_tokens: provider.inputTokensFullRate(response.usage),
           output_tokens: response.usage.output_tokens,
           cache_creation_input_tokens: response.usage.cache_creation_tokens ?? 0,
+          cache_creation_1h_input_tokens: response.usage.cache_creation_1h_tokens ?? 0,
           cache_read_input_tokens: response.usage.cache_read_tokens ?? 0
         });
       } catch (err) {
@@ -77354,6 +77454,7 @@ async function runAgent(input2) {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheCreationTokens: usage.cacheCreationTokens,
+    cacheCreation1hTokens: usage.cacheCreation1hTokens,
     cacheReadTokens: usage.cacheReadTokens
   }));
   for (const m2 of perModelCost) {
@@ -77365,13 +77466,15 @@ async function runAgent(input2) {
   }
   const costUsd = perModelCost.reduce((sum, m2) => sum + m2.costUsd, 0);
   const totals = budget.snapshot();
+  const totalCache1hSuffix = totals.cacheCreation1hTokens > 0 ? `, cache_c1h=${totals.cacheCreation1hTokens}` : "";
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`
+    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}${totalCache1hSuffix}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`
   );
   if (perModelCost.length > 1) {
     for (const m2 of perModelCost) {
+      const modelCache1hSuffix = m2.cacheCreation1hTokens > 0 ? `, cache_c1h=${m2.cacheCreation1hTokens}` : "";
       await logger.info(
-        `  ${m2.model}: $${m2.costUsd.toFixed(4)} (in=${m2.inputTokens}, cache_r=${m2.cacheReadTokens}, cache_c=${m2.cacheCreationTokens}, out=${m2.outputTokens})`
+        `  ${m2.model}: $${m2.costUsd.toFixed(4)} (in=${m2.inputTokens}, cache_r=${m2.cacheReadTokens}, cache_c=${m2.cacheCreationTokens}${modelCache1hSuffix}, out=${m2.outputTokens})`
       );
     }
   }

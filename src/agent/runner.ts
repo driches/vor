@@ -152,6 +152,7 @@ export interface RunAgentResult {
     inputTokens: number;
     outputTokens: number;
     cacheCreationTokens: number;
+    cacheCreation1hTokens: number;
     cacheReadTokens: number;
   }>;
 }
@@ -354,6 +355,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           input_tokens: provider.inputTokensFullRate(response.usage),
           output_tokens: response.usage.output_tokens,
           cache_creation_input_tokens: response.usage.cache_creation_tokens ?? 0,
+          cache_creation_1h_input_tokens: response.usage.cache_creation_1h_tokens ?? 0,
           cache_read_input_tokens: response.usage.cache_read_tokens ?? 0,
         });
       } catch (err) {
@@ -480,6 +482,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheCreationTokens: usage.cacheCreationTokens,
+    cacheCreation1hTokens: usage.cacheCreation1hTokens,
     cacheReadTokens: usage.cacheReadTokens,
   }));
 
@@ -493,14 +496,18 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
 
   const costUsd = perModelCost.reduce((sum, m) => sum + m.costUsd, 0);
   const totals = budget.snapshot();
+  const totalCache1hSuffix =
+    totals.cacheCreation1hTokens > 0 ? `, cache_c1h=${totals.cacheCreation1hTokens}` : '';
 
   await logger.info(
-    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`,
+    `Agent run ended: ${ended}, turns=${turns}, in=${totals.inputTokens} (cache_r=${totals.cacheReadTokens}, cache_c=${totals.cacheCreationTokens}${totalCache1hSuffix}), out=${totals.outputTokens}, cost=$${costUsd.toFixed(4)}`,
   );
   if (perModelCost.length > 1) {
     for (const m of perModelCost) {
+      const modelCache1hSuffix =
+        m.cacheCreation1hTokens > 0 ? `, cache_c1h=${m.cacheCreation1hTokens}` : '';
       await logger.info(
-        `  ${m.model}: $${m.costUsd.toFixed(4)} (in=${m.inputTokens}, cache_r=${m.cacheReadTokens}, cache_c=${m.cacheCreationTokens}, out=${m.outputTokens})`,
+        `  ${m.model}: $${m.costUsd.toFixed(4)} (in=${m.inputTokens}, cache_r=${m.cacheReadTokens}, cache_c=${m.cacheCreationTokens}${modelCache1hSuffix}, out=${m.outputTokens})`,
       );
     }
   }

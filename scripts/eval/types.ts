@@ -68,6 +68,8 @@ export interface RunRecord {
     cache_read_input_tokens: number;
     /** Anthropic-only; always 0 for OpenAI (cache writes are free there). */
     cache_creation_input_tokens: number;
+    /** Subset of `cache_creation_input_tokens` written at Anthropic's 1h TTL. */
+    cache_creation_1h_input_tokens?: number;
     cost_usd: number;
     turns: number;
     wall_ms: number;
@@ -84,6 +86,7 @@ export interface RunRecord {
       input_tokens: number;
       output_tokens: number;
       cache_creation_input_tokens: number;
+      cache_creation_1h_input_tokens?: number;
       cache_read_input_tokens: number;
     }>;
   };

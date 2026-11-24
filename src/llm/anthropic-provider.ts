@@ -70,8 +70,13 @@ export class AnthropicProvider implements LLMProvider {
     const anthropicMessages = canonicalMessagesToAnthropic(messages);
     // Sliding-window cache_control on the two most recent array-content user
     // messages (see markLatestMessageForCaching JSDoc for the 4-breakpoint
-    // budget math).
+    // breakpoint budget math).
     markLatestMessageForCaching(anthropicMessages);
+    // Array-content user messages carry the 5m tool_result breakpoints; when
+    // none exist yet (turn 1), every breakpoint sent in this request uses `promptCacheTtl`.
+    const hasMessageCacheBreakpoint = anthropicMessages.some(
+      (msg) => msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0,
+    );
     // Apply any longer TTL (`1h`) to the preceding tool breakpoint as well:
     // Anthropic evaluates `tools -> system -> messages` and rejects longer
     // TTLs placed after shorter ones.
@@ -104,7 +109,12 @@ export class AnthropicProvider implements LLMProvider {
       opts.abortSignal ? { signal: opts.abortSignal } : undefined,
     );
 
-    return anthropicResponseToCanonical(response);
+    return anthropicResponseToCanonical(
+      response,
+      promptCacheTtl === '1h' && !hasMessageCacheBreakpoint
+        ? { defaultCacheCreationTtl: '1h' }
+        : undefined,
+    );
   }
 
   /**
@@ -120,8 +130,8 @@ export class AnthropicProvider implements LLMProvider {
    * fields), so we return it unchanged.
    *
    * The combined `input + cache_creation` formula treats cache_creation
-   * as billable input — Anthropic charges cache writes at 1.25× input rate
-   * (full-cost equivalent). Cache reads are deliberately excluded from
+   * as billable input — Anthropic charges cache writes at 1.25× (5m) or 2× (1h)
+   * input rate. Cache reads are deliberately excluded from
    * the budget gate (billed at 0.1× input, effectively free; on cached
    * runs the read count dominates and would saturate the 500K default
    * cap on turn 1).
@@ -226,6 +236,60 @@ export function canonicalToolsToAnthropic(
   }));
 }
 
+function readNonNegativeFinite(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `@anthropic-ai/sdk@0.39.0`'s `Usage` type omits Anthropic's
+ * `cache_creation: { ephemeral_5m_input_tokens, ephemeral_1h_input_tokens }`
+ * breakdown object. Narrow it via runtime checks so mixed 5m/1h turns get billed
+ * at their true TTL rates instead of collapsing everything to 1.25×.
+ */
+function readCacheCreationBreakdown(
+  usage: unknown,
+): { ephemeral5m?: number; ephemeral1h?: number } | null {
+  if (usage === null || typeof usage !== 'object' || !('cache_creation' in usage)) {
+    return null;
+  }
+  const rawBreakdown = usage.cache_creation;
+  if (rawBreakdown === null || typeof rawBreakdown !== 'object') {
+    return null;
+  }
+  const ephemeral5m =
+    'ephemeral_5m_input_tokens' in rawBreakdown
+      ? readNonNegativeFinite(rawBreakdown.ephemeral_5m_input_tokens)
+      : undefined;
+  const ephemeral1h =
+    'ephemeral_1h_input_tokens' in rawBreakdown
+      ? readNonNegativeFinite(rawBreakdown.ephemeral_1h_input_tokens)
+      : undefined;
+  if (ephemeral5m === undefined && ephemeral1h === undefined) {
+    return null;
+  }
+  return {
+    ...(ephemeral5m !== undefined ? { ephemeral5m } : {}),
+    ...(ephemeral1h !== undefined ? { ephemeral1h } : {}),
+  };
+}
+
+function extractAnthropicCacheCreation(
+  usage: Anthropic.Usage,
+  defaultTtl?: '5m' | '1h',
+): { total: number; ephemeral1h: number } {
+  const rawTotal = readNonNegativeFinite(usage.cache_creation_input_tokens) ?? 0;
+  const breakdown = readCacheCreationBreakdown(usage);
+  if (breakdown !== null) {
+    const c5m = breakdown.ephemeral5m ?? 0;
+    const c1h = breakdown.ephemeral1h ?? 0;
+    return { total: Math.max(rawTotal, c5m + c1h), ephemeral1h: c1h };
+  }
+  return {
+    total: rawTotal,
+    ephemeral1h: defaultTtl === '1h' ? rawTotal : 0,
+  };
+}
+
 /**
  * Translate an Anthropic `Message` response back into a canonical
  * `CompleteResponse`. Collapses the provider's stop_reason taxonomy onto our
@@ -234,7 +298,10 @@ export function canonicalToolsToAnthropic(
  * names. `provider_state` is left undefined — Anthropic doesn't need a
  * replay blob (it's stateless wrt reasoning).
  */
-export function anthropicResponseToCanonical(response: Anthropic.Message): CompleteResponse {
+export function anthropicResponseToCanonical(
+  response: Anthropic.Message,
+  opts?: { defaultCacheCreationTtl?: '5m' | '1h' },
+): CompleteResponse {
   const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
   const toolUseBlocks = response.content.filter(
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
@@ -272,8 +339,12 @@ export function anthropicResponseToCanonical(response: Anthropic.Message): Compl
   // turns. The pricing math already guards with `?? 0` so this can't NaN.
   const cacheRead = response.usage.cache_read_input_tokens ?? 0;
   if (cacheRead > 0) usage.cache_read_tokens = cacheRead;
-  const cacheCreation = response.usage.cache_creation_input_tokens ?? 0;
+  const { total: cacheCreation, ephemeral1h: cacheCreation1h } = extractAnthropicCacheCreation(
+    response.usage,
+    opts?.defaultCacheCreationTtl,
+  );
   if (cacheCreation > 0) usage.cache_creation_tokens = cacheCreation;
+  if (cacheCreation1h > 0) usage.cache_creation_1h_tokens = cacheCreation1h;
 
   return {
     text,

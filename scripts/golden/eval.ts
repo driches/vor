@@ -143,6 +143,10 @@ async function main(): Promise<void> {
     mkdirSync(runDir, { recursive: true });
     const ts = stableTimestamp();
     const runPath = resolve(runDir, `${ts}.json`);
+    const cacheCreation1h = agentResult.perModelCost.reduce(
+      (sum, m) => sum + m.cacheCreation1hTokens,
+      0,
+    );
     writeFileSync(
       runPath,
       JSON.stringify(
@@ -160,6 +164,7 @@ async function main(): Promise<void> {
             (sum, m) => sum + m.cacheCreationTokens,
             0,
           ),
+          ...(cacheCreation1h > 0 ? { cache_creation_1h_input_tokens: cacheCreation1h } : {}),
           cache_read_input_tokens: agentResult.perModelCost.reduce(
             (sum, m) => sum + m.cacheReadTokens,
             0,
@@ -176,6 +181,9 @@ async function main(): Promise<void> {
             input_tokens: m.inputTokens,
             output_tokens: m.outputTokens,
             cache_creation_input_tokens: m.cacheCreationTokens,
+            ...(m.cacheCreation1hTokens > 0
+              ? { cache_creation_1h_input_tokens: m.cacheCreation1hTokens }
+              : {}),
             cache_read_input_tokens: m.cacheReadTokens,
           })),
           draft: deps.aggregator.snapshot(),

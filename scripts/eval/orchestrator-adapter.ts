@@ -24,7 +24,7 @@ import { synthesizeDiff } from './diff-synthesis.js';
 import type { RunRecord } from './types.js';
 import type { ReviewConfig } from '../../src/config/types.js';
 import { type Severity, type Category, type Confidence, CATEGORIES } from '../../src/types.js';
-import { MODEL_PRICING } from '../../src/util/pricing.js';
+import { costFromUsage, MODEL_PRICING } from '../../src/util/pricing.js';
 import {
   inferProviderFromModel,
   inputTokensFullRateFor,
@@ -58,15 +58,13 @@ function computeCostUsd(cost: AdapterState['costAccum'], model: string): number 
         `or fix the model name in your pipeline config.`,
     );
   }
-  // `cache_creation` / `cache_read` are optional on ModelPricing now that
-  // OpenAI rows landed (OpenAI cache writes are free). Guard with `?? 0` so
-  // a missing rate contributes nothing instead of NaN-poisoning the report.
-  return (
-    (cost.input_tokens * pricing.input) / 1_000_000 +
-    (cost.output_tokens * pricing.output) / 1_000_000 +
-    (cost.cache_creation_input_tokens * (pricing.cache_creation ?? 0)) / 1_000_000 +
-    (cost.cache_read_input_tokens * (pricing.cache_read ?? 0)) / 1_000_000
-  );
+  return costFromUsage(model, {
+    inputTokens: cost.input_tokens,
+    outputTokens: cost.output_tokens,
+    cacheCreationTokens: cost.cache_creation_input_tokens,
+    cacheCreation1hTokens: cost.cache_creation_1h_input_tokens,
+    cacheReadTokens: cost.cache_read_input_tokens,
+  });
 }
 
 interface AdapterState {
@@ -79,6 +77,7 @@ interface AdapterState {
     output_tokens: number;
     cache_read_input_tokens: number;
     cache_creation_input_tokens: number;
+    cache_creation_1h_input_tokens: number;
     turns: number;
   };
 }
@@ -100,6 +99,7 @@ const state: AdapterState = {
     output_tokens: 0,
     cache_read_input_tokens: 0,
     cache_creation_input_tokens: 0,
+    cache_creation_1h_input_tokens: 0,
     turns: 0,
   },
 };
@@ -145,11 +145,14 @@ export class FakeProvider implements LLMProvider {
     // cache_read_input_tokens * cache_read_rate`), mis-ranking configs by
     // cost on cache-heavy runs. Codex P2 #3300723609 — same shape as the
     // runner bug fixed in cb3c820, just in the eval accumulator this time.
+    const c1h = Math.max(0, next.usage.cache_creation_1h_tokens ?? 0);
+    const cTotal = Math.max(Math.max(0, next.usage.cache_creation_tokens ?? 0), c1h);
     state.costAccum.turns += 1;
     state.costAccum.input_tokens += this.inputTokensFullRate(next.usage);
     state.costAccum.output_tokens += next.usage.output_tokens;
     state.costAccum.cache_read_input_tokens += next.usage.cache_read_tokens ?? 0;
-    state.costAccum.cache_creation_input_tokens += next.usage.cache_creation_tokens ?? 0;
+    state.costAccum.cache_creation_input_tokens += cTotal;
+    state.costAccum.cache_creation_1h_input_tokens += c1h;
     return next;
   }
   /**
@@ -302,6 +305,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       output_tokens: 0,
       cache_read_input_tokens: 0,
       cache_creation_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
       turns: 0,
     };
 
@@ -367,7 +371,14 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunOutput> {
       findings,
       cost: {
         provider: providerId,
-        ...state.costAccum,
+        input_tokens: state.costAccum.input_tokens,
+        output_tokens: state.costAccum.output_tokens,
+        cache_read_input_tokens: state.costAccum.cache_read_input_tokens,
+        cache_creation_input_tokens: state.costAccum.cache_creation_input_tokens,
+        ...(state.costAccum.cache_creation_1h_input_tokens > 0
+          ? { cache_creation_1h_input_tokens: state.costAccum.cache_creation_1h_input_tokens }
+          : {}),
+        turns: state.costAccum.turns,
         cost_usd: computeCostUsd(state.costAccum, input.config.model),
         wall_ms,
         ended_reason: endedReason,

@@ -28,7 +28,15 @@ export interface BudgetLimits {
 export interface ModelUsage {
   input_tokens: number;
   output_tokens: number;
+  /** Total cache-write tokens across all TTLs (5m + 1h). */
   cache_creation_input_tokens?: number | null;
+  /** Subset of `cache_creation_input_tokens` written with Anthropic's 1h TTL. */
+  cache_creation_1h_input_tokens?: number | null;
+  /** Anthropic Messages API TTL breakdown object when emitted directly by the SDK. */
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number | null;
+    ephemeral_1h_input_tokens?: number | null;
+  } | null;
   cache_read_input_tokens?: number | null;
 }
 
@@ -37,6 +45,7 @@ export interface ModelUsageAccumulator {
   inputTokens: number;
   outputTokens: number;
   cacheCreationTokens: number;
+  cacheCreation1hTokens: number;
   cacheReadTokens: number;
 }
 
@@ -74,7 +83,13 @@ export class Budget {
   addUsage(model: string, usage: ModelUsage): void {
     const inDelta = usage.input_tokens;
     const outDelta = usage.output_tokens;
-    const creationDelta = usage.cache_creation_input_tokens ?? 0;
+    const c5mFromBreakdown = Math.max(0, usage.cache_creation?.ephemeral_5m_input_tokens ?? 0);
+    const c1hFromBreakdown = Math.max(0, usage.cache_creation?.ephemeral_1h_input_tokens ?? 0);
+    const creation1hDelta = Math.max(0, usage.cache_creation_1h_input_tokens ?? c1hFromBreakdown);
+    const creationDelta = Math.max(
+      Math.max(0, usage.cache_creation_input_tokens ?? 0),
+      c5mFromBreakdown + creation1hDelta,
+    );
     const readDelta = usage.cache_read_input_tokens ?? 0;
 
     const proposedBillable = this.totalBillableInput() + inDelta + creationDelta;
@@ -92,12 +107,19 @@ export class Budget {
 
     let m = this.state.perModel.get(model);
     if (m === undefined) {
-      m = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+      m = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
+        cacheReadTokens: 0,
+      };
       this.state.perModel.set(model, m);
     }
     m.inputTokens += inDelta;
     m.outputTokens += outDelta;
     m.cacheCreationTokens += creationDelta;
+    m.cacheCreation1hTokens += creation1hDelta;
     m.cacheReadTokens += readDelta;
   }
 
@@ -118,16 +140,19 @@ export class Budget {
     inputTokens: number;
     outputTokens: number;
     cacheCreationTokens: number;
+    cacheCreation1hTokens: number;
     cacheReadTokens: number;
   } {
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheCreationTokens = 0;
+    let cacheCreation1hTokens = 0;
     let cacheReadTokens = 0;
     for (const m of this.state.perModel.values()) {
       inputTokens += m.inputTokens;
       outputTokens += m.outputTokens;
       cacheCreationTokens += m.cacheCreationTokens;
+      cacheCreation1hTokens += m.cacheCreation1hTokens;
       cacheReadTokens += m.cacheReadTokens;
     }
     return {
@@ -135,6 +160,7 @@ export class Budget {
       inputTokens,
       outputTokens,
       cacheCreationTokens,
+      cacheCreation1hTokens,
       cacheReadTokens,
     };
   }
