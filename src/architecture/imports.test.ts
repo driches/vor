@@ -7,6 +7,7 @@ import {
   extractImports,
   extractKotlinDeclarations,
   loadWorkspaceResolveContext,
+  parseCargoManifest,
   parseGoModModule,
   parsePubspecName,
   parseTsConfigContent,
@@ -1428,5 +1429,147 @@ describe('extractImports & resolveImport across languages', () => {
       { spec: 'mod:repo', path: 'src/infrastructure/repo.rs' },
       { spec: 'mod:custom_mod', path: 'src/domain/order/child/custom.rs' },
     ]);
+  });
+
+  it('resolves Rust crate::, super::, and mod imports against the governing Cargo crate target', () => {
+    const knownFiles = new Set([
+      'src/lib.rs',
+      'src/infrastructure/repo.rs',
+      'src/domain/order.rs',
+      'src/domain/main.rs',
+      'src/bin/worker/main.rs',
+      'src/bin/worker/domain/mod.rs',
+      'src/bin/worker/infrastructure/mod.rs',
+      'crates/billing/src/lib.rs',
+      'crates/billing/src/bin/worker/main.rs',
+      'crates/billing/src/bin/worker/domain/mod.rs',
+      'crates/billing/src/bin/worker/infrastructure/mod.rs',
+      'examples/demo/main.rs',
+      'examples/demo/domain/mod.rs',
+      'examples/demo/infrastructure/mod.rs',
+    ]);
+    const ctx = { knownFiles };
+
+    const workerDomain = [
+      'use crate::infrastructure::Repo;',
+      'use crate::Config;',
+      'use super::AppConfig;',
+    ].join('\n');
+    const resolvedWorker = resolveImports(
+      extractImports('src/bin/worker/domain/mod.rs', workerDomain).imports,
+      'src/bin/worker/domain/mod.rs',
+      ctx,
+    );
+    expect(resolvedWorker.map((r) => r.resolvedPath)).toEqual([
+      'src/bin/worker/infrastructure/mod.rs',
+      'src/bin/worker/main.rs',
+      'src/bin/worker/main.rs',
+    ]);
+
+    const resolvedWorkspaceWorker = resolveImports(
+      extractImports(
+        'crates/billing/src/bin/worker/domain/mod.rs',
+        'use crate::infrastructure::Repo;',
+      ).imports,
+      'crates/billing/src/bin/worker/domain/mod.rs',
+      ctx,
+    );
+    expect(resolvedWorkspaceWorker.map((r) => r.resolvedPath)).toEqual([
+      'crates/billing/src/bin/worker/infrastructure/mod.rs',
+    ]);
+
+    const resolvedExample = resolveImports(
+      extractImports('examples/demo/domain/mod.rs', 'use crate::infrastructure::Repo;').imports,
+      'examples/demo/domain/mod.rs',
+      ctx,
+    );
+    expect(resolvedExample.map((r) => r.resolvedPath)).toEqual([
+      'examples/demo/infrastructure/mod.rs',
+    ]);
+
+    const ordinarySub = resolveImports(
+      extractImports('src/domain/order.rs', 'use crate::infrastructure::repo::Repo;').imports,
+      'src/domain/order.rs',
+      ctx,
+    );
+    expect(ordinarySub.map((r) => r.resolvedPath)).toEqual(['src/infrastructure/repo.rs']);
+
+    const cliKnown = new Set(['src/lib.rs', 'src/bin/cli.rs', 'src/bin/helper/mod.rs']);
+    const cliSrc = ['mod helper;', 'use crate::helper::Run;', 'use crate::Local;'].join('\n');
+    const resolvedCli = resolveImports(
+      extractImports('src/bin/cli.rs', cliSrc).imports,
+      'src/bin/cli.rs',
+      { knownFiles: cliKnown },
+    );
+    expect(resolvedCli.map((r) => ({ spec: r.specifier, path: r.resolvedPath }))).toEqual([
+      { spec: 'crate::helper::Run', path: 'src/bin/helper/mod.rs' },
+      { spec: 'crate::Local', path: 'src/bin/cli.rs' },
+      { spec: 'mod:helper', path: 'src/bin/helper/mod.rs' },
+    ]);
+
+    const explicitManifest = parseCargoManifest(
+      [
+        '[package]',
+        'name = "app"',
+        'description = """',
+        '[lib]',
+        'path = "src/ignored.rs"',
+        '"""',
+        'autobins = false # only explicit bins',
+        '',
+        '[[bin]]',
+        'name = "job"',
+        'path = "src/workers/job/entry.rs"',
+      ].join('\n'),
+    );
+    const customCtx = {
+      knownFiles: new Set([
+        'src/lib.rs',
+        'src/workers/job/entry.rs',
+        'src/workers/job/domain/mod.rs',
+        'src/workers/job/infrastructure/mod.rs',
+        'src/bin/worker/main.rs',
+        'src/bin/worker/domain/mod.rs',
+      ]),
+      cargoManifestsByDir: new Map([['', explicitManifest]]),
+    };
+    expect(
+      resolveImports(
+        extractImports('src/workers/job/domain/mod.rs', 'use crate::infrastructure::Repo;').imports,
+        'src/workers/job/domain/mod.rs',
+        customCtx,
+      ).map((r) => r.resolvedPath),
+    ).toEqual(['src/workers/job/infrastructure/mod.rs']);
+    expect(
+      resolveImports(
+        extractImports('src/workers/job/entry.rs', 'mod domain;').imports,
+        'src/workers/job/entry.rs',
+        customCtx,
+      ).map((r) => r.resolvedPath),
+    ).toEqual(['src/workers/job/domain/mod.rs']);
+    // With autobins = false, src/bin/worker falls back to src/lib.rs instead of a bin crate target.
+    expect(
+      resolveImports(
+        extractImports('src/bin/worker/domain/mod.rs', 'use crate::infrastructure::Repo;').imports,
+        'src/bin/worker/domain/mod.rs',
+        customCtx,
+      ).map((r) => r.resolvedPath),
+    ).toEqual(['src/lib.rs']);
+
+    const workspaceRootOnly = parseCargoManifest('[workspace]\nmembers = ["crates/billing"]\n');
+    expect(workspaceRootOnly.isPackage).toBe(false);
+    expect(
+      resolveImports(
+        extractImports(
+          'crates/billing/src/bin/worker/domain/mod.rs',
+          'use crate::infrastructure::Repo;',
+        ).imports,
+        'crates/billing/src/bin/worker/domain/mod.rs',
+        {
+          knownFiles,
+          cargoManifestsByDir: new Map([['', workspaceRootOnly]]),
+        },
+      ).map((r) => r.resolvedPath),
+    ).toEqual(['crates/billing/src/bin/worker/infrastructure/mod.rs']);
   });
 });

@@ -7,7 +7,7 @@
  * deterministic findings anchor to the exact PR-added line.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { isTestFile, normalizePath } from './glob.js';
 
@@ -55,6 +55,31 @@ export interface TsConfigPaths {
   paths: Record<string, string[]>;
 }
 
+/**
+ * Parsed Cargo manifest metadata relevant to resolving Rust crate targets.
+ */
+export interface CargoManifestInfo {
+  /** True when the manifest declares `[package]` or explicit target tables (false for `[workspace]`-only roots). */
+  isPackage: boolean;
+  packageName?: string;
+  /** Explicit `[lib]`/`[[bin]]`/`[[example]]`/`[[test]]`/`[[bench]]` `path` entries rebased to repo-relative POSIX paths. */
+  explicitTargets: Array<{
+    rootFile: string;
+    dir: string;
+    kind: 'lib' | 'bin' | 'example' | 'test' | 'bench';
+  }>;
+  /** Explicit target tables declaring `name` without `path` (used even when `auto* = false`). */
+  namedTargets: Array<{
+    kind: 'bin' | 'example' | 'test' | 'bench';
+    name: string;
+  }>;
+  hasExplicitLibPath: boolean;
+  autobins: boolean;
+  autoexamples: boolean;
+  autotests: boolean;
+  autobenches: boolean;
+}
+
 export interface WorkspaceResolveContext {
   workspaceDir?: string;
   knownFiles?: ReadonlySet<string>;
@@ -84,6 +109,11 @@ export interface WorkspaceResolveContext {
    * for root). `null` means absent; `''` means present without a parseable `name` boundary.
    */
   dartPackagesByDir?: ReadonlyMap<string, string | null>;
+  /**
+   * Optional per-directory `Cargo.toml` cache (keyed by normalized POSIX dir, `''` for root).
+   * `null` means `Cargo.toml` is confirmed absent at that directory (e.g. deleted at PR HEAD).
+   */
+  cargoManifestsByDir?: ReadonlyMap<string, CargoManifestInfo | null>;
 }
 
 export interface ResolvedImport {
@@ -2467,6 +2497,293 @@ export function resolveDartPackageForFile(
   return res ? { dir: res.dir, packageName: res.value } : undefined;
 }
 
+const TOML_TARGET_SECTIONS = new Set(['bin', 'example', 'test', 'bench'] as const);
+type TomlMultiTargetKind = 'bin' | 'example' | 'test' | 'bench';
+type TomlTargetKind = 'lib' | TomlMultiTargetKind;
+
+function stripTomlCommentOutsideStrings(
+  line: string,
+  state: { inMultiline: '"""' | "'''" | null },
+): string {
+  const out: string[] = [];
+  let inBasic = false;
+  let inLiteral = false;
+  let i = 0;
+
+  while (i < line.length) {
+    if (state.inMultiline !== null) {
+      if (state.inMultiline === '"""' && line[i] === '\\' && i + 1 < line.length) {
+        i += 2;
+        continue;
+      }
+      if (line.startsWith(state.inMultiline, i)) {
+        state.inMultiline = null;
+        i += 3;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    const ch = line[i]!;
+    if (inBasic) {
+      out.push(ch);
+      if (ch === '\\' && i + 1 < line.length) {
+        out.push(line[i + 1]!);
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inBasic = false;
+      i += 1;
+      continue;
+    }
+
+    if (inLiteral) {
+      out.push(ch);
+      if (ch === "'") inLiteral = false;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '#') break;
+    if (line.startsWith('"""', i)) {
+      state.inMultiline = '"""';
+      i += 3;
+      continue;
+    }
+    if (line.startsWith("'''", i)) {
+      state.inMultiline = "'''";
+      i += 3;
+      continue;
+    }
+    if (ch === '"') {
+      inBasic = true;
+      out.push(ch);
+      i += 1;
+      continue;
+    }
+    if (ch === "'") {
+      inLiteral = true;
+      out.push(ch);
+      i += 1;
+      continue;
+    }
+    out.push(ch);
+    i += 1;
+  }
+
+  return out.join('');
+}
+
+function parseTomlStringValue(rawVal: string): string | undefined {
+  const trimmed = rawVal.trim();
+  if (trimmed.length < 2) return undefined;
+  const quote = trimmed[0];
+  if (quote === '"') {
+    let out = '';
+    for (let i = 1; i < trimmed.length; i++) {
+      const ch = trimmed[i]!;
+      if (ch === '\\' && i + 1 < trimmed.length) {
+        const next = trimmed[i + 1]!;
+        if (next === 'n') out += '\n';
+        else if (next === 't') out += '\t';
+        else if (next === 'r') out += '\r';
+        else out += next;
+        i += 1;
+        continue;
+      }
+      if (ch === '"') {
+        return trimmed.slice(i + 1).trim() === '' ? out : undefined;
+      }
+      out += ch;
+    }
+    return undefined;
+  }
+  if (quote === "'") {
+    const closeIdx = trimmed.indexOf("'", 1);
+    if (closeIdx === -1) return undefined;
+    return trimmed.slice(closeIdx + 1).trim() === '' ? trimmed.slice(1, closeIdx) : undefined;
+  }
+  return undefined;
+}
+
+function parseTomlBooleanValue(rawVal: string): boolean | undefined {
+  const trimmed = rawVal.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return undefined;
+}
+
+/**
+ * Parse a `Cargo.toml` manifest (subset) into crate target metadata, rebasing
+ * explicit `[lib]`/`[[bin]]`/`[[example]]`/`[[test]]`/`[[bench]]` `path` entries
+ * relative to `manifestDir`.
+ */
+export function parseCargoManifest(raw: string, manifestDir = ''): CargoManifestInfo {
+  const info: CargoManifestInfo = {
+    isPackage: false,
+    explicitTargets: [],
+    namedTargets: [],
+    hasExplicitLibPath: false,
+    autobins: true,
+    autoexamples: true,
+    autotests: true,
+    autobenches: true,
+  };
+
+  let section: 'none' | 'package' | 'target' | 'other' = 'none';
+  let currentTarget: { kind: TomlTargetKind; path?: string; name?: string } | null = null;
+  const normManifestDir = manifestDir ? normalizePath(manifestDir) : '';
+
+  const flushTarget = (): void => {
+    if (!currentTarget) return;
+    const t = currentTarget;
+    currentTarget = null;
+    if (t.path !== undefined) {
+      const cleanPath = t.path.replace(/\\/g, '/').trim();
+      if (!cleanPath || cleanPath.startsWith('/')) return;
+      const joined = normManifestDir
+        ? posix.join(normManifestDir, cleanPath)
+        : posix.normalize(cleanPath);
+      const norm = normalizePath(joined);
+      if (!norm || norm === '..' || norm.startsWith('../')) return;
+      const rawDir = posix.dirname(norm);
+      const dir = rawDir === '.' ? '' : rawDir;
+      info.explicitTargets.push({ kind: t.kind, rootFile: norm, dir });
+      if (t.kind === 'lib') {
+        info.hasExplicitLibPath = true;
+      }
+      return;
+    }
+    if (t.kind !== 'lib' && t.name) {
+      info.namedTargets.push({ kind: t.kind, name: t.name });
+    }
+  };
+
+  const tomlState: { inMultiline: '"""' | "'''" | null } = { inMultiline: null };
+  for (const line of raw.split(/\r?\n/)) {
+    const startedInMultiline = tomlState.inMultiline !== null;
+    const visible = stripTomlCommentOutsideStrings(line, tomlState).trim();
+    if (startedInMultiline || !visible) continue;
+
+    if (visible.startsWith('[[') && visible.endsWith(']]')) {
+      flushTarget();
+      const header = visible.slice(2, -2).trim();
+      if (TOML_TARGET_SECTIONS.has(header as TomlMultiTargetKind)) {
+        info.isPackage = true;
+        section = 'target';
+        currentTarget = { kind: header as TomlMultiTargetKind };
+      } else {
+        section = 'other';
+      }
+      continue;
+    }
+
+    if (visible.startsWith('[') && visible.endsWith(']')) {
+      flushTarget();
+      const header = visible.slice(1, -1).trim();
+      if (header === 'package') {
+        info.isPackage = true;
+        section = 'package';
+      } else if (header === 'lib') {
+        info.isPackage = true;
+        section = 'target';
+        currentTarget = { kind: 'lib' };
+      } else {
+        section = 'other';
+      }
+      continue;
+    }
+
+    const eqIdx = visible.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = visible.slice(0, eqIdx).trim();
+    const rawVal = visible.slice(eqIdx + 1);
+
+    if (section === 'package') {
+      if (key === 'name') {
+        const s = parseTomlStringValue(rawVal);
+        if (s) info.packageName = s;
+      } else if (key === 'autobins') {
+        const b = parseTomlBooleanValue(rawVal);
+        if (b !== undefined) info.autobins = b;
+      } else if (key === 'autoexamples') {
+        const b = parseTomlBooleanValue(rawVal);
+        if (b !== undefined) info.autoexamples = b;
+      } else if (key === 'autotests') {
+        const b = parseTomlBooleanValue(rawVal);
+        if (b !== undefined) info.autotests = b;
+      } else if (key === 'autobenches') {
+        const b = parseTomlBooleanValue(rawVal);
+        if (b !== undefined) info.autobenches = b;
+      }
+    } else if (section === 'target' && currentTarget) {
+      if (key === 'path') {
+        const s = parseTomlStringValue(rawVal);
+        if (s !== undefined) currentTarget.path = s;
+      } else if (key === 'name') {
+        const s = parseTomlStringValue(rawVal);
+        if (s !== undefined) currentTarget.name = s;
+      }
+    }
+  }
+
+  flushTarget();
+  return info;
+}
+
+const workspaceCargoManifestCache = new WeakMap<
+  WorkspaceResolveContext,
+  Map<string, CargoManifestInfo | null>
+>();
+
+function resolveCargoManifestForFile(
+  sourceFilePath: string,
+  ctx: WorkspaceResolveContext,
+): { dir: string; manifest: CargoManifestInfo } | undefined {
+  let diskCache = ctx.workspaceDir ? workspaceCargoManifestCache.get(ctx) : undefined;
+
+  for (const dir of listAncestorDirs(sourceFilePath)) {
+    if (dir === '..' || dir.startsWith('../')) continue;
+
+    if (ctx.cargoManifestsByDir?.has(dir)) {
+      const entry = ctx.cargoManifestsByDir.get(dir);
+      if (entry === null) continue;
+      if (entry?.isPackage) return { dir, manifest: entry };
+      // `[workspace]`-only root Cargo.toml does not act as a crate package boundary.
+      continue;
+    }
+
+    if (!ctx.workspaceDir) continue;
+
+    if (!diskCache) {
+      diskCache = new Map<string, CargoManifestInfo | null>();
+      workspaceCargoManifestCache.set(ctx, diskCache);
+    }
+
+    if (diskCache.has(dir)) {
+      const cached = diskCache.get(dir);
+      if (cached?.isPackage) return { dir, manifest: cached };
+      continue;
+    }
+
+    const relPath = dir ? `${dir}/Cargo.toml` : 'Cargo.toml';
+    const raw = readOptionalFile(ctx.workspaceDir, relPath);
+    if (raw === null) {
+      diskCache.set(dir, null);
+      continue;
+    }
+
+    const parsed = parseCargoManifest(raw, dir);
+    diskCache.set(dir, parsed);
+    if (parsed.isPackage) {
+      return { dir, manifest: parsed };
+    }
+  }
+
+  return undefined;
+}
+
 export function loadWorkspaceResolveContext(
   workspaceDir?: string,
   opts: { knownFiles?: ReadonlySet<string> } = {},
@@ -2938,19 +3255,312 @@ export function resolveImports(
   return out;
 }
 
-function findRustCrateSrc(normSource: string): string {
-  const srcIdx = normSource.lastIndexOf('/src/');
-  if (srcIdx !== -1) return normSource.slice(0, srcIdx + 4);
-  return normSource.startsWith('src/') ? 'src' : '';
+interface RustCrateTarget {
+  dir: string;
+  rootFile?: string;
+}
+
+type RustTargetKind = 'lib' | 'bin' | 'example' | 'test' | 'bench';
+
+interface RustTargetCandidate {
+  dir: string;
+  rootFile?: string;
+  kind: RustTargetKind;
+  explicit: boolean;
+}
+
+const RUST_TARGET_SUBDIRS: Record<TomlMultiTargetKind, string> = {
+  bin: 'src/bin',
+  example: 'examples',
+  test: 'tests',
+  bench: 'benches',
+};
+
+const RUST_TARGET_KIND_PRIORITY: Record<RustTargetKind, number> = {
+  lib: 0,
+  bin: 1,
+  example: 2,
+  test: 3,
+  bench: 4,
+};
+
+const DEFAULT_CARGO_MANIFEST: CargoManifestInfo = {
+  isPackage: false,
+  explicitTargets: [],
+  namedTargets: [],
+  hasExplicitLibPath: false,
+  autobins: true,
+  autoexamples: true,
+  autotests: true,
+  autobenches: true,
+};
+
+function joinCargoPkgPath(pkgDir: string, rel: string): string {
+  return pkgDir ? `${pkgDir}/${rel}` : rel;
+}
+
+function targetContainsSource(
+  dir: string,
+  rootFile: string | undefined,
+  normSource: string,
+): boolean {
+  if (rootFile && rootFile === normSource) return true;
+  if (dir === '') return true;
+  return normSource === dir || normSource.startsWith(`${dir}/`);
+}
+
+function findSingleFileRustTargetsInDir(
+  containerDir: string,
+  ctx: WorkspaceResolveContext,
+): string[] {
+  const normDir = containerDir ? normalizePath(containerDir) : '';
+  const prefix = normDir ? `${normDir}/` : '';
+  const found = new Set<string>();
+
+  const collectFromSet = (files: ReadonlySet<string>): void => {
+    for (const f of files) {
+      if (!f.startsWith(prefix)) continue;
+      const rest = f.slice(prefix.length);
+      if (!rest || rest.includes('/')) continue;
+      if (rest.endsWith('.rs') && rest !== 'mod.rs') {
+        found.add(f);
+      }
+    }
+  };
+
+  if (ctx.extraFiles) collectFromSet(ctx.extraFiles);
+  if (ctx.knownFiles) {
+    collectFromSet(ctx.knownFiles);
+    return [...found].sort();
+  }
+
+  if (ctx.workspaceDir && normDir !== '..' && !normDir.startsWith('../')) {
+    try {
+      const absDir = normDir ? resolve(ctx.workspaceDir, normDir) : resolve(ctx.workspaceDir);
+      for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        if (entry.name.endsWith('.rs') && entry.name !== 'mod.rs') {
+          found.add(normDir ? `${normDir}/${entry.name}` : entry.name);
+        }
+      }
+    } catch {
+      /* optional Cargo target directory */
+    }
+  }
+
+  return [...found].sort();
+}
+
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findRustCrateTarget(normSource: string, ctx: WorkspaceResolveContext): RustCrateTarget {
+  const manifestHit = resolveCargoManifestForFile(normSource, ctx);
+  let pkgDir: string;
+  let manifest: CargoManifestInfo;
+
+  if (manifestHit) {
+    pkgDir = manifestHit.dir;
+    manifest = manifestHit.manifest;
+  } else {
+    const srcIdx = normSource.lastIndexOf('/src/');
+    if (srcIdx !== -1) {
+      pkgDir = normSource.slice(0, srcIdx);
+    } else if (normSource.startsWith('src/')) {
+      pkgDir = '';
+    } else {
+      const dirMatch = normSource.match(/^(?:(.*)\/)?(examples|tests|benches)\/(.+)$/);
+      if (!dirMatch) {
+        return { dir: '' };
+      }
+      pkgDir = dirMatch[1] ?? '';
+    }
+    manifest = DEFAULT_CARGO_MANIFEST;
+  }
+
+  const relToPkg = pkgDir
+    ? normSource.startsWith(`${pkgDir}/`)
+      ? normSource.slice(pkgDir.length + 1)
+      : normSource
+    : normSource;
+
+  if (manifest.isPackage && relToPkg === 'build.rs') {
+    return { dir: pkgDir, rootFile: normSource };
+  }
+
+  const candidates: RustTargetCandidate[] = [];
+
+  for (const target of manifest.explicitTargets) {
+    if (targetContainsSource(target.dir, target.rootFile, normSource)) {
+      candidates.push({
+        dir: target.dir,
+        rootFile: target.rootFile,
+        kind: target.kind,
+        explicit: true,
+      });
+    }
+  }
+
+  for (const named of manifest.namedTargets) {
+    const sub = RUST_TARGET_SUBDIRS[named.kind];
+    const multiDir = joinCargoPkgPath(pkgDir, `${sub}/${named.name}`);
+    const multiMain = `${multiDir}/main.rs`;
+    const singleFile = joinCargoPkgPath(pkgDir, `${sub}/${named.name}.rs`);
+    const singleDir = joinCargoPkgPath(pkgDir, sub);
+
+    if (normSource === multiMain || existsRepoFile(multiMain, ctx)) {
+      if (targetContainsSource(multiDir, multiMain, normSource)) {
+        candidates.push({ dir: multiDir, rootFile: multiMain, kind: named.kind, explicit: false });
+      }
+    } else if (normSource === singleFile || existsRepoFile(singleFile, ctx)) {
+      if (targetContainsSource(singleDir, singleFile, normSource)) {
+        candidates.push({
+          dir: singleDir,
+          rootFile: singleFile,
+          kind: named.kind,
+          explicit: false,
+        });
+      }
+    } else if (
+      named.kind === 'bin' &&
+      manifest.packageName &&
+      named.name === manifest.packageName
+    ) {
+      const srcDir = joinCargoPkgPath(pkgDir, 'src');
+      const srcMain = `${srcDir}/main.rs`;
+      if (
+        (normSource === srcMain || existsRepoFile(srcMain, ctx)) &&
+        targetContainsSource(srcDir, srcMain, normSource)
+      ) {
+        candidates.push({ dir: srcDir, rootFile: srcMain, kind: 'bin', explicit: false });
+      }
+    }
+  }
+
+  const hasRepoTree = Boolean(ctx.knownFiles || ctx.workspaceDir);
+  const autoFamilies: Array<[TomlMultiTargetKind, string, boolean]> = [
+    ['bin', 'src/bin', manifest.autobins],
+    ['example', 'examples', manifest.autoexamples],
+    ['test', 'tests', manifest.autotests],
+    ['bench', 'benches', manifest.autobenches],
+  ];
+
+  for (const [kind, prefix, enabled] of autoFamilies) {
+    if (!enabled) continue;
+    const escapedPrefix = escapeRegExpLiteral(prefix);
+    const singleMatch = relToPkg.match(new RegExp(`^${escapedPrefix}/([^/]+\\.rs)$`));
+    if (singleMatch && singleMatch[1] !== 'mod.rs') {
+      candidates.push({
+        dir: joinCargoPkgPath(pkgDir, prefix),
+        rootFile: normSource,
+        kind,
+        explicit: false,
+      });
+      continue;
+    }
+
+    const nestedMatch = relToPkg.match(new RegExp(`^${escapedPrefix}/([^/]+)/(.+)$`));
+    if (!nestedMatch) continue;
+    const targetName = nestedMatch[1]!;
+    const rest = nestedMatch[2]!;
+    const targetDir = joinCargoPkgPath(pkgDir, `${prefix}/${targetName}`);
+    const targetMain = `${targetDir}/main.rs`;
+
+    if (normSource === targetMain || existsRepoFile(targetMain, ctx)) {
+      candidates.push({ dir: targetDir, rootFile: targetMain, kind, explicit: false });
+    } else if (hasRepoTree) {
+      const containerDir = joinCargoPkgPath(pkgDir, prefix);
+      const singleFiles = findSingleFileRustTargetsInDir(containerDir, ctx);
+      if (singleFiles.length === 1) {
+        candidates.push({
+          dir: containerDir,
+          rootFile: singleFiles[0],
+          kind,
+          explicit: false,
+        });
+      } else if (singleFiles.length > 1) {
+        candidates.push({ dir: containerDir, kind, explicit: false });
+      }
+    } else if (kind === 'bin' || rest.includes('/')) {
+      candidates.push({ dir: targetDir, rootFile: targetMain, kind, explicit: false });
+    } else {
+      candidates.push({
+        dir: joinCargoPkgPath(pkgDir, prefix),
+        kind,
+        explicit: false,
+      });
+    }
+  }
+
+  if (relToPkg.startsWith('src/')) {
+    const srcDir = joinCargoPkgPath(pkgDir, 'src');
+    const srcLib = `${srcDir}/lib.rs`;
+    const srcMain = `${srcDir}/main.rs`;
+    let addedSrcTarget = false;
+
+    if (!manifest.hasExplicitLibPath && (normSource === srcLib || existsRepoFile(srcLib, ctx))) {
+      candidates.push({ dir: srcDir, rootFile: srcLib, kind: 'lib', explicit: false });
+      addedSrcTarget = true;
+    }
+    if (manifest.autobins && (normSource === srcMain || existsRepoFile(srcMain, ctx))) {
+      candidates.push({ dir: srcDir, rootFile: srcMain, kind: 'bin', explicit: false });
+      addedSrcTarget = true;
+    }
+    if (!addedSrcTarget) {
+      candidates.push({ dir: srcDir, kind: 'lib', explicit: false });
+    }
+  }
+
+  const exactMatch = candidates.find((c) => c.rootFile === normSource);
+  if (exactMatch) {
+    return { dir: exactMatch.dir, rootFile: exactMatch.rootFile };
+  }
+
+  if (candidates.length === 0) {
+    return relToPkg.startsWith('src/') ? { dir: joinCargoPkgPath(pkgDir, 'src') } : { dir: pkgDir };
+  }
+
+  const depthOf = (dir: string): number => (dir ? dir.split('/').length : 0);
+  let maxDepth = -1;
+  for (const c of candidates) {
+    const d = depthOf(c.dir);
+    if (d > maxDepth) maxDepth = d;
+  }
+  let remaining = candidates.filter((c) => depthOf(c.dir) === maxDepth);
+
+  let bestKindPriority = Number.POSITIVE_INFINITY;
+  for (const c of remaining) {
+    const p = RUST_TARGET_KIND_PRIORITY[c.kind];
+    if (p < bestKindPriority) bestKindPriority = p;
+  }
+  remaining = remaining.filter((c) => RUST_TARGET_KIND_PRIORITY[c.kind] === bestKindPriority);
+
+  if (remaining.some((c) => c.explicit)) {
+    remaining = remaining.filter((c) => c.explicit);
+  }
+
+  const distinctRoots = new Set<string>();
+  for (const c of remaining) {
+    if (c.rootFile) distinctRoots.add(c.rootFile);
+  }
+  const chosenDir = remaining[0]!.dir;
+  if (distinctRoots.size === 1) {
+    const [onlyRoot] = distinctRoots;
+    return { dir: chosenDir, rootFile: onlyRoot };
+  }
+  return { dir: chosenDir };
 }
 
 function resolveRustModulePath(
   joined: string,
-  crateRoot: string,
+  crateTarget: RustCrateTarget,
   ctx: WorkspaceResolveContext,
 ): string {
   const normJoined = normalizePath(joined);
-  const normRoot = crateRoot ? normalizePath(crateRoot) : '';
+  const normRoot = crateTarget.dir ? normalizePath(crateTarget.dir) : '';
+  const normRootFile = crateTarget.rootFile ? normalizePath(crateTarget.rootFile) : undefined;
+  const hasRepoTree = Boolean(ctx.knownFiles || ctx.workspaceDir);
 
   let candidate = normJoined;
   while (true) {
@@ -2958,10 +3568,16 @@ function resolveRustModulePath(
       break;
     }
     if (candidate === normRoot) {
-      const libRs = normRoot ? `${normRoot}/lib.rs` : 'lib.rs';
-      if (existsRepoFile(libRs, ctx)) return libRs;
-      const mainRs = normRoot ? `${normRoot}/main.rs` : 'main.rs';
-      if (existsRepoFile(mainRs, ctx)) return mainRs;
+      // Without a full repo tree (`knownFiles`/`workspaceDir`), untouched
+      // target submodules are absent from `extraFiles`; avoid collapsing
+      // deeper paths onto a PR-touched/probed crate root file.
+      if (hasRepoTree || normJoined === normRoot) {
+        if (normRootFile && existsRepoFile(normRootFile, ctx)) return normRootFile;
+        const libRs = normRoot ? `${normRoot}/lib.rs` : 'lib.rs';
+        if (existsRepoFile(libRs, ctx)) return libRs;
+        const mainRs = normRoot ? `${normRoot}/main.rs` : 'main.rs';
+        if (existsRepoFile(mainRs, ctx)) return mainRs;
+      }
       break;
     }
     if (candidate && candidate !== '.') {
@@ -2984,10 +3600,13 @@ function resolveRustModulePath(
   return normJoined;
 }
 
-function rustLogicalModuleDir(normSource: string): string {
+function rustLogicalModuleDir(normSource: string, crateTarget?: RustCrateTarget): string {
   // In Rust, `foo.rs` defines module `foo` (so child `mod bar;` lives at
-  // `foo/bar.rs` or `foo/bar/mod.rs`), whereas `mod.rs`, `lib.rs`, and
-  // `main.rs` correspond directly to their containing directory.
+  // `foo/bar.rs` or `foo/bar/mod.rs`), whereas crate roots (including custom
+  // target entrypoints) and `mod.rs` correspond directly to their containing directory.
+  if (crateTarget?.rootFile !== undefined && normSource === crateTarget.rootFile) {
+    return posix.dirname(normSource);
+  }
   const baseName = posix.basename(normSource);
   const isDirModule = baseName === 'mod.rs' || baseName === 'lib.rs' || baseName === 'main.rs';
   return isDirModule ? posix.dirname(normSource) : normSource.replace(/\.rs$/, '');
@@ -3192,8 +3811,9 @@ export function resolveImport(
     }
 
     case 'rust': {
+      const crateTarget = findRustCrateTarget(normSource, ctx);
       const spec = imp.specifier.replace(/^::\s*/, '');
-      const fileModDir = rustLogicalModuleDir(normSource);
+      const fileModDir = rustLogicalModuleDir(normSource, crateTarget);
       const scopedModDir =
         imp.rustModuleScope && imp.rustModuleScope.length > 0
           ? fileModDir === '.'
@@ -3243,11 +3863,10 @@ export function resolveImport(
       }
       if (spec.startsWith('crate::')) {
         const rel = spec.slice('crate::'.length).replace(/::/g, '/');
-        const crateSrc = findRustCrateSrc(normSource);
-        const joined = normalizePath(crateSrc ? `${crateSrc}/${rel}` : rel);
+        const joined = normalizePath(crateTarget.dir ? `${crateTarget.dir}/${rel}` : rel);
         return {
           ...base,
-          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx),
+          resolvedPath: resolveRustModulePath(joined, crateTarget, ctx),
         };
       }
       if (
@@ -3273,10 +3892,9 @@ export function resolveImport(
         const joined = normalizePath(
           rel ? (modDir === '.' ? rel : posix.join(modDir, rel)) : modDir,
         );
-        const crateSrc = findRustCrateSrc(normSource);
         return {
           ...base,
-          resolvedPath: resolveRustModulePath(joined, crateSrc, ctx),
+          resolvedPath: resolveRustModulePath(joined, crateTarget, ctx),
         };
       }
       const crateName = (spec.split('::')[0] ?? spec).trim();

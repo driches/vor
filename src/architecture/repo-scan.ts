@@ -132,7 +132,11 @@ function enumerateRepoFiles(workspaceDir: string): string[] {
         return; // unreadable or vanished directory during walk
       }
       for (const entry of entries) {
-        if (WALK_SKIP_DIRS.has(entry.name)) continue;
+        // Cargo binary targets live in `src/bin/` (and `<crate>/src/bin/`),
+        // which are source files rather than compiled `bin/` output folders.
+        const isCargoBinDir =
+          entry.name === 'bin' && (relBase === 'src' || relBase.endsWith('/src'));
+        if (WALK_SKIP_DIRS.has(entry.name) && !isCargoBinDir) continue;
         // Skip symlinks before isDirectory()/isFile() so circular directory
         // links cannot cause infinite recursion or escape workspaceDir.
         if (entry.isSymbolicLink()) continue;

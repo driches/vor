@@ -690,4 +690,44 @@ describe('explainFileArchitecture', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('resolves Cargo bin target imports rather than src/lib.rs in explain and repo checks', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vor-repo-scan-rust-bin-'));
+    try {
+      mkdirSync(join(ws, 'src/bin/worker/domain'), { recursive: true });
+      mkdirSync(join(ws, 'src/bin/worker/infrastructure'), { recursive: true });
+      writeFileSync(join(ws, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\n');
+      writeFileSync(join(ws, 'src/lib.rs'), 'pub fn lib_ok() {}\n');
+      writeFileSync(
+        join(ws, 'src/bin/worker/main.rs'),
+        'mod domain;\nmod infrastructure;\nfn main() {}\n',
+      );
+      writeFileSync(join(ws, 'src/bin/worker/infrastructure/mod.rs'), 'pub struct Repo;\n');
+      writeFileSync(
+        join(ws, 'src/bin/worker/domain/mod.rs'),
+        'use crate::infrastructure::Repo;\npub fn run() { let _ = Repo; }\n',
+      );
+
+      const spec = resolveArchitectureSpec({
+        ...DEFAULT_CONFIG.architecture,
+        enabled: true,
+        preset: 'ddd',
+        root: 'src/bin/worker',
+      });
+
+      const explained = explainFileArchitecture(ws, 'src/bin/worker/domain/mod.rs', spec);
+      expect(explained.imports[0]?.resolved_path).toBe('src/bin/worker/infrastructure/mod.rs');
+      expect(explained.imports[0]?.violations.map((v) => v.rule_id)).toEqual([
+        'arch:layer:domain-to-infrastructure',
+      ]);
+
+      const repoRes = await runRepoArchitectureCheck({ workspaceDir: ws, spec });
+      expect(repoRes.passed).toBe(false);
+      expect(repoRes.violations).toHaveLength(1);
+      expect(repoRes.violations[0]?.file_path).toBe('src/bin/worker/domain/mod.rs');
+      expect(repoRes.violations[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });

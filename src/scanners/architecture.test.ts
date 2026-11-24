@@ -652,4 +652,84 @@ entries:
     expect(pyRes.findings[0]?.rule_id).toBe('arch:forbidden-package:domain');
     expect(pyRes.findings[0]?.line).toBe(2);
   });
+
+  it('resolves Cargo bin targets and hydrates Cargo.toml explicit paths from PR HEAD', async () => {
+    const binSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src/bin/worker',
+    });
+    const binScanner = createArchitectureScanner(binSpec);
+    const workerDomainPath = 'src/bin/worker/domain/mod.rs';
+    const workerDomainContent = 'use crate::infrastructure::Repo;\n';
+    const changedWorker = makeChangedFile(workerDomainPath, {
+      1: 'use crate::infrastructure::Repo;',
+    });
+    changedWorker.language = 'rust';
+
+    const binRes = await binScanner.scan(
+      makeDeps([changedWorker], {
+        [workerDomainPath]: workerDomainContent,
+        'src/lib.rs': 'pub fn shared() {}\n',
+        'src/bin/worker/main.rs': 'mod domain;\nmod infrastructure;\n',
+        'src/bin/worker/infrastructure/mod.rs': 'pub struct Repo;\n',
+      }),
+    );
+    expect(binRes.findings).toHaveLength(1);
+    expect(binRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(binRes.findings[0]?.line).toBe(1);
+
+    const treeBinDeps = makeDeps([changedWorker], {
+      [workerDomainPath]: workerDomainContent,
+    });
+    treeBinDeps.octokit = {
+      rest: {
+        git: {
+          getTree: vi.fn(async () => ({
+            data: {
+              truncated: false,
+              tree: [
+                { type: 'blob', path: 'src/lib.rs' },
+                { type: 'blob', path: 'src/bin/worker/main.rs' },
+                { type: 'blob', path: workerDomainPath },
+                { type: 'blob', path: 'src/bin/worker/infrastructure/mod.rs' },
+              ],
+            },
+          })),
+        },
+      },
+    } as unknown as ScannerDeps['octokit'];
+    const treeBinRes = await binScanner.scan(treeBinDeps);
+    expect(treeBinRes.findings).toHaveLength(1);
+    expect(treeBinRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(treeBinRes.findings[0]?.line).toBe(1);
+
+    const customSpec = resolveArchitectureSpec({
+      ...DEFAULT_CONFIG.architecture,
+      enabled: true,
+      preset: 'ddd',
+      root: 'src/workers/job',
+    });
+    const customScanner = createArchitectureScanner(customSpec);
+    const jobDomainPath = 'src/workers/job/domain/mod.rs';
+    const changedJob = makeChangedFile(jobDomainPath, {
+      1: 'use crate::infrastructure::Repo;',
+    });
+    changedJob.language = 'rust';
+
+    const customRes = await customScanner.scan(
+      makeDeps([changedJob], {
+        'Cargo.toml':
+          '[package]\nname = "demo"\n\n[[bin]]\nname = "job"\npath = "src/workers/job/entry.rs"\n',
+        [jobDomainPath]: 'use crate::infrastructure::Repo;\n',
+        'src/lib.rs': 'pub fn shared() {}\n',
+        'src/workers/job/entry.rs': 'mod domain;\nmod infrastructure;\n',
+        'src/workers/job/infrastructure/mod.rs': 'pub struct Repo;\n',
+      }),
+    );
+    expect(customRes.findings).toHaveLength(1);
+    expect(customRes.findings[0]?.rule_id).toBe('arch:layer:domain-to-infrastructure');
+    expect(customRes.findings[0]?.line).toBe(1);
+  });
 });

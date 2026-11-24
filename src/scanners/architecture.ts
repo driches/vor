@@ -26,12 +26,14 @@ import {
   listAncestorDirs,
   listTsConfigAliasCandidates,
   loadWorkspaceResolveContext,
+  parseCargoManifest,
   parseGoModModule,
   parsePubspecName,
   parseTsConfigContent,
   resolveImport,
   resolveTsConfigForFile,
   type ArchLanguage,
+  type CargoManifestInfo,
   type TsConfigPaths,
   type WorkspaceResolveContext,
 } from '../architecture/imports.js';
@@ -523,6 +525,7 @@ async function hydrateResolveContext(
   const tsJsPaths: string[] = [];
   const goPaths: string[] = [];
   const dartPaths: string[] = [];
+  const rustPaths: string[] = [];
   for (const f of applicable) {
     const lang = detectArchLanguage(f.path);
     if (lang === 'typescript' || lang === 'javascript') {
@@ -531,6 +534,8 @@ async function hydrateResolveContext(
       goPaths.push(f.path);
     } else if (lang === 'dart') {
       dartPaths.push(f.path);
+    } else if (lang === 'rust') {
+      rustPaths.push(f.path);
     }
   }
 
@@ -614,6 +619,57 @@ async function hydrateResolveContext(
     if (rootDart !== undefined) {
       if (rootDart) ctx.dartPackage = rootDart;
       else delete ctx.dartPackage;
+    }
+  }
+
+  if (rustPaths.length > 0) {
+    const ancestorDirs = new Set<string>(['']);
+    for (const filePath of rustPaths) {
+      for (const dir of listAncestorDirs(filePath)) {
+        ancestorDirs.add(dir);
+      }
+    }
+
+    const byDir = new Map<string, CargoManifestInfo | null>();
+    for (const dir of ancestorDirs) {
+      if (deps.signal.aborted) break;
+      const manifestPath = dir ? `${dir}/Cargo.toml` : 'Cargo.toml';
+      const res = await readMetadataFile(deps, manifestPath, counters, headTree, removedFiles);
+      if (res.status === 'found') {
+        byDir.set(dir, parseCargoManifest(res.content, dir));
+      } else if (res.status === 'absent') {
+        byDir.set(dir, null);
+      }
+    }
+    if (byDir.size > 0) {
+      ctx.cargoManifestsByDir = byDir;
+    }
+
+    if (!ctx.knownFiles && !deps.signal.aborted) {
+      const probedTargets = new Set<string>();
+      const extraMutable = ctx.extraFiles ? new Set(ctx.extraFiles) : new Set<string>();
+      let extraUpdated = false;
+
+      for (const filePath of rustPaths) {
+        if (deps.signal.aborted) break;
+        const norm = normalizePath(filePath);
+        const match = norm.match(/^(.*?(?:^|\/)(?:src\/bin|examples|tests|benches)\/[^/]+)\//);
+        if (!match) continue;
+        const targetMain = `${match[1]}/main.rs`;
+        if (targetMain === norm || probedTargets.has(targetMain) || extraMutable.has(targetMain)) {
+          continue;
+        }
+        probedTargets.add(targetMain);
+        const res = await readMetadataFile(deps, targetMain, counters, headTree, removedFiles);
+        if (res.status === 'found') {
+          extraMutable.add(targetMain);
+          extraUpdated = true;
+        }
+      }
+
+      if (extraUpdated) {
+        ctx.extraFiles = extraMutable;
+      }
     }
   }
 
