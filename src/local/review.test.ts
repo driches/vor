@@ -223,4 +223,44 @@ describe('runLocalReview', () => {
       rmSync(r, { recursive: true, force: true });
     }
   });
+
+  it('scopes local FakeOctokit and wires referenceOctokitFactory by GitHub auth presence', async () => {
+    const spy = vi.fn(async (_input: OrchestratorInput) => cannedResult);
+
+    await runLocalReview(
+      { workspace: repo, target: 'range', base: 'HEAD~1', head: 'HEAD', githubToken: '' },
+      { runOrchestratorImpl: spy },
+    );
+    const unauthInput = spy.mock.calls[0]![0];
+    expect(unauthInput.github_token).toBe('local-review-placeholder-token');
+    expect(unauthInput.referenceOctokitFactory?.({ auth: unauthInput.github_token })).toBeNull();
+    const localClient = unauthInput.octokitFactory?.({ auth: 'x' });
+    await expect(
+      localClient!.rest.repos.getContent({
+        owner: 'org',
+        repo: 'standards',
+        path: 'docs/style.md',
+        ref: 'HEAD',
+      }),
+    ).rejects.toThrow(/cross-repository content/);
+
+    await runLocalReview(
+      {
+        workspace: repo,
+        target: 'range',
+        base: 'HEAD~1',
+        head: 'HEAD',
+        githubToken: 'ghp_test_token_123456',
+      },
+      { runOrchestratorImpl: spy },
+    );
+    const authInput = spy.mock.calls[1]![0];
+    expect(authInput.github_token).toBe('ghp_test_token_123456');
+    const authLocal = authInput.octokitFactory?.({ auth: authInput.github_token });
+    const authRef = authInput.referenceOctokitFactory?.({ auth: authInput.github_token });
+    expect(authRef).not.toBeNull();
+    expect(authRef).not.toBe(authLocal);
+    expect(typeof authRef?.rest?.repos?.getContent).toBe('function');
+    expect(typeof authRef?.rest?.git?.getTree).toBe('function');
+  });
 });

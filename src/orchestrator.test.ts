@@ -27,6 +27,9 @@
  *   since lockfiles are the canonical anchor for dependency CVEs.)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // -----------------------------------------------------------------
 // Mock script controller — set BEFORE importing the orchestrator.
@@ -154,11 +157,13 @@ const openaiScript: OpenAIScriptResponse[] = [];
 // test asserts this NEVER got called (orchestrator short-circuited before
 // instantiating the provider).
 const openaiCtorCalls: Array<{ apiKey: string }> = [];
+const openaiCreateCalls: Array<Record<string, unknown>> = [];
 
 vi.mock('openai', () => {
   class FakeOpenAI {
     public responses = {
-      create: vi.fn(async () => {
+      create: vi.fn(async (args: Record<string, unknown>) => {
+        openaiCreateCalls.push(args);
         const next = openaiScript.shift();
         if (!next) {
           throw new Error('openaiScript exhausted — test did not script enough turns');
@@ -324,6 +329,9 @@ vi.mock('./ocr/recognize.js', () => ({
 // Now the orchestrator import — `vi.mock` calls above have already swapped
 // the dependency graph for this module.
 // -----------------------------------------------------------------
+import type { Octokit } from '@octokit/rest';
+import { buildLocalOctokit } from './local/git-octokit.js';
+import { DiskReferenceCache } from './references/cache.js';
 import { runOrchestrator, type OrchestratorInput } from './orchestrator.js';
 import { _clearRegisteredSecrets } from './util/secrets.js';
 import { OsvClientError } from './scanners/osv-client.js';
@@ -483,6 +491,7 @@ beforeEach(() => {
   anthropicCreateCalls.length = 0;
   openaiScript.length = 0;
   openaiCtorCalls.length = 0;
+  openaiCreateCalls.length = 0;
   octokitState.diff = '';
   octokitState.filesApi = [];
   octokitState.pullData = makePullData();
@@ -2275,5 +2284,353 @@ describe('runOrchestrator — repo context is not sent twice', () => {
     expect(history).not.toContain('UNIQUE-AGENTS-MARKER');
     expect(history).toContain('in_system_prompt');
     expect(history).toContain('UNIQUE-PKG-MARKER');
+  });
+});
+
+describe('runOrchestrator — architecture enforcement', () => {
+  it('enforces inline architecture config independently of security.enabled and injects standards into system prompt', async () => {
+    const domDiff = [
+      'diff --git a/src/domain/order.ts b/src/domain/order.ts',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      '--- /dev/null',
+      '+++ b/src/domain/order.ts',
+      '@@ -0,0 +1,2 @@',
+      "+import { pgRepo } from '../adapters/out/pg_repo';",
+      '+export const x = pgRepo;',
+    ].join('\n');
+    octokitState.diff = `${domDiff}\n`;
+    octokitState.filesApi = [{ filename: 'src/domain/order.ts', changes: 2, patch: domDiff }];
+    octokitState.contents.set(
+      'src/domain/order.ts',
+      "import { pgRepo } from '../adapters/out/pg_repo';\nexport const x = pgRepo;\n",
+    );
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: false',
+        'architecture:',
+        '  enabled: true',
+        '  preset: hexagonal',
+      ].join('\n'),
+    );
+
+    scriptSummaryOnly();
+
+    const out = await runOrchestrator(baseInput());
+    expect(out.kept_comments).toHaveLength(1);
+    expect(out.kept_comments[0]?.category).toBe('architecture');
+    expect(out.kept_comments[0]?.line).toBe(1);
+
+    const call = octokitState.createReviewCalls[0]!.args as {
+      comments: Array<{ path: string; line: number; body: string }>;
+      body: string;
+    };
+    expect(call.comments[0]?.body).toContain('_via architecture scan_');
+    expect(call.body).toContain('**Architecture:** 1 violation from architecture scan');
+
+    const sysPrompt = JSON.stringify(anthropicCreateCalls[0]?.system ?? '');
+    expect(sysPrompt).toContain('### Software architecture standards');
+    expect(sysPrompt).toContain('**hexagonal**');
+  });
+
+  it('loads external architecture.file from PR HEAD', async () => {
+    const ctxDiff = [
+      'diff --git a/src/contexts/orders/app.ts b/src/contexts/orders/app.ts',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      '--- /dev/null',
+      '+++ b/src/contexts/orders/app.ts',
+      '@@ -0,0 +1,2 @@',
+      "+import { Invoice } from '../billing/domain/invoice';",
+      '+export const inv = Invoice;',
+    ].join('\n');
+    octokitState.diff = `${ctxDiff}\n`;
+    octokitState.filesApi = [
+      { filename: 'src/contexts/orders/app.ts', changes: 2, patch: ctxDiff },
+    ];
+    octokitState.contents.set(
+      'src/contexts/orders/app.ts',
+      "import { Invoice } from '../billing/domain/invoice';\nexport const inv = Invoice;\n",
+    );
+    octokitState.contents.set(
+      '.vor.yml',
+      ['architecture:', '  enabled: true', '  file: .vor/architecture.yml'].join('\n'),
+    );
+    octokitState.contents.set(
+      '.vor/architecture.yml',
+      ['preset: ddd', 'root: src', 'severity: critical'].join('\n'),
+    );
+
+    scriptSummaryOnly();
+
+    const out = await runOrchestrator(baseInput());
+    expect(out.kept_comments).toHaveLength(1);
+    expect(out.kept_comments[0]?.severity).toBe('critical');
+    expect(out.kept_comments[0]?.source?.kind).toBe('scanner');
+  });
+
+  it('suppresses both scanner and system prompt when external architecture.file sets enabled: false', async () => {
+    const domDiff = [
+      'diff --git a/src/domain/order.ts b/src/domain/order.ts',
+      'new file mode 100644',
+      'index 0000000..abc1234',
+      '--- /dev/null',
+      '+++ b/src/domain/order.ts',
+      '@@ -0,0 +1,2 @@',
+      "+import { pgRepo } from '../adapters/out/pg_repo';",
+      '+export const x = pgRepo;',
+    ].join('\n');
+    octokitState.diff = `${domDiff}\n`;
+    octokitState.filesApi = [{ filename: 'src/domain/order.ts', changes: 2, patch: domDiff }];
+    octokitState.contents.set(
+      'src/domain/order.ts',
+      "import { pgRepo } from '../adapters/out/pg_repo';\nexport const x = pgRepo;\n",
+    );
+    octokitState.contents.set(
+      '.vor.yml',
+      [
+        'security:',
+        '  enabled: false',
+        'architecture:',
+        '  enabled: true',
+        '  preset: hexagonal',
+        '  file: .vor/architecture.yml',
+      ].join('\n'),
+    );
+    octokitState.contents.set('.vor/architecture.yml', 'enabled: false\n');
+
+    scriptSummaryOnly();
+
+    const out = await runOrchestrator(baseInput());
+    expect(out.kept_comments).toEqual([]);
+    const sysPrompt = JSON.stringify(anthropicCreateCalls[0]?.system ?? '');
+    expect(sysPrompt).not.toContain('### Software architecture standards');
+  });
+});
+
+describe('runOrchestrator — reference documentation & two-layer caching', () => {
+  it('loads repo reference glob, caches on disk, injects into system prompt, and sets 1h Anthropic cache TTL', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+
+    const ws = mkdtempSync(join(tmpdir(), 'vor-orch-refs-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-refcache-'));
+    try {
+      mkdirSync(join(ws, 'docs/standards'), { recursive: true });
+      const apiDoc = '# API Standards\nAll endpoints must validate payloads.\n';
+      const largeDoc = `# Large Guide\n${'word '.repeat(200)}\n`;
+      writeFileSync(join(ws, 'docs/standards/api.md'), apiDoc);
+      writeFileSync(join(ws, 'docs/standards/large.md'), largeDoc);
+      octokitState.contents.set('docs/standards/api.md', apiDoc);
+      octokitState.contents.set('docs/standards/large.md', largeDoc);
+      octokitState.contents.set(
+        '.vor.yml',
+        [
+          'security:',
+          '  enabled: false',
+          'references:',
+          '  enabled: true',
+          '  max_inline_bytes: 120',
+          '  sources:',
+          '    - "docs/standards/**/*.md"',
+          '  cache:',
+          `    dir: "${cacheDir}"`,
+          '  prompt_cache:',
+          '    anthropic_ttl: 1h',
+        ].join('\n'),
+      );
+
+      scriptSummaryOnly();
+      await runOrchestrator(baseInput({ workspace_dir: ws }));
+
+      const call = anthropicCreateCalls[0]!;
+      const sysBlocks = call.system as Array<{ text: string; cache_control?: unknown }>;
+      expect(sysBlocks[0]?.text).toContain('### Reference documentation & standards');
+      expect(sysBlocks[0]?.text).toContain('All endpoints must validate payloads.');
+      expect(sysBlocks[0]?.text).toContain(
+        'Additional reference docs (on-demand via `read_reference_doc`)',
+      );
+      expect(sysBlocks[0]?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+
+      const tools = call.tools as Array<{ name: string }>;
+      expect(tools.some((t) => t.name === 'read_reference_doc')).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('derives deterministic OpenAI prompt_cache_key from reference corpus digest when unset', async () => {
+    const base = buildBaseDiff();
+    octokitState.diff = base.diff;
+    octokitState.filesApi = base.filesApi;
+
+    const ws = mkdtempSync(join(tmpdir(), 'vor-orch-refs-oai-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-refcache-oai-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      const stdDoc = '# Standards\nAlways check errors.\n';
+      writeFileSync(join(ws, 'docs/std.md'), stdDoc);
+      octokitState.contents.set('docs/std.md', stdDoc);
+      octokitState.contents.set(
+        '.vor.yml',
+        [
+          'model: gpt-4.1',
+          'security:',
+          '  enabled: false',
+          'references:',
+          '  enabled: true',
+          '  sources:',
+          '    - docs/std.md',
+          '  cache:',
+          `    dir: "${cacheDir}"`,
+        ].join('\n'),
+      );
+      openaiScript.push({
+        status: 'completed',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'post_summary',
+            arguments: JSON.stringify({
+              strengths: ['Clear and focused changes that adhere to standards.'],
+              assessment: 'approve',
+              assessment_reasoning: 'All changes comply with the configured team standards.',
+            }),
+          },
+        ],
+      });
+
+      await runOrchestrator(baseInput({ workspace_dir: ws, openai_api_key: 'sk-openai-test' }));
+      expect(openaiCreateCalls).toHaveLength(1);
+      expect(String(openaiCreateCalls[0]?.prompt_cache_key)).toMatch(
+        /^vor:driches\/test:refs-[0-9a-f]{12}$/,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses referenceOctokitFactory for cross-repo github: sources while reading local docs locally', async () => {
+    const base = buildBaseDiff();
+    const ws = mkdtempSync(join(tmpdir(), 'vor-orch-local-ghref-ws-'));
+    const cacheDir = mkdtempSync(join(tmpdir(), 'vor-orch-local-ghref-cache-'));
+    try {
+      mkdirSync(join(ws, 'docs'), { recursive: true });
+      writeFileSync(join(ws, 'docs/style.md'), '# Local Style\nLocal style only.\n');
+      const vorYml = [
+        'security:',
+        '  enabled: false',
+        'references:',
+        '  enabled: true',
+        '  sources:',
+        '    - "docs/*.md"',
+        '    - "github:org/standards/docs/style.md@HEAD"',
+        '    - "github:org/standards/rules/*.md@main"',
+        '  cache:',
+        `    dir: "${cacheDir}"`,
+      ].join('\n');
+
+      const localOctokit = buildLocalOctokit({
+        owner: 'local',
+        repo: 'local',
+        baseSha: 'a'.repeat(40),
+        headSha: 'WORKTREE',
+        files: base.filesApi.map((f) => ({
+          path: f.filename,
+          status: 'modified',
+          additions: f.changes,
+          deletions: 0,
+        })),
+        diff: base.diff,
+        prMeta: { title: 'Local PR', body: '', author: 'dev', additions: 2, deletions: 0 },
+        resolveBytes: (filePath) => {
+          if (filePath === '.vor.yml') return Buffer.from(vorYml, 'utf-8');
+          if (filePath === 'docs/style.md') {
+            return Buffer.from('# Local Style\nLocal style only.\n', 'utf-8');
+          }
+          return null;
+        },
+      });
+
+      const localInput = (
+        refFactory: OrchestratorInput['referenceOctokitFactory'],
+      ): OrchestratorInput => ({
+        ...baseInput({ workspace_dir: ws }),
+        owner: 'local',
+        repo: 'local',
+        pull_number: 0,
+        dry_run: true,
+        octokitFactory: () => localOctokit,
+        referenceOctokitFactory: refFactory,
+      });
+
+      // Case 1: unauthenticated local review (`() => null`) does not leak local docs/style.md under remote cache key.
+      scriptSummaryOnly();
+      await runOrchestrator(localInput(() => null));
+      const sysUnauth = String(
+        (anthropicCreateCalls[0]?.system as Array<{ text: string }> | undefined)?.[0]?.text ?? '',
+      );
+      expect(sysUnauth).toContain('Local style only.');
+      expect(sysUnauth).not.toContain('github:org/standards/docs/style.md@HEAD');
+      expect(
+        new DiskReferenceCache(cacheDir).get(
+          'github:org/standards@HEAD:docs/style.md',
+          Date.now(),
+          86_400,
+        ).status,
+      ).toBe('miss');
+
+      // Case 2: authenticated remote client fetches cross-repo docs & globs without querying local/local.
+      const remoteGetContent = vi.fn(
+        async (args: { owner: string; repo: string; path: string }) => ({
+          data: {
+            type: 'file',
+            sha: `sha-${args.path}`,
+            content: Buffer.from(
+              `# Remote ${args.owner}/${args.repo}\nContent for ${args.path}.\n`,
+              'utf-8',
+            ).toString('base64'),
+            encoding: 'base64',
+          },
+        }),
+      );
+      const remoteGetTree = vi.fn(async () => ({
+        data: {
+          truncated: false,
+          tree: [{ type: 'blob', path: 'rules/auth.md' }],
+        },
+      }));
+      const remoteOctokit = {
+        rest: { repos: { getContent: remoteGetContent }, git: { getTree: remoteGetTree } },
+      } as unknown as Octokit;
+
+      scriptSummaryOnly();
+      await runOrchestrator(localInput(() => remoteOctokit));
+      expect(remoteGetTree).toHaveBeenCalledTimes(1);
+      expect(remoteGetTree).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: 'org', repo: 'standards', tree_sha: 'main' }),
+      );
+      expect(remoteGetContent).toHaveBeenCalledTimes(2);
+      expect(
+        remoteGetContent.mock.calls.every(
+          ([args]) => args.owner === 'org' && args.repo === 'standards',
+        ),
+      ).toBe(true);
+      const sysAuth = String(
+        (anthropicCreateCalls[1]?.system as Array<{ text: string }> | undefined)?.[0]?.text ?? '',
+      );
+      expect(sysAuth).toContain('Local style only.');
+      expect(sysAuth).toContain('Content for docs/style.md.');
+      expect(sysAuth).toContain('Content for rules/auth.md.');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
   });
 });

@@ -140,6 +140,37 @@ export const DEFAULT_CONFIG: ReviewConfig = {
     enabled: false,
   },
 
+  // Software architecture standards enforcement. Off by default; opt in via
+  // `architecture.enabled: true` and a preset (`hexagonal`, `ddd`, `clean`,
+  // `layered`, `modular-monolith`, `custom`) or external `.vor/architecture.yml`.
+  architecture: {
+    enabled: false,
+    severity: 'important',
+    llm_enforcement: true,
+    deterministic_enforcement: true,
+    ignore_tests: true,
+  },
+
+  // Reference documentation & engineering standards reading + two-layer cache.
+  // Off by default; opt in via `references.enabled: true` and `references.sources`.
+  references: {
+    enabled: false,
+    sources: [],
+    max_inline_bytes: 80_000,
+    max_doc_bytes: 100_000,
+    max_docs: 100,
+    cache: {
+      enabled: true,
+      ttl_seconds: 86_400,
+      stale_on_error: true,
+    },
+    prompt_cache: {
+      enabled: true,
+      anthropic_ttl: '5m',
+      auto_openai_cache_key: true,
+    },
+  },
+
   experimental: {
     worker_delegation: {
       enabled: false,

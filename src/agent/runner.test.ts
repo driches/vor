@@ -316,6 +316,48 @@ describe('runAgent', () => {
     );
   });
 
+  it('registers read_reference_doc only when reference docs are loaded', async () => {
+    const offProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(offProvider);
+    await runAgent(baseInput());
+    expect(offProvider.completeCalls[0]!.tools.some((t) => t.name === 'read_reference_doc')).toBe(
+      false,
+    );
+
+    const onProvider = new FakeProvider([makeResponse()]);
+    vi.mocked(llmIndex.createProvider).mockReturnValueOnce(onProvider);
+    const deps = buildFakeDeps();
+    deps.references = {
+      docs: [
+        {
+          id: 'std',
+          title: 'Std',
+          source: 'docs/std.md',
+          kind: 'repo',
+          placement: 'on_demand',
+          content: '# Std',
+          byte_length: 5,
+          content_sha256: 'abc',
+          headings: ['Std'],
+          truncated: false,
+          cache_status: 'hit',
+        },
+      ],
+      inline_docs: [],
+      on_demand_docs: [],
+      total_inline_bytes: 0,
+      total_bytes: 5,
+      corpus_digest: 'digest',
+      cache_dir: '/tmp',
+      cache_stats: { hits: 1, revalidated: 0, misses: 0, stale_fallbacks: 0, uncached: 0 },
+      warnings: [],
+    };
+    await runAgent({ ...baseInput(), deps });
+    expect(onProvider.completeCalls[0]!.tools.some((t) => t.name === 'read_reference_doc')).toBe(
+      true,
+    );
+  });
+
   it('executes a tool_call, pushes a canonical tool message, and continues to the next turn', async () => {
     const input = baseInput();
     const provider = new FakeProvider([
@@ -574,6 +616,38 @@ describe('runAgent', () => {
     expect(result.perModelCost[0]!.inputTokens).toBe(200_000);
     expect(result.perModelCost[0]!.cacheCreationTokens).toBe(100_000);
     expect(result.perModelCost[0]!.cacheReadTokens).toBe(600_000);
+  });
+
+  it('prices Anthropic 1h cache writes at 2x base input in perModelCost and costUsd', async () => {
+    const provider = new FakeProvider(
+      [
+        makeResponse({
+          text: 'fine',
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 100_000,
+            output_tokens: 10_000,
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 600_000,
+            cache_read_tokens: 500_000,
+          },
+        }),
+      ],
+      'anthropic',
+    );
+    vi.mocked(llmIndex.createProvider).mockReturnValue(provider);
+
+    const result = await runAgent({
+      ...baseInput(),
+      maxInputTokens: 2_000_000,
+      model: 'claude-sonnet-4-6',
+    });
+
+    expect(result.perModelCost[0]!.cacheCreationTokens).toBe(1_000_000);
+    expect(result.perModelCost[0]!.cacheCreation1hTokens).toBe(600_000);
+    // Sonnet: 100K*$3/M ($0.30) + 10K*$15/M ($0.15) + 400K*$3.75/M ($1.50)
+    //       + 600K*$6/M ($3.60) + 500K*$0.30/M ($0.15) = $5.70
+    expect(result.costUsd).toBeCloseTo(5.7, 4);
   });
 
   it('exits with `aborted` when the abortController is fired before the first turn', async () => {

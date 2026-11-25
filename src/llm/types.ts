@@ -59,8 +59,15 @@ export interface CompleteOptions {
   system: string;
   temperature?: number;
   abortSignal?: AbortSignal;
+  /** Anthropic Messages API controls. Ignored by non-Anthropic providers. */
+  anthropic?: AnthropicCompleteOptions;
   /** OpenAI Responses API controls. Ignored by non-OpenAI providers. */
   openai?: OpenAICompleteOptions;
+}
+
+export interface AnthropicCompleteOptions {
+  /** Prompt-cache TTL for the static prefix (`'5m'` default, `'1h'` for extended cross-PR caching). */
+  prompt_cache_ttl?: '5m' | '1h';
 }
 
 interface OpenAICompleteOptionsBase {
@@ -100,10 +107,17 @@ export interface CanonicalUsage {
    */
   cache_read_tokens?: number;
   /**
-   * Tokens written into the prompt cache. Both providers can report these;
-   * pricing depends on the selected model.
+   * Total tokens written into the prompt cache across all TTLs (both the default
+   * 5-minute rate and any `cache_creation_1h_tokens` subset). Both providers can
+   * report these; pricing depends on the selected model and TTL bucket.
    */
   cache_creation_tokens?: number;
+  /**
+   * Subset of `cache_creation_tokens` written at Anthropic's 1-hour ephemeral
+   * TTL (`2×` base input rate). Subtracted from `cache_creation_tokens` when
+   * pricing the remaining 5-minute cache writes (`1.25×` base input rate).
+   */
+  cache_creation_1h_tokens?: number;
   /**
    * Hidden chain-of-thought tokens billed as output for OpenAI reasoning models.
    * Already included in `output_tokens` — surfaced separately for telemetry,

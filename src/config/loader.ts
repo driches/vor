@@ -20,12 +20,18 @@ export function deepMerge<T>(base: T, override: unknown): T {
   return result as T;
 }
 
+export interface LoadedConfigWithRaw {
+  config: ReviewConfig;
+  raw: PartialConfig;
+}
+
 /**
- * Parse YAML text and merge with defaults. On schema errors, log and return defaults.
+ * Parse YAML text and return both the defaulted config and the validated raw
+ * user overrides prior to default merging.
  */
-export function loadConfigFromString(yaml: string | null | undefined): ReviewConfig {
+export function loadConfigWithRawFromString(yaml: string | null | undefined): LoadedConfigWithRaw {
   if (!yaml || yaml.trim().length === 0) {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 
   let parsed: unknown;
@@ -33,27 +39,38 @@ export function loadConfigFromString(yaml: string | null | undefined): ReviewCon
     parsed = parseYaml(yaml);
   } catch (err) {
     void logger.warn(`Failed to parse .vor.yml: ${(err as Error).message}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 
   if (parsed == null || typeof parsed !== 'object') {
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 
   const result = partialConfigSchema.safeParse(parsed);
   if (!result.success) {
     const errMsg = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     void logger.warn(`.vor.yml validation failed: ${errMsg}. Using defaults.`);
-    return DEFAULT_CONFIG;
+    return { config: DEFAULT_CONFIG, raw: {} };
   }
 
-  return deepMerge(DEFAULT_CONFIG, result.data as PartialConfig);
+  return {
+    config: deepMerge(DEFAULT_CONFIG, result.data),
+    raw: result.data,
+  };
 }
 
 /**
- * Reject invalid YAML hard (used internally for tests that want strict failure).
+ * Parse YAML text and merge with defaults. On schema errors, log and return defaults.
  */
-export function loadConfigStrict(yaml: string): ReviewConfig {
+export function loadConfigFromString(yaml: string | null | undefined): ReviewConfig {
+  return loadConfigWithRawFromString(yaml).config;
+}
+
+/**
+ * Reject invalid YAML hard while returning both the merged config and the
+ * validated raw partial overrides.
+ */
+export function loadConfigStrictWithRaw(yaml: string): LoadedConfigWithRaw {
   let parsed: unknown;
   try {
     parsed = parseYaml(yaml);
@@ -65,5 +82,15 @@ export function loadConfigStrict(yaml: string): ReviewConfig {
   if (!result.success) {
     throw new ConfigError(`Config validation failed: ${result.error.message}`);
   }
-  return deepMerge(DEFAULT_CONFIG, result.data as PartialConfig);
+  return {
+    config: deepMerge(DEFAULT_CONFIG, result.data),
+    raw: result.data,
+  };
+}
+
+/**
+ * Reject invalid YAML hard (used internally for tests that want strict failure).
+ */
+export function loadConfigStrict(yaml: string): ReviewConfig {
+  return loadConfigStrictWithRaw(yaml).config;
 }

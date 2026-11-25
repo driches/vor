@@ -67,9 +67,10 @@ function buildSource(f: ScanFinding): FindingSource {
     case 'debris':
     case 'migration':
     case 'dependency':
+    case 'architecture':
       // Deterministic custom scanners with no CVE/GHSA alias — `rule_id`
       // carries the rule attribution; the kind-specific detail (snippet,
-      // statement, dependency spec) lives in the finding's evidence.
+      // statement, dependency spec, architecture boundary) lives in evidence.
       return { kind: 'scanner', scanner: f.scanner, rule_id: f.rule_id };
   }
 }

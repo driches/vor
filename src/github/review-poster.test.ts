@@ -53,6 +53,16 @@ describe('renderCommentBody', () => {
     expect(renderCommentBody(baseComment({ severity: 'critical' }))).toContain('CRITICAL');
     expect(renderCommentBody(baseComment({ severity: 'nit' }))).toContain('NIT');
   });
+
+  it('renders architecture scanner provenance tag', () => {
+    const body = renderCommentBody(
+      baseComment({
+        category: 'architecture',
+        source: { kind: 'scanner', scanner: 'architecture', rule_id: 'arch:layer:domain-to-infra' },
+      }),
+    );
+    expect(body).toContain('_via architecture scan_');
+  });
 });
 
 describe('postReview', () => {

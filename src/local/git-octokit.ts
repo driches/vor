@@ -13,6 +13,10 @@ import type { Octokit } from '@octokit/rest';
 import type { ChangedFile } from './git.js';
 
 export interface FakeOctokitOptions {
+  /** Expected repository owner for `repos.getContent`; mismatched owners are rejected. */
+  owner?: string;
+  /** Expected repository name for `repos.getContent`; mismatched repos are rejected. */
+  repo?: string;
   baseSha: string;
   /** Head identifier surfaced as the PR head SHA. A sentinel in working-tree mode. */
   headSha: string;
@@ -113,7 +117,15 @@ export function buildLocalOctokit(opts: FakeOctokitOptions): Octokit {
         createReview: async () => ({ data: { id: 0 } }),
       },
       repos: {
-        getContent: async (args: { path: string; ref?: string }) => {
+        getContent: async (args: { owner?: string; repo?: string; path: string; ref?: string }) => {
+          if (
+            (opts.owner !== undefined && args.owner !== undefined && args.owner !== opts.owner) ||
+            (opts.repo !== undefined && args.repo !== undefined && args.repo !== opts.repo)
+          ) {
+            throw new Error(
+              `local FakeOctokit cannot serve cross-repository content for ${args.owner ?? '?'}/${args.repo ?? '?'} (scoped to ${opts.owner ?? '*'}/${opts.repo ?? '*'}).`,
+            );
+          }
           const ref = args.ref ?? opts.headSha;
           const bytes = opts.resolveBytes(args.path, ref);
           if (bytes === null) {

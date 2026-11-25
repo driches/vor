@@ -53,7 +53,8 @@ export type ScannerId =
   | 'debris'
   | 'migration-safety'
   | 'dependency-hygiene'
-  | 'image-ocr';
+  | 'image-ocr'
+  | 'architecture';
 
 /**
  * Provenance of a finding. AI-originated comments use `{ kind: 'agent', model }`;

@@ -10,6 +10,8 @@
  *   - 'auto':         working-tree when the tree is dirty, else range.
  */
 
+import type { Octokit } from '@octokit/rest';
+import { createOctokit } from '../github/client.js';
 import { runOrchestrator } from '../orchestrator.js';
 import { logger } from '../util/logger.js';
 import {
@@ -60,6 +62,8 @@ export class ReviewSkippedError extends Error {
 export interface RunLocalReviewDeps {
   /** Override for tests so no real LLM/orchestrator call happens. */
   runOrchestratorImpl?: typeof runOrchestrator;
+  /** Override for tests checking cross-repository reference client wiring. */
+  referenceOctokitFactory?: (opts: { auth: string }) => Octokit | null;
   /**
    * Path → synthetic content overrides for `repos.getContent` (e.g. inject a
    * different `.vor.yml` to A/B a flag). Preserves the behavior of
@@ -159,6 +163,8 @@ export async function runLocalReview(
   // mode reviews HEAD itself, so the default ref is correct there.
   const metaRef = resolved === 'range' ? headSha : 'HEAD';
   const octokit = buildLocalOctokit({
+    owner: 'local',
+    repo: 'local',
     baseSha,
     headSha,
     files,
@@ -202,6 +208,8 @@ export async function runLocalReview(
     }
   }
 
+  const realGithubToken = (opts.githubToken ?? process.env.GITHUB_TOKEN ?? '').trim();
+
   let result;
   try {
     result = await runner({
@@ -210,14 +218,18 @@ export async function runLocalReview(
       pull_number: 0,
       anthropic_api_key: opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY?.trim() ?? '',
       openai_api_key: opts.openaiApiKey ?? process.env.OPENAI_API_KEY?.trim() ?? '',
-      // Unused by the FakeOctokit, but the orchestrator passes it to
-      // logger.setSecret(); a non-empty placeholder keeps that contract happy.
-      github_token: 'local-review-placeholder-token',
+      // Forward any configured GitHub token (registered + masked by the
+      // orchestrator) so cross-repo `github:` reference sources can hit the
+      // real GitHub API instead of the local FakeOctokit. Keep a non-empty
+      // placeholder otherwise to satisfy `logger.setSecret` / inputs contracts.
+      github_token: realGithubToken || 'local-review-placeholder-token',
       ...(opts.model !== undefined ? { model_override: opts.model } : {}),
       config_path: configPath,
       dry_run: true,
       workspace_dir: orchestratorWorkspace,
       octokitFactory: () => octokit,
+      referenceOctokitFactory:
+        deps.referenceOctokitFactory ?? (realGithubToken ? createOctokit : () => null),
     });
   } finally {
     cleanupWorktree?.();

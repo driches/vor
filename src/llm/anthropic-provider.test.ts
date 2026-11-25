@@ -540,6 +540,53 @@ describe('anthropicResponseToCanonical', () => {
     );
     expect(result.usage.cache_read_tokens).toBeUndefined();
     expect(result.usage.cache_creation_tokens).toBeUndefined();
+    expect(result.usage.cache_creation_1h_tokens).toBeUndefined();
+  });
+
+  it('extracts mixed 5m and 1h cache creation tokens from usage.cache_creation', () => {
+    // `@anthropic-ai/sdk@0.39.0`'s `Usage` interface omits Anthropic's `cache_creation` breakdown.
+    const mixedUsage = {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_creation_input_tokens: 1000,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 400,
+        ephemeral_1h_input_tokens: 600,
+      },
+    } as unknown as Anthropic.Usage;
+    const result = anthropicResponseToCanonical(fakeMessage({ usage: mixedUsage }));
+    expect(result.usage.cache_creation_tokens).toBe(1000);
+    expect(result.usage.cache_creation_1h_tokens).toBe(600);
+  });
+
+  it('derives total cache creation from TTL breakdown when aggregate is null and omits zero 1h', () => {
+    // `@anthropic-ai/sdk@0.39.0`'s `Usage` interface omits Anthropic's `cache_creation` breakdown.
+    const derivedUsage = {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_creation_input_tokens: null,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 300,
+        ephemeral_1h_input_tokens: 700,
+      },
+    } as unknown as Anthropic.Usage;
+    const derived = anthropicResponseToCanonical(fakeMessage({ usage: derivedUsage }));
+    expect(derived.usage.cache_creation_tokens).toBe(1000);
+    expect(derived.usage.cache_creation_1h_tokens).toBe(700);
+
+    // `@anthropic-ai/sdk@0.39.0`'s `Usage` interface omits Anthropic's `cache_creation` breakdown.
+    const zero1hUsage = {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_creation_input_tokens: 400,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 400,
+        ephemeral_1h_input_tokens: 0,
+      },
+    } as unknown as Anthropic.Usage;
+    const zero1h = anthropicResponseToCanonical(fakeMessage({ usage: zero1hUsage }));
+    expect(zero1h.usage.cache_creation_tokens).toBe(400);
+    expect(zero1h.usage.cache_creation_1h_tokens).toBeUndefined();
   });
 
   it('leaves provider_state undefined (Anthropic does not need a replay blob)', () => {
@@ -807,6 +854,155 @@ describe('AnthropicProvider', () => {
         system: 's',
       });
       expect(createSpy.mock.calls[0]![0].max_tokens).toBe(4096);
+    });
+
+    it('sets tool and system cache_control ttl to 1h only when anthropic.prompt_cache_ttl is 1h', async () => {
+      createSpy.mockResolvedValue({
+        id: 'msg_test',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+      const provider = new AnthropicProvider('sk-test');
+      const tools: CanonicalTool[] = [
+        {
+          name: 'get_pr_diff',
+          description: 'diff',
+          input_schema: { type: 'object', properties: {} },
+        },
+      ];
+      await provider.complete([{ role: 'user', content: 'go' }], tools, {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 4096,
+        system: 's',
+        anthropic: { prompt_cache_ttl: '5m' },
+      });
+      expect(createSpy.mock.calls[0]![0].tools[0].cache_control).toEqual({ type: 'ephemeral' });
+      expect(createSpy.mock.calls[0]![0].system[0].cache_control).toEqual({ type: 'ephemeral' });
+
+      await provider.complete([{ role: 'user', content: 'go' }], tools, {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 4096,
+        system: 's',
+        anthropic: { prompt_cache_ttl: '1h' },
+      });
+      expect(createSpy.mock.calls[1]![0].tools[0].cache_control).toEqual({
+        type: 'ephemeral',
+        ttl: '1h',
+      });
+      expect(createSpy.mock.calls[1]![0].system[0].cache_control).toEqual({
+        type: 'ephemeral',
+        ttl: '1h',
+      });
+    });
+
+    it('attributes 1h cache writes accurately across turn-1 fallback and mixed multi-turn responses', async () => {
+      const provider = new AnthropicProvider('sk-test');
+      const tools: CanonicalTool[] = [
+        {
+          name: 'get_pr_diff',
+          description: 'diff',
+          input_schema: { type: 'object', properties: {} },
+        },
+      ];
+
+      // Turn 1 (no tool_result user message yet): all cache breakpoints are 1h,
+      // so missing `usage.cache_creation` breakdown falls back to 1h.
+      createSpy.mockResolvedValueOnce({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_creation_input_tokens: 5000,
+        },
+      });
+      const turn1 = await provider.complete([{ role: 'user', content: 'go' }], tools, {
+        model: 'claude-sonnet-4-6',
+        maxOutputTokens: 4096,
+        system: 's',
+        anthropic: { prompt_cache_ttl: '1h' },
+      });
+      expect(turn1.usage.cache_creation_tokens).toBe(5000);
+      expect(turn1.usage.cache_creation_1h_tokens).toBe(5000);
+
+      // Turn 2+ with explicit breakdown: preserves split between 5m message
+      // breakpoint and 1h system/tool prefix.
+      createSpy.mockResolvedValueOnce({
+        id: 'msg_2',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_creation_input_tokens: 1000,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 400,
+            ephemeral_1h_input_tokens: 600,
+          },
+        },
+      });
+      const mixedTurn = await provider.complete(
+        [
+          { role: 'user', content: 'go' },
+          { role: 'assistant', tool_calls: [{ id: 't1', name: 'get_pr_diff', arguments: {} }] },
+          { role: 'tool', tool_call_id: 't1', content: 'diff' },
+        ],
+        tools,
+        {
+          model: 'claude-sonnet-4-6',
+          maxOutputTokens: 4096,
+          system: 's',
+          anthropic: { prompt_cache_ttl: '1h' },
+        },
+      );
+      expect(mixedTurn.usage.cache_creation_tokens).toBe(1000);
+      expect(mixedTurn.usage.cache_creation_1h_tokens).toBe(600);
+
+      // Turn 2+ without breakdown: do not misattribute 5m tool_result writes to 1h.
+      createSpy.mockResolvedValueOnce({
+        id: 'msg_3',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-6',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_creation_input_tokens: 1000,
+        },
+      });
+      const unsplitTurn = await provider.complete(
+        [
+          { role: 'user', content: 'go' },
+          { role: 'assistant', tool_calls: [{ id: 't1', name: 'get_pr_diff', arguments: {} }] },
+          { role: 'tool', tool_call_id: 't1', content: 'diff' },
+        ],
+        tools,
+        {
+          model: 'claude-sonnet-4-6',
+          maxOutputTokens: 4096,
+          system: 's',
+          anthropic: { prompt_cache_ttl: '1h' },
+        },
+      );
+      expect(unsplitTurn.usage.cache_creation_tokens).toBe(1000);
+      expect(unsplitTurn.usage.cache_creation_1h_tokens).toBeUndefined();
     });
   });
 });

@@ -316,6 +316,38 @@ describe('evalRun', () => {
     expect(result.cost.cost_usd).toBeCloseTo(0.0006, 6);
   });
 
+  it('bills Anthropic 1h cache writes at 2x input and preserves 1h bucket in eval cost', async () => {
+    const minimalCase: LoadedCase = {
+      case_id: 'anthropic-1h-cache',
+      files: [{ path: 'src/empty.ts', content: '// empty\n' }],
+      beforeFiles: [{ path: 'src/empty.ts', content: '\n' }],
+      truths: [],
+    };
+    const script: CompleteResponse[] = [
+      {
+        text: 'done',
+        tool_calls: [],
+        stop_reason: 'end_turn',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_tokens: 1000,
+          cache_creation_1h_tokens: 600,
+        },
+      },
+    ];
+    const result = await evalRun({
+      case: minimalCase,
+      config: { ...DEFAULT_CONFIG, model: 'claude-sonnet-4-6' },
+      apiKey: 'sk-ant-test',
+      agentScript: script,
+    });
+    expect(result.cost.cache_creation_input_tokens).toBe(1000);
+    expect(result.cost.cache_creation_1h_input_tokens).toBe(600);
+    // Sonnet: 100*$3/M (0.0003) + 50*$15/M (0.00075) + 400*$3.75/M (0.0015) + 600*$6/M (0.0036) = $0.00615
+    expect(result.cost.cost_usd).toBeCloseTo(0.00615, 6);
+  });
+
   it('force-disables worker_delegation in the sandboxed config so eval runs never hit real Anthropic SDK (Codex P2 #3300812876)', async () => {
     // Case configs that opt into `experimental.worker_delegation.enabled`
     // would otherwise cause runAgent to construct a real

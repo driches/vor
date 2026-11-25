@@ -143,4 +143,34 @@ describe('buildLocalOctokit getContent', () => {
     });
     expect(got).toBeNull();
   });
+
+  it('rejects cross-repository getContent calls when scoped to owner/repo', async () => {
+    const scoped = buildLocalOctokit({
+      owner: 'local',
+      repo: 'local',
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      files: FILES,
+      diff: DIFF,
+      prMeta: { title: 't', body: '', author: 'me', additions: 2, deletions: 1 },
+      resolveBytes: () => Buffer.from('# Local Style\n', 'utf-8'),
+    });
+
+    const localRes = await scoped.rest.repos.getContent({
+      owner: 'local',
+      repo: 'local',
+      path: 'docs/style.md',
+      ref: 'b'.repeat(40),
+    });
+    expect((localRes.data as { encoding?: string }).encoding).toBe('base64');
+
+    await expect(
+      scoped.rest.repos.getContent({
+        owner: 'org',
+        repo: 'standards',
+        path: 'docs/style.md',
+        ref: 'HEAD',
+      }),
+    ).rejects.toThrow(/cross-repository content/);
+  });
 });

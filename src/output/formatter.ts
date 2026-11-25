@@ -109,6 +109,8 @@ export function renderSummary(input: SummaryRenderInput): RenderedSummary {
     sections.push(formatCountsLine(counts));
     const scannerLine = formatScannerCountsLine(input.keptComments);
     if (scannerLine) sections.push(scannerLine);
+    const archLine = formatArchitectureCountsLine(input.keptComments);
+    if (archLine) sections.push(archLine);
   } else if (summary && summary.assessment !== 'approve') {
     // When summary is missing we already emit the prominent missing-summary
     // warning above; don't pile on with a redundant "no inline comments" note.
@@ -294,7 +296,7 @@ function capitalizeSeverity(s: Severity): string {
 function formatScannerCountsLine(comments: readonly PostedComment[]): string | null {
   const byScanner = new Map<ScannerId, number>();
   for (const c of comments) {
-    if (c.source?.kind !== 'scanner') continue;
+    if (c.source?.kind !== 'scanner' || c.source.scanner === 'architecture') continue;
     byScanner.set(c.source.scanner, (byScanner.get(c.source.scanner) ?? 0) + 1);
   }
   const total = Array.from(byScanner.values()).reduce((a, b) => a + b, 0);
@@ -309,6 +311,7 @@ function formatScannerCountsLine(comments: readonly PostedComment[]): string | n
     ['debris', 'debris finding', 'debris findings'],
     ['migration-safety', 'migration risk', 'migration risks'],
     ['dependency-hygiene', 'dependency issue', 'dependency issues'],
+    ['image-ocr', 'image OCR finding', 'image OCR findings'],
   ];
   const breakdown = labels
     .map(([id, singular, plural]) => {
@@ -358,4 +361,20 @@ function formatScannerFailures(failures: ScannerStatus['failures']): string | nu
 
 function uniqueSkippedTools(skipped: readonly ScanSkip[]): string[] {
   return [...new Set(skipped.map((s) => s.name))];
+}
+
+/**
+ * Returns an "Architecture:" sub-line summarizing deterministic architecture
+ * scanner violations, or `null` when none are present.
+ */
+function formatArchitectureCountsLine(comments: readonly PostedComment[]): string | null {
+  let count = 0;
+  for (const c of comments) {
+    if (c.source?.kind === 'scanner' && c.source.scanner === 'architecture') {
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const noun = count === 1 ? 'violation' : 'violations';
+  return `**Architecture:** ${count} ${noun} from architecture scan`;
 }

@@ -13,25 +13,67 @@ export interface ModelPricing {
   /** $ per million output tokens. */
   output: number;
   /**
-   * $ per million input tokens written to the prompt cache. Some providers
-   * and model families do not bill or report this separately.
+   * $ per million input tokens written to the prompt cache (5-minute TTL on
+   * Anthropic). Some providers and model families do not bill or report this
+   * separately.
    */
   cache_creation?: number;
+  /**
+   * $ per million input tokens written to the prompt cache with a 1-hour TTL
+   * (Anthropic `2×` base input rate). Falls back to `cache_creation` when omitted.
+   */
+  cache_creation_1h?: number;
   /** $ per million input tokens read from the prompt cache. */
   cache_read?: number;
 }
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-  'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.3 },
+  'claude-sonnet-4-6': {
+    input: 3,
+    output: 15,
+    cache_creation: 3.75,
+    cache_creation_1h: 6,
+    cache_read: 0.3,
+  },
   // Opus 4.5, 4.6, and 4.7 share the lower-tier Opus pricing that Anthropic
   // introduced starting with 4.5. Opus 4.1 retains the original higher Opus
   // tier and is kept here so legacy configs still resolve to real pricing
   // instead of falling through to the Sonnet fallback.
-  'claude-opus-4-7': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  'claude-opus-4-6': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  'claude-opus-4-5': { input: 5, output: 25, cache_creation: 6.25, cache_read: 0.5 },
-  'claude-opus-4-1': { input: 15, output: 75, cache_creation: 18.75, cache_read: 1.5 },
-  'claude-haiku-4-5': { input: 1, output: 5, cache_creation: 1.25, cache_read: 0.1 },
+  'claude-opus-4-7': {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5,
+  },
+  'claude-opus-4-6': {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5,
+  },
+  'claude-opus-4-5': {
+    input: 5,
+    output: 25,
+    cache_creation: 6.25,
+    cache_creation_1h: 10,
+    cache_read: 0.5,
+  },
+  'claude-opus-4-1': {
+    input: 15,
+    output: 75,
+    cache_creation: 18.75,
+    cache_creation_1h: 30,
+    cache_read: 1.5,
+  },
+  'claude-haiku-4-5': {
+    input: 1,
+    output: 5,
+    cache_creation: 1.25,
+    cache_creation_1h: 2,
+    cache_read: 0.1,
+  },
   // OpenAI rates from the published price list as of 2026-08. Verify before
   // each release; published rates shift.
   'gpt-4.1': { input: 2, output: 8, cache_read: 0.5 },
@@ -82,6 +124,7 @@ const SONNET_FALLBACK_PRICING: ModelPricing = {
   input: 3,
   output: 15,
   cache_creation: 3.75,
+  cache_creation_1h: 6,
   cache_read: 0.3,
 };
 
@@ -100,19 +143,25 @@ export function costFromUsage(
   usage: {
     inputTokens?: number;
     outputTokens?: number;
+    /** Total cache write tokens across TTLs (5m + 1h). */
     cacheCreationTokens?: number;
+    /** Subset of `cacheCreationTokens` written at Anthropic's 1h TTL (`2×` rate). */
+    cacheCreation1hTokens?: number;
     cacheReadTokens?: number;
   },
 ): number {
   const pricing =
     pricingForModel(model) ?? pricingForModel('claude-sonnet-4-6') ?? SONNET_FALLBACK_PRICING;
-  // `cache_creation` / `cache_read` are optional on `ModelPricing` because
-  // Cache rates are model-dependent. Guard each with `?? 0` so a model that
+  const create1h = Math.max(0, usage.cacheCreation1hTokens ?? 0);
+  const create5m = Math.max(0, (usage.cacheCreationTokens ?? 0) - create1h);
+  // `cache_creation` / `cache_creation_1h` / `cache_read` are optional on `ModelPricing`
+  // because cache rates are model-dependent. Guard each with `?? 0` so a model that
   // emits no separately-priced cache bucket contributes $0 instead of `NaN`.
   return (
     ((usage.inputTokens ?? 0) * pricing.input) / 1_000_000 +
     ((usage.outputTokens ?? 0) * pricing.output) / 1_000_000 +
-    ((usage.cacheCreationTokens ?? 0) * (pricing.cache_creation ?? 0)) / 1_000_000 +
+    (create5m * (pricing.cache_creation ?? 0)) / 1_000_000 +
+    (create1h * (pricing.cache_creation_1h ?? pricing.cache_creation ?? 0)) / 1_000_000 +
     ((usage.cacheReadTokens ?? 0) * (pricing.cache_read ?? 0)) / 1_000_000
   );
 }

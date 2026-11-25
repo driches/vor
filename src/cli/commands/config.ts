@@ -2,9 +2,15 @@ import type { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
+import {
+  isSafeRelativePath,
+  parseExternalArchitectureYamlStrict,
+  validateArchitectureRules,
+} from '../../architecture/loader.js';
 import { loadConfigFromString, loadConfigStrict } from '../../config/loader.js';
 import type { ReviewConfig } from '../../config/types.js';
 import { unsafeReasoningEffortWarning } from '../../config/warnings.js';
+import { ConfigError } from '../../util/errors.js';
 import { color, out, status } from '../output.js';
 import { workspace } from './shared.js';
 
@@ -52,8 +58,29 @@ export function registerConfig(program: Command): void {
         return;
       }
       try {
-        const resolved = loadConfigStrict(raw);
-        warnOnUnsafeOverrides(resolved);
+        const cfg = loadConfigStrict(raw);
+        warnOnUnsafeOverrides(cfg);
+        if (cfg.architecture.rules) {
+          const issues = validateArchitectureRules(cfg.architecture.rules);
+          if (issues.length > 0) {
+            throw new ConfigError(`architecture.rules invalid: ${issues.join('; ')}`);
+          }
+        }
+        if (cfg.architecture.file) {
+          const ws = workspace();
+          if (!isSafeRelativePath(ws, cfg.architecture.file)) {
+            throw new ConfigError(
+              `architecture.file '${cfg.architecture.file}' escapes workspace root.`,
+            );
+          }
+          const archRaw = readConfigFile(cfg.architecture.file);
+          if (archRaw === null) {
+            throw new ConfigError(
+              `Referenced architecture.file '${cfg.architecture.file}' was not found.`,
+            );
+          }
+          parseExternalArchitectureYamlStrict(archRaw);
+        }
         status(color('blue', `${flags.config} is valid.`));
       } catch (err) {
         status(color('red', `${flags.config} is invalid: ${(err as Error).message}`));

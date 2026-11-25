@@ -8,6 +8,7 @@ describe('pricingForModel', () => {
     expect(p!.input).toBe(3);
     expect(p!.output).toBe(15);
     expect(p!.cache_creation).toBe(3.75);
+    expect(p!.cache_creation_1h).toBe(6);
     expect(p!.cache_read).toBe(0.3);
   });
 
@@ -17,6 +18,7 @@ describe('pricingForModel', () => {
     expect(p!.input).toBe(1);
     expect(p!.output).toBe(5);
     expect(p!.cache_creation).toBe(1.25);
+    expect(p!.cache_creation_1h).toBe(2);
     expect(p!.cache_read).toBe(0.1);
   });
 
@@ -29,6 +31,7 @@ describe('pricingForModel', () => {
     expect(p47!.input).toBe(5);
     expect(p47!.output).toBe(25);
     expect(p47!.cache_creation).toBe(6.25);
+    expect(p47!.cache_creation_1h).toBe(10);
     expect(p47!.cache_read).toBe(0.5);
   });
 
@@ -37,6 +40,7 @@ describe('pricingForModel', () => {
     expect(p41!.input).toBe(15);
     expect(p41!.output).toBe(75);
     expect(p41!.cache_creation).toBe(18.75);
+    expect(p41!.cache_creation_1h).toBe(30);
     expect(p41!.cache_read).toBe(1.5);
   });
 
@@ -240,5 +244,27 @@ describe('costFromUsage', () => {
       cacheReadTokens: 100_000,
     });
     expect(cost).toBeCloseTo(0.54, 4);
+  });
+
+  it('prices 1h Claude cache writes at 2x input and splits mixed 5m/1h writes', () => {
+    const pure1h = costFromUsage('claude-sonnet-4-6', {
+      cacheCreationTokens: 1_000_000,
+      cacheCreation1hTokens: 1_000_000,
+    });
+    expect(pure1h).toBeCloseTo(6, 4);
+
+    // 400K @ 5m ($3.75/M = $1.50) + 600K @ 1h ($6/M = $3.60) = $5.10
+    const mixed = costFromUsage('claude-sonnet-4-6', {
+      cacheCreationTokens: 1_000_000,
+      cacheCreation1hTokens: 600_000,
+    });
+    expect(mixed).toBeCloseTo(5.1, 4);
+
+    // Unknown model inherits Sonnet 2x fallback for 1h writes
+    const fallback1h = costFromUsage('claude-imaginary-99', {
+      cacheCreationTokens: 1_000_000,
+      cacheCreation1hTokens: 1_000_000,
+    });
+    expect(fallback1h).toBeCloseTo(6, 4);
   });
 });

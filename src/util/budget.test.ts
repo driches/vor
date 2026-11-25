@@ -144,4 +144,44 @@ describe('Budget', () => {
     expect(after.inputTokens).toBe(before.inputTokens);
     expect(after.outputTokens).toBe(before.outputTokens);
   });
+
+  it('tracks 1h cache creation tokens without double-counting against maxInputTokens', () => {
+    const b = new Budget(limits);
+    // Turn 1: explicit normalized fields
+    b.addUsage(SONNET, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_input_tokens: 300,
+      cache_creation_1h_input_tokens: 200,
+    });
+    // Turn 2: raw Anthropic SDK nested `cache_creation` breakdown
+    b.addUsage(HAIKU, {
+      input_tokens: 50,
+      output_tokens: 10,
+      cache_creation_input_tokens: 250,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 100,
+        ephemeral_1h_input_tokens: 150,
+      },
+    });
+
+    const snap = b.snapshot();
+    expect(snap.cacheCreationTokens).toBe(550);
+    expect(snap.cacheCreation1hTokens).toBe(350);
+
+    const sonnet = b.snapshotByModel().find((e) => e.model === SONNET);
+    expect(sonnet?.usage.cacheCreationTokens).toBe(300);
+    expect(sonnet?.usage.cacheCreation1hTokens).toBe(200);
+
+    const haiku = b.snapshotByModel().find((e) => e.model === HAIKU);
+    expect(haiku?.usage.cacheCreationTokens).toBe(250);
+    expect(haiku?.usage.cacheCreation1hTokens).toBe(150);
+
+    // Total billable so far: 100 + 300 + 50 + 250 = 700 (not double-counting 1h!).
+    // Adding 300 input fits exact 1000 cap; adding 1 more exceeds it.
+    b.addUsage(SONNET, { input_tokens: 300, output_tokens: 0 });
+    expect(() => b.addUsage(SONNET, { input_tokens: 1, output_tokens: 0 })).toThrowError(
+      BudgetError,
+    );
+  });
 });
