@@ -1,0 +1,41 @@
+architecture:
+  enabled: true
+  file: .vor/architecture.yml
+
+references:
+  enabled: true
+  sources:
+    - id: knowledge-index
+      title: Vor Knowledge Index
+      path: knowledge/index.md
+      mode: inline
+    - id: knowledge-overview
+      title: Vor Overview
+      path: knowledge/overview.md
+      mode: on_demand
+    - id: knowledge-architecture
+      title: Review Loop and Repo Structure
+      path: knowledge/architecture.md
+      mode: on_demand
+    - id: knowledge-scanners
+      title: Deterministic Scanners and Finding Pipeline
+      path: knowledge/scanners.md
+      mode: on_demand
+    - id: knowledge-standards-and-references
+      title: Architecture Standards and Reference Caching
+      path: knowledge/standards-and-references.md
+      mode: on_demand
+    - id: knowledge-tech-stack
+      title: Tech Stack and Key Dependencies
+      path: knowledge/tech-stack.md
+      mode: on_demand
+    - id: knowledge-conventions
+      title: Contribution Conventions and Workflows
+      path: knowledge/conventions.md
+      mode: on_demand
+  cache:
+    enabled: true
+  prompt_cache:
+    enabled: true
+    anthropic_ttl: 5m
+    auto_openai_cache_key: true

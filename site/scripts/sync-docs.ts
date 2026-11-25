@@ -54,6 +54,20 @@ const PAGES: Page[] = [
       'CVE scanning, secrets detection, SAST, image OCR, and the security-ignore file format.',
   },
   {
+    src: 'docs/architecture-standards.md',
+    out: 'architecture-standards.md',
+    title: 'Architecture standards',
+    description:
+      'Enforce hexagonal, DDD, clean, layered, modular-monolith, or custom boundaries on PRs and across repos.',
+  },
+  {
+    src: 'docs/references.md',
+    out: 'references.md',
+    title: 'Reference documentation',
+    description:
+      'Ingest ADRs, style guides, and runbooks with persistent disk/ETag caching and LLM prompt-cache optimization.',
+  },
+  {
     src: 'docs/triggers.md',
     out: 'triggers.md',
     title: 'Trigger options',

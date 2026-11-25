@@ -4,13 +4,13 @@
 
 1. The action fetches PR metadata, the file list, and the full unified diff via the GitHub API.
 2. It computes **reviewable line ranges** for each file — the added lines plus context lines inside diff hunks.
-3. It loads `.vor.yml` and any convention files listed in `context.include` (CLAUDE.md, AGENTS.md, etc.) from the PR HEAD.
-4. It builds a system prompt that includes the repo's conventions, severity calibration, and any `prompt.additions`.
+3. It loads `.vor.yml` (plus optional `.vor/architecture.yml`), any convention files listed in `context.include` (CLAUDE.md, AGENTS.md, etc.) from PR HEAD, and configured `references.sources` via the two-layer disk/ETag + prompt cache.
+4. It builds a byte-deterministic system prompt that includes the repo's conventions, severity calibration, configured architecture rules/principles, inline reference docs, and any `prompt.additions`.
 5. It runs a **cross-file impact pre-pass** (blast radius): for each public symbol the PR adds or modifies, grep the checkout for references elsewhere in the codebase. The result is folded into the agent's prompt so it can check call-site compatibility before posting a breaking-change finding.
-6. The **agent loop** runs with 9 custom tools and no built-in filesystem or shell access:
-   - Read: `get_pr_metadata`, `list_changed_files`, `get_pr_diff`, `read_file_at_ref`, `grep_repo_at_ref`, `read_repo_context_file`
+6. The **agent loop** runs with 9 base custom tools (and up to 3 conditional tools — `describe_image_at_ref`, `worker_check_usage_claim`, and `read_reference_doc` for on-demand/overflow reference docs) with no built-in filesystem or shell access:
+   - Read: `get_pr_metadata`, `list_changed_files`, `get_pr_diff`, `read_file_at_ref`, `grep_repo_at_ref`, `read_repo_context_file` (plus conditional `describe_image_at_ref`, `worker_check_usage_claim`, `read_reference_doc`)
    - Write: `post_inline_comment` (validated), `post_summary` (terminates the loop), `skip_file`
-7. In parallel, the security scanners run: `dependency-cve` queries OSV.dev for vulnerabilities in changed lockfiles; `secrets` scans added diff lines for credential patterns; `sast` runs the repo's own linters against changed files.
+7. In parallel, the deterministic scanners run: `dependency-cve` queries OSV.dev for vulnerabilities in changed lockfiles; `secrets` scans added diff lines for credential patterns; `sast` runs the repo's own linters against changed files; and `architecture` (when enabled, independent of `security.enabled`) checks import/layer/context boundaries against `.vor.yml` / `.vor/architecture.yml`.
 8. Every `post_inline_comment` call is validated against the reviewable line ranges. On rejection, the agent gets a structured `{ reason, hint }` listing the actual valid ranges so it can self-correct and retry.
 9. After `post_summary`, findings from the agent and all scanners are filtered by severity floor, per-file cap, and global cap. If `review.sticky` is on, prior reviews from this agent on the PR are dismissed. A single review is posted via `octokit.pulls.createReview`.
 

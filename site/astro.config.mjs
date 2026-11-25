@@ -12,7 +12,7 @@ export default defineConfig({
     starlight({
       title: 'Vor',
       description:
-        'AI-powered PR code review with parallel vulnerability scanning. Inline comments anchored to real diff lines — Claude or OpenAI.',
+        'AI-powered PR code review with parallel vulnerability scanning, architecture enforcement, and cached reference docs. Inline comments anchored to real diff lines — Claude or OpenAI.',
       logo: {
         light: './src/assets/logo.svg',
         dark: './src/assets/logo-dark.svg',
@@ -43,6 +43,8 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'Configuration', link: '/configuration/' },
+            { label: 'Architecture standards', link: '/architecture-standards/' },
+            { label: 'Reference documentation', link: '/references/' },
             { label: 'Security scanning', link: '/security-scanning/' },
             { label: 'How it works', link: '/how-it-works/' },
           ],
