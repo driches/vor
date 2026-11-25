@@ -15,13 +15,23 @@ const features: Feature[] = [
   },
   {
     title: 'Dependency CVE scanning',
-    body: 'Parses changed lockfiles and queries OSV.dev for known CVEs — npm, yarn, pnpm, and pinned pip requirements.',
+    body: 'Parses changed lockfiles and queries OSV.dev for known CVEs — npm, yarn, pnpm, PyPI (requirements.txt, poetry.lock), Go (go.sum), and Rust (Cargo.lock).',
     icon: 'M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z',
   },
   {
     title: 'Secret detection',
-    body: 'Scans added lines for ~14 high-confidence credential patterns — AWS keys, GitHub PATs, Slack, Stripe, PEM keys — masked before posting.',
+    body: 'Scans added lines for 21 high-confidence credential patterns — AWS, GitHub, Anthropic/OpenAI, Slack, Stripe, PEM keys — masked before posting.',
     icon: 'M12 1a4 4 0 00-4 4v4H6a2 2 0 00-2 2v9h16v-9a2 2 0 00-2-2h-2V5a4 4 0 00-4-4z',
+  },
+  {
+    title: 'Architecture standards',
+    body: 'Enforce hexagonal, DDD, clean, layered, modular-monolith, or custom boundaries on PRs and across whole repos via vor arch check.',
+    icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  },
+  {
+    title: 'Cached reference docs',
+    body: 'Load ADRs, style guides, and runbooks from repo files, URLs, or GitHub repos with persistent disk/ETag and LLM prompt caching.',
+    icon: 'M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z',
   },
   {
     title: 'Claude or OpenAI',

@@ -27,7 +27,9 @@
 
 **Comments can't land on lines that don't exist.** Every inline comment is validated against the actual diff before posting. The agent gets a structured hint and self-corrects — hallucinated line numbers are structurally impossible.
 
-**Security is first-class, not a bolt-on.** CVE scanning via OSV, 14+ hardcoded-credential patterns, and multi-language SAST run in parallel with the AI review and post in the same single PR review.
+**Security is first-class, not a bolt-on.** CVE scanning via OSV, 21 hardcoded-credential patterns, and multi-language SAST run in parallel with the AI review and post in the same single PR review.
+
+**Enforce your architecture and standards.** Enable hexagonal, DDD, clean, layered, modular-monolith, or custom boundaries and feed cached team ADRs/style guides straight into reviews.
 
 **Works with Claude or GPT.** Switch by changing one line — the provider is inferred from the model ID.
 
@@ -99,6 +101,8 @@ npx @driches/vor review                              # review uncommitted change
 # review a branch against main
 npx @driches/vor review --range --base origin/main --head HEAD
 
+npx @driches/vor arch check                          # enforce architecture rules across the repo
+npx @driches/vor refs sync                           # warm cached reference documentation
 vor dashboard                                   # run history at http://127.0.0.1:4310
 claude mcp add vor -- npx -y @driches/vor mcp  # expose to Claude Code as MCP
 ```
@@ -120,6 +124,24 @@ Security scanners run in parallel with the AI review:
 - **SAST** — runs your repo's own linters (ESLint, Ruff, golangci-lint, Semgrep, and others) at zero token cost
 
 → [Security scanning docs](https://driches.github.io/vor/security-scanning/)
+
+## Architecture standards
+
+Enforce layered, clean, hexagonal, DDD bounded-context, or modular-monolith boundaries across PRs and whole repositories:
+
+- **Deterministic import checks** — resolves cross-file and external package dependencies across TypeScript/JavaScript, Python, Go, Dart, Rust, Java/Kotlin, and C# at zero token cost (`vor arch check`)
+- **Semantic LLM enforcement** — injects your configured architecture rules and principles into the review agent prompt
+
+→ [Architecture standards docs](https://driches.github.io/vor/architecture-standards/)
+
+## Reference documentation
+
+Feed ADRs, style guides, and runbooks into reviews without blowing up prompt cost:
+
+- **Persistent disk & ETag cache** — indexes repo globs, remote URLs, and cross-repo `github:` docs locally or via `actions/cache` (`vor refs sync`)
+- **Hybrid inline + prompt caching** — packs fit docs in a byte-deterministic prefix (`5m`/`1h` Anthropic TTL, derived OpenAI cache keys) and reads overflow docs on demand via `read_reference_doc`
+
+→ [Reference documentation docs](https://driches.github.io/vor/references/)
 
 ## Contributing
 

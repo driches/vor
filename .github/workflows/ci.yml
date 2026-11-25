@@ -37,3 +37,6 @@ jobs:
 
       - name: Verify dist/ is up to date
         run: npm run verify-dist
+
+      - name: Architecture check
+        run: node dist/cli.js arch check

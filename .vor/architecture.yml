@@ -1,0 +1,84 @@
+preset: custom
+severity: important
+ignore_tests: true
+
+layers:
+  util:
+    paths:
+      - 'src/util/**'
+    can_import: [util]
+    description: Pure shared utilities (logger, errors, pricing, budget, secrets) with zero internal dependencies.
+  types:
+    paths:
+      - 'src/types.ts'
+    can_import: [types]
+    description: Top-level shared type definitions.
+  adapters:
+    paths:
+      - 'src/llm/**'
+      - 'src/github/**'
+      - 'src/ocr/**'
+      - 'src/vision/**'
+      - 'src/context/**'
+    can_import: [adapters, types, util]
+    description: Leaf provider, GitHub API, OCR, vision, and blast-radius adapters.
+  config:
+    paths:
+      - 'src/config/**'
+    can_import: [config, adapters, types, util]
+    description: Schema validation, defaults, and .vor.yml loading.
+  domain_engines:
+    paths:
+      - 'src/architecture/**'
+      - 'src/references/**'
+      - 'src/scanners/**'
+      - 'src/output/**'
+    cannot_import: [local_surfaces, eval]
+    description: Deterministic scanners, architecture/reference engines, and review output formatting.
+  agent_runtime:
+    paths:
+      - 'src/agent/**'
+      - 'src/tools/**'
+      - 'src/orchestrator.ts'
+      - 'src/index.ts'
+    cannot_import: [local_surfaces, eval]
+    description: Action entry point, orchestrator, LLM agent loop, and validated agent tools.
+  local_surfaces:
+    paths:
+      - 'src/local/**'
+      - 'src/cli/**'
+      - 'src/mcp/**'
+      - 'src/dashboard/**'
+    cannot_import: [eval]
+    description: Local CLI, git-backed FakeOctokit, dashboard server, and stdio MCP server (excluded from dist/index.js).
+  eval:
+    paths:
+      - 'src/eval/**'
+    description: Local-only evaluation harness; must never be imported by production code.
+
+rules:
+  - id: no-eval-in-production
+    from: [util, types, adapters, config, domain_engines, agent_runtime, local_surfaces]
+    forbid_imports: [eval]
+    severity: critical
+    reason: The eval harness is local-only and must never ship in dist/index.js or dist/cli.js (AGENTS.md §0.5).
+  - id: no-local-surfaces-in-action
+    from: [util, types, adapters, config, domain_engines, agent_runtime]
+    forbid_imports: [local_surfaces]
+    severity: critical
+    reason: CLI, dashboard, MCP, and local git modules must never leak into the GitHub Action bundle (dist/index.js).
+  - id: no-llm-in-scanners
+    from:
+      - 'src/scanners/**'
+      - 'src/architecture/**'
+      - 'src/references/**'
+    forbid_imports:
+      - 'src/llm/**'
+    severity: important
+    reason: Deterministic scanners and loaders must remain LLM-free (AGENTS.md §2).
+
+principles:
+  - The orchestrator (src/orchestrator.ts) owns the review flow; do not add top-level side effects in src/index.ts.
+  - Every agent action goes through a registered tool in src/tools/ whose input validator runs before external calls.
+  - Never use console.log in production paths; use the structured masking logger in src/util/logger.ts.
+  - Keep OrchestratorOutput.kept_comments backwards-compatible with the eval harness.

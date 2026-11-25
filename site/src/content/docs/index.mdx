@@ -29,7 +29,8 @@ export const base = import.meta.env.BASE_URL;
   </h1>
   <p class="ccr-tagline">
     A provider-agnostic GitHub Action — Claude or OpenAI — that posts inline review comments with
-    one-click suggestions, and runs CVE and secret scanning in parallel, all in a single PR review.
+    one-click suggestions, enforces architecture standards with cached team docs, and runs CVE and
+    secret scanning in parallel, all in a single PR review.
   </p>
   <div class="ccr-actions">
     <a class="ccr-btn ccr-btn--primary" href={`${base}overview/#quick-start`}>
@@ -120,13 +121,28 @@ export const base = import.meta.env.BASE_URL;
     <div class="ccr-lang">
       <h3>Dependency CVEs</h3>
       <p>
-        npm (<code>package-lock</code>, <code>yarn</code>, <code>pnpm</code>) and PyPI (
-        <code>requirements.txt</code>) via OSV.dev.
+        npm (<code>package-lock</code>, <code>yarn</code>, <code>pnpm</code>), PyPI (
+        <code>requirements.txt</code>, <code>poetry.lock</code>), Go (<code>go.sum</code>), and Rust
+        (<code>Cargo.lock</code>) via OSV.dev.
       </p>
     </div>
     <div class="ccr-lang">
       <h3>Secrets</h3>
-      <p>~14 credential patterns — any language, any file.</p>
+      <p>21 high-confidence credential patterns — any language, any file.</p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Architecture standards</h3>
+      <p>
+        Layer, package, and bounded-context boundaries across TS/JS, Python, Go, Dart, Rust,
+        Java/Kotlin, and C#.
+      </p>
+    </div>
+    <div class="ccr-lang">
+      <h3>Reference docs</h3>
+      <p>
+        Repo globs, HTML/Markdown URLs, and cross-repo <code>github:</code> specs with disk + prompt
+        caching.
+      </p>
     </div>
   </div>
   <p class="ccr-step">
